@@ -40,14 +40,18 @@ namespace
 
 bool NRIPreloadCoordinator::HasFrameTarget(NRIRenderer& renderer, const Context& context)
 {
-	if (renderer.mFrameBuffer == nullptr || !renderer.mFrameBuffer->HasCurrentCommandBuffer() || !renderer.mFrameBuffer->HasActiveTarget())
+	const bool hasCommandBuffer = renderer.mFrameBuffer != nullptr && renderer.mFrameBuffer->HasCurrentCommandBuffer();
+	const bool hasRequiredTarget = context.standaloneContextUsed || (renderer.mFrameBuffer != nullptr && renderer.mFrameBuffer->HasActiveTarget());
+	if (!hasCommandBuffer || !hasRequiredTarget)
 	{
 		if ((int)nri_ptloadingtrace >= 1)
 		{
-			Printf("NRI PT loading gate: event=renderer-preload result=wait reason=frame-target-not-ready framebuffer=%u command_buffer=%u active_target=%u output=%ux%u target=%ux%u\n",
+			Printf("NRI PT loading gate: event=renderer-preload result=wait reason=%s framebuffer=%u command_buffer=%u active_target=%u standalone_context=%u output=%ux%u target=%ux%u\n",
+				!hasCommandBuffer ? "command-buffer-not-ready" : "frame-target-not-ready",
 				renderer.mFrameBuffer != nullptr ? 1u : 0u,
 				renderer.mFrameBuffer != nullptr && renderer.mFrameBuffer->HasCurrentCommandBuffer() ? 1u : 0u,
 				renderer.mFrameBuffer != nullptr && renderer.mFrameBuffer->HasActiveTarget() ? 1u : 0u,
+				context.standaloneContextUsed ? 1u : 0u,
 				context.outputWidth,
 				context.outputHeight,
 				context.targetWidth,
@@ -150,6 +154,15 @@ NRIPreloadCoordinator::StepResult NRIPreloadCoordinator::PreloadStaticSceneAndSt
 				DurationMs(context.start, std::chrono::steady_clock::now()));
 		}
 		return StepResult::Ready;
+	}
+	if (renderer.mAllowStartupMapWorldCorrection)
+	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=renderer-preload result=wait reason=startup-correction-pending ms=%.3f\n",
+				DurationMs(context.start, std::chrono::steady_clock::now()));
+		}
+		return StepResult::Wait;
 	}
 	if (!renderer.mStaticMapScene.valid ||
 		!renderer.mStaticMapScene.texturesResident ||
@@ -280,6 +293,27 @@ NRIPreloadCoordinator::StepResult NRIPreloadCoordinator::PreloadResidentSceneRes
 bool NRIPreloadCoordinator::Finish(NRIRenderer& renderer, const Context& context)
 {
 	renderer.PrepareSceneTextureInputsForCompute();
+	const bool staticReady =
+		renderer.mStaticMapScene.valid &&
+		renderer.mStaticMapScene.texturesResident &&
+		renderer.mStaticMapScene.buffersResident &&
+		renderer.mStaticMapScene.accelerationResident &&
+		(!renderer.mMapWorld.valid || renderer.mStaticMapScene.buildSerial == renderer.mMapWorld.buildSerial);
+	const NRIPersistentVoxelPreloadStatus voxelStatus = renderer.mPersistentVoxels.BuildPreloadStatusSnapshot();
+	Printf("NRI PT loading summary: static_ready=%u startup_correction_pending=%u required_voxel_pending=%u required_voxel_ready=%u optional_voxel_pending=%u voxel_batch_ready=%u voxel_batch_pending=%u deferred_texture_prewarm=%u deferred_onboarding=%u frame_target_used=%u standalone_context_used=%u gpu_voxel_loading=%u static_light_refresh=%u\n",
+		staticReady ? 1u : 0u,
+		renderer.mAllowStartupMapWorldCorrection ? 1u : 0u,
+		voxelStatus.requiredPending,
+		voxelStatus.requiredReady,
+		voxelStatus.optionalPending,
+		voxelStatus.batchReady ? 1u : 0u,
+		voxelStatus.batchPendingActors,
+		voxelStatus.deferredTexturePrewarm,
+		voxelStatus.deferredOnboarding,
+		context.frameTargetUsed ? 1u : 0u,
+		context.standaloneContextUsed ? 1u : 0u,
+		voxelStatus.gpuLoadingEnabled ? 1u : 0u,
+		context.staticLightRefreshReady ? 1u : 0u);
 	Printf("NRI PT preload ready: level=%s build_serial=%llu chunks=%u tris=%u materials=%u\n",
 		renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : "(none)",
 		(unsigned long long)renderer.mMapWorld.buildSerial,
@@ -302,6 +336,8 @@ bool NRIPreloadCoordinator::Run(NRIRenderer& renderer, const NRIPreloadLevelScen
 	context.outputHeight = inputs.outputHeight;
 	context.targetWidth = inputs.targetWidth;
 	context.targetHeight = inputs.targetHeight;
+	context.frameTargetUsed = inputs.frameTargetUsed;
+	context.standaloneContextUsed = inputs.standaloneContextUsed;
 	context.start = std::chrono::steady_clock::now();
 
 	if (!HasFrameTarget(renderer, context))

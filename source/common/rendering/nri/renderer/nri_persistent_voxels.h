@@ -249,17 +249,19 @@ struct NRIPersistentVoxelResetServices
 	void InvalidateSceneDataDescriptors() const;
 };
 
+struct NRIPersistentVoxelBatchStats;
+
 struct NRIPersistentVoxelPreloadServices
 {
 	using PumpAdmissionQueueFn = bool (*)(void* user, const char* phase);
-	using EnsureBatchFn = bool (*)(void* user);
+	using EnsureBatchFn = bool (*)(void* user, NRIPersistentVoxelBatchStats* outStats);
 
 	void* user = nullptr;
 	PumpAdmissionQueueFn pumpAdmissionQueue = nullptr;
 	EnsureBatchFn ensureBatch = nullptr;
 
 	bool PumpAdmissionQueue(const char* phase) const;
-	bool EnsureBatch() const;
+	bool EnsureBatch(NRIPersistentVoxelBatchStats* outStats = nullptr) const;
 };
 
 struct NRIPersistentVoxelAdmissionServices
@@ -612,6 +614,21 @@ struct NRIPersistentVoxelTlasBuildStats
 	uint32_t bakedFallbackInstanceCount = 0;
 };
 
+struct NRIPersistentVoxelPreloadStatus
+{
+	bool gpuLoadingEnabled = false;
+	bool hasCacheEntries = false;
+	bool batchReady = true;
+	uint32_t requiredPending = 0;
+	uint32_t requiredReady = 0;
+	uint32_t optionalPending = 0;
+	uint32_t failed = 0;
+	uint32_t batchReadyActors = 0;
+	uint32_t batchPendingActors = 0;
+	uint32_t deferredTexturePrewarm = 0;
+	uint32_t deferredOnboarding = 0;
+};
+
 class NRIPersistentVoxelResidency
 {
 public:
@@ -720,6 +737,7 @@ public:
 	bool HasValidBatch() const;
 	bool HasRenderableOverlay() const;
 	bool HasPreloadPending() const;
+	NRIPersistentVoxelPreloadStatus BuildPreloadStatusSnapshot() const;
 	uint32_t OverlayMaterialCount() const;
 	uint32_t EstimatePrimitiveCountForInstanceOffset(uint32_t primitiveOffset) const;
 	nri_scene::SceneDebugStats BuildOverlayDebugStats() const;
@@ -786,6 +804,7 @@ public:
 	uint64_t residencyLastBuildSerial = 0;
 	bool loadingWarmupActive = false;
 	bool preloadPending = false;
+	NRIPersistentVoxelPreloadStatus lastPreloadStatus = {};
 };
 
 const char* GetPersistentVoxelBakeSpaceName(nri_scene::VoxelMeshBakeSpace bakeSpace);

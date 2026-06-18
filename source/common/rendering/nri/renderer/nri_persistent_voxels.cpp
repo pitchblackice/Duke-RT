@@ -192,9 +192,9 @@ bool NRIPersistentVoxelPreloadServices::PumpAdmissionQueue(const char* phase) co
 	return pumpAdmissionQueue(user, phase);
 }
 
-bool NRIPersistentVoxelPreloadServices::EnsureBatch() const
+bool NRIPersistentVoxelPreloadServices::EnsureBatch(NRIPersistentVoxelBatchStats* outStats) const
 {
-	return ensureBatch != nullptr && ensureBatch(user);
+	return ensureBatch != nullptr && ensureBatch(user, outStats);
 }
 
 bool NRIPersistentVoxelAdmissionServices::AdmitVariantResource(
@@ -526,6 +526,11 @@ bool NRIPersistentVoxelResidency::HasRenderableOverlay() const
 bool NRIPersistentVoxelResidency::HasPreloadPending() const
 {
 	return preloadPending;
+}
+
+NRIPersistentVoxelPreloadStatus NRIPersistentVoxelResidency::BuildPreloadStatusSnapshot() const
+{
+	return lastPreloadStatus;
 }
 
 uint32_t NRIPersistentVoxelResidency::OverlayMaterialCount() const
@@ -5493,8 +5498,24 @@ bool NRIPersistentVoxelResidency::PreloadResources(
 	const NRIPersistentVoxelResetServices& resetServices,
 	const NRIPersistentVoxelPreloadServices& preloadServices)
 {
+	lastPreloadStatus = {};
+	lastPreloadStatus.gpuLoadingEnabled = gpuLoadingEnabled;
+	lastPreloadStatus.hasCacheEntries = hasCacheEntries;
+	lastPreloadStatus.batchReady = true;
+
+	auto refreshAdmissionStatus = [&]()
+	{
+		CountAdmissionWork(
+			lastPreloadStatus.requiredPending,
+			lastPreloadStatus.requiredReady,
+			lastPreloadStatus.optionalPending,
+			lastPreloadStatus.failed);
+		lastPreloadStatus.batchReadyActors = batch.activeActorCount;
+	};
+
 	if (!gpuLoadingEnabled)
 	{
+		refreshAdmissionStatus();
 		if (loadingTraceLevel >= 1)
 		{
 			Printf("NRI PT loading voxel resources: event=skip reason=gpu-disabled mesh_resources=%u material_resources=%u actors=%u active=%u prims=%u\n",
@@ -5525,8 +5546,10 @@ bool NRIPersistentVoxelResidency::PreloadResources(
 		resetServices,
 		preloadServices))
 	{
+		refreshAdmissionStatus();
 		if (preloadPending)
 		{
+			lastPreloadStatus.batchReady = false;
 			if (loadingTraceLevel >= 1)
 			{
 				uint32_t requiredPending = 0;
@@ -5561,6 +5584,7 @@ bool NRIPersistentVoxelResidency::PreloadResources(
 
 	if (!hasCacheEntries)
 	{
+		refreshAdmissionStatus();
 		if (loadingTraceLevel >= 1)
 		{
 			Printf("NRI PT loading voxel resources: event=skip reason=no-durable-entries entries=0 mesh_resources=%u material_resources=%u actors=%u active=%u prims=%u\n",
@@ -5587,12 +5611,26 @@ bool NRIPersistentVoxelResidency::PreloadResources(
 		~LoadingWarmupScope() { active = false; }
 	} loadingWarmupScope(loadingWarmupActive);
 
-	const bool ready = preloadServices.EnsureBatch();
+	NRIPersistentVoxelBatchStats batchStats = {};
+	const bool ready = preloadServices.EnsureBatch(&batchStats);
 	const auto end = std::chrono::steady_clock::now();
+	refreshAdmissionStatus();
+	lastPreloadStatus.batchReady = ready;
+	lastPreloadStatus.batchReadyActors = batch.activeActorCount;
+	lastPreloadStatus.deferredTexturePrewarm =
+		batchStats.persistentVoxelTexturePrewarmDeferredCount +
+		batchStats.persistentVoxelOnboardingTextureBudgetHits;
+	lastPreloadStatus.deferredOnboarding =
+		batchStats.persistentVoxelOnboardingDeferredCount > batchStats.persistentVoxelOnboardingTextureBudgetHits
+			? batchStats.persistentVoxelOnboardingDeferredCount - batchStats.persistentVoxelOnboardingTextureBudgetHits
+			: 0u;
+	lastPreloadStatus.batchPendingActors = ready ? 0u : std::max<uint32_t>(
+		1u,
+		lastPreloadStatus.deferredTexturePrewarm + lastPreloadStatus.deferredOnboarding);
 
 	if (loadingTraceLevel >= 1)
 	{
-		Printf("NRI PT loading voxel resources: event=%s entries=%u mesh_resources=%u mesh_delta=%d material_resources=%u material_delta=%d actors=%u actor_delta=%d active=%u active_delta=%d prims=%u prim_delta=%d ms=%.3f\n",
+		Printf("NRI PT loading voxel resources: event=%s entries=%u mesh_resources=%u mesh_delta=%d material_resources=%u material_delta=%d actors=%u actor_delta=%d active=%u active_delta=%d prims=%u prim_delta=%d batch_pending=%u deferred_texture_prewarm=%u deferred_onboarding=%u ms=%.3f\n",
 			ready ? "admit" : "defer",
 			(uint32_t)cacheEntries.size(),
 			(uint32_t)meshVariantResources.size(),
@@ -5605,9 +5643,12 @@ bool NRIPersistentVoxelResidency::PreloadResources(
 			(int32_t)batch.activeActorCount - (int32_t)activeActorsBefore,
 			batch.primitiveCount,
 			(int32_t)batch.primitiveCount - (int32_t)primitivesBefore,
+			lastPreloadStatus.batchPendingActors,
+			lastPreloadStatus.deferredTexturePrewarm,
+			lastPreloadStatus.deferredOnboarding,
 			PersistentVoxelDurationMs(start, end));
 	}
-	return true;
+	return ready;
 }
 
 PersistentVoxelReadinessStatus NRIPersistentVoxelResidency::GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const

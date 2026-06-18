@@ -11,6 +11,8 @@ struct NRIPreloadLevelSceneInputs
 	uint32_t outputHeight = 0;
 	uint32_t targetWidth = 0;
 	uint32_t targetHeight = 0;
+	bool frameTargetUsed = false;
+	bool standaloneContextUsed = false;
 };
 
 class NRIPreloadCoordinator
@@ -27,6 +29,8 @@ private:
 		uint32_t targetHeight = 0;
 		std::chrono::steady_clock::time_point start = {};
 		bool staticLightRefreshReady = true;
+		bool frameTargetUsed = false;
+		bool standaloneContextUsed = false;
 	};
 
 	enum class StepResult

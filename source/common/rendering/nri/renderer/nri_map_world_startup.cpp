@@ -222,6 +222,8 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 	StartupMapWorldDiffDetails diffDetails = {};
 	if (!StartupMapWorldStructureDiffers(mMapWorld, correctedWorld, chunkDiffCount, surfaceDiffCount, &diffDetails))
 	{
+		mAllowStartupMapWorldCorrection = false;
+		mStartupMapWorldCorrectionDeadlineFrame = 0;
 		return true;
 	}
 

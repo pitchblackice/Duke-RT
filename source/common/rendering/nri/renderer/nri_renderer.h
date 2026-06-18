@@ -1370,7 +1370,7 @@ public:
 	bool Initialize();
 	void Shutdown();
 	bool RenderScene(HWDrawInfo& di, int drawmode, bool portal);
-	bool PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight);
+	bool PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight, bool frameTargetUsed, bool standaloneContextUsed);
 	void ResetHistory();
 	void RequestAutoExposureReset(const char* reason);
 	LevelTransitionSnapshot BuildLevelTransitionSnapshot() const;

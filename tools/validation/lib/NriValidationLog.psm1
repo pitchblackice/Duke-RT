@@ -75,6 +75,21 @@ function Get-NriObjectPropertyValue {
     return $null
 }
 
+function ConvertTo-NriInt64 {
+    param([object]$Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    $parsed = 0L
+    if ([int64]::TryParse([string]$Value, [ref]$parsed)) {
+        return $parsed
+    }
+
+    return $null
+}
+
 function Get-NriValidationLogSummary {
     param(
         [Parameter(Mandatory = $true)]
@@ -99,6 +114,7 @@ function Get-NriValidationLogSummary {
     $forbiddenHits = New-Object System.Collections.Generic.List[object]
     $selfTestFrames = New-Object System.Collections.Generic.List[object]
     $acceptedFrames = New-Object System.Collections.Generic.List[object]
+    $loadingSummaries = New-Object System.Collections.Generic.List[object]
 
     $lineNumber = 0
     $stream = [System.IO.File]::Open($resolved.Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
@@ -132,11 +148,20 @@ function Get-NriValidationLogSummary {
                 if (Test-NriLinePrefix -Line $line -Prefix "NRI PT selftest:") {
                     $frame = ConvertFrom-NriKeyValueLine -Line $line
                     if ($null -ne $frame) {
+                        $frame | Add-Member -NotePropertyName "line" -NotePropertyValue $lineNumber
                         $selfTestFrames.Add($frame)
                         if ((Test-NriTruthyValue (Get-NriObjectPropertyValue -Object $frame -Name "world_active")) -and
                             (Test-NriTruthyValue (Get-NriObjectPropertyValue -Object $frame -Name "gameplay_frame"))) {
                             $acceptedFrames.Add($frame)
                         }
+                    }
+                }
+
+                if (Test-NriLinePrefix -Line $line -Prefix "NRI PT loading summary:") {
+                    $loading = ConvertFrom-NriKeyValueLine -Line $line -Prefix "NRI PT loading summary:"
+                    if ($null -ne $loading) {
+                        $loading | Add-Member -NotePropertyName "line" -NotePropertyValue $lineNumber
+                        $loadingSummaries.Add($loading)
                     }
                 }
             }
@@ -153,10 +178,128 @@ function Get-NriValidationLogSummary {
         path = $resolved.Path
         requiredPrefixes = $requiredHits
         forbiddenHits = $forbiddenHits.ToArray()
+        loadingSummaryCount = $loadingSummaries.Count
+        loadingSummaries = $loadingSummaries.ToArray()
+        firstLoadingSummary = @($loadingSummaries.ToArray()) | Select-Object -First 1
+        latestLoadingSummary = @($loadingSummaries.ToArray()) | Select-Object -Last 1
         selfTestFrameCount = $selfTestFrames.Count
         acceptedSelfTestFrameCount = $acceptedFrames.Count
         selfTestFrames = $selfTestFrames.ToArray()
         acceptedSelfTestFrames = $acceptedFrames.ToArray()
+    }
+}
+
+function Test-NriLoadingAssertions {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Summary,
+
+        [object]$Assertions
+    )
+
+    $errors = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $Assertions) {
+        return [pscustomobject]@{
+            ok = $true
+            errors = $errors.ToArray()
+        }
+    }
+
+    $latest = $Summary.latestLoadingSummary
+    if (($Assertions.PSObject.Properties.Name.Contains("requirePreloadReady") -and [bool]$Assertions.requirePreloadReady) -or
+        ($Assertions.PSObject.Properties.Name.Contains("requireSummary") -and [bool]$Assertions.requireSummary)) {
+        if ($Summary.loadingSummaryCount -le 0 -or $null -eq $latest) {
+            $errors.Add("missing NRI PT loading summary")
+        }
+    }
+
+    $firstAccepted = @($Summary.acceptedSelfTestFrames) | Select-Object -First 1
+    if ($null -ne $latest -and $null -ne $firstAccepted) {
+        $preloadBeforeFirstAccepted = $false
+        foreach ($loading in @($Summary.loadingSummaries)) {
+            if ([int]$loading.line -lt [int]$firstAccepted.line) {
+                $preloadBeforeFirstAccepted = $true
+                break
+            }
+        }
+        if (-not $preloadBeforeFirstAccepted) {
+            $errors.Add("loading summary was not emitted before the first accepted selftest frame")
+        }
+    }
+
+    if ($null -ne $latest) {
+        if ($Assertions.PSObject.Properties.Name.Contains("forbidFrameTargetWait") -and [bool]$Assertions.forbidFrameTargetWait) {
+            if (Test-NriTruthyValue (Get-NriObjectPropertyValue -Object $latest -Name "frame_target_used")) {
+                $errors.Add("loading summary used an onscreen frame target")
+            }
+        }
+
+        if ($Assertions.PSObject.Properties.Name.Contains("requireStandaloneContext") -and [bool]$Assertions.requireStandaloneContext) {
+            if (-not (Test-NriTruthyValue (Get-NriObjectPropertyValue -Object $latest -Name "standalone_context_used"))) {
+                $errors.Add("loading summary did not use a standalone preload context")
+            }
+        }
+
+        if ($Assertions.PSObject.Properties.Name.Contains("maxRequiredVoxelPendingAtReady")) {
+            $value = ConvertTo-NriInt64 (Get-NriObjectPropertyValue -Object $latest -Name "required_voxel_pending")
+            if ($null -eq $value) {
+                $errors.Add("loading summary is missing numeric required_voxel_pending")
+            }
+            elseif ($value -gt [int64]$Assertions.maxRequiredVoxelPendingAtReady) {
+                $errors.Add("required_voxel_pending $value > allowed $($Assertions.maxRequiredVoxelPendingAtReady)")
+            }
+        }
+
+        if ($Assertions.PSObject.Properties.Name.Contains("maxStartupCorrectionPendingAtReady")) {
+            $value = ConvertTo-NriInt64 (Get-NriObjectPropertyValue -Object $latest -Name "startup_correction_pending")
+            if ($null -eq $value) {
+                $errors.Add("loading summary is missing numeric startup_correction_pending")
+            }
+            elseif ($value -gt [int64]$Assertions.maxStartupCorrectionPendingAtReady) {
+                $errors.Add("startup_correction_pending $value > allowed $($Assertions.maxStartupCorrectionPendingAtReady)")
+            }
+        }
+    }
+
+    if ($null -ne $firstAccepted) {
+        if ($Assertions.PSObject.Properties.Name.Contains("maxFirstFrameRuntimeVoxelAdmissions")) {
+            $value = ConvertTo-NriInt64 (Get-NriObjectPropertyValue -Object $firstAccepted -Name "runtime_voxel_onboarding_admitted")
+            if ($null -eq $value) {
+                $errors.Add("first accepted selftest frame is missing numeric runtime_voxel_onboarding_admitted")
+            }
+            elseif ($value -gt [int64]$Assertions.maxFirstFrameRuntimeVoxelAdmissions) {
+                $errors.Add("first-frame runtime voxel admissions $value > allowed $($Assertions.maxFirstFrameRuntimeVoxelAdmissions)")
+            }
+        }
+
+        if ($Assertions.PSObject.Properties.Name.Contains("maxFirstFrameStaticSceneBuilds")) {
+            $uploads = ConvertTo-NriInt64 (Get-NriObjectPropertyValue -Object $firstAccepted -Name "static_scene_upload_this_frame")
+            $asBuilds = ConvertTo-NriInt64 (Get-NriObjectPropertyValue -Object $firstAccepted -Name "static_scene_as_build_this_frame")
+            if ($null -eq $uploads -or $null -eq $asBuilds) {
+                $errors.Add("first accepted selftest frame is missing static scene loading fields")
+            }
+            else {
+                $total = $uploads + $asBuilds
+                if ($total -gt [int64]$Assertions.maxFirstFrameStaticSceneBuilds) {
+                    $errors.Add("first-frame static scene loading work $total > allowed $($Assertions.maxFirstFrameStaticSceneBuilds)")
+                }
+            }
+        }
+
+        if ($Assertions.PSObject.Properties.Name.Contains("maxFirstFrameTexturePrewarmDefers")) {
+            $value = ConvertTo-NriInt64 (Get-NriObjectPropertyValue -Object $firstAccepted -Name "runtime_voxel_texture_prewarm_deferred")
+            if ($null -eq $value) {
+                $errors.Add("first accepted selftest frame is missing numeric runtime_voxel_texture_prewarm_deferred")
+            }
+            elseif ($value -gt [int64]$Assertions.maxFirstFrameTexturePrewarmDefers) {
+                $errors.Add("first-frame texture prewarm defers $value > allowed $($Assertions.maxFirstFrameTexturePrewarmDefers)")
+            }
+        }
+    }
+
+    [pscustomobject]@{
+        ok = $errors.Count -eq 0
+        errors = $errors.ToArray()
     }
 }
 
@@ -233,4 +376,4 @@ function Test-NriValidationSummary {
     }
 }
 
-Export-ModuleMember -Function ConvertFrom-NriKeyValueLine, Test-NriTruthyValue, Get-NriValidationLogSummary, Test-NriValidationSummary
+Export-ModuleMember -Function ConvertFrom-NriKeyValueLine, Test-NriTruthyValue, Get-NriValidationLogSummary, Test-NriValidationSummary, Test-NriLoadingAssertions

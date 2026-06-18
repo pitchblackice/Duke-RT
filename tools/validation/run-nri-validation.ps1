@@ -193,7 +193,14 @@ if ($CaptureWhenPassed) {
             try {
                 $summary = Get-NriValidationLogSummary -Path $LogPath -RequiredPrefixes $requiredPrefixes -ForbiddenPatterns $forbiddenPatterns
                 $result = Test-NriValidationSummary -Summary $summary -MinSelfTestFrames $minSelfTestFrames
-                if ($result.ok) {
+                $loadingResult = [pscustomobject]@{
+                    ok = $true
+                    errors = @()
+                }
+                if ($scenario.PSObject.Properties.Name.Contains("loadingAssertions")) {
+                    $loadingResult = Test-NriLoadingAssertions -Summary $summary -Assertions $scenario.loadingAssertions
+                }
+                if ($result.ok -and $loadingResult.ok) {
                     if ($SummaryOutput) {
                         $summaryDirectory = Split-Path -Parent $SummaryOutput
                         if ($summaryDirectory) {

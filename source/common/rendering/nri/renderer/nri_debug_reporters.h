@@ -72,6 +72,10 @@ struct NRISelfTestSummarySnapshot
 	uint32_t dynamicInstanceCount = 0;
 	uint32_t persistentVoxelInstanceCount = 0;
 	uint32_t emissiveInstanceCount = 0;
+	uint32_t staticSceneUploadThisFrame = 0;
+	uint32_t staticSceneAsBuildThisFrame = 0;
+	uint32_t runtimeVoxelOnboardingAdmitted = 0;
+	uint32_t runtimeVoxelTexturePrewarmDeferred = 0;
 	uint32_t vertexCount = 0;
 	uint32_t indexCount = 0;
 	uint64_t vertexBytes = 0;

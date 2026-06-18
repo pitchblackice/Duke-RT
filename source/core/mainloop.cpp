@@ -275,6 +275,8 @@ bool newGameStarted;
 static bool gPendingPathTracingLevelPreload = false;
 static bool gPathTracingLevelPreloadHeldScreenJobCompletion = false;
 static bool gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
+static bool gPathTracingLevelPreloadNeeded = false;
+static bool gPathTracingLevelPreloadFinalCheckNeeded = false;
 static uint64_t gLevelTransitionSerial = 0;
 
 static void CancelPendingPathTracingLevelPreload()
@@ -289,6 +291,8 @@ static void CancelPendingPathTracingLevelPreload()
 	}
 	gPendingPathTracingLevelPreload = false;
 	gPathTracingLevelPreloadHeldScreenJobCompletion = false;
+	gPathTracingLevelPreloadNeeded = false;
+	gPathTracingLevelPreloadFinalCheckNeeded = false;
 	if (screen != nullptr)
 	{
 		screen->CancelPathTracingLevelPreload();
@@ -340,6 +344,7 @@ void G_NotifyLevelLoadBegin(const LevelTransitionInfo& info, MapRecord* loadedLe
 	{
 		screen->NotifyLevelLoadBegin(loadInfo);
 	}
+	gPathTracingLevelPreloadNeeded = true;
 }
 
 static void FinalizePendingLevelStart()
@@ -353,6 +358,7 @@ static void FinalizePendingLevelStart()
 			screen != nullptr && screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
 	}
 	CancelPendingPathTracingLevelPreload();
+	gPathTracingLevelPreloadNeeded = false;
 	gameaction = ga_level;
 	ResetStatusBar();
 	gameInput.resetCrouchToggle();
@@ -373,6 +379,7 @@ static bool BeginPathTracingLevelPreloadGate()
 	}
 
 	gPendingPathTracingLevelPreload = true;
+	gPathTracingLevelPreloadNeeded = false;
 	gPathTracingLevelPreloadHeldScreenJobCompletion = false;
 	gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
 	if (cl_loadingscreens && globalCutscenes.LoadingScreen.isdefined())
@@ -387,6 +394,97 @@ static bool BeginPathTracingLevelPreloadGate()
 			GetGameStateName(gamestate),
 			(int)gameaction,
 			screen != nullptr && screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
+	}
+	return true;
+}
+
+static bool TickPendingPathTracingLevelPreloadGate()
+{
+	if (!gPendingPathTracingLevelPreload || screen == nullptr || !screen->IsPathTracingLevelPreloadPending())
+	{
+		return false;
+	}
+
+	const bool preloadReady = screen->TickPathTracingLevelPreload();
+	if ((int)nri_ptloadingtrace >= 2)
+	{
+		Printf("NRI PT loading gate: event=pre-frame-tick ready=%u gamestate=%s gameaction=%d screen_pending=%u\n",
+			preloadReady ? 1u : 0u,
+			GetGameStateName(gamestate),
+			(int)gameaction,
+			screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
+	}
+	if (!preloadReady)
+	{
+		return false;
+	}
+
+	const bool keepLoadingScreenUntilLevelFrame = cutscene.runner != nullptr;
+	FinalizePendingLevelStart();
+	gPathTracingLevelPreloadFinalCheckNeeded = true;
+	if (keepLoadingScreenUntilLevelFrame)
+	{
+		gPathTracingLevelPreloadAwaitingFirstLevelFrame = true;
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=preload-ready-await-level-frame gamestate=%s gameaction=%d gametic=%d\n",
+				GetGameStateName(gamestate),
+				(int)gameaction,
+				gametic);
+		}
+	}
+	return true;
+}
+
+static bool RunPathTracingLevelPreloadFinalCheck()
+{
+	if (!gPathTracingLevelPreloadFinalCheckNeeded)
+	{
+		return true;
+	}
+
+	if (screen == nullptr)
+	{
+		gPathTracingLevelPreloadFinalCheckNeeded = false;
+		return true;
+	}
+
+	if (!screen->IsPathTracingLevelPreloadPending())
+	{
+		if (!screen->StartPathTracingLevelPreload())
+		{
+			gPathTracingLevelPreloadFinalCheckNeeded = false;
+			return true;
+		}
+		gPendingPathTracingLevelPreload = true;
+	}
+
+	for (uint32_t pass = 0; pass < 8u && screen->IsPathTracingLevelPreloadPending(); ++pass)
+	{
+		(void)screen->TickPathTracingLevelPreload();
+	}
+
+	if (screen->IsPathTracingLevelPreloadPending())
+	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=final-check result=wait gamestate=%s gameaction=%d screen_pending=%u\n",
+				GetGameStateName(gamestate),
+				(int)gameaction,
+				screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
+		}
+		gamestate = GS_CUTSCENE;
+		gameaction = ga_level;
+		return false;
+	}
+
+	gPendingPathTracingLevelPreload = false;
+	gPathTracingLevelPreloadFinalCheckNeeded = false;
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT loading gate: event=final-check result=ready gamestate=%s gameaction=%d\n",
+			GetGameStateName(gamestate),
+			(int)gameaction);
 	}
 	return true;
 }
@@ -523,11 +621,23 @@ static void GameTicker()
 			break;
 
 		case ga_level:
+			if (gPathTracingLevelPreloadNeeded && !gPendingPathTracingLevelPreload)
+			{
+				if (BeginPathTracingLevelPreloadGate())
+				{
+					break;
+				}
+				gPathTracingLevelPreloadNeeded = false;
+			}
 			CancelPendingPathTracingLevelPreload();
 			Net_ClearFifo();
 			inputState.ClearAllInput();
 			gameInput.Clear();
 			gamestate = GS_LEVEL;
+			if (!RunPathTracingLevelPreloadFinalCheck())
+			{
+				return;
+			}
 			return;
 
 		case ga_intro:
@@ -635,6 +745,7 @@ static void GameTicker()
 	case GS_CUTSCENE:
 	case GS_INTRO:
 	{
+		TickPendingPathTracingLevelPreloadGate();
 		const bool pathTracingPreloadPending =
 			gPendingPathTracingLevelPreload &&
 			screen != nullptr &&
@@ -771,34 +882,6 @@ void Display()
 	case GS_INTRO:
 	case GS_CUTSCENE:
 		ScreenJobDraw();
-		if (gPendingPathTracingLevelPreload && screen != nullptr && screen->IsPathTracingLevelPreloadPending())
-		{
-			const bool preloadReady = screen->TickPathTracingLevelPreload();
-			if ((int)nri_ptloadingtrace >= 2)
-			{
-				Printf("NRI PT loading gate: event=draw-tick ready=%u gamestate=%s gameaction=%d screen_pending=%u\n",
-					preloadReady ? 1u : 0u,
-					GetGameStateName(gamestate),
-					(int)gameaction,
-					screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
-			}
-			if (preloadReady)
-			{
-				const bool keepLoadingScreenUntilLevelFrame = cutscene.runner != nullptr;
-				FinalizePendingLevelStart();
-				if (keepLoadingScreenUntilLevelFrame)
-				{
-					gPathTracingLevelPreloadAwaitingFirstLevelFrame = true;
-					if ((int)nri_ptloadingtrace >= 1)
-					{
-						Printf("NRI PT loading gate: event=preload-ready-await-level-frame gamestate=%s gameaction=%d gametic=%d\n",
-							GetGameStateName(gamestate),
-							(int)gameaction,
-							gametic);
-					}
-				}
-			}
-		}
 		break;
 
 	case GS_LEVEL:

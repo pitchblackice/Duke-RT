@@ -41,6 +41,13 @@ if (-not $ForbiddenPattern) {
 
 $summary = Get-NriValidationLogSummary -Path $InputPath -RequiredPrefixes $RequiredPrefix -ForbiddenPatterns $ForbiddenPattern
 $result = Test-NriValidationSummary -Summary $summary -MinSelfTestFrames $MinSelfTestFrames
+$loadingResult = [pscustomobject]@{
+    ok = $true
+    errors = @()
+}
+if ($null -ne $scenario -and $scenario.PSObject.Properties.Name.Contains("loadingAssertions")) {
+    $loadingResult = Test-NriLoadingAssertions -Summary $summary -Assertions $scenario.loadingAssertions
+}
 
 if ($SummaryOutput) {
     $summaryDirectory = Split-Path -Parent $SummaryOutput
@@ -50,8 +57,11 @@ if ($SummaryOutput) {
     $summary | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $SummaryOutput -Encoding UTF8
 }
 
-if (-not $result.ok) {
+if (-not $result.ok -or -not $loadingResult.ok) {
     foreach ($errorText in $result.errors) {
+        Write-Error $errorText -ErrorAction Continue
+    }
+    foreach ($errorText in $loadingResult.errors) {
         Write-Error $errorText -ErrorAction Continue
     }
     exit 1

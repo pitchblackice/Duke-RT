@@ -3307,6 +3307,57 @@ bool NRIRenderDevice::SubmitWaitAndRestartCommandList(const char* reason)
 	return BeginCommandList(reason != nullptr ? reason : "SubmitWaitAndRestartCommandList", false);
 }
 
+bool NRIRenderDevice::BeginPreloadCommandContext(const char* reason)
+{
+	if (!mInitialized || mFrameBegun || mCommandBufferOpen || mPreloadCommandContextActive)
+	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=preload-command result=wait reason=busy initialized=%u frame_begun=%u command_open=%u active=%u\n",
+				mInitialized ? 1u : 0u,
+				mFrameBegun ? 1u : 0u,
+				mCommandBufferOpen ? 1u : 0u,
+				mPreloadCommandContextActive ? 1u : 0u);
+		}
+		return false;
+	}
+
+	mCurrentQueuedFrameIndex = GetQueuedFrameIndex(mFrameIndex);
+	WaitForCommands(false);
+	ReleaseRetiredTextureResources(false);
+	mCurrentPresentTarget = nullptr;
+	mActiveTarget = nullptr;
+	mHasAcquiredSwapChainImage = false;
+	mHasPresentedSwapChainFrame = false;
+	mPreloadCommandContextActive = true;
+	if (!BeginCommandList(reason != nullptr ? reason : "preload", true))
+	{
+		mPreloadCommandContextActive = false;
+		return false;
+	}
+	return true;
+}
+
+bool NRIRenderDevice::EndPreloadCommandContext(const char* reason)
+{
+	if (!mPreloadCommandContextActive)
+	{
+		return true;
+	}
+
+	const bool success = SubmitAndWaitCurrentCommandBuffer();
+	mPreloadCommandContextActive = false;
+	mActiveTarget = nullptr;
+	mCurrentPresentTarget = nullptr;
+	if (!success)
+	{
+		Printf(TEXTCOLOR_RED "NRI preload command context submit failed (reason=%s).\n",
+			reason != nullptr ? reason : "unknown");
+		LogD3D12FailureDiagnostics(reason != nullptr ? reason : "EndPreloadCommandContext");
+	}
+	return success;
+}
+
 void NRIRenderDevice::SetSaveBuffers(bool yes)
 {
 	mUsingSaveTarget = yes;
@@ -5268,17 +5319,17 @@ bool NRIRenderDevice::StartPathTracingLevelPreload()
 
 	if (!mRenderer->RefreshPathTracingAvailability() || !mRenderer->IsPathTracingSupported())
 	{
-		mPathTracingLevelPreloadPending = false;
+		mPathTracingLevelPreloadPending = true;
 		if ((int)nri_ptloadingtrace >= 1)
 		{
-			Printf("NRI PT loading gate: event=device-start result=skip reason=pt-unsupported initialized=%u renderer=%u pending=%u frame_begun=%u active_target=%u\n",
+			Printf("NRI PT loading gate: event=device-start result=pending reason=pt-unavailable-at-start initialized=%u renderer=%u pending=%u frame_begun=%u active_target=%u\n",
 				mInitialized ? 1u : 0u,
 				mRenderer != nullptr ? 1u : 0u,
 				mPathTracingLevelPreloadPending ? 1u : 0u,
 				mFrameBegun ? 1u : 0u,
 				mActiveTarget != nullptr ? 1u : 0u);
 		}
-		return false;
+		return true;
 	}
 
 	mPathTracingLevelPreloadPending = true;
@@ -5336,39 +5387,47 @@ bool NRIRenderDevice::TickPathTracingLevelPreload()
 		return false;
 	}
 
-	if (!mRenderer->RefreshPathTracingAvailability() || !mRenderer->IsPathTracingSupported())
+	const bool useStandalonePreload = !mFrameBegun;
+	bool standaloneContextOpened = false;
+	if (useStandalonePreload)
 	{
-		mPathTracingLevelPreloadPending = false;
-		if ((int)nri_ptloadingtrace >= 1)
+		standaloneContextOpened = BeginPreloadCommandContext("level-preload");
+		if (!standaloneContextOpened)
 		{
-			Printf("NRI PT loading gate: event=device-tick result=ready reason=pt-unsupported initialized=%u renderer=%u frame_begun=%u active_target=%u\n",
-				mInitialized ? 1u : 0u,
-				mRenderer != nullptr ? 1u : 0u,
-				mFrameBegun ? 1u : 0u,
-				mActiveTarget != nullptr ? 1u : 0u);
+			return false;
 		}
-		return true;
 	}
 
-	if (!mFrameBegun || mCommandBuffer == nullptr || mActiveTarget == nullptr)
+	if (mCommandBuffer == nullptr || (!useStandalonePreload && mActiveTarget == nullptr))
 	{
 		if ((int)nri_ptloadingtrace >= 1)
 		{
-			Printf("NRI PT loading gate: event=device-tick result=wait reason=frame-not-ready initialized=%u renderer=%u frame_begun=%u command_buffer=%u active_target=%u\n",
+			Printf("NRI PT loading gate: event=device-tick result=wait reason=command-context-not-ready initialized=%u renderer=%u frame_begun=%u command_buffer=%u active_target=%u standalone_context=%u\n",
 				mInitialized ? 1u : 0u,
 				mRenderer != nullptr ? 1u : 0u,
 				mFrameBegun ? 1u : 0u,
 				mCommandBuffer != nullptr ? 1u : 0u,
-				mActiveTarget != nullptr ? 1u : 0u);
+				mActiveTarget != nullptr ? 1u : 0u,
+				mPreloadCommandContextActive ? 1u : 0u);
+		}
+		if (standaloneContextOpened)
+		{
+			EndPreloadCommandContext("level-preload-abort");
 		}
 		return false;
 	}
 
-	const uint32_t outputWidth = std::max<uint32_t>((uint32_t)mSceneViewport.width, 1u);
-	const uint32_t outputHeight = std::max<uint32_t>((uint32_t)mSceneViewport.height, 1u);
-	const uint32_t targetWidth = std::max<uint32_t>(mActiveTarget->width, 1u);
-	const uint32_t targetHeight = std::max<uint32_t>(mActiveTarget->height, 1u);
-	const bool ready = mRenderer->PreloadLevelScene(outputWidth, outputHeight, targetWidth, targetHeight);
+	const uint32_t fallbackWidth = (uint32_t)(std::max)(GetWidth(), 1);
+	const uint32_t fallbackHeight = (uint32_t)(std::max)(GetHeight(), 1);
+	const uint32_t outputWidth = mSceneViewport.width > 0 ? (uint32_t)mSceneViewport.width : fallbackWidth;
+	const uint32_t outputHeight = mSceneViewport.height > 0 ? (uint32_t)mSceneViewport.height : fallbackHeight;
+	const uint32_t targetWidth = mActiveTarget != nullptr ? std::max<uint32_t>(mActiveTarget->width, 1u) : outputWidth;
+	const uint32_t targetHeight = mActiveTarget != nullptr ? std::max<uint32_t>(mActiveTarget->height, 1u) : outputHeight;
+	bool ready = mRenderer->PreloadLevelScene(outputWidth, outputHeight, targetWidth, targetHeight, !useStandalonePreload, useStandalonePreload);
+	if (standaloneContextOpened && !EndPreloadCommandContext("level-preload"))
+	{
+		ready = false;
+	}
 	if (ready)
 	{
 		mPathTracingLevelPreloadPending = false;
@@ -9352,6 +9411,7 @@ void NRIRenderDevice::ResetFrameTracking(bool presentedAcquiredImage)
 	mHasAcquiredSwapChainImage = false;
 	mCurrentSwapChainImage = 0;
 	mStandaloneSavePicFrame = false;
+	mPreloadCommandContextActive = false;
 }
 
 void NRIRenderDevice::ResetLevelTransitionShellState()

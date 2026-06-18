@@ -82,6 +82,7 @@ public:
 	bool HasActiveSceneFrame() const override;
 	bool HasCurrentCommandBuffer() const;
 	bool HasActiveTarget() const;
+	bool IsPreloadCommandContextActive() const { return mPreloadCommandContextActive; }
 	nri::CoreInterface* GetCoreInterface() { return &mCore; }
 	nri::Device* GetDevice() const { return mDevice; }
 	nri::CommandBuffer* GetCurrentCommandBuffer() const { return mCommandBuffer; }
@@ -221,6 +222,8 @@ private:
 	void DestroyRenderResources();
 	bool BeginCommandList(const char* reason, bool waitForSlotReuse = false);
 	bool SubmitWaitAndRestartCommandList(const char* reason);
+	bool BeginPreloadCommandContext(const char* reason);
+	bool EndPreloadCommandContext(const char* reason);
 	bool EnsureSwapChainSize();
 	void EndFrameAndPresent();
 	void LogD3D12FailureDiagnostics(const char* context);
@@ -393,6 +396,7 @@ private:
 	bool mFrameBegun = false;
 	bool mUsingSaveTarget = false;
 	bool mStandaloneSavePicFrame = false;
+	bool mPreloadCommandContextActive = false;
 	bool mPathTracingLevelPreloadPending = false;
 	bool mHasAcquiredSwapChainImage = false;
 	bool mHasPresentedSwapChainFrame = false;

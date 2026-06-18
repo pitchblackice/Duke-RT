@@ -2277,13 +2277,15 @@ NRIRendererFrameContext NRIRenderer::BuildFrameContext(int drawmode, bool portal
 	return context;
 }
 
-bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight)
+bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight, bool frameTargetUsed, bool standaloneContextUsed)
 {
 	NRIPreloadLevelSceneInputs inputs = {};
 	inputs.outputWidth = outputWidth;
 	inputs.outputHeight = outputHeight;
 	inputs.targetWidth = targetWidth;
 	inputs.targetHeight = targetHeight;
+	inputs.frameTargetUsed = frameTargetUsed;
+	inputs.standaloneContextUsed = standaloneContextUsed;
 	return NRIPreloadCoordinator::Run(*this, inputs);
 }
 
@@ -2709,6 +2711,10 @@ void NRIRenderer::EmitSelfTestSummary(uint32_t traceFrameIndex, int drawmode, bo
 	summary.dynamicInstanceCount = shell.sceneInstanceDynamicCount;
 	summary.persistentVoxelInstanceCount = shell.sceneInstancePersistentVoxelCount;
 	summary.emissiveInstanceCount = mBoundEmissivePrimitiveCount;
+	summary.staticSceneUploadThisFrame = mUploadedStaticMapSceneLastFrame ? 1u : 0u;
+	summary.staticSceneAsBuildThisFrame = mBuiltStaticMapSceneASLastFrame ? 1u : 0u;
+	summary.runtimeVoxelOnboardingAdmitted = shell.persistentVoxelOnboardingAdmittedCount;
+	summary.runtimeVoxelTexturePrewarmDeferred = shell.persistentVoxelTexturePrewarmDeferredCount;
 	summary.vertexCount = mVertexBuffer.stride != 0 ? (uint32_t)(vertexBytes / mVertexBuffer.stride) : 0u;
 	summary.indexCount = mIndexBuffer.stride != 0 ? (uint32_t)(indexBytes / mIndexBuffer.stride) : 0u;
 	summary.vertexBytes = vertexBytes;

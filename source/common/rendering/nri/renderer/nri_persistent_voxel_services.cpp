@@ -231,9 +231,9 @@ public:
 				BuildResetServices(*renderer),
 				BuildAdmissionServices(*renderer));
 		};
-		preloadServices.ensureBatch = [](void* user) -> bool
+		preloadServices.ensureBatch = [](void* user, NRIPersistentVoxelBatchStats* outStats) -> bool
 		{
-			return EnsureBatch(static_cast<NRIRenderer&>(*static_cast<NRIRenderer*>(user)));
+			return EnsureBatch(static_cast<NRIRenderer&>(*static_cast<NRIRenderer*>(user)), outStats);
 		};
 		return renderer.mPersistentVoxels.PreloadResources(
 			variants,
@@ -250,7 +250,7 @@ public:
 			preloadServices);
 	}
 
-	static bool EnsureBatch(NRIRenderer& renderer)
+	static bool EnsureBatch(NRIRenderer& renderer, NRIPersistentVoxelBatchStats* outStats = nullptr)
 	{
 		NRIPersistentVoxelBatchServices batchServices = {};
 		batchServices.user = &renderer;
@@ -333,6 +333,10 @@ public:
 			BuildResetServices(renderer),
 			batchServices,
 			batchStats);
+		if (outStats != nullptr)
+		{
+			*outStats = batchStats;
+		}
 
 		renderer.mLastPerfShellTraceStats.geometryBuildPersistentVoxelVariantMs += batchStats.geometryBuildPersistentVoxelVariantMs;
 		renderer.mLastPerfShellTraceStats.geometryBuildPersistentVoxelAppendMs += batchStats.geometryBuildPersistentVoxelAppendMs;
