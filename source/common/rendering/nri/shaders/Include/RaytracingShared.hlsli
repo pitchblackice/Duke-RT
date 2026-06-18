@@ -562,12 +562,17 @@ float SampleMaterialScalarChannel(MaterialData material, uint textureIndex, floa
 	return SampleMaterialColor(material, textureIndex, uv, false, false, false).r;
 }
 
+bool IsPlainMirrorMaterial(MaterialData material)
+{
+	return (material.flags & MATERIAL_FLAG_PLAIN_MIRROR) != 0u;
+}
+
 float4 SampleMaterialBaseColor(uint materialIndex, uint dataSource, float2 uv)
 {
 	MaterialData material = GetMaterialData(materialIndex, dataSource);
-	if ((material.flags & MATERIAL_FLAG_PLAIN_MIRROR) != 0)
+	if (IsPlainMirrorMaterial(material))
 	{
-		return float4(1.0, 1.0, 1.0, 1.0);
+		return float4(0.92, 0.92, 0.92, 1.0);
 	}
 
 	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;
@@ -577,9 +582,9 @@ float4 SampleMaterialBaseColor(uint materialIndex, uint dataSource, float2 uv)
 float4 SampleMaterialBaseColorRaw(uint materialIndex, uint dataSource, float2 uv)
 {
 	MaterialData material = GetMaterialData(materialIndex, dataSource);
-	if ((material.flags & MATERIAL_FLAG_PLAIN_MIRROR) != 0)
+	if (IsPlainMirrorMaterial(material))
 	{
-		return float4(1.0, 1.0, 1.0, 1.0);
+		return float4(0.92, 0.92, 0.92, 1.0);
 	}
 
 	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;

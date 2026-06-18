@@ -12,11 +12,14 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 	const SceneLightSystem::PersistentDynamicEmissiveHighWaterStats& persistentHighWater = mSceneLights.GetPersistentDynamicEmissiveHighWaterStats();
 	const ActorSpriteDebugStats& actorSpriteDebugStats = mSceneLights.GetActorSpriteDebugStats();
 	const bool mirrorMaterialMode = (bool)nri_ptmirrormaterialmode;
+	const char* const mirrorPlayerPolicy = mirrorMaterialMode ?
+		(mDynamicSceneLastFrame.mirrorPlayerSurfaceCount > 0 ? "reflection_only" : "disabled") :
+		"legacy_enabled";
 
 	Printf("NRI PT mirror policy: wall_mode=%s mirror_overlay=%s mirror_player=%s mirror_distance=%.1f\n",
 		mirrorMaterialMode ? "material_reflection_requested" : "legacy_traversal",
 		mirrorMaterialMode ? "disabled" : "legacy_enabled",
-		mirrorMaterialMode ? "disabled" : "legacy_enabled",
+		mirrorPlayerPolicy,
 		mirrorMaterialMode ? 0.0 : (double)nri_ptmirrordynamicdistance);
 	Printf("NRI PT dynamic scene: active=%s sprite_surfaces=%u tris=%u materials=%u models=%u unsupported_models=%u mirror_extended_surfaces=%u mirror_extended_tris=%u mirror_extended_materials=%u mirror_extended_models=%u mirror_extended_unsupported_models=%u mirror_player_surfaces=%u mirror_player_tris=%u mirror_player_materials=%u mirror_player_models=%u mirror_player_unsupported_models=%u mirror_distance=%.1f dynamic_as_builds=%u last_frame_as_build=%s active_tlas_instances=%u emissive_cache=%s cache_surfaces=%u cache_tris=%u cache_materials=%u\n",
 		mUsedDynamicSceneLastFrame ? "yes" : "no",

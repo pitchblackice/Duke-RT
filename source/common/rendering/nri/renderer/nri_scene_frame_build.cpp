@@ -59,6 +59,18 @@ namespace
 		return (uint32_t)std::max(0, std::min((int)nri_ptbootstrapmode, 13));
 	}
 
+	static bool HasPlainMirrorMaterialSurfaces(const nri_scene::PTMapWorld& mapWorld)
+	{
+		for (const nri_scene::PTMapSurface& surface : mapWorld.surfaces)
+		{
+			if ((surface.surface.material.flags & nri_scene::MaterialFlag_PlainMirror) != 0)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
 
 	static bool TryComputeCapturedSurfaceNormal(const nri_scene::SurfaceRef& surface, float outNormal[3])
 	{
@@ -600,7 +612,11 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				CaptureNRIMirrorExtendedDynamicScene(request, mirrorExtendedDynamicSceneView);
 			return result.captured;
 		}();
-		const bool hasMirrorPlayerScene = !deferOverlayThisFrame && !mirrorMaterialMode && IsNRIMirrorPlayerPreviewCaptureEnabled() && [&]()
+		const bool shouldCaptureReflectionPlayer =
+			!deferOverlayThisFrame &&
+			((!mirrorMaterialMode && IsNRIMirrorPlayerPreviewCaptureEnabled()) ||
+				(mirrorMaterialMode && HasPlainMirrorMaterialSurfaces(mMapWorld)));
+		const bool hasMirrorPlayerScene = shouldCaptureReflectionPlayer && [&]()
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMirrorCaptureMs);
 			ScopedPtPerfTimer mirrorPlayerTimer(mLastPerfShellTraceStats.mirrorPlayerCaptureMs);

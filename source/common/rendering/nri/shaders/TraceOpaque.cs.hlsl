@@ -911,6 +911,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const MaterialData material = GetMaterialData(hit.materialIndex, hit.dataSource);
 			const bool fullbright = (material.flags & MATERIAL_FLAG_FULLBRIGHT) != 0;
 			const bool emissiveMaterial = IsMaterialEmissive(material);
+			const bool plainMirrorMaterial = IsPlainMirrorMaterial(material);
 			if (fullbright)
 			{
 				TraceShaderStatAdd(TRACE_STAT_MATERIAL_FULLBRIGHT, 1u);
@@ -958,20 +959,24 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				{
 					shadowPenumbra = SIGMA_FrontEnd_PackPenumbra(shadowHitDistance, GetDirectionalPlaceholderTanAngularSize());
 				}
-				sectorSourceLighting = EvaluateSectorLightingSource(material, shadingNormal);
-				sectorAmbientLighting = EvaluateSectorLighting(material, shadingNormal, diffuseAlbedo);
-				ambientDirectLighting = EvaluateAmbientSurface(albedo.rgb, diffuseAlbedo, metalness) + sectorAmbientLighting;
-				sunTransportDiffuse = useDirectionalLight ? EvaluateDirectSunDiffuse(diffuseAlbedo, directionalShadingNormal, lightDir) * directionalLightColor * shadow : 0.0;
-				sunTransportSpecular = useDirectionalLight ? EvaluateSunSpecular(albedo.rgb, metalness, directionalShadingNormal, viewDir, lightDir, 1.0) * directionalLightColor * shadow : 0.0;
+				if (!plainMirrorMaterial)
+				{
+					sectorSourceLighting = EvaluateSectorLightingSource(material, shadingNormal);
+					sectorAmbientLighting = EvaluateSectorLighting(material, shadingNormal, diffuseAlbedo);
+					ambientDirectLighting = EvaluateAmbientSurface(albedo.rgb, diffuseAlbedo, metalness) + sectorAmbientLighting;
+					sunTransportDiffuse = useDirectionalLight ? EvaluateDirectSunDiffuse(diffuseAlbedo, directionalShadingNormal, lightDir) * directionalLightColor * shadow : 0.0;
+					sunTransportSpecular = useDirectionalLight ? EvaluateSunSpecular(albedo.rgb, metalness, directionalShadingNormal, viewDir, lightDir, 1.0) * directionalLightColor * shadow : 0.0;
+				}
 
 				const RuntimeLightTileHeaderData runtimeLightTile = GetRuntimeLightTileHeader(pixelPos);
-				if (runtimeLightTile.indexCount > 0u)
+				const uint runtimeLightCandidateCount = plainMirrorMaterial ? 0u : runtimeLightTile.indexCount;
+				if (runtimeLightCandidateCount > 0u)
 				{
 					TraceShaderStatAdd(TRACE_STAT_RUNTIME_TILE_NONEMPTY, 1u);
-					TraceShaderStatMax(TRACE_STAT_RUNTIME_TILE_MAX, runtimeLightTile.indexCount);
+					TraceShaderStatMax(TRACE_STAT_RUNTIME_TILE_MAX, runtimeLightCandidateCount);
 				}
 				[loop]
-				for (uint runtimeLightCandidate = 0u; runtimeLightCandidate < runtimeLightTile.indexCount; ++runtimeLightCandidate)
+				for (uint runtimeLightCandidate = 0u; runtimeLightCandidate < runtimeLightCandidateCount; ++runtimeLightCandidate)
 				{
 					TraceShaderStatAdd(TRACE_STAT_RUNTIME_CANDIDATES, 1u);
 					const uint runtimeLightIndex = gRuntimeLightTileIndices[runtimeLightTile.indexOffset + runtimeLightCandidate];
