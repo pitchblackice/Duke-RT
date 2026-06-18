@@ -90,13 +90,6 @@ void GetNrdPrimaryMaterialFactors(float3 normal, float3 viewDir, float3 baseColo
 	NRD_MaterialFactors(normalize(normal), normalize(viewDir), albedo, rf0, roughness, diffuseFactor, specularFactor);
 }
 
-float GetDirectLightingCompositionWeight(float metalness, float roughness)
-{
-	const float metallicSuppression = smoothstep(0.75, 1.0, metalness);
-	const float glossySuppression = 1.0 - smoothstep(0.02, 0.50, roughness);
-	return 1.0 - metallicSuppression * glossySuppression;
-}
-
 float3 EvaluateSunSpecular(float3 albedo, float metalness, float3 normal, float3 viewDir, float3 lightDir, float shadow)
 {
 	const float lambert = max(dot(normal, lightDir), 0.0);
@@ -159,11 +152,10 @@ float3 ComposeLighting(uint2 pixelPos, float3 diffuseSignal, float3 specularSign
 	GetNrdPrimaryMaterialFactors(normal, viewDir, albedo, metalness, roughness, diffuseFactor, specularFactor);
 	const float3 shadedDiffuse = diffuseSignal * diffuseFactor;
 	const float3 shadedSpecular = specularSignal * specularFactor;
-	const float3 composedDirectLighting = directLighting * GetDirectLightingCompositionWeight(metalness, roughness);
 
 	// This remodulates the NRD-facing transport back into the beauty signal using the same
 	// primary material factors that TraceOpaque used for de-modulation.
-	return directEmission + composedDirectLighting + shadedDiffuse + shadedSpecular;
+	return directEmission + directLighting + shadedDiffuse + shadedSpecular;
 }
 
 [numthreads(8, 8, 1)]
