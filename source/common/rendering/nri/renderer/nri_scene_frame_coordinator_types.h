@@ -76,14 +76,12 @@ struct RenderSceneFrameBuildResult
 {
 	nri_scene::SceneView capturedSceneView;
 	nri_scene::SceneView dynamicSceneView;
-	nri_scene::SceneView mirrorExtendedDynamicSceneView;
-	nri_scene::SceneView mirrorPlayerSceneView;
+	nri_scene::SceneView localPlayerReflectionSceneView;
 	nri_scene::SceneView sceneLightMergedDynamicSceneView;
 	nri_scene::SceneView mergedDynamicSceneView;
 	nri_scene::GeometryData capturedGeometry;
 	nri_scene::GeometryData runtimeSpaceLinkGeometry;
 	nri_scene::GeometryData dynamicGeometry;
-	nri_scene::GeometryData mirrorExtendedDynamicGeometry;
 	nri_scene::GeometryData mergedDynamicGeometry;
 	nri_scene::GeometryData debugSphereGeometry;
 	nri_scene::GeometryData surfaceLightGeometry;
@@ -91,8 +89,7 @@ struct RenderSceneFrameBuildResult
 	nri_scene::MaterialBridgeData materialBridge;
 	nri_scene::MaterialBridgeData runtimeSpaceLinkMaterialBridge;
 	nri_scene::MaterialBridgeData dynamicMaterialBridge;
-	nri_scene::MaterialBridgeData mirrorExtendedDynamicMaterialBridge;
-	nri_scene::MaterialBridgeData mirrorPlayerMaterialBridge;
+	nri_scene::MaterialBridgeData localPlayerReflectionMaterialBridge;
 	nri_scene::MaterialBridgeData sceneLightMergedDynamicMaterialBridge;
 	nri_scene::MaterialBridgeData mergedDynamicMaterialBridge;
 	nri_scene::MaterialBridgeData debugSphereMaterialBridge;

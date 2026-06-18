@@ -86,7 +86,6 @@ struct PTMapChunkMutationAnalysis
 
 struct PTMapBuildOptions
 {
-	bool wallMirrorsAsReflectiveMaterials = false;
 };
 
 void NotifyLevelGeometryReady();

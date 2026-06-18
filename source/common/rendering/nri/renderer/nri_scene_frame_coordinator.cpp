@@ -450,7 +450,6 @@ bool NRIRenderer::BeginRenderSceneFrame(HWDrawInfo& di, const NRIRendererFrameCo
 	nri_scene::ResetSkyPerfStats();
 	mUsedStaticMapSceneLastFrame = false;
 	mUsedDynamicSceneLastFrame = false;
-	mHasVisibleMirrorPortalLastFrame = false;
 	mUploadedStaticMapSceneLastFrame = false;
 	mBuiltStaticMapSceneASLastFrame = false;
 	mBuiltDynamicSceneASLastFrame = false;

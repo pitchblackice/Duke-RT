@@ -189,9 +189,8 @@ namespace
 		switch (slot)
 		{
 		case NRIRenderer::MaterialBuildTraceSlot::DynamicLive: return "dynamic_live";
-		case NRIRenderer::MaterialBuildTraceSlot::MirrorExtended: return "mirror_extended";
 		case NRIRenderer::MaterialBuildTraceSlot::SceneLightMergedDynamic: return "scene_light_merged_dynamic";
-		case NRIRenderer::MaterialBuildTraceSlot::MirrorPlayer: return "mirror_player";
+		case NRIRenderer::MaterialBuildTraceSlot::LocalPlayerReflection: return "local_player_reflection";
 		case NRIRenderer::MaterialBuildTraceSlot::DynamicWithPersistentEmissive: return "dynamic_with_persistent_emissive";
 		case NRIRenderer::MaterialBuildTraceSlot::SceneLightMergedPersistent: return "scene_light_merged_persistent";
 		case NRIRenderer::MaterialBuildTraceSlot::CapturedScene: return "captured_scene";

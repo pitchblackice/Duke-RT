@@ -105,12 +105,12 @@ NRISceneFrameGenerationResult BuildNRISceneFrameGenerationResult(
 				inputs.activeDynamicGeometry != nullptr ? (uint64_t)inputs.activeDynamicGeometry->primitives.size() : 0ull),
 			inputs.activeDynamicMaterials != nullptr ? (uint64_t)inputs.activeDynamicMaterials->materials.size() : 0ull) :
 		0ull;
-	result.current.mirrorPlayer = inputs.hasMirrorPlayerScene ?
+	result.current.localPlayerReflection = inputs.hasLocalPlayerReflectionScene ?
 		SceneFrameHashCombine64(
 			SceneFrameHashCombine64(
 				inputs.frameIndex,
-				inputs.mirrorPlayerGeometry != nullptr ? (uint64_t)inputs.mirrorPlayerGeometry->primitives.size() : 0ull),
-			inputs.mirrorPlayerMaterials != nullptr ? (uint64_t)inputs.mirrorPlayerMaterials->materials.size() : 0ull) :
+				inputs.localPlayerReflectionGeometry != nullptr ? (uint64_t)inputs.localPlayerReflectionGeometry->primitives.size() : 0ull),
+			inputs.localPlayerReflectionMaterials != nullptr ? (uint64_t)inputs.localPlayerReflectionMaterials->materials.size() : 0ull) :
 		0ull;
 	result.current.persistentVoxels = inputs.persistentVoxelGeneration;
 	result.current.materialBridge = inputs.activeMaterialBridge != nullptr ?
@@ -155,7 +155,7 @@ NRISceneFrameGenerationResult BuildNRISceneFrameGenerationResult(
 	result.changedStaticMap = domainChanged(result.current.staticMap, previous.staticMap);
 	result.changedRuntimeMutation = domainChanged(result.current.runtimeMutation, previous.runtimeMutation);
 	result.changedDynamicActors = domainChanged(result.current.dynamicActors, previous.dynamicActors);
-	result.changedMirrorPlayer = domainChanged(result.current.mirrorPlayer, previous.mirrorPlayer);
+	result.changedLocalPlayerReflection = domainChanged(result.current.localPlayerReflection, previous.localPlayerReflection);
 	result.changedPersistentVoxels = domainChanged(result.current.persistentVoxels, previous.persistentVoxels);
 	result.changedMaterialBridge = domainChanged(result.current.materialBridge, previous.materialBridge);
 	result.changedTextures = domainChanged(result.current.textures, previous.textures);
@@ -165,7 +165,7 @@ NRISceneFrameGenerationResult BuildNRISceneFrameGenerationResult(
 		result.changedStaticMap +
 		result.changedRuntimeMutation +
 		result.changedDynamicActors +
-		result.changedMirrorPlayer +
+		result.changedLocalPlayerReflection +
 		result.changedPersistentVoxels +
 		result.changedMaterialBridge +
 		result.changedTextures +
@@ -181,7 +181,7 @@ void WriteNRISceneFrameGenerationTraceStats(
 	stats.sceneSelectStateCommitGenStaticMap = result.current.staticMap;
 	stats.sceneSelectStateCommitGenRuntimeMutation = result.current.runtimeMutation;
 	stats.sceneSelectStateCommitGenDynamicActors = result.current.dynamicActors;
-	stats.sceneSelectStateCommitGenMirrorPlayer = result.current.mirrorPlayer;
+	stats.sceneSelectStateCommitGenLocalPlayerReflection = result.current.localPlayerReflection;
 	stats.sceneSelectStateCommitGenPersistentVoxels = result.current.persistentVoxels;
 	stats.sceneSelectStateCommitGenMaterialBridge = result.current.materialBridge;
 	stats.sceneSelectStateCommitGenTextures = result.current.textures;
@@ -190,7 +190,7 @@ void WriteNRISceneFrameGenerationTraceStats(
 	stats.sceneSelectStateCommitChangedStaticMap = result.changedStaticMap;
 	stats.sceneSelectStateCommitChangedRuntimeMutation = result.changedRuntimeMutation;
 	stats.sceneSelectStateCommitChangedDynamicActors = result.changedDynamicActors;
-	stats.sceneSelectStateCommitChangedMirrorPlayer = result.changedMirrorPlayer;
+	stats.sceneSelectStateCommitChangedLocalPlayerReflection = result.changedLocalPlayerReflection;
 	stats.sceneSelectStateCommitChangedPersistentVoxels = result.changedPersistentVoxels;
 	stats.sceneSelectStateCommitChangedMaterialBridge = result.changedMaterialBridge;
 	stats.sceneSelectStateCommitChangedTextures = result.changedTextures;
@@ -222,17 +222,11 @@ nri_scene::SceneDebugStats BuildNRISceneFrameDebugStats(
 		dynamicOverlayStats = nri_scene::MergeSceneDebugStats(dynamicOverlayStats, *inputs.persistentVoxelStats);
 		stats.sceneSelectStateCommitStatsPersistentVoxel = 1;
 	}
-	if (inputs.mirrorExtendedSceneView != nullptr)
+	if (inputs.localPlayerReflectionSceneView != nullptr)
 	{
-		ScopedSceneFrameTimer mirrorExtendedStatsTimer(inputs.mirrorExtendedMs);
-		dynamicOverlayStats = nri_scene::MergeSceneDebugStats(dynamicOverlayStats, inputs.mirrorExtendedSceneView->stats);
-		stats.sceneSelectStateCommitStatsMirrorExtended = 1;
-	}
-	if (inputs.mirrorPlayerSceneView != nullptr)
-	{
-		ScopedSceneFrameTimer mirrorPlayerStatsTimer(inputs.mirrorPlayerMs);
-		dynamicOverlayStats = nri_scene::MergeSceneDebugStats(dynamicOverlayStats, inputs.mirrorPlayerSceneView->stats);
-		stats.sceneSelectStateCommitStatsMirrorPlayer = 1;
+		ScopedSceneFrameTimer localPlayerReflectionStatsTimer(inputs.localPlayerReflectionMs);
+		dynamicOverlayStats = nri_scene::MergeSceneDebugStats(dynamicOverlayStats, inputs.localPlayerReflectionSceneView->stats);
+		stats.sceneSelectStateCommitStatsLocalPlayerReflection = 1;
 	}
 
 	ScopedSceneFrameTimer mergeStatsTimer(inputs.mergeMs);
@@ -258,25 +252,15 @@ NRIRenderer::DynamicSceneFrameState BuildNRISceneFrameDynamicState(
 		result.unsupportedModelCount = inputs.activeDynamicSceneView->stats.unsupportedModelDrawItems;
 		stats.sceneSelectStateCommitActiveDynamic = 1;
 	}
-	if (inputs.mirrorExtendedSceneView != nullptr && inputs.mirrorExtendedGeometry != nullptr && inputs.mirrorExtendedMaterials != nullptr)
+	if (inputs.localPlayerReflectionSceneView != nullptr && inputs.localPlayerReflectionGeometry != nullptr && inputs.localPlayerReflectionMaterials != nullptr)
 	{
-		ScopedSceneFrameTimer mirrorExtendedTimer(inputs.mirrorExtendedMs);
-		result.mirrorExtendedSurfaceCount = CountSceneFrameSurfaces(*inputs.mirrorExtendedSceneView);
-		result.mirrorExtendedPrimitiveCount = (uint32_t)inputs.mirrorExtendedGeometry->primitives.size();
-		result.mirrorExtendedMaterialCount = (uint32_t)inputs.mirrorExtendedMaterials->materials.size();
-		result.mirrorExtendedModelCount = inputs.mirrorExtendedSceneView->stats.modelDrawItems;
-		result.mirrorExtendedUnsupportedModelCount = inputs.mirrorExtendedSceneView->stats.unsupportedModelDrawItems;
-		stats.sceneSelectStateCommitMirrorExtended = 1;
-	}
-	if (inputs.mirrorPlayerSceneView != nullptr && inputs.mirrorPlayerGeometry != nullptr && inputs.mirrorPlayerMaterials != nullptr)
-	{
-		ScopedSceneFrameTimer mirrorPlayerTimer(inputs.mirrorPlayerMs);
-		result.mirrorPlayerSurfaceCount = CountSceneFrameSurfaces(*inputs.mirrorPlayerSceneView);
-		result.mirrorPlayerPrimitiveCount = (uint32_t)inputs.mirrorPlayerGeometry->primitives.size();
-		result.mirrorPlayerMaterialCount = (uint32_t)inputs.mirrorPlayerMaterials->materials.size();
-		result.mirrorPlayerModelCount = inputs.mirrorPlayerSceneView->stats.modelDrawItems;
-		result.mirrorPlayerUnsupportedModelCount = inputs.mirrorPlayerSceneView->stats.unsupportedModelDrawItems;
-		stats.sceneSelectStateCommitMirrorPlayer = 1;
+		ScopedSceneFrameTimer localPlayerReflectionTimer(inputs.localPlayerReflectionMs);
+		result.localPlayerReflectionSurfaceCount = CountSceneFrameSurfaces(*inputs.localPlayerReflectionSceneView);
+		result.localPlayerReflectionPrimitiveCount = (uint32_t)inputs.localPlayerReflectionGeometry->primitives.size();
+		result.localPlayerReflectionMaterialCount = (uint32_t)inputs.localPlayerReflectionMaterials->materials.size();
+		result.localPlayerReflectionModelCount = inputs.localPlayerReflectionSceneView->stats.modelDrawItems;
+		result.localPlayerReflectionUnsupportedModelCount = inputs.localPlayerReflectionSceneView->stats.unsupportedModelDrawItems;
+		stats.sceneSelectStateCommitLocalPlayerReflection = 1;
 	}
 	return result;
 }

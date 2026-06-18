@@ -11,34 +11,23 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 	const PersistentDynamicEmissiveCache& persistentCache = mSceneLights.GetPersistentDynamicEmissiveCache();
 	const SceneLightSystem::PersistentDynamicEmissiveHighWaterStats& persistentHighWater = mSceneLights.GetPersistentDynamicEmissiveHighWaterStats();
 	const ActorSpriteDebugStats& actorSpriteDebugStats = mSceneLights.GetActorSpriteDebugStats();
-	const bool mirrorMaterialMode = (bool)nri_ptmirrormaterialmode;
-	const char* const mirrorPlayerPolicy = mirrorMaterialMode ?
-		(mDynamicSceneLastFrame.mirrorPlayerSurfaceCount > 0 ? "reflection_only" : "disabled") :
-		"legacy_enabled";
+	const char* const localPlayerReflectionPolicy =
+		mDynamicSceneLastFrame.localPlayerReflectionSurfaceCount > 0 ? "reflection_only" : "disabled";
 
-	Printf("NRI PT mirror policy: wall_mode=%s mirror_overlay=%s mirror_player=%s mirror_distance=%.1f\n",
-		mirrorMaterialMode ? "material_reflection_requested" : "legacy_traversal",
-		mirrorMaterialMode ? "disabled" : "legacy_enabled",
-		mirrorPlayerPolicy,
-		mirrorMaterialMode ? 0.0 : (double)nri_ptmirrordynamicdistance);
-	Printf("NRI PT dynamic scene: active=%s sprite_surfaces=%u tris=%u materials=%u models=%u unsupported_models=%u mirror_extended_surfaces=%u mirror_extended_tris=%u mirror_extended_materials=%u mirror_extended_models=%u mirror_extended_unsupported_models=%u mirror_player_surfaces=%u mirror_player_tris=%u mirror_player_materials=%u mirror_player_models=%u mirror_player_unsupported_models=%u mirror_distance=%.1f dynamic_as_builds=%u last_frame_as_build=%s active_tlas_instances=%u emissive_cache=%s cache_surfaces=%u cache_tris=%u cache_materials=%u\n",
+	Printf("NRI PT mirror policy: wall_mode=material_reflection mirror_overlay=removed local_player_reflection=%s\n",
+		localPlayerReflectionPolicy);
+	Printf("NRI PT dynamic scene: active=%s sprite_surfaces=%u tris=%u materials=%u models=%u unsupported_models=%u local_player_reflection_surfaces=%u local_player_reflection_tris=%u local_player_reflection_materials=%u local_player_reflection_models=%u local_player_reflection_unsupported_models=%u dynamic_as_builds=%u last_frame_as_build=%s active_tlas_instances=%u emissive_cache=%s cache_surfaces=%u cache_tris=%u cache_materials=%u\n",
 		mUsedDynamicSceneLastFrame ? "yes" : "no",
 		mDynamicSceneLastFrame.spriteSurfaceCount,
 		mDynamicSceneLastFrame.primitiveCount,
 		mDynamicSceneLastFrame.materialCount,
 		mDynamicSceneLastFrame.modelCount,
 		mDynamicSceneLastFrame.unsupportedModelCount,
-		mDynamicSceneLastFrame.mirrorExtendedSurfaceCount,
-		mDynamicSceneLastFrame.mirrorExtendedPrimitiveCount,
-		mDynamicSceneLastFrame.mirrorExtendedMaterialCount,
-		mDynamicSceneLastFrame.mirrorExtendedModelCount,
-		mDynamicSceneLastFrame.mirrorExtendedUnsupportedModelCount,
-		mDynamicSceneLastFrame.mirrorPlayerSurfaceCount,
-		mDynamicSceneLastFrame.mirrorPlayerPrimitiveCount,
-		mDynamicSceneLastFrame.mirrorPlayerMaterialCount,
-		mDynamicSceneLastFrame.mirrorPlayerModelCount,
-		mDynamicSceneLastFrame.mirrorPlayerUnsupportedModelCount,
-		mirrorMaterialMode ? 0.0 : (double)nri_ptmirrordynamicdistance,
+		mDynamicSceneLastFrame.localPlayerReflectionSurfaceCount,
+		mDynamicSceneLastFrame.localPlayerReflectionPrimitiveCount,
+		mDynamicSceneLastFrame.localPlayerReflectionMaterialCount,
+		mDynamicSceneLastFrame.localPlayerReflectionModelCount,
+		mDynamicSceneLastFrame.localPlayerReflectionUnsupportedModelCount,
 		mDynamicSceneLastFrame.asBuildCount,
 		mBuiltDynamicSceneASLastFrame ? "yes" : "no",
 		mActiveTlasInstanceCount,

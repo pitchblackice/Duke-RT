@@ -322,7 +322,6 @@ NRIMapChunkCompareSnapshot NRIRenderer::BuildMapChunkCompareSnapshot(int32_t chu
 	nri_scene::PTMapWorld liveWorld = {};
 	nri_scene::PTMapWorldStats liveStats = {};
 	nri_scene::PTMapBuildOptions mapBuildOptions = {};
-	mapBuildOptions.wallMirrorsAsReflectiveMaterials = (bool)nri_ptmirrormaterialmode;
 	if (!nri_scene::BuildLiveMapChunkWorld(staticChunk, liveWorld, &liveStats, mapBuildOptions) ||
 		liveWorld.chunks.empty())
 	{

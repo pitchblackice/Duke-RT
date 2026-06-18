@@ -4451,8 +4451,6 @@ void SceneLightSystem::BuildRuntimeLightClusterUpload(
 	}
 
 	std::vector<std::vector<uint32_t>> tileLights(tileCount);
-	const float mirrorExtendedLightDistanceSq =
-		input.mirrorExtendedLightCoverage ? input.mirrorExtendedLightDistance * input.mirrorExtendedLightDistance : 0.0f;
 	for (uint32_t lightIndex = 0; lightIndex < activeLightCount; ++lightIndex)
 	{
 		const SceneAnalyticLight& light = activeLights[lightIndex];
@@ -4469,14 +4467,7 @@ void SceneLightSystem::BuildRuntimeLightClusterUpload(
 		const float viewX = Dot3(toLight, input.currentCameraRight);
 		const float viewY = Dot3(toLight, input.currentCameraUp);
 		const float viewZ = Dot3(toLight, input.currentCameraForward);
-		const float lightDistanceSq =
-			toLight[0] * toLight[0] +
-			toLight[1] * toLight[1] +
-			toLight[2] * toLight[2];
-		const bool forceMirrorFullscreen =
-			input.mirrorExtendedLightCoverage &&
-			lightDistanceSq <= mirrorExtendedLightDistanceSq;
-		if (!forceMirrorFullscreen && viewZ <= -light.radius)
+		if (viewZ <= -light.radius)
 		{
 			continue;
 		}
@@ -4486,8 +4477,7 @@ void SceneLightSystem::BuildRuntimeLightClusterUpload(
 		int32_t maxTileX = (int32_t)outTileCountX - 1;
 		int32_t maxTileY = (int32_t)outTileCountY - 1;
 
-		if (!forceMirrorFullscreen &&
-			viewZ > light.radius &&
+		if (viewZ > light.radius &&
 			input.tanHalfFovX > 0.0f &&
 			input.tanHalfFovY > 0.0f)
 		{

@@ -193,7 +193,7 @@ namespace
 		return stamp;
 	}
 
-	NRIRenderer::SceneBufferUploadProducerStamp ToProducerStamp(const NRIMirrorPlayerUploadStamp& built)
+	NRIRenderer::SceneBufferUploadProducerStamp ToProducerStamp(const NRILocalPlayerReflectionUploadStamp& built)
 	{
 		NRIRenderer::SceneBufferUploadProducerStamp stamp = {};
 		stamp.vertexPayloadStamp = built.vertexPayloadStamp;
@@ -214,13 +214,13 @@ namespace
 		return ToProducerStamp(BuildSceneViewUploadProducerStamp(sceneView, inputs.mapWorldBuildSerial));
 	}
 
-	NRIRenderer::SceneBufferUploadProducerStamp BuildMirrorPlayerProducerStamp(const NRISceneFrameOverlayBuildInputs& inputs)
+	NRIRenderer::SceneBufferUploadProducerStamp BuildLocalPlayerReflectionProducerStamp(const NRISceneFrameOverlayBuildInputs& inputs)
 	{
 		ScopedOverlayTimer aggregateTimer(inputs.collectTiming, &inputs.stats->overlayAppendProducerStampMs);
-		ScopedOverlayTimer sourceTimer(inputs.collectTiming, &inputs.stats->overlayAppendMirrorPlayerStampMs);
-		return ToProducerStamp(BuildNRIMirrorPlayerUploadProducerStamp(
-			*inputs.mirrorPlayerGeometry,
-			*inputs.mirrorPlayerMaterials,
+		ScopedOverlayTimer sourceTimer(inputs.collectTiming, &inputs.stats->overlayAppendLocalPlayerReflectionStampMs);
+		return ToProducerStamp(BuildNRILocalPlayerReflectionUploadProducerStamp(
+			*inputs.localPlayerReflectionGeometry,
+			*inputs.localPlayerReflectionMaterials,
 			inputs.frameIndex,
 			inputs.mapWorldBuildSerial));
 	}
@@ -293,13 +293,9 @@ void BuildNRISceneFrameOverlay(
 			inputs.hasActiveDynamicOverlay && inputs.activeDynamicSceneView != nullptr ?
 				BuildSceneViewProducerStamp(inputs, *inputs.activeDynamicSceneView, &stats.overlayAppendDynamicStampMs) :
 				NRIRenderer::SceneBufferUploadProducerStamp {};
-		const NRIRenderer::SceneBufferUploadProducerStamp mirrorExtendedStamp =
-			inputs.hasMirrorExtendedDynamicOverlay && inputs.mirrorExtendedSceneView != nullptr ?
-				BuildSceneViewProducerStamp(inputs, *inputs.mirrorExtendedSceneView, &stats.overlayAppendMirrorExtendedStampMs) :
-				NRIRenderer::SceneBufferUploadProducerStamp {};
-		const NRIRenderer::SceneBufferUploadProducerStamp mirrorPlayerStamp =
-			inputs.hasMirrorPlayerOverlay && inputs.mirrorPlayerGeometry != nullptr && inputs.mirrorPlayerMaterials != nullptr ?
-				BuildMirrorPlayerProducerStamp(inputs) :
+		const NRIRenderer::SceneBufferUploadProducerStamp localPlayerReflectionStamp =
+			inputs.hasLocalPlayerReflectionOverlay && inputs.localPlayerReflectionGeometry != nullptr && inputs.localPlayerReflectionMaterials != nullptr ?
+				BuildLocalPlayerReflectionProducerStamp(inputs) :
 				NRIRenderer::SceneBufferUploadProducerStamp {};
 
 		NRISceneContributionReserve overlayReserve = {};
@@ -315,13 +311,9 @@ void BuildNRISceneFrameOverlay(
 		{
 			AddOverlayReserve(inputs.activeDynamicGeometry, inputs.activeDynamicMaterials, overlayReserve);
 		}
-		if (inputs.hasMirrorExtendedDynamicOverlay)
+		if (inputs.hasLocalPlayerReflectionOverlay)
 		{
-			AddOverlayReserve(inputs.mirrorExtendedGeometry, inputs.mirrorExtendedMaterials, overlayReserve);
-		}
-		if (inputs.hasMirrorPlayerOverlay)
-		{
-			AddOverlayReserve(inputs.mirrorPlayerGeometry, inputs.mirrorPlayerMaterials, overlayReserve);
+			AddOverlayReserve(inputs.localPlayerReflectionGeometry, inputs.localPlayerReflectionMaterials, overlayReserve);
 		}
 		if (inputs.hasRuntimeDebugSphereOverlay)
 		{
@@ -369,26 +361,14 @@ void BuildNRISceneFrameOverlay(
 				overlayMaterialBridge,
 				uploadSpans);
 		}
-		if (inputs.hasMirrorExtendedDynamicOverlay)
+		if (inputs.hasLocalPlayerReflectionOverlay)
 		{
 			AppendOverlaySource(
-				inputs.mirrorExtendedGeometry,
-				&mirrorExtendedStamp,
-				inputs.mirrorExtendedMaterials,
-				inputs.mirrorExtendedTelemetry,
-				NRIRenderer::SceneBufferUploadDomain::MirrorExtended,
-				overlayGeometry,
-				overlayMaterialBridge,
-				uploadSpans);
-		}
-		if (inputs.hasMirrorPlayerOverlay)
-		{
-			AppendOverlaySource(
-				inputs.mirrorPlayerGeometry,
-				&mirrorPlayerStamp,
-				inputs.mirrorPlayerMaterials,
-				inputs.mirrorPlayerTelemetry,
-				NRIRenderer::SceneBufferUploadDomain::MirrorPlayer,
+				inputs.localPlayerReflectionGeometry,
+				&localPlayerReflectionStamp,
+				inputs.localPlayerReflectionMaterials,
+				inputs.localPlayerReflectionTelemetry,
+				NRIRenderer::SceneBufferUploadDomain::LocalPlayerReflection,
 				overlayGeometry,
 				overlayMaterialBridge,
 				uploadSpans);

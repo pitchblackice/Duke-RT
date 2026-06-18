@@ -86,9 +86,8 @@ public:
 	enum class MaterialBuildTraceSlot : uint32_t
 	{
 		DynamicLive = 0,
-		MirrorExtended,
 		SceneLightMergedDynamic,
-		MirrorPlayer,
+		LocalPlayerReflection,
 		DynamicWithPersistentEmissive,
 		SceneLightMergedPersistent,
 		CapturedScene,
@@ -109,8 +108,7 @@ public:
 		StaticOverlay = 0,
 		RuntimeMutation,
 		Dynamic,
-		MirrorExtended,
-		MirrorPlayer,
+		LocalPlayerReflection,
 		PersistentVoxelMaterial,
 		Count,
 	};
@@ -143,7 +141,7 @@ public:
 		uint64_t staticMap = 0;
 		uint64_t runtimeMutation = 0;
 		uint64_t dynamicActors = 0;
-		uint64_t mirrorPlayer = 0;
+		uint64_t localPlayerReflection = 0;
 		uint64_t persistentVoxels = 0;
 		uint64_t materialBridge = 0;
 		uint64_t textures = 0;
@@ -158,16 +156,11 @@ public:
 		uint32_t materialCount = 0;
 		uint32_t modelCount = 0;
 		uint32_t unsupportedModelCount = 0;
-		uint32_t mirrorExtendedSurfaceCount = 0;
-		uint32_t mirrorExtendedPrimitiveCount = 0;
-		uint32_t mirrorExtendedMaterialCount = 0;
-		uint32_t mirrorExtendedModelCount = 0;
-		uint32_t mirrorExtendedUnsupportedModelCount = 0;
-		uint32_t mirrorPlayerSurfaceCount = 0;
-		uint32_t mirrorPlayerPrimitiveCount = 0;
-		uint32_t mirrorPlayerMaterialCount = 0;
-		uint32_t mirrorPlayerModelCount = 0;
-		uint32_t mirrorPlayerUnsupportedModelCount = 0;
+		uint32_t localPlayerReflectionSurfaceCount = 0;
+		uint32_t localPlayerReflectionPrimitiveCount = 0;
+		uint32_t localPlayerReflectionMaterialCount = 0;
+		uint32_t localPlayerReflectionModelCount = 0;
+		uint32_t localPlayerReflectionUnsupportedModelCount = 0;
 		uint32_t asBuildCount = 0;
 	};
 
@@ -478,8 +471,7 @@ public:
 		double overlayAppendSourcesMs = 0.0;
 		double overlayAppendProducerStampMs = 0.0;
 		double overlayAppendDynamicStampMs = 0.0;
-		double overlayAppendMirrorExtendedStampMs = 0.0;
-		double overlayAppendMirrorPlayerStampMs = 0.0;
+		double overlayAppendLocalPlayerReflectionStampMs = 0.0;
 		double overlayAppendBookkeepingMs = 0.0;
 		double overlayRuntimeSpaceLinkMs = 0.0;
 		double overlayRuntimeSpaceLinkGeometryMs = 0.0;
@@ -490,26 +482,21 @@ public:
 		double overlayDynamicMs = 0.0;
 		double overlayDynamicGeometryMs = 0.0;
 		double overlayDynamicMaterialMs = 0.0;
-		double overlayMirrorExtendedMs = 0.0;
-		double overlayMirrorExtendedGeometryMs = 0.0;
-		double overlayMirrorExtendedMaterialMs = 0.0;
-		double overlayMirrorPlayerMs = 0.0;
-		double overlayMirrorPlayerGeometryMs = 0.0;
-		double overlayMirrorPlayerMaterialMs = 0.0;
+		double overlayLocalPlayerReflectionMs = 0.0;
+		double overlayLocalPlayerReflectionGeometryMs = 0.0;
+		double overlayLocalPlayerReflectionMaterialMs = 0.0;
 		double overlayDebugSphereMs = 0.0;
 		double overlayDebugSphereGeometryMs = 0.0;
 		double overlayDebugSphereMaterialMs = 0.0;
 		double dynamicCaptureMs = 0.0;
-		double mirrorPlayerCaptureMs = 0.0;
-		double mirrorPlayerGeometryBuildMs = 0.0;
-		double mirrorPlayerGeometryBuildWallMs = 0.0;
-		double mirrorPlayerGeometryBuildFlatMs = 0.0;
-		double mirrorPlayerGeometryBuildSpriteMs = 0.0;
-		double mirrorPlayerPortalAssignMs = 0.0;
-		double mirrorPlayerMaterialBuildMs = 0.0;
+		double localPlayerReflectionCaptureMs = 0.0;
+		double localPlayerReflectionGeometryBuildMs = 0.0;
+		double localPlayerReflectionGeometryBuildWallMs = 0.0;
+		double localPlayerReflectionGeometryBuildFlatMs = 0.0;
+		double localPlayerReflectionGeometryBuildSpriteMs = 0.0;
+		double localPlayerReflectionPortalAssignMs = 0.0;
+		double localPlayerReflectionMaterialBuildMs = 0.0;
 		double sceneSelectStaticMapMs = 0.0;
-		double sceneSelectMirrorPortalMs = 0.0;
-		double sceneSelectMirrorCaptureMs = 0.0;
 		double sceneSelectPersistentVoxelBatchMs = 0.0;
 		double sceneSelectPersistentEmissiveMs = 0.0;
 		double sceneSelectDynamicMergeMs = 0.0;
@@ -649,31 +636,27 @@ public:
 		double sceneSelectStateCommitGeometryStateMs = 0.0;
 		double sceneSelectStateCommitStatsMs = 0.0;
 		double sceneSelectStateCommitDynamicCoreMs = 0.0;
-		double sceneSelectStateCommitDynamicMirrorExtendedMs = 0.0;
-		double sceneSelectStateCommitDynamicMirrorPlayerMs = 0.0;
+		double sceneSelectStateCommitDynamicLocalPlayerReflectionMs = 0.0;
 		double sceneSelectStateCommitGeometrySelectMs = 0.0;
 		double sceneSelectStateCommitGeometryStaticCopyMs = 0.0;
 		double sceneSelectStateCommitGeometryAppendMs = 0.0;
 		double sceneSelectStateCommitStatsBaseMs = 0.0;
 		double sceneSelectStateCommitStatsPersistentVoxelMs = 0.0;
-		double sceneSelectStateCommitStatsMirrorExtendedMs = 0.0;
-		double sceneSelectStateCommitStatsMirrorPlayerMs = 0.0;
+		double sceneSelectStateCommitStatsLocalPlayerReflectionMs = 0.0;
 		double sceneSelectStateCommitStatsMergeMs = 0.0;
 		uint32_t sceneSelectStateCommitSelectedDynamic = 0;
 		uint32_t sceneSelectStateCommitActiveDynamic = 0;
-		uint32_t sceneSelectStateCommitMirrorExtended = 0;
-		uint32_t sceneSelectStateCommitMirrorPlayer = 0;
+		uint32_t sceneSelectStateCommitLocalPlayerReflection = 0;
 		uint32_t sceneSelectStateCommitGeometryCombined = 0;
 		uint32_t sceneSelectStateCommitGeometryStaticOnly = 0;
 		uint32_t sceneSelectStateCommitStatsPersistentVoxel = 0;
-		uint32_t sceneSelectStateCommitStatsMirrorExtended = 0;
-		uint32_t sceneSelectStateCommitStatsMirrorPlayer = 0;
+		uint32_t sceneSelectStateCommitStatsLocalPlayerReflection = 0;
 		uint32_t sceneSelectStateCommitCombinedPrimitiveCount = 0;
 		uint32_t sceneSelectStateCommitCombinedMaterialCount = 0;
 		uint64_t sceneSelectStateCommitGenStaticMap = 0;
 		uint64_t sceneSelectStateCommitGenRuntimeMutation = 0;
 		uint64_t sceneSelectStateCommitGenDynamicActors = 0;
-		uint64_t sceneSelectStateCommitGenMirrorPlayer = 0;
+		uint64_t sceneSelectStateCommitGenLocalPlayerReflection = 0;
 		uint64_t sceneSelectStateCommitGenPersistentVoxels = 0;
 		uint64_t sceneSelectStateCommitGenMaterialBridge = 0;
 		uint64_t sceneSelectStateCommitGenTextures = 0;
@@ -682,7 +665,7 @@ public:
 		uint32_t sceneSelectStateCommitChangedStaticMap = 0;
 		uint32_t sceneSelectStateCommitChangedRuntimeMutation = 0;
 		uint32_t sceneSelectStateCommitChangedDynamicActors = 0;
-		uint32_t sceneSelectStateCommitChangedMirrorPlayer = 0;
+		uint32_t sceneSelectStateCommitChangedLocalPlayerReflection = 0;
 		uint32_t sceneSelectStateCommitChangedPersistentVoxels = 0;
 		uint32_t sceneSelectStateCommitChangedMaterialBridge = 0;
 		uint32_t sceneSelectStateCommitChangedTextures = 0;
@@ -761,8 +744,7 @@ public:
 		double actorOverrideMapBuildMs = 0.0;
 		double materialBuildMs = 0.0;
 		double geometryBuildDynamicLiveMs = 0.0;
-		double geometryBuildMirrorExtendedMs = 0.0;
-		double geometryBuildMirrorPlayerMs = 0.0;
+		double geometryBuildLocalPlayerReflectionMs = 0.0;
 		double geometryBuildMergedDynamicMs = 0.0;
 		double geometryBuildCapturedMs = 0.0;
 		double geometryBuildPersistentVoxelVariantMs = 0.0;
@@ -1063,10 +1045,8 @@ public:
 		uint32_t overlayRuntimeMutationMaterialCount = 0;
 		uint32_t overlayDynamicPrimitiveCount = 0;
 		uint32_t overlayDynamicMaterialCount = 0;
-		uint32_t overlayMirrorExtendedPrimitiveCount = 0;
-		uint32_t overlayMirrorExtendedMaterialCount = 0;
-		uint32_t overlayMirrorPlayerPrimitiveCount = 0;
-		uint32_t overlayMirrorPlayerMaterialCount = 0;
+		uint32_t overlayLocalPlayerReflectionPrimitiveCount = 0;
+		uint32_t overlayLocalPlayerReflectionMaterialCount = 0;
 		uint32_t overlayDebugSpherePrimitiveCount = 0;
 		uint32_t overlayDebugSphereMaterialCount = 0;
 		uint32_t overlayPersistentVoxelActorCount = 0;
@@ -1075,30 +1055,29 @@ public:
 		OverlayAppendSourceTraceEntry overlayRuntimeSpaceLinkAppend = {};
 		OverlayAppendSourceTraceEntry overlayRuntimeMutationAppend = {};
 		OverlayAppendSourceTraceEntry overlayDynamicAppend = {};
-		OverlayAppendSourceTraceEntry overlayMirrorExtendedAppend = {};
-		OverlayAppendSourceTraceEntry overlayMirrorPlayerAppend = {};
+		OverlayAppendSourceTraceEntry overlayLocalPlayerReflectionAppend = {};
 		OverlayAppendSourceTraceEntry overlayDebugSphereAppend = {};
 		OverlayAppendSourceTraceEntry overlayPersistentVoxelAppend = {};
-		uint32_t mirrorPlayerCaptureRawFacingSprites = 0;
-		uint32_t mirrorPlayerCaptureRawVoxelSprites = 0;
-		uint32_t mirrorPlayerCaptureSurfaces = 0;
-		uint32_t mirrorPlayerCaptureMatchingActorSurfaces = 0;
-		uint32_t mirrorPlayerCaptureOtherActorSurfaces = 0;
-		uint32_t mirrorPlayerCaptureActorlessSurfaces = 0;
-		uint32_t mirrorPlayerCaptureFilteredSurfaces = 0;
-		uint32_t mirrorPlayerGeometryWallSurfaces = 0;
-		uint32_t mirrorPlayerGeometryFlatSurfaces = 0;
-		uint32_t mirrorPlayerGeometrySpriteSurfaces = 0;
-		uint32_t mirrorPlayerGeometryIndexedSurfaces = 0;
-		uint32_t mirrorPlayerGeometryTriangleFanSurfaces = 0;
-		uint32_t mirrorPlayerGeometrySpriteStripSurfaces = 0;
-		uint32_t mirrorPlayerGeometrySkippedSurfaces = 0;
-		uint32_t mirrorPlayerGeometrySourceVertices = 0;
-		uint32_t mirrorPlayerGeometrySourceIndices = 0;
-		uint32_t mirrorPlayerGeometryVertexGrowths = 0;
-		uint32_t mirrorPlayerGeometryIndexGrowths = 0;
-		uint32_t mirrorPlayerGeometryPrimitiveGrowths = 0;
-		uint32_t mirrorPlayerGeometryProvenanceGrowths = 0;
+		uint32_t localPlayerReflectionCaptureRawFacingSprites = 0;
+		uint32_t localPlayerReflectionCaptureRawVoxelSprites = 0;
+		uint32_t localPlayerReflectionCaptureSurfaces = 0;
+		uint32_t localPlayerReflectionCaptureMatchingActorSurfaces = 0;
+		uint32_t localPlayerReflectionCaptureOtherActorSurfaces = 0;
+		uint32_t localPlayerReflectionCaptureActorlessSurfaces = 0;
+		uint32_t localPlayerReflectionCaptureFilteredSurfaces = 0;
+		uint32_t localPlayerReflectionGeometryWallSurfaces = 0;
+		uint32_t localPlayerReflectionGeometryFlatSurfaces = 0;
+		uint32_t localPlayerReflectionGeometrySpriteSurfaces = 0;
+		uint32_t localPlayerReflectionGeometryIndexedSurfaces = 0;
+		uint32_t localPlayerReflectionGeometryTriangleFanSurfaces = 0;
+		uint32_t localPlayerReflectionGeometrySpriteStripSurfaces = 0;
+		uint32_t localPlayerReflectionGeometrySkippedSurfaces = 0;
+		uint32_t localPlayerReflectionGeometrySourceVertices = 0;
+		uint32_t localPlayerReflectionGeometrySourceIndices = 0;
+		uint32_t localPlayerReflectionGeometryVertexGrowths = 0;
+		uint32_t localPlayerReflectionGeometryIndexGrowths = 0;
+		uint32_t localPlayerReflectionGeometryPrimitiveGrowths = 0;
+		uint32_t localPlayerReflectionGeometryProvenanceGrowths = 0;
 		uint32_t dynamicCaptureCalls = 0;
 		uint32_t dynamicCaptureWallSurfaces = 0;
 		uint32_t dynamicCaptureFlatSurfaces = 0;
@@ -1136,8 +1115,7 @@ public:
 		uint32_t dynamicAsRuntimeSpaceLinkPrimitives = 0;
 		uint32_t dynamicAsRuntimeMutationPrimitives = 0;
 		uint32_t dynamicAsDynamicPrimitives = 0;
-		uint32_t dynamicAsMirrorExtendedPrimitives = 0;
-		uint32_t dynamicAsMirrorPlayerPrimitives = 0;
+		uint32_t dynamicAsLocalPlayerReflectionPrimitives = 0;
 		uint32_t dynamicAsDebugSpherePrimitives = 0;
 		uint32_t dynamicAsCreateCalls = 0;
 		uint32_t dynamicAsReuseCount = 0;
@@ -1146,8 +1124,7 @@ public:
 		uint64_t dynamicAsRuntimeSpaceLinkBytes = 0;
 		uint64_t dynamicAsRuntimeMutationBytes = 0;
 		uint64_t dynamicAsDynamicBytes = 0;
-		uint64_t dynamicAsMirrorExtendedBytes = 0;
-		uint64_t dynamicAsMirrorPlayerBytes = 0;
+		uint64_t dynamicAsLocalPlayerReflectionBytes = 0;
 		uint64_t dynamicAsDebugSphereBytes = 0;
 		uint64_t dynamicAsScratchRequestedBytes = 0;
 		uint64_t dynamicAsMemoryBytes = 0;
@@ -1956,7 +1933,7 @@ private:
 	std::vector<nri_scene::MaterialData> mSelectPersistentVoxelGpuMaterialScratch;
 	std::vector<nri_scene::MaterialData> mSelectCombinedGpuMaterialScratch;
 	std::vector<nri_scene::MaterialData> mSelectRefreshedCombinedGpuMaterialScratch;
-	nri_scene::GeometryData mSelectMirrorPlayerGeometryScratch;
+	nri_scene::GeometryData mSelectLocalPlayerReflectionGeometryScratch;
 	nri_scene::GeometryData mSelectOverlayGeometryScratch;
 	nri_scene::MaterialBridgeData mSelectOverlayMaterialBridgeScratch;
 	NRISceneFrameGeometry mSceneFrameGeometry;
@@ -2109,7 +2086,6 @@ private:
 	bool mHasLoggedFallback = false;
 	bool mUsedStaticMapSceneLastFrame = false;
 	bool mUsedDynamicSceneLastFrame = false;
-	bool mHasVisibleMirrorPortalLastFrame = false;
 	bool mGpuSceneHasDynamicOverlay = false;
 	bool mUploadedStaticMapSceneLastFrame = false;
 	bool mBuiltStaticMapSceneASLastFrame = false;

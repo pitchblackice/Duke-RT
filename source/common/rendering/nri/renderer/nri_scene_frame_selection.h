@@ -38,13 +38,9 @@ struct NRISceneFrameOverlayEligibilityInputs
 	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
 
-	bool hasMirrorExtendedDynamicScene = false;
-	const nri_scene::GeometryData* mirrorExtendedGeometry = nullptr;
-	const nri_scene::MaterialBridgeData* mirrorExtendedMaterials = nullptr;
-
-	bool hasMirrorPlayerScene = false;
-	const nri_scene::GeometryData* mirrorPlayerGeometry = nullptr;
-	const nri_scene::MaterialBridgeData* mirrorPlayerMaterials = nullptr;
+	bool hasLocalPlayerReflectionScene = false;
+	const nri_scene::GeometryData* localPlayerReflectionGeometry = nullptr;
+	const nri_scene::MaterialBridgeData* localPlayerReflectionMaterials = nullptr;
 
 	bool runtimeDebugSphereBuilt = false;
 	bool surfaceLightBuilt = false;
@@ -56,8 +52,7 @@ struct NRISceneFrameOverlayEligibilityResult
 	bool hasRuntimeMutationOverlay = false;
 	bool hasPersistentVoxelOverlay = false;
 	bool hasActiveDynamicOverlay = false;
-	bool hasMirrorExtendedDynamicOverlay = false;
-	bool hasMirrorPlayerOverlay = false;
+	bool hasLocalPlayerReflectionOverlay = false;
 	bool hasRuntimeDebugSphereOverlay = false;
 	bool hasSurfaceLightOverlay = false;
 	bool hasAnyOverlay = false;

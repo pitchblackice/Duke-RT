@@ -397,10 +397,9 @@ namespace
 			uint32_t prims;
 			uint64_t bytes;
 		};
-		std::array<GeometryPath, 20> geometryPaths = {{
+		std::array<GeometryPath, 19> geometryPaths = {{
 			{ "dynamic_live", shell.geometryBuildDynamicLiveMs, shell.dynamicCaptureCalls, shell.geometryBuildDynamicLivePrimitives, resource.sceneDynamicUploadBytes },
-			{ "mirror_extended", shell.geometryBuildMirrorExtendedMs, 0, 0, 0 },
-			{ "mirror_player", shell.geometryBuildMirrorPlayerMs, 0, 0, 0 },
+			{ "local_player_reflection", shell.geometryBuildLocalPlayerReflectionMs, 0, 0, 0 },
 			{ "merged_dynamic", shell.geometryBuildMergedDynamicMs, 0, shell.dynamicPrimitiveCount, resource.sceneDynamicUploadBytes },
 			{ "captured", shell.geometryBuildCapturedMs, 0, shell.activePrimitiveCount, resource.sceneUploadBytes },
 			{ "persistent_voxel_variant", shell.geometryBuildPersistentVoxelVariantMs, shell.geometryBuildPersistentVoxelVariantCalls, shell.geometryBuildPersistentVoxelVariantPrimitives, resource.scenePersistentVoxelVariantUploadBytes },
@@ -448,11 +447,10 @@ namespace
 		}
 
 		Printf(
-			"PERF pt progressive geometry NRI: frame=%llu dynamic_live=%.3f mirror_extended=%.3f mirror_player=%.3f captured=%.3f persistent_voxel_variant=%.3f persistent_voxel_append=%.3f persistent_voxel_rebuild=%.3f persistent_voxel_tlas=%.3f persistent_voxel_resource_stats=%.3f persistent_voxel_batch_stats=%.3f scene_instance_stats=%.3f persistent_emissive=%.3f static_chunk=%.3f mutation_truth=%.3f mutation_rebuild=%.3f mutation_material_only=%.3f spacelink=%.3f resident_apply=%.3f resident_recover=%.3f dynamic_capture_models=%.3f dynamic_capture_model_mesh=%.3f dynamic_capture_model_surface=%.3f dynamic_capture_model_store=%.3f dynamic_walls=%u dynamic_flats=%u dynamic_sprites=%u dynamic_voxel_proxies=%u dynamic_unsupported_models=%u\n",
+			"PERF pt progressive geometry NRI: frame=%llu dynamic_live=%.3f local_player_reflection=%.3f captured=%.3f persistent_voxel_variant=%.3f persistent_voxel_append=%.3f persistent_voxel_rebuild=%.3f persistent_voxel_tlas=%.3f persistent_voxel_resource_stats=%.3f persistent_voxel_batch_stats=%.3f scene_instance_stats=%.3f persistent_emissive=%.3f static_chunk=%.3f mutation_truth=%.3f mutation_rebuild=%.3f mutation_material_only=%.3f spacelink=%.3f resident_apply=%.3f resident_recover=%.3f dynamic_capture_models=%.3f dynamic_capture_model_mesh=%.3f dynamic_capture_model_surface=%.3f dynamic_capture_model_store=%.3f dynamic_walls=%u dynamic_flats=%u dynamic_sprites=%u dynamic_voxel_proxies=%u dynamic_unsupported_models=%u\n",
 			(unsigned long long)frameNumber,
 			shell.geometryBuildDynamicLiveMs,
-			shell.geometryBuildMirrorExtendedMs,
-			shell.geometryBuildMirrorPlayerMs,
+			shell.geometryBuildLocalPlayerReflectionMs,
 			shell.geometryBuildCapturedMs,
 			shell.geometryBuildPersistentVoxelVariantMs,
 			shell.geometryBuildPersistentVoxelAppendMs,
@@ -3721,11 +3719,8 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeSpaceLinkMs +
 			shell.runtimeMutationMs +
 			shell.dynamicCaptureMs +
-			shell.sceneSelectMirrorPortalMs +
-			shell.sceneSelectMirrorCaptureMs +
 			shell.geometryBuildDynamicLiveMs +
-			shell.geometryBuildMirrorExtendedMs +
-			shell.geometryBuildMirrorPlayerMs +
+			shell.geometryBuildLocalPlayerReflectionMs +
 			shell.sceneSelectPersistentVoxelBatchMs +
 			shell.sceneSelectPersistentEmissiveMs +
 			shell.persistentDynamicMs +
@@ -3793,69 +3788,69 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.restoreStaticSceneMs,
 			shell.copyFinalMs);
 		Printf(
-			"PERF pt mirror player detail NRI: frame=%llu capture=%.3f geometry_total=%.3f geometry_build=%.3f portal_assign=%.3f material=%.3f append=%.3f append_geo=%.3f append_mat=%.3f vertices=%u indices=%u prims=%u mats=%u bytes=%llu\n",
+			"PERF pt local player reflection detail NRI: frame=%llu capture=%.3f geometry_total=%.3f geometry_build=%.3f portal_assign=%.3f material=%.3f append=%.3f append_geo=%.3f append_mat=%.3f vertices=%u indices=%u prims=%u mats=%u bytes=%llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
-			shell.mirrorPlayerCaptureMs,
-			shell.geometryBuildMirrorPlayerMs,
-			shell.mirrorPlayerGeometryBuildMs,
-			shell.mirrorPlayerPortalAssignMs,
-			shell.mirrorPlayerMaterialBuildMs,
-			shell.overlayMirrorPlayerMs,
-			shell.overlayMirrorPlayerGeometryMs,
-			shell.overlayMirrorPlayerMaterialMs,
-			shell.overlayMirrorPlayerAppend.vertexCount,
-			shell.overlayMirrorPlayerAppend.indexCount,
-			shell.overlayMirrorPlayerAppend.primitiveCount,
-			shell.overlayMirrorPlayerAppend.materialCount,
-			(unsigned long long)shell.overlayMirrorPlayerAppend.byteCount);
+			shell.localPlayerReflectionCaptureMs,
+			shell.geometryBuildLocalPlayerReflectionMs,
+			shell.localPlayerReflectionGeometryBuildMs,
+			shell.localPlayerReflectionPortalAssignMs,
+			shell.localPlayerReflectionMaterialBuildMs,
+			shell.overlayLocalPlayerReflectionMs,
+			shell.overlayLocalPlayerReflectionGeometryMs,
+			shell.overlayLocalPlayerReflectionMaterialMs,
+			shell.overlayLocalPlayerReflectionAppend.vertexCount,
+			shell.overlayLocalPlayerReflectionAppend.indexCount,
+			shell.overlayLocalPlayerReflectionAppend.primitiveCount,
+			shell.overlayLocalPlayerReflectionAppend.materialCount,
+			(unsigned long long)shell.overlayLocalPlayerReflectionAppend.byteCount);
 		Printf(
-			"PERF pt mirror player geometry NRI: frame=%llu wall_ms=%.3f flat_ms=%.3f sprite_ms=%.3f raw_facing=%u raw_voxels=%u captured_surfaces=%u captured_match=%u captured_other=%u captured_actorless=%u filtered_surfaces=%u wall_surfaces=%u flat_surfaces=%u sprite_surfaces=%u indexed_surfaces=%u fan_surfaces=%u strip_surfaces=%u skipped_surfaces=%u source_vertices=%u source_indices=%u output_vertices=%u output_indices=%u output_prims=%u vertex_grows=%u index_grows=%u primitive_grows=%u provenance_grows=%u\n",
+			"PERF pt local player reflection geometry NRI: frame=%llu wall_ms=%.3f flat_ms=%.3f sprite_ms=%.3f raw_facing=%u raw_voxels=%u captured_surfaces=%u captured_match=%u captured_other=%u captured_actorless=%u filtered_surfaces=%u wall_surfaces=%u flat_surfaces=%u sprite_surfaces=%u indexed_surfaces=%u fan_surfaces=%u strip_surfaces=%u skipped_surfaces=%u source_vertices=%u source_indices=%u output_vertices=%u output_indices=%u output_prims=%u vertex_grows=%u index_grows=%u primitive_grows=%u provenance_grows=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
-			shell.mirrorPlayerGeometryBuildWallMs,
-			shell.mirrorPlayerGeometryBuildFlatMs,
-			shell.mirrorPlayerGeometryBuildSpriteMs,
-			shell.mirrorPlayerCaptureRawFacingSprites,
-			shell.mirrorPlayerCaptureRawVoxelSprites,
-			shell.mirrorPlayerCaptureSurfaces,
-			shell.mirrorPlayerCaptureMatchingActorSurfaces,
-			shell.mirrorPlayerCaptureOtherActorSurfaces,
-			shell.mirrorPlayerCaptureActorlessSurfaces,
-			shell.mirrorPlayerCaptureFilteredSurfaces,
-			shell.mirrorPlayerGeometryWallSurfaces,
-			shell.mirrorPlayerGeometryFlatSurfaces,
-			shell.mirrorPlayerGeometrySpriteSurfaces,
-			shell.mirrorPlayerGeometryIndexedSurfaces,
-			shell.mirrorPlayerGeometryTriangleFanSurfaces,
-			shell.mirrorPlayerGeometrySpriteStripSurfaces,
-			shell.mirrorPlayerGeometrySkippedSurfaces,
-			shell.mirrorPlayerGeometrySourceVertices,
-			shell.mirrorPlayerGeometrySourceIndices,
-			shell.overlayMirrorPlayerAppend.vertexCount,
-			shell.overlayMirrorPlayerAppend.indexCount,
-			shell.overlayMirrorPlayerAppend.primitiveCount,
-			shell.mirrorPlayerGeometryVertexGrowths,
-			shell.mirrorPlayerGeometryIndexGrowths,
-			shell.mirrorPlayerGeometryPrimitiveGrowths,
-			shell.mirrorPlayerGeometryProvenanceGrowths);
+			shell.localPlayerReflectionGeometryBuildWallMs,
+			shell.localPlayerReflectionGeometryBuildFlatMs,
+			shell.localPlayerReflectionGeometryBuildSpriteMs,
+			shell.localPlayerReflectionCaptureRawFacingSprites,
+			shell.localPlayerReflectionCaptureRawVoxelSprites,
+			shell.localPlayerReflectionCaptureSurfaces,
+			shell.localPlayerReflectionCaptureMatchingActorSurfaces,
+			shell.localPlayerReflectionCaptureOtherActorSurfaces,
+			shell.localPlayerReflectionCaptureActorlessSurfaces,
+			shell.localPlayerReflectionCaptureFilteredSurfaces,
+			shell.localPlayerReflectionGeometryWallSurfaces,
+			shell.localPlayerReflectionGeometryFlatSurfaces,
+			shell.localPlayerReflectionGeometrySpriteSurfaces,
+			shell.localPlayerReflectionGeometryIndexedSurfaces,
+			shell.localPlayerReflectionGeometryTriangleFanSurfaces,
+			shell.localPlayerReflectionGeometrySpriteStripSurfaces,
+			shell.localPlayerReflectionGeometrySkippedSurfaces,
+			shell.localPlayerReflectionGeometrySourceVertices,
+			shell.localPlayerReflectionGeometrySourceIndices,
+			shell.overlayLocalPlayerReflectionAppend.vertexCount,
+			shell.overlayLocalPlayerReflectionAppend.indexCount,
+			shell.overlayLocalPlayerReflectionAppend.primitiveCount,
+			shell.localPlayerReflectionGeometryVertexGrowths,
+			shell.localPlayerReflectionGeometryIndexGrowths,
+			shell.localPlayerReflectionGeometryPrimitiveGrowths,
+			shell.localPlayerReflectionGeometryProvenanceGrowths);
 		Printf(
-			"PERF pt mirror player append NRI: frame=%llu total=%.3f geo=%.3f mat=%.3f vertices=%u indices=%u prims=%u mats=%u vertex_bytes=%llu index_bytes=%llu primitive_bytes=%llu material_bytes=%llu total_bytes=%llu geometry_grows=%u material_grows=%u\n",
+			"PERF pt local player reflection append NRI: frame=%llu total=%.3f geo=%.3f mat=%.3f vertices=%u indices=%u prims=%u mats=%u vertex_bytes=%llu index_bytes=%llu primitive_bytes=%llu material_bytes=%llu total_bytes=%llu geometry_grows=%u material_grows=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
-			shell.overlayMirrorPlayerMs,
-			shell.overlayMirrorPlayerGeometryMs,
-			shell.overlayMirrorPlayerMaterialMs,
-			shell.overlayMirrorPlayerAppend.vertexCount,
-			shell.overlayMirrorPlayerAppend.indexCount,
-			shell.overlayMirrorPlayerAppend.primitiveCount,
-			shell.overlayMirrorPlayerAppend.materialCount,
-			(unsigned long long)shell.overlayMirrorPlayerAppend.vertexBytes,
-			(unsigned long long)shell.overlayMirrorPlayerAppend.indexBytes,
-			(unsigned long long)shell.overlayMirrorPlayerAppend.primitiveBytes,
-			(unsigned long long)shell.overlayMirrorPlayerAppend.materialBytes,
-			(unsigned long long)shell.overlayMirrorPlayerAppend.byteCount,
-			shell.overlayMirrorPlayerAppend.geometryGrowthEvents,
-			shell.overlayMirrorPlayerAppend.materialGrowthEvents);
+			shell.overlayLocalPlayerReflectionMs,
+			shell.overlayLocalPlayerReflectionGeometryMs,
+			shell.overlayLocalPlayerReflectionMaterialMs,
+			shell.overlayLocalPlayerReflectionAppend.vertexCount,
+			shell.overlayLocalPlayerReflectionAppend.indexCount,
+			shell.overlayLocalPlayerReflectionAppend.primitiveCount,
+			shell.overlayLocalPlayerReflectionAppend.materialCount,
+			(unsigned long long)shell.overlayLocalPlayerReflectionAppend.vertexBytes,
+			(unsigned long long)shell.overlayLocalPlayerReflectionAppend.indexBytes,
+			(unsigned long long)shell.overlayLocalPlayerReflectionAppend.primitiveBytes,
+			(unsigned long long)shell.overlayLocalPlayerReflectionAppend.materialBytes,
+			(unsigned long long)shell.overlayLocalPlayerReflectionAppend.byteCount,
+			shell.overlayLocalPlayerReflectionAppend.geometryGrowthEvents,
+			shell.overlayLocalPlayerReflectionAppend.materialGrowthEvents);
 		Printf(
-			"PERF pt dynamic as input NRI: frame=%llu total=%.3f setup=%.3f create=%.3f scratch=%.3f build=%.3f barrier=%.3f total_prims=%u total_vertices=%u total_indices=%u creates=%u reuses=%u scratch_queries=%u scratch_grows=%u scratch_requested_bytes=%llu as_bytes=%llu spacelink_prims=%u spacelink_bytes=%llu mutation_prims=%u mutation_bytes=%llu dynamic_prims=%u dynamic_bytes=%llu mirror_ext_prims=%u mirror_ext_bytes=%llu mirror_player_prims=%u mirror_player_bytes=%llu debug_sphere_prims=%u debug_sphere_bytes=%llu\n",
+			"PERF pt dynamic as input NRI: frame=%llu total=%.3f setup=%.3f create=%.3f scratch=%.3f build=%.3f barrier=%.3f total_prims=%u total_vertices=%u total_indices=%u creates=%u reuses=%u scratch_queries=%u scratch_grows=%u scratch_requested_bytes=%llu as_bytes=%llu spacelink_prims=%u spacelink_bytes=%llu mutation_prims=%u mutation_bytes=%llu dynamic_prims=%u dynamic_bytes=%llu local_player_reflection_prims=%u local_player_reflection_bytes=%llu debug_sphere_prims=%u debug_sphere_bytes=%llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.dynamicAsMs,
 			shell.dynamicAsSetupMs,
@@ -3878,10 +3873,8 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.dynamicAsRuntimeMutationBytes,
 			shell.dynamicAsDynamicPrimitives,
 			(unsigned long long)shell.dynamicAsDynamicBytes,
-			shell.dynamicAsMirrorExtendedPrimitives,
-			(unsigned long long)shell.dynamicAsMirrorExtendedBytes,
-			shell.dynamicAsMirrorPlayerPrimitives,
-			(unsigned long long)shell.dynamicAsMirrorPlayerBytes,
+			shell.dynamicAsLocalPlayerReflectionPrimitives,
+			(unsigned long long)shell.dynamicAsLocalPlayerReflectionBytes,
 			shell.dynamicAsDebugSpherePrimitives,
 			(unsigned long long)shell.dynamicAsDebugSphereBytes);
 		const double overlayPathAccountedMs =
@@ -3901,7 +3894,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectStateCommitMs;
 		const double overlayPathResidualMs = shell.overlayAssembleMs - overlayPathAccountedMs;
 		Printf(
-			"PERF pt overlay detail NRI: frame=%llu total=%.3f append=%.3f append_reset=%.3f append_sources=%.3f append_bookkeeping=%.3f spacelink=%.3f spacelink_geo=%.3f spacelink_mat=%.3f spacelink_prims=%u spacelink_mats=%u mutation=%.3f mutation_geo=%.3f mutation_mat=%.3f mutation_prims=%u mutation_mats=%u dynamic=%.3f dynamic_geo=%.3f dynamic_mat=%.3f dynamic_prims=%u dynamic_mats=%u mirror_ext=%.3f mirror_ext_geo=%.3f mirror_ext_mat=%.3f mirror_ext_prims=%u mirror_ext_mats=%u mirror_player=%.3f mirror_player_geo=%.3f mirror_player_mat=%.3f mirror_player_prims=%u mirror_player_mats=%u debug_sphere=%.3f debug_sphere_geo=%.3f debug_sphere_mat=%.3f debug_sphere_prims=%u debug_sphere_mats=%u persistent_voxel_actors=%u persistent_voxel_prims=%u persistent_voxel_mats=%u overlay_prims=%u overlay_mats=%u\n",
+			"PERF pt overlay detail NRI: frame=%llu total=%.3f append=%.3f append_reset=%.3f append_sources=%.3f append_bookkeeping=%.3f spacelink=%.3f spacelink_geo=%.3f spacelink_mat=%.3f spacelink_prims=%u spacelink_mats=%u mutation=%.3f mutation_geo=%.3f mutation_mat=%.3f mutation_prims=%u mutation_mats=%u dynamic=%.3f dynamic_geo=%.3f dynamic_mat=%.3f dynamic_prims=%u dynamic_mats=%u local_player_reflection=%.3f local_player_reflection_geo=%.3f local_player_reflection_mat=%.3f local_player_reflection_prims=%u local_player_reflection_mats=%u debug_sphere=%.3f debug_sphere_geo=%.3f debug_sphere_mat=%.3f debug_sphere_prims=%u debug_sphere_mats=%u persistent_voxel_actors=%u persistent_voxel_prims=%u persistent_voxel_mats=%u overlay_prims=%u overlay_mats=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.overlayAssembleMs,
 			shell.overlayAppendMs,
@@ -3923,16 +3916,11 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.overlayDynamicMaterialMs,
 			shell.overlayDynamicPrimitiveCount,
 			shell.overlayDynamicMaterialCount,
-			shell.overlayMirrorExtendedMs,
-			shell.overlayMirrorExtendedGeometryMs,
-			shell.overlayMirrorExtendedMaterialMs,
-			shell.overlayMirrorExtendedPrimitiveCount,
-			shell.overlayMirrorExtendedMaterialCount,
-			shell.overlayMirrorPlayerMs,
-			shell.overlayMirrorPlayerGeometryMs,
-			shell.overlayMirrorPlayerMaterialMs,
-			shell.overlayMirrorPlayerPrimitiveCount,
-			shell.overlayMirrorPlayerMaterialCount,
+			shell.overlayLocalPlayerReflectionMs,
+			shell.overlayLocalPlayerReflectionGeometryMs,
+			shell.overlayLocalPlayerReflectionMaterialMs,
+			shell.overlayLocalPlayerReflectionPrimitiveCount,
+			shell.overlayLocalPlayerReflectionMaterialCount,
 			shell.overlayDebugSphereMs,
 			shell.overlayDebugSphereGeometryMs,
 			shell.overlayDebugSphereMaterialMs,
@@ -3944,24 +3932,21 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.overlayPrimitiveCount,
 			shell.overlayMaterialCount);
 		Printf(
-			"PERF pt overlay append stamp NRI: frame=%llu total=%.3f dynamic=%.3f mirror_ext=%.3f mirror_player=%.3f dynamic_prims=%u mirror_ext_prims=%u mirror_player_prims=%u\n",
+			"PERF pt overlay append stamp NRI: frame=%llu total=%.3f dynamic=%.3f local_player_reflection=%.3f dynamic_prims=%u local_player_reflection_prims=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.overlayAppendProducerStampMs,
 			shell.overlayAppendDynamicStampMs,
-			shell.overlayAppendMirrorExtendedStampMs,
-			shell.overlayAppendMirrorPlayerStampMs,
+			shell.overlayAppendLocalPlayerReflectionStampMs,
 			shell.overlayDynamicAppend.primitiveCount,
-			shell.overlayMirrorExtendedAppend.primitiveCount,
-			shell.overlayMirrorPlayerAppend.primitiveCount);
+			shell.overlayLocalPlayerReflectionAppend.primitiveCount);
 		const auto& spacelinkAppend = shell.overlayRuntimeSpaceLinkAppend;
 		const auto& mutationAppend = shell.overlayRuntimeMutationAppend;
 		const auto& dynamicAppend = shell.overlayDynamicAppend;
-		const auto& mirrorExtAppend = shell.overlayMirrorExtendedAppend;
-		const auto& mirrorPlayerAppend = shell.overlayMirrorPlayerAppend;
+		const auto& localPlayerReflectionAppend = shell.overlayLocalPlayerReflectionAppend;
 		const auto& debugSphereAppend = shell.overlayDebugSphereAppend;
 		const auto& persistentVoxelAppend = shell.overlayPersistentVoxelAppend;
 		Printf(
-			"PERF pt overlay append sources NRI: frame=%llu spacelink_ms=%.3f spacelink_geo_ms=%.3f spacelink_mat_ms=%.3f spacelink_vertices=%u spacelink_indices=%u spacelink_prims=%u spacelink_mats=%u spacelink_bytes=%llu mutation_ms=%.3f mutation_geo_ms=%.3f mutation_mat_ms=%.3f mutation_vertices=%u mutation_indices=%u mutation_prims=%u mutation_mats=%u mutation_bytes=%llu dynamic_ms=%.3f dynamic_geo_ms=%.3f dynamic_mat_ms=%.3f dynamic_vertices=%u dynamic_indices=%u dynamic_prims=%u dynamic_mats=%u dynamic_bytes=%llu mirror_ext_ms=%.3f mirror_ext_geo_ms=%.3f mirror_ext_mat_ms=%.3f mirror_ext_vertices=%u mirror_ext_indices=%u mirror_ext_prims=%u mirror_ext_mats=%u mirror_ext_bytes=%llu mirror_player_ms=%.3f mirror_player_geo_ms=%.3f mirror_player_mat_ms=%.3f mirror_player_vertices=%u mirror_player_indices=%u mirror_player_prims=%u mirror_player_mats=%u mirror_player_bytes=%llu debug_sphere_ms=%.3f debug_sphere_geo_ms=%.3f debug_sphere_mat_ms=%.3f debug_sphere_vertices=%u debug_sphere_indices=%u debug_sphere_prims=%u debug_sphere_mats=%u debug_sphere_bytes=%llu persistent_voxel_actors=%u persistent_voxel_vertices=%u persistent_voxel_indices=%u persistent_voxel_prims=%u persistent_voxel_mats=%u persistent_voxel_bytes=%llu overlay_prims=%u overlay_mats=%u\n",
+			"PERF pt overlay append sources NRI: frame=%llu spacelink_ms=%.3f spacelink_geo_ms=%.3f spacelink_mat_ms=%.3f spacelink_vertices=%u spacelink_indices=%u spacelink_prims=%u spacelink_mats=%u spacelink_bytes=%llu mutation_ms=%.3f mutation_geo_ms=%.3f mutation_mat_ms=%.3f mutation_vertices=%u mutation_indices=%u mutation_prims=%u mutation_mats=%u mutation_bytes=%llu dynamic_ms=%.3f dynamic_geo_ms=%.3f dynamic_mat_ms=%.3f dynamic_vertices=%u dynamic_indices=%u dynamic_prims=%u dynamic_mats=%u dynamic_bytes=%llu local_player_reflection_ms=%.3f local_player_reflection_geo_ms=%.3f local_player_reflection_mat_ms=%.3f local_player_reflection_vertices=%u local_player_reflection_indices=%u local_player_reflection_prims=%u local_player_reflection_mats=%u local_player_reflection_bytes=%llu debug_sphere_ms=%.3f debug_sphere_geo_ms=%.3f debug_sphere_mat_ms=%.3f debug_sphere_vertices=%u debug_sphere_indices=%u debug_sphere_prims=%u debug_sphere_mats=%u debug_sphere_bytes=%llu persistent_voxel_actors=%u persistent_voxel_vertices=%u persistent_voxel_indices=%u persistent_voxel_prims=%u persistent_voxel_mats=%u persistent_voxel_bytes=%llu overlay_prims=%u overlay_mats=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.overlayRuntimeSpaceLinkMs,
 			shell.overlayRuntimeSpaceLinkGeometryMs,
@@ -3987,22 +3972,14 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			dynamicAppend.primitiveCount,
 			dynamicAppend.materialCount,
 			(unsigned long long)dynamicAppend.byteCount,
-			shell.overlayMirrorExtendedMs,
-			shell.overlayMirrorExtendedGeometryMs,
-			shell.overlayMirrorExtendedMaterialMs,
-			mirrorExtAppend.vertexCount,
-			mirrorExtAppend.indexCount,
-			mirrorExtAppend.primitiveCount,
-			mirrorExtAppend.materialCount,
-			(unsigned long long)mirrorExtAppend.byteCount,
-			shell.overlayMirrorPlayerMs,
-			shell.overlayMirrorPlayerGeometryMs,
-			shell.overlayMirrorPlayerMaterialMs,
-			mirrorPlayerAppend.vertexCount,
-			mirrorPlayerAppend.indexCount,
-			mirrorPlayerAppend.primitiveCount,
-			mirrorPlayerAppend.materialCount,
-			(unsigned long long)mirrorPlayerAppend.byteCount,
+			shell.overlayLocalPlayerReflectionMs,
+			shell.overlayLocalPlayerReflectionGeometryMs,
+			shell.overlayLocalPlayerReflectionMaterialMs,
+			localPlayerReflectionAppend.vertexCount,
+			localPlayerReflectionAppend.indexCount,
+			localPlayerReflectionAppend.primitiveCount,
+			localPlayerReflectionAppend.materialCount,
+			(unsigned long long)localPlayerReflectionAppend.byteCount,
 			shell.overlayDebugSphereMs,
 			shell.overlayDebugSphereGeometryMs,
 			shell.overlayDebugSphereMaterialMs,
@@ -4061,11 +4038,9 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneDataSetMs,
 			shell.sceneDataSetCalls);
 		Printf(
-			"PERF pt scene select phases NRI: frame=%llu static_map=%.3f mirror_portal=%.3f mirror_capture=%.3f persistent_batch=%.3f persistent_emissive=%.3f dynamic_merge=%.3f light_merge=%.3f static_instances=%.3f material_bridge=%.3f palette=%.3f textures=%.3f material_split=%.3f buffer_upload=%.3f instance_handles=%.3f texture_prep=%.3f state_commit=%.3f\n",
+			"PERF pt scene select phases NRI: frame=%llu static_map=%.3f persistent_batch=%.3f persistent_emissive=%.3f dynamic_merge=%.3f light_merge=%.3f static_instances=%.3f material_bridge=%.3f palette=%.3f textures=%.3f material_split=%.3f buffer_upload=%.3f instance_handles=%.3f texture_prep=%.3f state_commit=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneSelectStaticMapMs,
-			shell.sceneSelectMirrorPortalMs,
-			shell.sceneSelectMirrorCaptureMs,
 			shell.sceneSelectPersistentVoxelBatchMs,
 			shell.sceneSelectPersistentEmissiveMs,
 			shell.sceneSelectDynamicMergeMs,
@@ -4080,7 +4055,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectTexturePrepMs,
 			shell.sceneSelectStateCommitMs);
 		Printf(
-			"PERF pt scene select accounting NRI: frame=%llu select=%.3f accounted=%.3f unaccounted=%.3f static_map=%.3f spacelink=%.3f mutation=%.3f dynamic_capture=%.3f mirror_portal=%.3f mirror_capture=%.3f dynamic_geo=%.3f mirror_extended_geo=%.3f mirror_player_geo=%.3f persistent_batch=%.3f persistent_emissive=%.3f persistent_dynamic=%.3f dynamic_merge=%.3f light_merge=%.3f debug_sphere=%.3f overlay=%.3f static_instances=%.3f material_bridge=%.3f palette=%.3f textures=%.3f material_split=%.3f buffer_upload=%.3f persistent_voxel_as=%.3f dynamic_as=%.3f instance_handles=%.3f world_tlas=%.3f scene_data=%.3f texture_prep=%.3f state_commit=%.3f\n",
+			"PERF pt scene select accounting NRI: frame=%llu select=%.3f accounted=%.3f unaccounted=%.3f static_map=%.3f spacelink=%.3f mutation=%.3f dynamic_capture=%.3f dynamic_geo=%.3f local_player_reflection_geo=%.3f persistent_batch=%.3f persistent_emissive=%.3f persistent_dynamic=%.3f dynamic_merge=%.3f light_merge=%.3f debug_sphere=%.3f overlay=%.3f static_instances=%.3f material_bridge=%.3f palette=%.3f textures=%.3f material_split=%.3f buffer_upload=%.3f persistent_voxel_as=%.3f dynamic_as=%.3f instance_handles=%.3f world_tlas=%.3f scene_data=%.3f texture_prep=%.3f state_commit=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneSelectMs,
 			sceneSelectAccountedMs,
@@ -4089,11 +4064,8 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeSpaceLinkMs,
 			shell.runtimeMutationMs,
 			shell.dynamicCaptureMs,
-			shell.sceneSelectMirrorPortalMs,
-			shell.sceneSelectMirrorCaptureMs,
 			shell.geometryBuildDynamicLiveMs,
-			shell.geometryBuildMirrorExtendedMs,
-			shell.geometryBuildMirrorPlayerMs,
+			shell.geometryBuildLocalPlayerReflectionMs,
 			shell.sceneSelectPersistentVoxelBatchMs,
 			shell.sceneSelectPersistentEmissiveMs,
 			shell.persistentDynamicMs,
@@ -4249,8 +4221,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			case NRIRenderer::SceneBufferUploadDomain::StaticOverlay: return "static_overlay";
 			case NRIRenderer::SceneBufferUploadDomain::RuntimeMutation: return "runtime_mutation";
 			case NRIRenderer::SceneBufferUploadDomain::Dynamic: return "dynamic";
-			case NRIRenderer::SceneBufferUploadDomain::MirrorExtended: return "mirror_extended";
-			case NRIRenderer::SceneBufferUploadDomain::MirrorPlayer: return "mirror_player";
+			case NRIRenderer::SceneBufferUploadDomain::LocalPlayerReflection: return "local_player_reflection";
 			case NRIRenderer::SceneBufferUploadDomain::PersistentVoxelMaterial: return "persistent_voxel_material";
 			case NRIRenderer::SceneBufferUploadDomain::Count: break;
 			}
@@ -4352,18 +4323,16 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 		const double stateCommitItemizedAccounted =
 			shell.sceneSelectStateCommitFlagsMs +
 			shell.sceneSelectStateCommitDynamicCoreMs +
-			shell.sceneSelectStateCommitDynamicMirrorExtendedMs +
-			shell.sceneSelectStateCommitDynamicMirrorPlayerMs +
+			shell.sceneSelectStateCommitDynamicLocalPlayerReflectionMs +
 			shell.sceneSelectStateCommitGeometrySelectMs +
 			shell.sceneSelectStateCommitGeometryStaticCopyMs +
 			shell.sceneSelectStateCommitGeometryAppendMs +
 			shell.sceneSelectStateCommitStatsBaseMs +
 			shell.sceneSelectStateCommitStatsPersistentVoxelMs +
-			shell.sceneSelectStateCommitStatsMirrorExtendedMs +
-			shell.sceneSelectStateCommitStatsMirrorPlayerMs +
+			shell.sceneSelectStateCommitStatsLocalPlayerReflectionMs +
 			shell.sceneSelectStateCommitStatsMergeMs;
 		Printf(
-			"PERF pt state commit detail NRI: frame=%llu total=%.3f top_accounted=%.3f top_residual=%.3f itemized_accounted=%.3f itemized_residual=%.3f flags=%.3f dynamic=%.3f dynamic_core=%.3f dynamic_mirror_extended=%.3f dynamic_mirror_player=%.3f geometry=%.3f geometry_select=%.3f geometry_static_copy=%.3f geometry_append=%.3f stats=%.3f stats_base=%.3f stats_persistent_voxel=%.3f stats_mirror_extended=%.3f stats_mirror_player=%.3f stats_merge=%.3f selected_dynamic=%u active_dynamic=%u mirror_extended=%u mirror_player=%u geometry_combined=%u geometry_static_only=%u stats_persistent_voxel_count=%u stats_mirror_extended_count=%u stats_mirror_player_count=%u combined_prims=%u combined_mats=%u\n",
+			"PERF pt state commit detail NRI: frame=%llu total=%.3f top_accounted=%.3f top_residual=%.3f itemized_accounted=%.3f itemized_residual=%.3f flags=%.3f dynamic=%.3f dynamic_core=%.3f dynamic_local_player_reflection=%.3f geometry=%.3f geometry_select=%.3f geometry_static_copy=%.3f geometry_append=%.3f stats=%.3f stats_base=%.3f stats_persistent_voxel=%.3f stats_local_player_reflection=%.3f stats_merge=%.3f selected_dynamic=%u active_dynamic=%u local_player_reflection=%u geometry_combined=%u geometry_static_only=%u stats_persistent_voxel_count=%u stats_local_player_reflection_count=%u combined_prims=%u combined_mats=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneSelectStateCommitMs,
 			stateCommitTopAccounted,
@@ -4373,8 +4342,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectStateCommitFlagsMs,
 			shell.sceneSelectStateCommitDynamicStateMs,
 			shell.sceneSelectStateCommitDynamicCoreMs,
-			shell.sceneSelectStateCommitDynamicMirrorExtendedMs,
-			shell.sceneSelectStateCommitDynamicMirrorPlayerMs,
+			shell.sceneSelectStateCommitDynamicLocalPlayerReflectionMs,
 			shell.sceneSelectStateCommitGeometryStateMs,
 			shell.sceneSelectStateCommitGeometrySelectMs,
 			shell.sceneSelectStateCommitGeometryStaticCopyMs,
@@ -4382,22 +4350,19 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectStateCommitStatsMs,
 			shell.sceneSelectStateCommitStatsBaseMs,
 			shell.sceneSelectStateCommitStatsPersistentVoxelMs,
-			shell.sceneSelectStateCommitStatsMirrorExtendedMs,
-			shell.sceneSelectStateCommitStatsMirrorPlayerMs,
+			shell.sceneSelectStateCommitStatsLocalPlayerReflectionMs,
 			shell.sceneSelectStateCommitStatsMergeMs,
 			shell.sceneSelectStateCommitSelectedDynamic,
 			shell.sceneSelectStateCommitActiveDynamic,
-			shell.sceneSelectStateCommitMirrorExtended,
-			shell.sceneSelectStateCommitMirrorPlayer,
+			shell.sceneSelectStateCommitLocalPlayerReflection,
 			shell.sceneSelectStateCommitGeometryCombined,
 			shell.sceneSelectStateCommitGeometryStaticOnly,
 			shell.sceneSelectStateCommitStatsPersistentVoxel,
-			shell.sceneSelectStateCommitStatsMirrorExtended,
-			shell.sceneSelectStateCommitStatsMirrorPlayer,
+			shell.sceneSelectStateCommitStatsLocalPlayerReflection,
 			shell.sceneSelectStateCommitCombinedPrimitiveCount,
 			shell.sceneSelectStateCommitCombinedMaterialCount);
 		Printf(
-			"PERF pt state commit generations NRI: frame=%llu changed_domains=%u static_map_gen=%llu static_map_changed=%u runtime_mutation_gen=%llu runtime_mutation_changed=%u dynamic_actors_gen=%llu dynamic_actors_changed=%u mirror_player_gen=%llu mirror_player_changed=%u persistent_voxels_gen=%llu persistent_voxels_changed=%u material_bridge_gen=%llu material_bridge_changed=%u textures_gen=%llu textures_changed=%u tlas_instances_gen=%llu tlas_instances_changed=%u scene_constants_gen=%llu scene_constants_changed=%u\n",
+			"PERF pt state commit generations NRI: frame=%llu changed_domains=%u static_map_gen=%llu static_map_changed=%u runtime_mutation_gen=%llu runtime_mutation_changed=%u dynamic_actors_gen=%llu dynamic_actors_changed=%u local_player_reflection_gen=%llu local_player_reflection_changed=%u persistent_voxels_gen=%llu persistent_voxels_changed=%u material_bridge_gen=%llu material_bridge_changed=%u textures_gen=%llu textures_changed=%u tlas_instances_gen=%llu tlas_instances_changed=%u scene_constants_gen=%llu scene_constants_changed=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneSelectStateCommitChangedDomainCount,
 			(unsigned long long)shell.sceneSelectStateCommitGenStaticMap,
@@ -4406,8 +4371,8 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectStateCommitChangedRuntimeMutation,
 			(unsigned long long)shell.sceneSelectStateCommitGenDynamicActors,
 			shell.sceneSelectStateCommitChangedDynamicActors,
-			(unsigned long long)shell.sceneSelectStateCommitGenMirrorPlayer,
-			shell.sceneSelectStateCommitChangedMirrorPlayer,
+			(unsigned long long)shell.sceneSelectStateCommitGenLocalPlayerReflection,
+			shell.sceneSelectStateCommitChangedLocalPlayerReflection,
 			(unsigned long long)shell.sceneSelectStateCommitGenPersistentVoxels,
 			shell.sceneSelectStateCommitChangedPersistentVoxels,
 			(unsigned long long)shell.sceneSelectStateCommitGenMaterialBridge,
@@ -4586,12 +4551,11 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			}
 		}
 		Printf(
-			"PERF pt geometry build detail NRI: frame=%llu dynamic_live=%.3f dynamic_live_prims=%u mirror_extended=%.3f mirror_player=%.3f merged_dynamic=%.3f captured=%.3f persistent_voxel_variant=%.3f persistent_voxel_variant_calls=%u persistent_voxel_variant_prims=%u persistent_voxel_append=%.3f persistent_voxel_rebuild=%.3f persistent_emissive_prune=%.3f persistent_emissive_rebuild=%.3f static_chunk=%.3f static_chunk_calls=%u static_chunk_prims=%u debug_sphere=%.3f mutation_truth=%.3f mutation_truth_calls=%u mutation_rebuild=%.3f mutation_rebuild_calls=%u mutation_material_only=%.3f mutation_material_only_calls=%u mutation_prims=%u spacelink=%.3f spacelink_calls=%u spacelink_prims=%u resident_apply=%.3f resident_apply_calls=%u resident_recover=%.3f resident_recover_calls=%u resident_prims=%u\n",
+			"PERF pt geometry build detail NRI: frame=%llu dynamic_live=%.3f dynamic_live_prims=%u local_player_reflection=%.3f merged_dynamic=%.3f captured=%.3f persistent_voxel_variant=%.3f persistent_voxel_variant_calls=%u persistent_voxel_variant_prims=%u persistent_voxel_append=%.3f persistent_voxel_rebuild=%.3f persistent_emissive_prune=%.3f persistent_emissive_rebuild=%.3f static_chunk=%.3f static_chunk_calls=%u static_chunk_prims=%u debug_sphere=%.3f mutation_truth=%.3f mutation_truth_calls=%u mutation_rebuild=%.3f mutation_rebuild_calls=%u mutation_material_only=%.3f mutation_material_only_calls=%u mutation_prims=%u spacelink=%.3f spacelink_calls=%u spacelink_prims=%u resident_apply=%.3f resident_apply_calls=%u resident_recover=%.3f resident_recover_calls=%u resident_prims=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.geometryBuildDynamicLiveMs,
 			shell.geometryBuildDynamicLivePrimitives,
-			shell.geometryBuildMirrorExtendedMs,
-			shell.geometryBuildMirrorPlayerMs,
+			shell.geometryBuildLocalPlayerReflectionMs,
 			shell.geometryBuildMergedDynamicMs,
 			shell.geometryBuildCapturedMs,
 			shell.geometryBuildPersistentVoxelVariantMs,

@@ -53,9 +53,9 @@ struct NRISceneFrameGenerationInputs
 	const nri_scene::SceneView* activeDynamicSceneView = nullptr;
 	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
-	bool hasMirrorPlayerScene = false;
-	const nri_scene::GeometryData* mirrorPlayerGeometry = nullptr;
-	const nri_scene::MaterialBridgeData* mirrorPlayerMaterials = nullptr;
+	bool hasLocalPlayerReflectionScene = false;
+	const nri_scene::GeometryData* localPlayerReflectionGeometry = nullptr;
+	const nri_scene::MaterialBridgeData* localPlayerReflectionMaterials = nullptr;
 	const nri_scene::MaterialBridgeData* activeMaterialBridge = nullptr;
 	const std::vector<nri_scene::MaterialData>* activeGpuMaterials = nullptr;
 	uint32_t sceneTextureCacheCount = 0;
@@ -72,7 +72,7 @@ struct NRISceneFrameGenerationResult
 	uint32_t changedStaticMap = 0;
 	uint32_t changedRuntimeMutation = 0;
 	uint32_t changedDynamicActors = 0;
-	uint32_t changedMirrorPlayer = 0;
+	uint32_t changedLocalPlayerReflection = 0;
 	uint32_t changedPersistentVoxels = 0;
 	uint32_t changedMaterialBridge = 0;
 	uint32_t changedTextures = 0;
@@ -87,13 +87,11 @@ struct NRISceneFrameDebugStatsInputs
 	const nri_scene::SceneView* deferredDynamicSceneView = nullptr;
 	const nri_scene::SceneView* activeDynamicSceneView = nullptr;
 	const nri_scene::SceneDebugStats* persistentVoxelStats = nullptr;
-	const nri_scene::SceneView* mirrorExtendedSceneView = nullptr;
-	const nri_scene::SceneView* mirrorPlayerSceneView = nullptr;
+	const nri_scene::SceneView* localPlayerReflectionSceneView = nullptr;
 	double* totalMs = nullptr;
 	double* baseMs = nullptr;
 	double* persistentVoxelMs = nullptr;
-	double* mirrorExtendedMs = nullptr;
-	double* mirrorPlayerMs = nullptr;
+	double* localPlayerReflectionMs = nullptr;
 	double* mergeMs = nullptr;
 };
 
@@ -102,16 +100,12 @@ struct NRISceneFrameDynamicStateInputs
 	const nri_scene::SceneView* activeDynamicSceneView = nullptr;
 	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
-	const nri_scene::SceneView* mirrorExtendedSceneView = nullptr;
-	const nri_scene::GeometryData* mirrorExtendedGeometry = nullptr;
-	const nri_scene::MaterialBridgeData* mirrorExtendedMaterials = nullptr;
-	const nri_scene::SceneView* mirrorPlayerSceneView = nullptr;
-	const nri_scene::GeometryData* mirrorPlayerGeometry = nullptr;
-	const nri_scene::MaterialBridgeData* mirrorPlayerMaterials = nullptr;
+	const nri_scene::SceneView* localPlayerReflectionSceneView = nullptr;
+	const nri_scene::GeometryData* localPlayerReflectionGeometry = nullptr;
+	const nri_scene::MaterialBridgeData* localPlayerReflectionMaterials = nullptr;
 	double* totalMs = nullptr;
 	double* dynamicCoreMs = nullptr;
-	double* mirrorExtendedMs = nullptr;
-	double* mirrorPlayerMs = nullptr;
+	double* localPlayerReflectionMs = nullptr;
 };
 
 struct NRISceneSurfaceProbeFrameInputs

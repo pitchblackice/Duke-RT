@@ -186,10 +186,9 @@ namespace
 		}
 	}
 
-	bool ShouldTranslateWallMirrorAsMaterial(const PTMapBuildOptions& options, const walltype* wal)
+	bool ShouldTranslateWallMirrorAsMaterial(const walltype* wal)
 	{
-		return options.wallMirrorsAsReflectiveMaterials &&
-			wal != nullptr &&
+		return wal != nullptr &&
 			wal->portalflags == PORTAL_WALL_MIRROR;
 	}
 
@@ -578,7 +577,7 @@ namespace
 		PlanesAtPoint(frontSector, wal->pos.X, wal->pos.Y, &frontCeilingLeft, &frontFloorLeft);
 		PlanesAtPoint(frontSector, wal->point2Wall()->pos.X, wal->point2Wall()->pos.Y, &frontCeilingRight, &frontFloorRight);
 
-		if (ShouldTranslateWallMirrorAsMaterial(options, wal))
+		if (ShouldTranslateWallMirrorAsMaterial(wal))
 		{
 			FGameTexture* texture = ResolvePlainMirrorMaterialTexture(wal);
 			if (texture == nullptr || !texture->isValid())
@@ -1033,7 +1032,7 @@ namespace
 
 			for (const walltype& wal : sec.walls)
 			{
-				if (ShouldTranslateWallMirrorAsMaterial(options, &wal))
+				if (ShouldTranslateWallMirrorAsMaterial(&wal))
 				{
 					continue;
 				}

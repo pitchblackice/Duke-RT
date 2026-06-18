@@ -39,16 +39,10 @@ struct NRISceneFrameOverlayBuildInputs
 	const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
 	NRISceneFrameOverlaySourceTelemetry activeDynamicTelemetry = {};
 
-	bool hasMirrorExtendedDynamicOverlay = false;
-	const nri_scene::SceneView* mirrorExtendedSceneView = nullptr;
-	const nri_scene::GeometryData* mirrorExtendedGeometry = nullptr;
-	const nri_scene::MaterialBridgeData* mirrorExtendedMaterials = nullptr;
-	NRISceneFrameOverlaySourceTelemetry mirrorExtendedTelemetry = {};
-
-	bool hasMirrorPlayerOverlay = false;
-	const nri_scene::GeometryData* mirrorPlayerGeometry = nullptr;
-	const nri_scene::MaterialBridgeData* mirrorPlayerMaterials = nullptr;
-	NRISceneFrameOverlaySourceTelemetry mirrorPlayerTelemetry = {};
+	bool hasLocalPlayerReflectionOverlay = false;
+	const nri_scene::GeometryData* localPlayerReflectionGeometry = nullptr;
+	const nri_scene::MaterialBridgeData* localPlayerReflectionMaterials = nullptr;
+	NRISceneFrameOverlaySourceTelemetry localPlayerReflectionTelemetry = {};
 
 	bool hasRuntimeDebugSphereOverlay = false;
 	const nri_scene::GeometryData* runtimeDebugSphereGeometry = nullptr;

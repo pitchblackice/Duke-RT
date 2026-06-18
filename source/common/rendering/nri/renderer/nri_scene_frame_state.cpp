@@ -6,16 +6,12 @@ NRISceneFrameDynamicStateInputs MakeNRISceneFrameDynamicStateInputs(const NRISce
 	inputs.activeDynamicSceneView = request.activeDynamicSceneView;
 	inputs.activeDynamicGeometry = request.activeDynamicGeometry;
 	inputs.activeDynamicMaterials = request.activeDynamicMaterials;
-	inputs.mirrorExtendedSceneView = request.hasMirrorExtendedDynamicScene ? request.mirrorExtendedSceneView : nullptr;
-	inputs.mirrorExtendedGeometry = request.hasMirrorExtendedDynamicScene ? request.mirrorExtendedGeometry : nullptr;
-	inputs.mirrorExtendedMaterials = request.hasMirrorExtendedDynamicScene ? request.mirrorExtendedMaterials : nullptr;
-	inputs.mirrorPlayerSceneView = request.hasMirrorPlayerScene ? request.mirrorPlayerSceneView : nullptr;
-	inputs.mirrorPlayerGeometry = request.hasMirrorPlayerScene ? request.mirrorPlayerGeometry : nullptr;
-	inputs.mirrorPlayerMaterials = request.hasMirrorPlayerScene ? request.mirrorPlayerMaterials : nullptr;
+	inputs.localPlayerReflectionSceneView = request.hasLocalPlayerReflectionScene ? request.localPlayerReflectionSceneView : nullptr;
+	inputs.localPlayerReflectionGeometry = request.hasLocalPlayerReflectionScene ? request.localPlayerReflectionGeometry : nullptr;
+	inputs.localPlayerReflectionMaterials = request.hasLocalPlayerReflectionScene ? request.localPlayerReflectionMaterials : nullptr;
 	inputs.totalMs = request.totalMs;
 	inputs.dynamicCoreMs = request.dynamicCoreMs;
-	inputs.mirrorExtendedMs = request.mirrorExtendedMs;
-	inputs.mirrorPlayerMs = request.mirrorPlayerMs;
+	inputs.localPlayerReflectionMs = request.localPlayerReflectionMs;
 	return inputs;
 }
 
@@ -39,9 +35,9 @@ NRISceneFrameGenerationInputs MakeNRISceneFrameGenerationInputs(const NRISceneFr
 	inputs.activeDynamicSceneView = request.activeDynamicSceneView;
 	inputs.activeDynamicGeometry = request.activeDynamicGeometry;
 	inputs.activeDynamicMaterials = request.activeDynamicMaterials;
-	inputs.hasMirrorPlayerScene = request.hasMirrorPlayerScene;
-	inputs.mirrorPlayerGeometry = request.mirrorPlayerGeometry;
-	inputs.mirrorPlayerMaterials = request.mirrorPlayerMaterials;
+	inputs.hasLocalPlayerReflectionScene = request.hasLocalPlayerReflectionScene;
+	inputs.localPlayerReflectionGeometry = request.localPlayerReflectionGeometry;
+	inputs.localPlayerReflectionMaterials = request.localPlayerReflectionMaterials;
 	inputs.activeMaterialBridge = request.activeMaterialBridge;
 	inputs.activeGpuMaterials = request.activeGpuMaterials;
 	inputs.sceneTextureCacheCount = request.sceneTextureCacheCount;

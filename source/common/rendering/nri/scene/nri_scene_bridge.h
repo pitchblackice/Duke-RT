@@ -313,7 +313,6 @@ enum class DynamicVoxelCaptureMode : uint8_t
 {
 	Authoritative,
 	ReadOnlyCache,
-	MirrorResidencyRequest,
 	Transient,
 };
 

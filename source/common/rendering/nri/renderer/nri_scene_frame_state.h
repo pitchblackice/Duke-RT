@@ -7,18 +7,13 @@ struct NRISceneFrameDynamicStateBuildRequest
 	const nri_scene::SceneView* activeDynamicSceneView = nullptr;
 	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
-	bool hasMirrorExtendedDynamicScene = false;
-	const nri_scene::SceneView* mirrorExtendedSceneView = nullptr;
-	const nri_scene::GeometryData* mirrorExtendedGeometry = nullptr;
-	const nri_scene::MaterialBridgeData* mirrorExtendedMaterials = nullptr;
-	bool hasMirrorPlayerScene = false;
-	const nri_scene::SceneView* mirrorPlayerSceneView = nullptr;
-	const nri_scene::GeometryData* mirrorPlayerGeometry = nullptr;
-	const nri_scene::MaterialBridgeData* mirrorPlayerMaterials = nullptr;
+	bool hasLocalPlayerReflectionScene = false;
+	const nri_scene::SceneView* localPlayerReflectionSceneView = nullptr;
+	const nri_scene::GeometryData* localPlayerReflectionGeometry = nullptr;
+	const nri_scene::MaterialBridgeData* localPlayerReflectionMaterials = nullptr;
 	double* totalMs = nullptr;
 	double* dynamicCoreMs = nullptr;
-	double* mirrorExtendedMs = nullptr;
-	double* mirrorPlayerMs = nullptr;
+	double* localPlayerReflectionMs = nullptr;
 };
 
 struct NRISceneFrameGenerationBuildRequest
@@ -40,9 +35,9 @@ struct NRISceneFrameGenerationBuildRequest
 	const nri_scene::SceneView* activeDynamicSceneView = nullptr;
 	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
-	bool hasMirrorPlayerScene = false;
-	const nri_scene::GeometryData* mirrorPlayerGeometry = nullptr;
-	const nri_scene::MaterialBridgeData* mirrorPlayerMaterials = nullptr;
+	bool hasLocalPlayerReflectionScene = false;
+	const nri_scene::GeometryData* localPlayerReflectionGeometry = nullptr;
+	const nri_scene::MaterialBridgeData* localPlayerReflectionMaterials = nullptr;
 	const nri_scene::MaterialBridgeData* activeMaterialBridge = nullptr;
 	const std::vector<nri_scene::MaterialData>* activeGpuMaterials = nullptr;
 	uint32_t sceneTextureCacheCount = 0;

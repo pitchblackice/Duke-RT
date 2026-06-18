@@ -37,14 +37,10 @@ NRISceneFrameOverlayEligibilityResult SelectNRISceneFrameOverlayEligibility(cons
 	result.hasActiveDynamicOverlay =
 		HasPrimitives(inputs.activeDynamicGeometry) &&
 		inputs.activeDynamicMaterials != nullptr;
-	result.hasMirrorExtendedDynamicOverlay =
-		inputs.hasMirrorExtendedDynamicScene &&
-		HasPrimitives(inputs.mirrorExtendedGeometry) &&
-		HasMaterials(inputs.mirrorExtendedMaterials);
-	result.hasMirrorPlayerOverlay =
-		inputs.hasMirrorPlayerScene &&
-		HasPrimitives(inputs.mirrorPlayerGeometry) &&
-		HasMaterials(inputs.mirrorPlayerMaterials);
+	result.hasLocalPlayerReflectionOverlay =
+		inputs.hasLocalPlayerReflectionScene &&
+		HasPrimitives(inputs.localPlayerReflectionGeometry) &&
+		HasMaterials(inputs.localPlayerReflectionMaterials);
 	result.hasRuntimeDebugSphereOverlay = inputs.runtimeDebugSphereBuilt;
 	result.hasSurfaceLightOverlay = inputs.surfaceLightBuilt;
 	result.hasAnyOverlay =
@@ -52,8 +48,7 @@ NRISceneFrameOverlayEligibilityResult SelectNRISceneFrameOverlayEligibility(cons
 		result.hasRuntimeMutationOverlay ||
 		result.hasPersistentVoxelOverlay ||
 		result.hasActiveDynamicOverlay ||
-		result.hasMirrorExtendedDynamicOverlay ||
-		result.hasMirrorPlayerOverlay ||
+		result.hasLocalPlayerReflectionOverlay ||
 		result.hasRuntimeDebugSphereOverlay ||
 		result.hasSurfaceLightOverlay;
 	return result;

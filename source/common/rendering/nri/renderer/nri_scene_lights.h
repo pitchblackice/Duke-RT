@@ -250,8 +250,6 @@ public:
 		float currentCameraUp[3] = { 0.0f, 1.0f, 0.0f };
 		float tanHalfFovX = 0.0f;
 		float tanHalfFovY = 0.0f;
-		bool mirrorExtendedLightCoverage = false;
-		float mirrorExtendedLightDistance = 0.0f;
 	};
 
 	struct EmissiveSamplingBuildContext

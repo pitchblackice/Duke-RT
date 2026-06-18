@@ -1722,7 +1722,6 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			nri_scene::SceneView liveVisibleChunkView;
 			nri_scene::PTMapWorldStats ignoredVisibleStats = {};
 			nri_scene::PTMapBuildOptions mapBuildOptions = {};
-			mapBuildOptions.wallMirrorsAsReflectiveMaterials = (bool)nri_ptmirrormaterialmode;
 			if (nri_scene::BuildLiveMapChunkSceneView(mapChunk, liveVisibleChunkView, &ignoredVisibleStats, mapBuildOptions))
 			{
 				if (nri_ptceilingnudge)
@@ -1840,7 +1839,6 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			}
 
 			nri_scene::PTMapBuildOptions mapBuildOptions = {};
-			mapBuildOptions.wallMirrorsAsReflectiveMaterials = (bool)nri_ptmirrormaterialmode;
 			if (!nri_scene::BuildLiveMapChunkWorld(mapChunk, liveWorld, &liveStats, mapBuildOptions))
 			{
 				return false;

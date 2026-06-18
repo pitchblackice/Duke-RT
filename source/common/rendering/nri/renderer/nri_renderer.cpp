@@ -1985,7 +1985,6 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 
 	mUsedStaticMapSceneLastFrame = false;
 	mUsedDynamicSceneLastFrame = false;
-	mHasVisibleMirrorPortalLastFrame = false;
 	mGpuSceneHasDynamicOverlay = false;
 	mUploadedStaticMapSceneLastFrame = false;
 	mBuiltStaticMapSceneASLastFrame = false;
@@ -3160,7 +3159,6 @@ void NRIRenderer::RefreshMapWorld()
 
 	nri_scene::PTMapWorld world;
 	nri_scene::PTMapBuildOptions mapBuildOptions = {};
-	mapBuildOptions.wallMirrorsAsReflectiveMaterials = (bool)nri_ptmirrormaterialmode;
 	if (!nri_scene::BuildMapWorld(world, mapBuildOptions))
 	{
 		if (pendingBuildSerial != mObservedMapWorldBuildSerial || levelChanged)
@@ -3212,11 +3210,6 @@ SceneLightSystem::RuntimeLightClusterBuildInput NRIRenderer::BuildRuntimeLightCl
 	Copy3(mCurrentCameraUp, input.currentCameraUp);
 	input.tanHalfFovX = mCurrentTanHalfFovX;
 	input.tanHalfFovY = mCurrentTanHalfFovY;
-	input.mirrorExtendedLightCoverage =
-		!nri_ptmirrormaterialmode &&
-		mHasVisibleMirrorPortalLastFrame &&
-		nri_ptmirrordynamicdistance > 0.0f;
-	input.mirrorExtendedLightDistance = input.mirrorExtendedLightCoverage ? (float)nri_ptmirrordynamicdistance : 0.0f;
 	return input;
 }
 

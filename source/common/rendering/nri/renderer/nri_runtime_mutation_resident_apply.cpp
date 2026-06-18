@@ -228,7 +228,6 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyLiveBuildMs);
 			nri_scene::PTMapBuildOptions mapBuildOptions = {};
-			mapBuildOptions.wallMirrorsAsReflectiveMaterials = (bool)nri_ptmirrormaterialmode;
 			if (!nri_scene::BuildLiveMapChunkWorld(mapChunk, liveWorld, &ignoredStats, mapBuildOptions))
 			{
 				return false;
@@ -369,7 +368,6 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyLiveBuildMs);
 			nri_scene::PTMapBuildOptions mapBuildOptions = {};
-			mapBuildOptions.wallMirrorsAsReflectiveMaterials = (bool)nri_ptmirrormaterialmode;
 			if (!nri_scene::BuildLiveMapChunkWorld(mapChunk, liveWorld, &ignoredStats, mapBuildOptions))
 			{
 				return false;

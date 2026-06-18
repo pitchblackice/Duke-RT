@@ -7,13 +7,11 @@ NRISceneFrameDebugStatsInputs MakeNRISceneFrameDebugStatsInputs(const NRISceneFr
 	inputs.deferredDynamicSceneView = !request.deferOverlayThisFrame ? request.deferredDynamicSceneView : nullptr;
 	inputs.activeDynamicSceneView = request.activeDynamicSceneView;
 	inputs.persistentVoxelStats = request.persistentVoxelStats;
-	inputs.mirrorExtendedSceneView = request.hasMirrorExtendedDynamicScene ? request.mirrorExtendedSceneView : nullptr;
-	inputs.mirrorPlayerSceneView = request.hasMirrorPlayerScene ? request.mirrorPlayerSceneView : nullptr;
+	inputs.localPlayerReflectionSceneView = request.hasLocalPlayerReflectionScene ? request.localPlayerReflectionSceneView : nullptr;
 	inputs.totalMs = request.totalMs;
 	inputs.baseMs = request.baseMs;
 	inputs.persistentVoxelMs = request.persistentVoxelMs;
-	inputs.mirrorExtendedMs = request.mirrorExtendedMs;
-	inputs.mirrorPlayerMs = request.mirrorPlayerMs;
+	inputs.localPlayerReflectionMs = request.localPlayerReflectionMs;
 	inputs.mergeMs = request.mergeMs;
 	return inputs;
 }

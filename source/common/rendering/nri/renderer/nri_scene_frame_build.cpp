@@ -390,15 +390,13 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	NRIRuntimeMutationFrameOutput& runtimeMutationFrame = frame.runtimeMutationFrame;
 	nri_scene::GeometryData& runtimeSpaceLinkGeometry = frame.runtimeSpaceLinkGeometry;
 	nri_scene::GeometryData& dynamicGeometry = frame.dynamicGeometry;
-	nri_scene::GeometryData& mirrorExtendedDynamicGeometry = frame.mirrorExtendedDynamicGeometry;
 	nri_scene::GeometryData& mergedDynamicGeometry = frame.mergedDynamicGeometry;
 	nri_scene::GeometryData& debugSphereGeometry = frame.debugSphereGeometry;
 	nri_scene::GeometryData& surfaceLightGeometry = frame.surfaceLightGeometry;
 	nri_scene::MaterialBridgeData& materialBridge = frame.materialBridge;
 	nri_scene::MaterialBridgeData& runtimeSpaceLinkMaterialBridge = frame.runtimeSpaceLinkMaterialBridge;
 	nri_scene::MaterialBridgeData& dynamicMaterialBridge = frame.dynamicMaterialBridge;
-	nri_scene::MaterialBridgeData& mirrorExtendedDynamicMaterialBridge = frame.mirrorExtendedDynamicMaterialBridge;
-	nri_scene::MaterialBridgeData& mirrorPlayerMaterialBridge = frame.mirrorPlayerMaterialBridge;
+	nri_scene::MaterialBridgeData& localPlayerReflectionMaterialBridge = frame.localPlayerReflectionMaterialBridge;
 	nri_scene::MaterialBridgeData& sceneLightMergedDynamicMaterialBridge = frame.sceneLightMergedDynamicMaterialBridge;
 	nri_scene::MaterialBridgeData& mergedDynamicMaterialBridge = frame.mergedDynamicMaterialBridge;
 	nri_scene::MaterialBridgeData& debugSphereMaterialBridge = frame.debugSphereMaterialBridge;
@@ -416,7 +414,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	persistentVoxelGpuMaterials.clear();
 	combinedGpuMaterials.clear();
 	refreshedCombinedGpuMaterials.clear();
-	nri_scene::ClearGeometryRetainingCapacity(mSelectMirrorPlayerGeometryScratch);
+	nri_scene::ClearGeometryRetainingCapacity(mSelectLocalPlayerReflectionGeometryScratch);
 	nri_scene::ClearGeometryRetainingCapacity(mSelectOverlayGeometryScratch);
 	nri_scene::ClearMaterialBridgeRetainingCapacity(mSelectOverlayMaterialBridgeScratch);
 	mSelectTopLevelInstanceScratch.clear();
@@ -431,16 +429,15 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	const nri_scene::MaterialBridgeData* sceneLightCapturedMaterials = nullptr;
 	const nri_scene::SceneView* sceneLightDynamicView = nullptr;
 	const nri_scene::MaterialBridgeData* sceneLightDynamicMaterials = nullptr;
-	nri_scene::SceneView& mirrorExtendedDynamicSceneView = frame.mirrorExtendedDynamicSceneView;
-	nri_scene::SceneView& mirrorPlayerSceneView = frame.mirrorPlayerSceneView;
+	nri_scene::SceneView& localPlayerReflectionSceneView = frame.localPlayerReflectionSceneView;
 	nri_scene::SceneView& sceneLightMergedDynamicSceneView = frame.sceneLightMergedDynamicSceneView;
 	nri_scene::SceneView& mergedDynamicSceneView = frame.mergedDynamicSceneView;
 	const nri_scene::SceneView*& activeDynamicSceneView = frame.activeDynamicSceneView;
 	const nri_scene::GeometryData*& activeDynamicGeometry = frame.activeDynamicGeometry;
 	const nri_scene::MaterialBridgeData*& activeDynamicMaterials = frame.activeDynamicMaterials;
-	nri_scene::GeometryData& mirrorPlayerGeometry = mSelectMirrorPlayerGeometryScratch;
-	NRIMirrorPlayerCaptureStats mirrorPlayerCaptureStats = {};
-	nri_scene::GeometryBuildTraceStats mirrorPlayerGeometryTraceStats = {};
+	nri_scene::GeometryData& localPlayerReflectionGeometry = mSelectLocalPlayerReflectionGeometryScratch;
+	NRILocalPlayerReflectionCaptureStats localPlayerReflectionCaptureStats = {};
+	nri_scene::GeometryBuildTraceStats localPlayerReflectionGeometryTraceStats = {};
 	std::vector<SceneBufferUploadDomainSpan> sceneUploadDomainSpans;
 	uint32_t activeStaticProbePrimitiveCount = 0;
 	EmissiveSamplingBuildContext emissiveSamplingContext = {};
@@ -576,59 +573,18 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				mLastPerfShellTraceStats.dynamicCaptureStatsMs += captureStats.statsMs;
 				return captured;
 			}();
-			const NRISurfaceProbeResult& lastSurfaceProbe = mSurfaceProbe.Last();
-			const int32_t preferredMirrorWallIndex =
-			lastSurfaceProbe.valid &&
-			lastSurfaceProbe.hit &&
-			(lastSurfaceProbe.primitiveFlags & nri_scene::MaterialFlag_Mirror) != 0 &&
-			lastSurfaceProbe.provenance.wallIndex >= 0 ?
-				lastSurfaceProbe.provenance.wallIndex :
-				-1;
-		const bool mirrorMaterialMode = (bool)nri_ptmirrormaterialmode;
-		const bool allowLegacyMirrorOverlay = !deferOverlayThisFrame && !mirrorMaterialMode;
-		const NRIMirrorPortalSelectionResult visibleMirrorPortalSelection = allowLegacyMirrorOverlay ? [&]()
-			{
-				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMirrorPortalMs);
-				NRIMirrorPortalSelectionRequest request = {};
-				request.drawInfo = &di;
-				request.preferredWallIndex = preferredMirrorWallIndex;
-				return SelectNRIPrimaryMirrorPortal(request);
-			}() :
-			NRIMirrorPortalSelectionResult {};
-		HWPortal* const visibleMirrorPortal = visibleMirrorPortalSelection.portal;
-		const uint32_t visibleMirrorPortalCandidates = visibleMirrorPortalSelection.candidateCount;
-		const int32_t selectedVisibleMirrorWallIndex = visibleMirrorPortalSelection.selectedWallIndex;
-		mHasVisibleMirrorPortalLastFrame = visibleMirrorPortal != nullptr;
-		const bool hasMirrorExtendedDynamicScene = allowLegacyMirrorOverlay && [&]()
-		{
-			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMirrorCaptureMs);
-			NRIMirrorExtendedCaptureRequest request = {};
-			request.drawInfo = &di;
-			request.mirrorPortal = visibleMirrorPortal;
-			request.selectedMirrorWallIndex = selectedVisibleMirrorWallIndex;
-			request.baseDynamicSceneView = hasDynamicScene ? &dynamicSceneView : nullptr;
-			request.frameIndex = mFrameIndex;
-			request.rebuildSceneViewStats = RebuildSceneViewStats;
-			const NRIMirrorExtendedCaptureResult result =
-				CaptureNRIMirrorExtendedDynamicScene(request, mirrorExtendedDynamicSceneView);
-			return result.captured;
-		}();
 		const bool shouldCaptureReflectionPlayer =
 			!deferOverlayThisFrame &&
-			((allowLegacyMirrorOverlay && IsNRIMirrorPlayerPreviewCaptureEnabled()) ||
-				(mirrorMaterialMode && HasPlainMirrorMaterialSurfaces(mMapWorld)));
-		const bool hasMirrorPlayerScene = shouldCaptureReflectionPlayer && [&]()
+			HasPlainMirrorMaterialSurfaces(mMapWorld);
+		const bool hasLocalPlayerReflectionScene = shouldCaptureReflectionPlayer && [&]()
 		{
-			ScopedPtPerfTimer mirrorPlayerTimer(mLastPerfShellTraceStats.mirrorPlayerCaptureMs);
-			NRIMirrorPlayerCaptureRequest request = {};
+			ScopedPtPerfTimer localPlayerReflectionTimer(mLastPerfShellTraceStats.localPlayerReflectionCaptureMs);
+			NRILocalPlayerReflectionCaptureRequest request = {};
 			request.drawInfo = &di;
-			request.mirrorPortal = visibleMirrorPortal;
-			request.selectedMirrorWallIndex = selectedVisibleMirrorWallIndex;
-			request.mirrorPortalCandidates = visibleMirrorPortalCandidates;
 			request.rebuildSceneViewStats = RebuildSceneViewStats;
-			const NRIMirrorPlayerCaptureResult result =
-				CaptureNRIMirrorPlayerDynamicScene(request, mirrorPlayerSceneView);
-			mirrorPlayerCaptureStats = result.stats;
+			const NRILocalPlayerReflectionCaptureResult result =
+				CaptureNRILocalPlayerReflectionDynamicScene(request, localPlayerReflectionSceneView);
+			localPlayerReflectionCaptureStats = result.stats;
 			return result.captured;
 		}();
 		if (hasDynamicScene)
@@ -663,91 +619,49 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 					BuildPersistentDynamicEmissiveCacheServices());
 			}();
 		}
-		if (hasMirrorExtendedDynamicScene)
+		if (hasLocalPlayerReflectionScene)
 		{
 			{
 				Clocker clock(NriPTGeometryBuild);
-				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildMirrorExtendedMs);
-				nri_scene::BuildGeometry(mirrorExtendedDynamicSceneView, mirrorExtendedDynamicGeometry);
-				AssignGeometryPortalIndices(mMapWorld, mirrorExtendedDynamicGeometry);
-			}
-
-			if (!mirrorExtendedDynamicGeometry.primitives.empty())
-			{
-				Clocker clock(NriPTMaterialBuild);
-				BuildMaterialsWithActorOverrides(mirrorExtendedDynamicSceneView, mirrorExtendedDynamicMaterialBridge, "mirror_extended");
-			}
-
-			if (hasDynamicScene)
-			{
-				ScopedPtPerfTimer mergePerfTimer(mLastPerfShellTraceStats.sceneSelectLightMergeMs);
-				sceneLightMergedDynamicSceneView = dynamicSceneView;
-				sceneLightMergedDynamicSceneView.opaqueWalls.insert(
-					sceneLightMergedDynamicSceneView.opaqueWalls.end(),
-					mirrorExtendedDynamicSceneView.opaqueWalls.begin(),
-					mirrorExtendedDynamicSceneView.opaqueWalls.end());
-				sceneLightMergedDynamicSceneView.opaqueFlats.insert(
-					sceneLightMergedDynamicSceneView.opaqueFlats.end(),
-					mirrorExtendedDynamicSceneView.opaqueFlats.begin(),
-					mirrorExtendedDynamicSceneView.opaqueFlats.end());
-				sceneLightMergedDynamicSceneView.opaqueSprites.insert(
-					sceneLightMergedDynamicSceneView.opaqueSprites.end(),
-					mirrorExtendedDynamicSceneView.opaqueSprites.begin(),
-					mirrorExtendedDynamicSceneView.opaqueSprites.end());
-				RebuildSceneViewStats(sceneLightMergedDynamicSceneView);
-				BuildMaterialsWithActorOverrides(sceneLightMergedDynamicSceneView, sceneLightMergedDynamicMaterialBridge, "scene_light_merged_dynamic");
-				sceneLightDynamicView = &sceneLightMergedDynamicSceneView;
-				sceneLightDynamicMaterials = &sceneLightMergedDynamicMaterialBridge;
-			}
-			else
-			{
-				sceneLightDynamicView = &mirrorExtendedDynamicSceneView;
-				sceneLightDynamicMaterials = &mirrorExtendedDynamicMaterialBridge;
-			}
-		}
-		if (hasMirrorPlayerScene)
-		{
-			{
-				Clocker clock(NriPTGeometryBuild);
-				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildMirrorPlayerMs);
+				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildLocalPlayerReflectionMs);
 				{
-					ScopedPtPerfTimer buildTimer(mLastPerfShellTraceStats.mirrorPlayerGeometryBuildMs);
-					nri_scene::BuildGeometry(mirrorPlayerSceneView, mirrorPlayerGeometry, &mirrorPlayerGeometryTraceStats, true);
+					ScopedPtPerfTimer buildTimer(mLastPerfShellTraceStats.localPlayerReflectionGeometryBuildMs);
+					nri_scene::BuildGeometry(localPlayerReflectionSceneView, localPlayerReflectionGeometry, &localPlayerReflectionGeometryTraceStats, true);
 				}
 				{
-					ScopedPtPerfTimer portalTimer(mLastPerfShellTraceStats.mirrorPlayerPortalAssignMs);
-					AssignGeometryPortalIndices(mMapWorld, mirrorPlayerGeometry);
+					ScopedPtPerfTimer portalTimer(mLastPerfShellTraceStats.localPlayerReflectionPortalAssignMs);
+					AssignGeometryPortalIndices(mMapWorld, localPlayerReflectionGeometry);
 				}
-				mLastPerfShellTraceStats.mirrorPlayerGeometryBuildWallMs = mirrorPlayerGeometryTraceStats.wallMs;
-				mLastPerfShellTraceStats.mirrorPlayerGeometryBuildFlatMs = mirrorPlayerGeometryTraceStats.flatMs;
-				mLastPerfShellTraceStats.mirrorPlayerGeometryBuildSpriteMs = mirrorPlayerGeometryTraceStats.spriteMs;
-				mLastPerfShellTraceStats.mirrorPlayerCaptureRawFacingSprites = mirrorPlayerCaptureStats.rawFacingSprites;
-				mLastPerfShellTraceStats.mirrorPlayerCaptureRawVoxelSprites = mirrorPlayerCaptureStats.rawVoxelSprites;
-				mLastPerfShellTraceStats.mirrorPlayerCaptureSurfaces = mirrorPlayerCaptureStats.capturedSurfaceCount;
-				mLastPerfShellTraceStats.mirrorPlayerCaptureMatchingActorSurfaces = mirrorPlayerCaptureStats.capturedMatchingActorSurfaces;
-				mLastPerfShellTraceStats.mirrorPlayerCaptureOtherActorSurfaces = mirrorPlayerCaptureStats.capturedOtherActorSurfaces;
-				mLastPerfShellTraceStats.mirrorPlayerCaptureActorlessSurfaces = mirrorPlayerCaptureStats.capturedActorlessSurfaces;
-				mLastPerfShellTraceStats.mirrorPlayerCaptureFilteredSurfaces = mirrorPlayerCaptureStats.filteredSurfaceCount;
-				mLastPerfShellTraceStats.mirrorPlayerGeometryWallSurfaces = mirrorPlayerGeometryTraceStats.wallSurfaces;
-				mLastPerfShellTraceStats.mirrorPlayerGeometryFlatSurfaces = mirrorPlayerGeometryTraceStats.flatSurfaces;
-				mLastPerfShellTraceStats.mirrorPlayerGeometrySpriteSurfaces = mirrorPlayerGeometryTraceStats.spriteSurfaces;
-				mLastPerfShellTraceStats.mirrorPlayerGeometryIndexedSurfaces = mirrorPlayerGeometryTraceStats.indexedSurfaces;
-				mLastPerfShellTraceStats.mirrorPlayerGeometryTriangleFanSurfaces = mirrorPlayerGeometryTraceStats.triangleFanSurfaces;
-				mLastPerfShellTraceStats.mirrorPlayerGeometrySpriteStripSurfaces = mirrorPlayerGeometryTraceStats.spriteStripSurfaces;
-				mLastPerfShellTraceStats.mirrorPlayerGeometrySkippedSurfaces = mirrorPlayerGeometryTraceStats.skippedSurfaces;
-				mLastPerfShellTraceStats.mirrorPlayerGeometrySourceVertices = mirrorPlayerGeometryTraceStats.sourceVertexCount;
-				mLastPerfShellTraceStats.mirrorPlayerGeometrySourceIndices = mirrorPlayerGeometryTraceStats.sourceIndexCount;
-				mLastPerfShellTraceStats.mirrorPlayerGeometryVertexGrowths = mirrorPlayerGeometryTraceStats.vertexCapacityGrowths;
-				mLastPerfShellTraceStats.mirrorPlayerGeometryIndexGrowths = mirrorPlayerGeometryTraceStats.indexCapacityGrowths;
-				mLastPerfShellTraceStats.mirrorPlayerGeometryPrimitiveGrowths = mirrorPlayerGeometryTraceStats.primitiveCapacityGrowths;
-				mLastPerfShellTraceStats.mirrorPlayerGeometryProvenanceGrowths = mirrorPlayerGeometryTraceStats.provenanceCapacityGrowths;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometryBuildWallMs = localPlayerReflectionGeometryTraceStats.wallMs;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometryBuildFlatMs = localPlayerReflectionGeometryTraceStats.flatMs;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometryBuildSpriteMs = localPlayerReflectionGeometryTraceStats.spriteMs;
+				mLastPerfShellTraceStats.localPlayerReflectionCaptureRawFacingSprites = localPlayerReflectionCaptureStats.rawFacingSprites;
+				mLastPerfShellTraceStats.localPlayerReflectionCaptureRawVoxelSprites = localPlayerReflectionCaptureStats.rawVoxelSprites;
+				mLastPerfShellTraceStats.localPlayerReflectionCaptureSurfaces = localPlayerReflectionCaptureStats.capturedSurfaceCount;
+				mLastPerfShellTraceStats.localPlayerReflectionCaptureMatchingActorSurfaces = localPlayerReflectionCaptureStats.capturedMatchingActorSurfaces;
+				mLastPerfShellTraceStats.localPlayerReflectionCaptureOtherActorSurfaces = localPlayerReflectionCaptureStats.capturedOtherActorSurfaces;
+				mLastPerfShellTraceStats.localPlayerReflectionCaptureActorlessSurfaces = localPlayerReflectionCaptureStats.capturedActorlessSurfaces;
+				mLastPerfShellTraceStats.localPlayerReflectionCaptureFilteredSurfaces = localPlayerReflectionCaptureStats.filteredSurfaceCount;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometryWallSurfaces = localPlayerReflectionGeometryTraceStats.wallSurfaces;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometryFlatSurfaces = localPlayerReflectionGeometryTraceStats.flatSurfaces;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometrySpriteSurfaces = localPlayerReflectionGeometryTraceStats.spriteSurfaces;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometryIndexedSurfaces = localPlayerReflectionGeometryTraceStats.indexedSurfaces;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometryTriangleFanSurfaces = localPlayerReflectionGeometryTraceStats.triangleFanSurfaces;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometrySpriteStripSurfaces = localPlayerReflectionGeometryTraceStats.spriteStripSurfaces;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometrySkippedSurfaces = localPlayerReflectionGeometryTraceStats.skippedSurfaces;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometrySourceVertices = localPlayerReflectionGeometryTraceStats.sourceVertexCount;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometrySourceIndices = localPlayerReflectionGeometryTraceStats.sourceIndexCount;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometryVertexGrowths = localPlayerReflectionGeometryTraceStats.vertexCapacityGrowths;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometryIndexGrowths = localPlayerReflectionGeometryTraceStats.indexCapacityGrowths;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometryPrimitiveGrowths = localPlayerReflectionGeometryTraceStats.primitiveCapacityGrowths;
+				mLastPerfShellTraceStats.localPlayerReflectionGeometryProvenanceGrowths = localPlayerReflectionGeometryTraceStats.provenanceCapacityGrowths;
 			}
 
-			if (!mirrorPlayerGeometry.primitives.empty())
+			if (!localPlayerReflectionGeometry.primitives.empty())
 			{
 				Clocker clock(NriPTMaterialBuild);
-				ScopedPtPerfTimer materialTimer(mLastPerfShellTraceStats.mirrorPlayerMaterialBuildMs);
-				BuildMaterialsWithActorOverrides(mirrorPlayerSceneView, mirrorPlayerMaterialBridge, "mirror_player");
+				ScopedPtPerfTimer materialTimer(mLastPerfShellTraceStats.localPlayerReflectionMaterialBuildMs);
+				BuildMaterialsWithActorOverrides(localPlayerReflectionSceneView, localPlayerReflectionMaterialBridge, "local_player_reflection");
 			}
 		}
 
@@ -819,36 +733,10 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				activeDynamicMaterials = &persistentDynamicCache.materialBridge;
 			}
 
-			if (hasMirrorExtendedDynamicScene && activeDynamicSceneView != nullptr && activeDynamicMaterials != nullptr)
-			{
-				ScopedPtPerfTimer mergePerfTimer(mLastPerfShellTraceStats.sceneSelectLightMergeMs);
-				sceneLightMergedDynamicSceneView = *activeDynamicSceneView;
-				sceneLightMergedDynamicSceneView.opaqueWalls.insert(
-					sceneLightMergedDynamicSceneView.opaqueWalls.end(),
-					mirrorExtendedDynamicSceneView.opaqueWalls.begin(),
-					mirrorExtendedDynamicSceneView.opaqueWalls.end());
-				sceneLightMergedDynamicSceneView.opaqueFlats.insert(
-					sceneLightMergedDynamicSceneView.opaqueFlats.end(),
-					mirrorExtendedDynamicSceneView.opaqueFlats.begin(),
-					mirrorExtendedDynamicSceneView.opaqueFlats.end());
-				sceneLightMergedDynamicSceneView.opaqueSprites.insert(
-					sceneLightMergedDynamicSceneView.opaqueSprites.end(),
-					mirrorExtendedDynamicSceneView.opaqueSprites.begin(),
-					mirrorExtendedDynamicSceneView.opaqueSprites.end());
-				RebuildSceneViewStats(sceneLightMergedDynamicSceneView);
-				BuildMaterialsWithActorOverrides(sceneLightMergedDynamicSceneView, sceneLightMergedDynamicMaterialBridge, "scene_light_merged_persistent");
-				sceneLightDynamicView = &sceneLightMergedDynamicSceneView;
-				sceneLightDynamicMaterials = &sceneLightMergedDynamicMaterialBridge;
-			}
-			else if (activeDynamicSceneView != nullptr && activeDynamicMaterials != nullptr)
+			if (activeDynamicSceneView != nullptr && activeDynamicMaterials != nullptr)
 			{
 				sceneLightDynamicView = activeDynamicSceneView;
 				sceneLightDynamicMaterials = activeDynamicMaterials;
-			}
-			else if (hasMirrorExtendedDynamicScene)
-			{
-				sceneLightDynamicView = &mirrorExtendedDynamicSceneView;
-				sceneLightDynamicMaterials = &mirrorExtendedDynamicMaterialBridge;
 			}
 		}
 
@@ -887,12 +775,9 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		overlayEligibilityInputs.persistentVoxelRenderable = hasPersistentVoxelBatch ? mPersistentVoxels.HasRenderableOverlay() : false;
 		overlayEligibilityInputs.activeDynamicGeometry = activeDynamicGeometry;
 		overlayEligibilityInputs.activeDynamicMaterials = activeDynamicMaterials;
-		overlayEligibilityInputs.hasMirrorExtendedDynamicScene = hasMirrorExtendedDynamicScene;
-		overlayEligibilityInputs.mirrorExtendedGeometry = &mirrorExtendedDynamicGeometry;
-		overlayEligibilityInputs.mirrorExtendedMaterials = &mirrorExtendedDynamicMaterialBridge;
-		overlayEligibilityInputs.hasMirrorPlayerScene = hasMirrorPlayerScene;
-		overlayEligibilityInputs.mirrorPlayerGeometry = &mirrorPlayerGeometry;
-		overlayEligibilityInputs.mirrorPlayerMaterials = &mirrorPlayerMaterialBridge;
+		overlayEligibilityInputs.hasLocalPlayerReflectionScene = hasLocalPlayerReflectionScene;
+		overlayEligibilityInputs.localPlayerReflectionGeometry = &localPlayerReflectionGeometry;
+		overlayEligibilityInputs.localPlayerReflectionMaterials = &localPlayerReflectionMaterialBridge;
 		overlayEligibilityInputs.runtimeDebugSphereBuilt = runtimeDebugSphereBuilt;
 		overlayEligibilityInputs.surfaceLightBuilt = surfaceLightBuilt;
 		const NRISceneFrameOverlayEligibilityResult overlayEligibility =
@@ -901,8 +786,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		const bool hasRuntimeMutationOverlayForAssembly = overlayEligibility.hasRuntimeMutationOverlay;
 		const bool hasPersistentVoxelOverlay = overlayEligibility.hasPersistentVoxelOverlay;
 		const bool hasActiveDynamicOverlay = overlayEligibility.hasActiveDynamicOverlay;
-		const bool hasMirrorExtendedDynamicOverlay = overlayEligibility.hasMirrorExtendedDynamicOverlay;
-		const bool hasMirrorPlayerOverlay = overlayEligibility.hasMirrorPlayerOverlay;
+		const bool hasLocalPlayerReflectionOverlay = overlayEligibility.hasLocalPlayerReflectionOverlay;
 		const bool hasRuntimeDebugSphereOverlay = overlayEligibility.hasRuntimeDebugSphereOverlay;
 		const bool hasSurfaceLightOverlay = overlayEligibility.hasSurfaceLightOverlay;
 
@@ -956,28 +840,16 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				&mLastPerfShellTraceStats.overlayDynamicMaterialCount,
 				&mLastPerfShellTraceStats.overlayDynamicAppend };
 
-			overlayInputs.hasMirrorExtendedDynamicOverlay = hasMirrorExtendedDynamicOverlay;
-			overlayInputs.mirrorExtendedSceneView = &mirrorExtendedDynamicSceneView;
-			overlayInputs.mirrorExtendedGeometry = &mirrorExtendedDynamicGeometry;
-			overlayInputs.mirrorExtendedMaterials = &mirrorExtendedDynamicMaterialBridge;
-			overlayInputs.mirrorExtendedTelemetry = {
-				&mLastPerfShellTraceStats.overlayMirrorExtendedMs,
-				&mLastPerfShellTraceStats.overlayMirrorExtendedGeometryMs,
-				&mLastPerfShellTraceStats.overlayMirrorExtendedMaterialMs,
-				&mLastPerfShellTraceStats.overlayMirrorExtendedPrimitiveCount,
-				&mLastPerfShellTraceStats.overlayMirrorExtendedMaterialCount,
-				&mLastPerfShellTraceStats.overlayMirrorExtendedAppend };
-
-			overlayInputs.hasMirrorPlayerOverlay = hasMirrorPlayerOverlay;
-			overlayInputs.mirrorPlayerGeometry = &mirrorPlayerGeometry;
-			overlayInputs.mirrorPlayerMaterials = &mirrorPlayerMaterialBridge;
-			overlayInputs.mirrorPlayerTelemetry = {
-				&mLastPerfShellTraceStats.overlayMirrorPlayerMs,
-				&mLastPerfShellTraceStats.overlayMirrorPlayerGeometryMs,
-				&mLastPerfShellTraceStats.overlayMirrorPlayerMaterialMs,
-				&mLastPerfShellTraceStats.overlayMirrorPlayerPrimitiveCount,
-				&mLastPerfShellTraceStats.overlayMirrorPlayerMaterialCount,
-				&mLastPerfShellTraceStats.overlayMirrorPlayerAppend };
+			overlayInputs.hasLocalPlayerReflectionOverlay = hasLocalPlayerReflectionOverlay;
+			overlayInputs.localPlayerReflectionGeometry = &localPlayerReflectionGeometry;
+			overlayInputs.localPlayerReflectionMaterials = &localPlayerReflectionMaterialBridge;
+			overlayInputs.localPlayerReflectionTelemetry = {
+				&mLastPerfShellTraceStats.overlayLocalPlayerReflectionMs,
+				&mLastPerfShellTraceStats.overlayLocalPlayerReflectionGeometryMs,
+				&mLastPerfShellTraceStats.overlayLocalPlayerReflectionMaterialMs,
+				&mLastPerfShellTraceStats.overlayLocalPlayerReflectionPrimitiveCount,
+				&mLastPerfShellTraceStats.overlayLocalPlayerReflectionMaterialCount,
+				&mLastPerfShellTraceStats.overlayLocalPlayerReflectionAppend };
 
 			overlayInputs.hasRuntimeDebugSphereOverlay = hasRuntimeDebugSphereOverlay;
 			overlayInputs.runtimeDebugSphereGeometry = &debugSphereGeometry;
@@ -1134,14 +1006,12 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						mLastPerfShellTraceStats.dynamicAsRuntimeSpaceLinkPrimitives = mLastPerfShellTraceStats.overlayRuntimeSpaceLinkAppend.primitiveCount;
 						mLastPerfShellTraceStats.dynamicAsRuntimeMutationPrimitives = mLastPerfShellTraceStats.overlayRuntimeMutationAppend.primitiveCount;
 						mLastPerfShellTraceStats.dynamicAsDynamicPrimitives = mLastPerfShellTraceStats.overlayDynamicAppend.primitiveCount;
-						mLastPerfShellTraceStats.dynamicAsMirrorExtendedPrimitives = mLastPerfShellTraceStats.overlayMirrorExtendedAppend.primitiveCount;
-						mLastPerfShellTraceStats.dynamicAsMirrorPlayerPrimitives = mLastPerfShellTraceStats.overlayMirrorPlayerAppend.primitiveCount;
+						mLastPerfShellTraceStats.dynamicAsLocalPlayerReflectionPrimitives = mLastPerfShellTraceStats.overlayLocalPlayerReflectionAppend.primitiveCount;
 						mLastPerfShellTraceStats.dynamicAsDebugSpherePrimitives = mLastPerfShellTraceStats.overlayDebugSphereAppend.primitiveCount;
 						mLastPerfShellTraceStats.dynamicAsRuntimeSpaceLinkBytes = mLastPerfShellTraceStats.overlayRuntimeSpaceLinkAppend.byteCount;
 						mLastPerfShellTraceStats.dynamicAsRuntimeMutationBytes = mLastPerfShellTraceStats.overlayRuntimeMutationAppend.byteCount;
 						mLastPerfShellTraceStats.dynamicAsDynamicBytes = mLastPerfShellTraceStats.overlayDynamicAppend.byteCount;
-						mLastPerfShellTraceStats.dynamicAsMirrorExtendedBytes = mLastPerfShellTraceStats.overlayMirrorExtendedAppend.byteCount;
-						mLastPerfShellTraceStats.dynamicAsMirrorPlayerBytes = mLastPerfShellTraceStats.overlayMirrorPlayerAppend.byteCount;
+						mLastPerfShellTraceStats.dynamicAsLocalPlayerReflectionBytes = mLastPerfShellTraceStats.overlayLocalPlayerReflectionAppend.byteCount;
 						mLastPerfShellTraceStats.dynamicAsDebugSphereBytes = mLastPerfShellTraceStats.overlayDebugSphereAppend.byteCount;
 						dynamicAsReady =
 							BuildDynamicAccelerationStructure(
@@ -1302,18 +1172,13 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 					dynamicStateRequest.activeDynamicSceneView = activeDynamicSceneView;
 					dynamicStateRequest.activeDynamicGeometry = activeDynamicGeometry;
 					dynamicStateRequest.activeDynamicMaterials = activeDynamicMaterials;
-					dynamicStateRequest.hasMirrorExtendedDynamicScene = hasMirrorExtendedDynamicScene;
-					dynamicStateRequest.mirrorExtendedSceneView = &mirrorExtendedDynamicSceneView;
-					dynamicStateRequest.mirrorExtendedGeometry = &mirrorExtendedDynamicGeometry;
-					dynamicStateRequest.mirrorExtendedMaterials = &mirrorExtendedDynamicMaterialBridge;
-					dynamicStateRequest.hasMirrorPlayerScene = hasMirrorPlayerScene;
-					dynamicStateRequest.mirrorPlayerSceneView = &mirrorPlayerSceneView;
-					dynamicStateRequest.mirrorPlayerGeometry = &mirrorPlayerGeometry;
-					dynamicStateRequest.mirrorPlayerMaterials = &mirrorPlayerMaterialBridge;
+					dynamicStateRequest.hasLocalPlayerReflectionScene = hasLocalPlayerReflectionScene;
+					dynamicStateRequest.localPlayerReflectionSceneView = &localPlayerReflectionSceneView;
+					dynamicStateRequest.localPlayerReflectionGeometry = &localPlayerReflectionGeometry;
+					dynamicStateRequest.localPlayerReflectionMaterials = &localPlayerReflectionMaterialBridge;
 					dynamicStateRequest.totalMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicStateMs;
 					dynamicStateRequest.dynamicCoreMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicCoreMs;
-					dynamicStateRequest.mirrorExtendedMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicMirrorExtendedMs;
-					dynamicStateRequest.mirrorPlayerMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicMirrorPlayerMs;
+					dynamicStateRequest.localPlayerReflectionMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicLocalPlayerReflectionMs;
 					const NRISceneFrameDynamicStateInputs dynamicStateInputs =
 						MakeNRISceneFrameDynamicStateInputs(dynamicStateRequest);
 					mDynamicSceneLastFrame = BuildNRISceneFrameDynamicState(dynamicStateInputs, mDynamicSceneLastFrame, mLastPerfShellTraceStats);
@@ -1363,14 +1228,11 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 					debugStatsRequest.deferredDynamicSceneView = &dynamicSceneView;
 					debugStatsRequest.activeDynamicSceneView = activeDynamicSceneView;
 					debugStatsRequest.persistentVoxelStats = hasPersistentVoxelOverlay ? &persistentVoxelOverlayStats : nullptr;
-					debugStatsRequest.hasMirrorExtendedDynamicScene = hasMirrorExtendedDynamicScene;
-					debugStatsRequest.mirrorExtendedSceneView = &mirrorExtendedDynamicSceneView;
-					debugStatsRequest.hasMirrorPlayerScene = hasMirrorPlayerScene;
-					debugStatsRequest.mirrorPlayerSceneView = &mirrorPlayerSceneView;
+					debugStatsRequest.hasLocalPlayerReflectionScene = hasLocalPlayerReflectionScene;
+					debugStatsRequest.localPlayerReflectionSceneView = &localPlayerReflectionSceneView;
 					debugStatsRequest.baseMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsBaseMs;
 					debugStatsRequest.persistentVoxelMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsPersistentVoxelMs;
-					debugStatsRequest.mirrorExtendedMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorExtendedMs;
-					debugStatsRequest.mirrorPlayerMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorPlayerMs;
+					debugStatsRequest.localPlayerReflectionMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsLocalPlayerReflectionMs;
 					debugStatsRequest.mergeMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsMergeMs;
 					const NRISceneFrameDebugStatsInputs debugStatsInputs =
 						MakeNRISceneFrameDebugStatsInputs(debugStatsRequest);
@@ -1396,9 +1258,9 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 					generationRequest.activeDynamicSceneView = activeDynamicSceneView;
 					generationRequest.activeDynamicGeometry = activeDynamicGeometry;
 					generationRequest.activeDynamicMaterials = activeDynamicMaterials;
-					generationRequest.hasMirrorPlayerScene = hasMirrorPlayerScene;
-					generationRequest.mirrorPlayerGeometry = &mirrorPlayerGeometry;
-					generationRequest.mirrorPlayerMaterials = &mirrorPlayerMaterialBridge;
+					generationRequest.hasLocalPlayerReflectionScene = hasLocalPlayerReflectionScene;
+					generationRequest.localPlayerReflectionGeometry = &localPlayerReflectionGeometry;
+					generationRequest.localPlayerReflectionMaterials = &localPlayerReflectionMaterialBridge;
 					generationRequest.activeMaterialBridge = activeMaterialBridge;
 					generationRequest.activeGpuMaterials = activeGpuMaterials;
 					generationRequest.sceneTextureCacheCount = mSceneTextures.CacheCount();
