@@ -107,6 +107,11 @@ namespace
 	uint32_t ComputeMaterialClass(const MaterialRef& materialRef)
 	{
 		const uint32_t flags = materialRef.flags;
+		if (IsPlainMirrorMaterial(materialRef))
+		{
+			return MaterialClass_DefaultDiffuse;
+		}
+
 		if ((flags & (MaterialFlag_Mirror | MaterialFlag_Portal)) != 0)
 		{
 			return MaterialClass_SpecularSpecial;
