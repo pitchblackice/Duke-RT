@@ -223,25 +223,6 @@ float3 EvaluateSunSpecular(float3 albedo, float metalness, float3 normal, float3
 	return specularColor * specularTerm * 0.85;
 }
 
-float3 EvaluatePlainMirrorSurfaceSpecular(float3 albedo, float metalness, float3 normal, float3 viewDir, float3 lightDir, float shadow)
-{
-	const float noL = saturate(dot(normal, lightDir));
-	if (noL <= 0.0)
-	{
-		return 0.0;
-	}
-
-	const float3 halfVector = normalize(lightDir + viewDir);
-	const float noH = saturate(dot(normal, halfVector));
-	const float voH = saturate(dot(viewDir, halfVector));
-	const float noV = saturate(dot(normal, viewDir));
-	const float3 f0 = lerp(float3(0.04, 0.04, 0.04), albedo, metalness);
-	const float3 fresnel = lerp(f0, 1.0, pow(1.0 - voH, 5.0));
-	const float grazingGate = 1.0 - smoothstep(0.12, 0.72, noV);
-	const float lobe = pow(noH, 64.0) * (0.35 + 0.65 * noL);
-	return fresnel * (lobe * grazingGate * shadow * 1.75);
-}
-
 float EvaluatePointLightAttenuation(float distance, float radius, float intensity)
 {
 	if (radius <= 0.0 || distance >= radius)
@@ -840,19 +821,25 @@ float3 EvaluatePlainMirrorSurfaceGlint(HitData mirrorHit, float3 mirrorPlaneNorm
 	const float4 mirrorAlbedo = SampleMaterialBaseColor(mirrorHit.materialIndex, mirrorHit.dataSource, mirrorHit.uv);
 	const float mirrorMetalness = GetSurfaceMetalness(mirrorMaterial, mirrorHit.uv);
 	const float3 mirrorViewDir = normalize(-primaryRayDirection);
+	const float mirrorNoV = saturate(dot(mirrorPlaneNormal, mirrorViewDir));
+	const float edgeFactor = pow(1.0 - mirrorNoV, 1.5) * (1.0 - smoothstep(0.25, 0.85, mirrorNoV));
+	if (edgeFactor <= 0.0)
+	{
+		return 0.0;
+	}
+
+	const float3 mirrorSpecularColor = GetSurfaceSpecularColor(mirrorAlbedo.rgb, mirrorMetalness);
+	const float3 mirrorFresnel = lerp(mirrorSpecularColor, 1.0, pow(1.0 - mirrorNoV, 5.0));
 	const bool receivesShadow = MaterialReceivesShadow(mirrorMaterial);
-	float3 glint = 0.0;
+	float3 sourceRadiance = 0.0;
 
 	if (UseDirectionalPlaceholderLight())
 	{
 		const float3 lightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(17u, 29u), gTraceConstants.FrameIndex);
 		const float3 lightNormal = ResolveLightFacingShadingNormal(mirrorMaterial, mirrorPlaneNormal, lightDir);
-		const float3 unshadowedSpecular = EvaluatePlainMirrorSurfaceSpecular(mirrorAlbedo.rgb, mirrorMetalness, lightNormal, mirrorViewDir, lightDir, 1.0);
-		if (any(unshadowedSpecular > 0.0))
-		{
-			const float shadow = (receivesShadow && UseDirectionalPlaceholderShadow()) ? ComputeSunShadow(mirrorHit.position, lightNormal, lightDir) : 1.0;
-			glint += unshadowedSpecular * GetDirectionalPlaceholderColor() * shadow;
-		}
+		const float lightFacing = saturate(dot(lightNormal, lightDir));
+		const float shadow = (receivesShadow && UseDirectionalPlaceholderShadow()) ? ComputeSunShadow(mirrorHit.position, lightNormal, lightDir) : 1.0;
+		sourceRadiance += GetDirectionalPlaceholderColor() * (0.35 + 0.65 * lightFacing) * shadow;
 	}
 
 	const RuntimeLightTileHeaderData runtimeLightTile = GetRuntimeLightTileHeader(pixelPos);
@@ -881,12 +868,7 @@ float3 EvaluatePlainMirrorSurfaceGlint(HitData mirrorHit, float3 mirrorPlaneNorm
 
 		const float3 lightDir = toLight / lightDistance;
 		const float3 lightNormal = ResolveLightFacingShadingNormal(mirrorMaterial, mirrorPlaneNormal, lightDir);
-		const float3 unshadowedSpecular = EvaluatePlainMirrorSurfaceSpecular(mirrorAlbedo.rgb, mirrorMetalness, lightNormal, mirrorViewDir, lightDir, 1.0);
-		if (all(unshadowedSpecular <= 0.0))
-		{
-			continue;
-		}
-
+		const float lightFacing = saturate(dot(lightNormal, lightDir));
 		const bool runtimeLightCastsShadow = (runtimeLight.flags & RUNTIME_POINT_LIGHT_FLAG_CASTS_SHADOW) != 0u;
 		const float runtimeShadow = (receivesShadow && runtimeLightCastsShadow) ? ComputePointLightShadow(mirrorHit.position, lightNormal, lightDir, lightDistance) : 1.0;
 		if (runtimeShadow <= 0.0)
@@ -895,7 +877,7 @@ float3 EvaluatePlainMirrorSurfaceGlint(HitData mirrorHit, float3 mirrorPlaneNorm
 		}
 
 		const float attenuation = EvaluatePointLightAttenuation(lightDistance, runtimeLight.radius, runtimeLight.intensity);
-		glint += unshadowedSpecular * runtimeLight.color * attenuation * runtimeShadow;
+		sourceRadiance += runtimeLight.color * attenuation * (0.35 + 0.65 * lightFacing) * runtimeShadow;
 	}
 
 	float3 emissiveSampleDiffuse = 0.0;
@@ -922,11 +904,15 @@ float3 EvaluatePlainMirrorSurfaceGlint(HitData mirrorHit, float3 mirrorPlaneNorm
 		emissiveSampleOccluded,
 		emissiveSampleUv,
 		emissiveSampleRadiance);
-	const float mirrorNoV = saturate(dot(mirrorPlaneNormal, mirrorViewDir));
-	const float emissiveGrazingGate = 1.0 - smoothstep(0.12, 0.72, mirrorNoV);
-	glint += emissiveSampleSpecular * emissiveGrazingGate * 0.85;
+	if (!emissiveSampleOccluded)
+	{
+		sourceRadiance += emissiveSampleRadiance * 0.25;
+	}
 
-	return glint;
+	sourceRadiance = min(sourceRadiance, float3(4.0, 4.0, 4.0));
+	const float sourceLuma = dot(sourceRadiance, float3(0.2126, 0.7152, 0.0722));
+	const float sourceGate = smoothstep(0.03, 0.40, sourceLuma);
+	return sourceRadiance * mirrorFresnel * (edgeFactor * sourceGate * 0.55);
 }
 
 [numthreads(8, 8, 1)]
