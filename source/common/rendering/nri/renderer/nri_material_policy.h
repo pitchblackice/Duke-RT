@@ -19,28 +19,41 @@ namespace nri_material_policy
 		ActorMaterialOverride_Fullbright = 1u << 2,
 	};
 
+	struct ActorMaterialOverrideState
+	{
+		uint32_t bits = ActorMaterialOverride_None;
+		uint32_t emissiveStableFrames = 0;
+
+		bool Empty() const
+		{
+			return bits == ActorMaterialOverride_None && emissiveStableFrames == 0;
+		}
+	};
+
+	using ActorMaterialOverrideMap = std::unordered_map<int32_t, ActorMaterialOverrideState>;
+
 	struct ActorMaterialOverrideCache
 	{
 		bool valid = false;
 		uint32_t frameIndex = UINT32_MAX;
 		uint32_t resolvedGeneration = 0;
 		bool hasFullbrightOverrides = false;
-		std::unordered_map<int32_t, uint32_t> overrides;
+		ActorMaterialOverrideMap overrides;
 	};
 
 	bool HasActorMaterialOverrideRules(const ResolvedLightOverlaySet& resolved);
 	bool HasActorFullbrightOverrides(const ResolvedLightOverlaySet& resolved);
 	void BuildActorMaterialOverrideMap(
 		const ResolvedLightOverlaySet& resolved,
-		std::unordered_map<int32_t, uint32_t>& outOverrides);
-	const std::unordered_map<int32_t, uint32_t>& GetActorMaterialOverrideMapForFrame(
+		ActorMaterialOverrideMap& outOverrides);
+	const ActorMaterialOverrideMap& GetActorMaterialOverrideMapForFrame(
 		const ResolvedLightOverlaySet& resolved,
 		uint32_t frameIndex,
 		ActorMaterialOverrideCache& cache,
 		bool& outBuilt);
 
 	void ApplyActorMaterialOverridesToBuiltMaterials(
-		const std::unordered_map<int32_t, uint32_t>& actorOverrides,
+		const ActorMaterialOverrideMap& actorOverrides,
 		float fullbrightBoost,
 		nri_scene::MaterialBridgeData& materials);
 
@@ -52,7 +65,7 @@ namespace nri_material_policy
 		std::vector<nri_scene::MaterialData>& inOutGpuMaterials);
 
 	void ApplyActorShadowMaterialOverrides(
-		const std::unordered_map<int32_t, uint32_t>& actorOverrides,
+		const ActorMaterialOverrideMap& actorOverrides,
 		float fullbrightBoost,
 		const nri_scene::MaterialBridgeData& materials,
 		std::vector<nri_scene::MaterialData>& inOutGpuMaterials);
@@ -66,7 +79,7 @@ namespace nri_material_policy
 		const std::vector<nri_scene::MaterialData>& b);
 
 	uint64_t ComputeChunkActorOverrideHash(
-		const std::unordered_map<int32_t, uint32_t>& actorOverrides,
+		const ActorMaterialOverrideMap& actorOverrides,
 		const nri_scene::MaterialBridgeData& materials);
 
 	uint64_t ComputeChunkEmissiveOverrideHash(

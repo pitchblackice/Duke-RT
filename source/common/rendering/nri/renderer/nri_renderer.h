@@ -1792,7 +1792,7 @@ private:
 	void QueueStaticMapSceneLightingInvalidation();
 	void InvalidateStaticMapSceneForMaterialLighting();
 	static MaterialBuildTraceSlot ResolveMaterialBuildTraceSlot(const char* traceLabel);
-	const std::unordered_map<int32_t, uint32_t>& GetActorMaterialOverrideMapForFrame(MaterialBuildTraceSlot traceSlot = MaterialBuildTraceSlot::Unknown);
+	const nri_material_policy::ActorMaterialOverrideMap& GetActorMaterialOverrideMapForFrame(MaterialBuildTraceSlot traceSlot = MaterialBuildTraceSlot::Unknown);
 	void LogFallback(const char* reason);
 	void CopyFinalToActiveTarget();
 	void UpdateFrameGenerationFrameDesc();

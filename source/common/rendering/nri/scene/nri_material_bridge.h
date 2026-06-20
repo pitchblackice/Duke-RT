@@ -72,6 +72,7 @@ struct MaterialLightingMetadata
 	uint32_t lightingFlags = 0;
 	uint32_t materialClass = 0;
 	uint32_t emissiveMode = MaterialEmissiveMode_None;
+	uint32_t emissiveStableFrames = 0;
 	SurfaceSourceType sourceType = {};
 	int32_t sectorIndex = -1;
 	int32_t actorIndex = -1;

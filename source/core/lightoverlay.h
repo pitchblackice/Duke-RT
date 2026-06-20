@@ -45,6 +45,8 @@ struct ParsedLightOverlayActorRule
 	bool shadowCast = true;
 	bool hasFullbright = false;
 	bool fullbright = false;
+	bool hasEmissiveStableFrames = false;
+	uint32_t emissiveStableFrames = 0;
 	bool hasActivationPolicy = false;
 	LightOverlayActorActivationPolicy activationPolicy = LightOverlayActorActivationPolicy::Surface;
 	bool hasTileFilter = false;
@@ -310,6 +312,8 @@ struct ResolvedLightOverlayActorRule
 	bool shadowCast = true;
 	bool hasFullbright = false;
 	bool fullbright = false;
+	bool hasEmissiveStableFrames = false;
+	uint32_t emissiveStableFrames = 0;
 	bool hasActivationPolicy = false;
 	LightOverlayActorActivationPolicy activationPolicy = LightOverlayActorActivationPolicy::Surface;
 	bool hasTileFilter = false;

@@ -290,6 +290,7 @@ namespace
 		Fnv1a64Append(key, &metadata.paletteIndex, sizeof(metadata.paletteIndex));
 		Fnv1a64Append(key, &metadata.materialFlags, sizeof(metadata.materialFlags));
 		Fnv1a64Append(key, &metadata.lightingFlags, sizeof(metadata.lightingFlags));
+		Fnv1a64Append(key, &metadata.emissiveStableFrames, sizeof(metadata.emissiveStableFrames));
 		Fnv1a64Append(key, &materialRef.alpha, sizeof(materialRef.alpha));
 		return key;
 	}

@@ -480,7 +480,7 @@ NRIRenderer::MaterialBuildTraceSlot NRIRenderer::ResolveMaterialBuildTraceSlot(c
 	return MaterialBuildTraceSlot::Unknown;
 }
 
-const std::unordered_map<int32_t, uint32_t>& NRIRenderer::GetActorMaterialOverrideMapForFrame(MaterialBuildTraceSlot traceSlot)
+const nri_material_policy::ActorMaterialOverrideMap& NRIRenderer::GetActorMaterialOverrideMapForFrame(MaterialBuildTraceSlot traceSlot)
 {
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
 	auto& materialTraceEntry = mLastPerfShellTraceStats.materialBuildByLabel[GetMaterialBuildTraceSlotIndex(traceSlot)];
@@ -523,8 +523,8 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 	materialTraceEntry.calls++;
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
 	const bool hasActorMaterialRules = nri_material_policy::HasActorMaterialOverrideRules(resolvedLightOverlays);
-	const std::unordered_map<int32_t, uint32_t>* actorOverridesForBuild = nullptr;
-	std::unordered_map<int32_t, uint32_t> mergedActorOverridesForBuild;
+	const nri_material_policy::ActorMaterialOverrideMap* actorOverridesForBuild = nullptr;
+	nri_material_policy::ActorMaterialOverrideMap mergedActorOverridesForBuild;
 	if (hasActorMaterialRules)
 	{
 		const auto& actorOverrides = GetActorMaterialOverrideMapForFrame(materialTraceSlot);
@@ -555,7 +555,7 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 					{
 						mergedActorOverridesForBuild = *actorOverridesForBuild;
 					}
-					mergedActorOverridesForBuild[entry.first] |= overrideBits;
+					mergedActorOverridesForBuild[entry.first].bits |= overrideBits;
 				}
 			}
 			if (!mergedActorOverridesForBuild.empty())
@@ -586,7 +586,7 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 
 				auto it = actorOverridesForBuild->find(surface.provenance.actorIndex);
 				if (it == actorOverridesForBuild->end() ||
-					(it->second & nri_material_policy::ActorMaterialOverride_Fullbright) == 0)
+					(it->second.bits & nri_material_policy::ActorMaterialOverride_Fullbright) == 0)
 				{
 					continue;
 				}
@@ -672,9 +672,16 @@ bool nri_material_policy::HasActorFullbrightOverrides(const ResolvedLightOverlay
 	return false;
 }
 
+static uint64_t HashActorMaterialOverrideState(uint64_t hash, const nri_material_policy::ActorMaterialOverrideState& state)
+{
+	hash = nri_scene::HashCombine64(hash, (uint64_t)state.bits);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)state.emissiveStableFrames);
+	return hash;
+}
+
 void nri_material_policy::BuildActorMaterialOverrideMap(
 	const ResolvedLightOverlaySet& resolved,
-	std::unordered_map<int32_t, uint32_t>& outOverrides)
+	ActorMaterialOverrideMap& outOverrides)
 {
 	if (!HasActorMaterialOverrideRules(resolved))
 	{
@@ -695,7 +702,7 @@ void nri_material_policy::BuildActorMaterialOverrideMap(
 			continue;
 		}
 
-		uint32_t overrideBits = ActorMaterialOverride_None;
+		ActorMaterialOverrideState overrideState = {};
 		bool touched = false;
 		const uint32_t actorTextureId = (unsigned)actor->spr.picnum < MAXTILES ? (uint32_t)tileGetTextureID(actor->spr.picnum).GetIndex() : 0u;
 		for (const auto& resolvedRule : resolved.actorRules)
@@ -717,11 +724,11 @@ void nri_material_policy::BuildActorMaterialOverrideMap(
 				touched = true;
 				if (resolvedRule.shadowReceive)
 				{
-					overrideBits &= ~ActorMaterialOverride_NoShadowReceive;
+					overrideState.bits &= ~ActorMaterialOverride_NoShadowReceive;
 				}
 				else
 				{
-					overrideBits |= ActorMaterialOverride_NoShadowReceive;
+					overrideState.bits |= ActorMaterialOverride_NoShadowReceive;
 				}
 			}
 
@@ -730,11 +737,11 @@ void nri_material_policy::BuildActorMaterialOverrideMap(
 				touched = true;
 				if (resolvedRule.shadowCast)
 				{
-					overrideBits &= ~ActorMaterialOverride_NoShadowCast;
+					overrideState.bits &= ~ActorMaterialOverride_NoShadowCast;
 				}
 				else
 				{
-					overrideBits |= ActorMaterialOverride_NoShadowCast;
+					overrideState.bits |= ActorMaterialOverride_NoShadowCast;
 				}
 			}
 
@@ -743,12 +750,18 @@ void nri_material_policy::BuildActorMaterialOverrideMap(
 				touched = true;
 				if (resolvedRule.fullbright)
 				{
-					overrideBits |= ActorMaterialOverride_Fullbright;
+					overrideState.bits |= ActorMaterialOverride_Fullbright;
 				}
 				else
 				{
-					overrideBits &= ~ActorMaterialOverride_Fullbright;
+					overrideState.bits &= ~ActorMaterialOverride_Fullbright;
 				}
+			}
+
+			if (resolvedRule.hasEmissiveStableFrames)
+			{
+				touched = true;
+				overrideState.emissiveStableFrames = std::max(overrideState.emissiveStableFrames, resolvedRule.emissiveStableFrames);
 			}
 		}
 
@@ -766,11 +779,11 @@ void nri_material_policy::BuildActorMaterialOverrideMap(
 				touched = true;
 				if (resolvedRule.shadowReceive)
 				{
-					overrideBits &= ~ActorMaterialOverride_NoShadowReceive;
+					overrideState.bits &= ~ActorMaterialOverride_NoShadowReceive;
 				}
 				else
 				{
-					overrideBits |= ActorMaterialOverride_NoShadowReceive;
+					overrideState.bits |= ActorMaterialOverride_NoShadowReceive;
 				}
 			}
 
@@ -779,23 +792,23 @@ void nri_material_policy::BuildActorMaterialOverrideMap(
 				touched = true;
 				if (resolvedRule.shadowCast)
 				{
-					overrideBits &= ~ActorMaterialOverride_NoShadowCast;
+					overrideState.bits &= ~ActorMaterialOverride_NoShadowCast;
 				}
 				else
 				{
-					overrideBits |= ActorMaterialOverride_NoShadowCast;
+					overrideState.bits |= ActorMaterialOverride_NoShadowCast;
 				}
 			}
 		}
 
-		if (touched && overrideBits != ActorMaterialOverride_None)
+		if (touched && !overrideState.Empty())
 		{
-			outOverrides[(int32_t)actor->GetIndex()] = overrideBits;
+			outOverrides[(int32_t)actor->GetIndex()] = overrideState;
 		}
 	}
 }
 
-const std::unordered_map<int32_t, uint32_t>& nri_material_policy::GetActorMaterialOverrideMapForFrame(
+const nri_material_policy::ActorMaterialOverrideMap& nri_material_policy::GetActorMaterialOverrideMapForFrame(
 	const ResolvedLightOverlaySet& resolved,
 	uint32_t frameIndex,
 	ActorMaterialOverrideCache& cache,
@@ -826,7 +839,7 @@ const std::unordered_map<int32_t, uint32_t>& nri_material_policy::GetActorMateri
 }
 
 void nri_material_policy::ApplyActorMaterialOverridesToBuiltMaterials(
-	const std::unordered_map<int32_t, uint32_t>& actorOverrides,
+	const ActorMaterialOverrideMap& actorOverrides,
 	float fullbrightBoost,
 	nri_scene::MaterialBridgeData& materials)
 {
@@ -846,8 +859,14 @@ void nri_material_policy::ApplyActorMaterialOverridesToBuiltMaterials(
 		}
 
 		nri_scene::MaterialData& material = materials.materials[materialIndex];
-		const uint32_t overrideBits = it->second;
+		const ActorMaterialOverrideState& overrideState = it->second;
+		const uint32_t overrideBits = overrideState.bits;
 		bool appliedOverride = false;
+		if (overrideState.emissiveStableFrames > 0)
+		{
+			metadata.emissiveStableFrames = std::max(metadata.emissiveStableFrames, overrideState.emissiveStableFrames);
+			appliedOverride = true;
+		}
 		if ((overrideBits & ActorMaterialOverride_NoShadowReceive) != 0)
 		{
 			material.lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowReceive;
@@ -864,7 +883,9 @@ void nri_material_policy::ApplyActorMaterialOverridesToBuiltMaterials(
 		{
 			if (appliedOverride)
 			{
-				metadata.materialKey = nri_scene::HashCombine64(nri_scene::HashCombine64(metadata.materialKey, 0xAC70A11C00000001ull), overrideBits);
+				metadata.materialKey = HashActorMaterialOverrideState(
+					nri_scene::HashCombine64(metadata.materialKey, 0xAC70A11C00000001ull),
+					overrideState);
 			}
 			continue;
 		}
@@ -884,7 +905,9 @@ void nri_material_policy::ApplyActorMaterialOverridesToBuiltMaterials(
 		metadata.emissiveColor[2] = 1.0f;
 		if (appliedOverride)
 		{
-			metadata.materialKey = nri_scene::HashCombine64(nri_scene::HashCombine64(metadata.materialKey, 0xAC70A11C00000001ull), overrideBits);
+			metadata.materialKey = HashActorMaterialOverrideState(
+				nri_scene::HashCombine64(metadata.materialKey, 0xAC70A11C00000001ull),
+				overrideState);
 		}
 	}
 }
@@ -909,7 +932,7 @@ void nri_material_policy::ApplyEmissiveMaterialOverrides(
 }
 
 void nri_material_policy::ApplyActorShadowMaterialOverrides(
-	const std::unordered_map<int32_t, uint32_t>& actorOverrides,
+	const ActorMaterialOverrideMap& actorOverrides,
 	float fullbrightBoost,
 	const nri_scene::MaterialBridgeData& materials,
 	std::vector<nri_scene::MaterialData>& inOutGpuMaterials)
@@ -934,15 +957,16 @@ void nri_material_policy::ApplyActorShadowMaterialOverrides(
 			continue;
 		}
 
-		if ((it->second & ActorMaterialOverride_NoShadowReceive) != 0)
+		const uint32_t overrideBits = it->second.bits;
+		if ((overrideBits & ActorMaterialOverride_NoShadowReceive) != 0)
 		{
 			inOutGpuMaterials[materialIndex].lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowReceive;
 		}
-		if ((it->second & ActorMaterialOverride_NoShadowCast) != 0)
+		if ((overrideBits & ActorMaterialOverride_NoShadowCast) != 0)
 		{
 			inOutGpuMaterials[materialIndex].lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowCast;
 		}
-		if ((it->second & ActorMaterialOverride_Fullbright) != 0)
+		if ((overrideBits & ActorMaterialOverride_Fullbright) != 0)
 		{
 			ApplyFullbrightMaterialOverride(inOutGpuMaterials[materialIndex], fullbrightBoost);
 		}
@@ -998,7 +1022,7 @@ bool nri_material_policy::MaterialDataVectorEqual(
 }
 
 uint64_t nri_material_policy::ComputeChunkActorOverrideHash(
-	const std::unordered_map<int32_t, uint32_t>& actorOverrides,
+	const ActorMaterialOverrideMap& actorOverrides,
 	const nri_scene::MaterialBridgeData& materials)
 {
 	if (actorOverrides.empty() || materials.lightMetadata.empty())
@@ -1016,14 +1040,14 @@ uint64_t nri_material_policy::ComputeChunkActorOverrideHash(
 		}
 
 		auto it = actorOverrides.find(metadata.actorIndex);
-		if (it == actorOverrides.end() || it->second == ActorMaterialOverride_None)
+		if (it == actorOverrides.end() || it->second.Empty())
 		{
 			continue;
 		}
 
 		touched = true;
 		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)metadata.actorIndex);
-		hash = nri_scene::HashCombine64(hash, (uint64_t)it->second);
+		hash = HashActorMaterialOverrideState(hash, it->second);
 	}
 
 	return touched ? hash : 0;

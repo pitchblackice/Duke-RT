@@ -778,6 +778,8 @@ public:
 		uint32_t limit) const;
 	bool MaterialWouldEmit(const nri_scene::MaterialLightingMetadata& metadata) const;
 	bool ApplyEmissiveMaterialSettings(const nri_scene::MaterialLightingMetadata& metadata, nri_scene::MaterialData& inOutMaterial) const;
+	bool IsEmissiveStableForSampling(uint64_t stableKey, uint32_t requiredFrames, const float center[3], float boundsRadius, float surfaceArea);
+	void PruneEmissiveStableSurfaceStates();
 	void ResetPersistentDynamicEmissiveCache();
 	void ResetPersistentDynamicEmissiveHighWaterStats();
 	void PrunePersistentDynamicEmissiveCacheToLiveActors(const PersistentDynamicEmissiveCacheBuildServices& services);
@@ -831,6 +833,15 @@ private:
 		bool occupied = false;
 	};
 
+	struct EmissiveStableSurfaceState
+	{
+		uint64_t lastFrameSerial = 0;
+		uint32_t consecutiveFrames = 0;
+		float center[3] = {};
+		float boundsRadius = 0.0f;
+		float surfaceArea = 0.0f;
+	};
+
 	static NRILightingSettings CaptureSettings();
 	void AppendSurfaceRecord(SurfaceRecord record, uint32_t materialIndexBase);
 	void AppendSurfaceList(
@@ -854,6 +865,7 @@ private:
 	uint64_t mFrameSerial = 0;
 	uint32_t mNextRuntimePointLightId = 1;
 	std::unordered_set<uint64_t> mActivatedActorOverlayKeys;
+	std::unordered_map<uint64_t, EmissiveStableSurfaceState> mEmissiveStableSurfaceStates;
 	std::unordered_map<std::string, ResolvedLightOverlayMuzzleFlashRule> mResolvedMuzzleFlashRuleLookup;
 	std::vector<TransientMuzzleFlashSlot> mTransientMuzzleFlashSlots;
 	std::vector<SceneAnalyticLight> mTransientMuzzleFlashLights;

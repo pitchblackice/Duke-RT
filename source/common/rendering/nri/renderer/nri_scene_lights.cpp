@@ -2765,6 +2765,7 @@ void SceneLightSystem::Reset()
 	mFrameAppendStats = {};
 	mFrameSerial = 0;
 	mActivatedActorOverlayKeys.clear();
+	mEmissiveStableSurfaceStates.clear();
 	mResolvedMuzzleFlashRuleLookup.clear();
 	mTransientMuzzleFlashSlots.clear();
 	mTransientMuzzleFlashLights.clear();
@@ -2828,6 +2829,7 @@ void SceneLightSystem::ResetLevelState()
 	mFrameAppendStats = {};
 	mFrameSerial = 0;
 	mActivatedActorOverlayKeys.clear();
+	mEmissiveStableSurfaceStates.clear();
 	mResolvedMuzzleFlashRuleLookup.clear();
 	mTransientMuzzleFlashSlots.clear();
 	mTransientMuzzleFlashLights.clear();
@@ -2866,6 +2868,77 @@ void SceneLightSystem::ResetPersistentDynamicEmissiveCache()
 {
 	mPersistentDynamicEmissiveCache = {};
 	mActorSpriteDebugStats = {};
+	mEmissiveStableSurfaceStates.clear();
+}
+
+bool SceneLightSystem::IsEmissiveStableForSampling(
+	uint64_t stableKey,
+	uint32_t requiredFrames,
+	const float center[3],
+	float boundsRadius,
+	float surfaceArea)
+{
+	if (requiredFrames <= 1)
+	{
+		return true;
+	}
+
+	EmissiveStableSurfaceState& state = mEmissiveStableSurfaceStates[stableKey];
+	bool comparable = false;
+	if (state.consecutiveFrames > 0)
+	{
+		const float dx = center[0] - state.center[0];
+		const float dy = center[1] - state.center[1];
+		const float dz = center[2] - state.center[2];
+		const float radiusBase = std::max(1.0f, std::max(std::fabs(boundsRadius), std::fabs(state.boundsRadius)));
+		const float centerTolerance = std::max(0.5f, radiusBase * 0.10f);
+		const float radiusTolerance = std::max(0.5f, radiusBase * 0.10f);
+		const float areaBase = std::max(1.0f, std::max(std::fabs(surfaceArea), std::fabs(state.surfaceArea)));
+		const float areaTolerance = std::max(1.0f, areaBase * 0.15f);
+
+		comparable =
+			dx * dx + dy * dy + dz * dz <= centerTolerance * centerTolerance &&
+			std::fabs(boundsRadius - state.boundsRadius) <= radiusTolerance &&
+			std::fabs(surfaceArea - state.surfaceArea) <= areaTolerance;
+	}
+
+	const bool sameFrame = state.lastFrameSerial == mFrameSerial;
+	const bool consecutiveFrame = state.lastFrameSerial + 1 == mFrameSerial;
+	if (state.consecutiveFrames == 0 || (!sameFrame && !consecutiveFrame) || !comparable)
+	{
+		state.consecutiveFrames = 1;
+	}
+	else if (!sameFrame)
+	{
+		state.consecutiveFrames = std::min(requiredFrames, state.consecutiveFrames + 1);
+	}
+
+	state.lastFrameSerial = mFrameSerial;
+	Copy3f(center, state.center);
+	state.boundsRadius = boundsRadius;
+	state.surfaceArea = surfaceArea;
+	return state.consecutiveFrames >= requiredFrames;
+}
+
+void SceneLightSystem::PruneEmissiveStableSurfaceStates()
+{
+	if (mEmissiveStableSurfaceStates.empty())
+	{
+		return;
+	}
+
+	constexpr uint64_t maxStaleFrames = 8;
+	for (auto it = mEmissiveStableSurfaceStates.begin(); it != mEmissiveStableSurfaceStates.end(); )
+	{
+		if (it->second.lastFrameSerial + maxStaleFrames < mFrameSerial)
+		{
+			it = mEmissiveStableSurfaceStates.erase(it);
+		}
+		else
+		{
+			++it;
+		}
+	}
 }
 
 void SceneLightSystem::ResetPersistentDynamicEmissiveHighWaterStats()
@@ -3198,15 +3271,27 @@ bool SceneLightSystem::RebuildPersistentDynamicEmissiveCache(
 	{
 		for (const auto& surface : source)
 		{
-			const bool keepSurface =
-				materialIndex < materials.lightMetadata.size() &&
-				MaterialWouldEmit(materials.lightMetadata[materialIndex]);
+			bool keepSurface = false;
+			if (materialIndex < materials.lightMetadata.size() && MaterialWouldEmit(materials.lightMetadata[materialIndex]))
+			{
+				liveSceneHasEmissive = true;
+				const nri_scene::MaterialLightingMetadata& metadata = materials.lightMetadata[materialIndex];
+				keepSurface = true;
+				if (metadata.emissiveStableFrames > 1)
+				{
+					float center[3] = {};
+					float boundsRadius = 0.0f;
+					ComputeSurfaceBounds(surface, center, boundsRadius);
+					const float surfaceArea = ComputeSurfaceArea(surface);
+					const uint64_t stableKey = nri_scene::HashCombine64(BuildPersistentEmissiveSurfaceIdentityKey(surface), 0x5053594E414D4943ull);
+					keepSurface = IsEmissiveStableForSampling(stableKey, metadata.emissiveStableFrames, center, boundsRadius, surfaceArea);
+				}
+			}
 			const bool keepSpriteCacheSurface =
 				surface.provenance.sourceType != nri_scene::SurfaceSourceType::FacingSprite &&
 				surface.provenance.sourceType != nri_scene::SurfaceSourceType::VoxelProxySprite;
 			if (keepSurface && (keepSpriteCacheSurface || surface.provenance.actorIndex >= 0))
 			{
-				liveSceneHasEmissive = true;
 				const uint64_t identityKey = BuildPersistentEmissiveSurfaceIdentityKey(surface);
 				if (seenSurfaceKeys.insert(identityKey).second)
 				{
@@ -4051,6 +4136,14 @@ void SceneLightSystem::RebuildEmissiveSurfaces(
 		{
 			continue;
 		}
+		if (record.material.emissiveStableFrames > 1)
+		{
+			const uint64_t stableKey = nri_scene::HashCombine64(emissive.stableKey, 0x414354495645454Dull);
+			if (!IsEmissiveStableForSampling(stableKey, record.material.emissiveStableFrames, record.center, record.boundsRadius, record.surfaceArea))
+			{
+				continue;
+			}
+		}
 
 		if (nextSurfaces.size() >= maxActiveSurfaces)
 		{
@@ -4159,6 +4252,7 @@ void SceneLightSystem::RebuildEmissiveSurfaces(
 	mEmissiveSurfaces.activeBindingHashes = std::move(nextBindingHashes);
 	mEmissiveSurfaces.activeDiagnosticFlags = std::move(nextDiagnosticFlags);
 	mEmissiveSurfaces.activeSurfaces = std::move(nextSurfaces);
+	PruneEmissiveStableSurfaceStates();
 }
 
 void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t sectorCount)

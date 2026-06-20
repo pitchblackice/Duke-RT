@@ -562,6 +562,12 @@ namespace
 						sc.ScriptMessage("Invalid fullbright value '%s'; expected off/default/on", sc.String);
 					}
 				}
+				else if (sc.Compare("emissivestableframes"))
+				{
+					sc.MustGetNumber();
+					rule.hasEmissiveStableFrames = true;
+					rule.emissiveStableFrames = (uint32_t)std::max(sc.Number, 0);
+				}
 				else if (sc.Compare("activation"))
 				{
 					sc.MustGetString();
@@ -1540,6 +1546,7 @@ namespace
 		if (rule.hasShadowReceive) AppendShadowStateField(text, 2, "shadowreceive", rule.shadowReceive);
 		if (rule.hasShadowCast) AppendShadowStateField(text, 2, "shadowcast", rule.shadowCast);
 		if (rule.hasFullbright) AppendShadowStateField(text, 2, "fullbright", rule.fullbright);
+		if (rule.hasEmissiveStableFrames) AppendLine(text, 2, FStringf("emissivestableframes %u", rule.emissiveStableFrames));
 		if (rule.hasActivationPolicy) AppendLine(text, 2, FStringf("activation %s", ActorActivationPolicyName(rule.activationPolicy)));
 		if (rule.hasTileFilter) AppendLine(text, 2, FStringf("tile %d", rule.tileFilter));
 		AppendLine(text, 2, FStringf("type %s", QuoteLightOverlayString(rule.lightType).GetChars()));
@@ -1922,6 +1929,7 @@ namespace
 			if (rule->hasOffset) Printf("  offset=(%.3f, %.3f, %.3f)\n", rule->offset[0], rule->offset[1], rule->offset[2]);
 			if (rule->hasNudgeFromSurface) Printf("  nudgefromsurface=%.3f\n", rule->nudgeFromSurfaceDistance);
 			if (rule->hasDirection) Printf("  direction=(%.3f, %.3f, %.3f)\n", rule->direction[0], rule->direction[1], rule->direction[2]);
+			if (rule->hasEmissiveStableFrames) Printf("  emissivestableframes=%u\n", rule->emissiveStableFrames);
 			if (rule->hasFlicker) Printf("  flicker_frames=%u\n", rule->flickerFrames);
 			if (rule->hasRandom) Printf("  random=(%.3f, %.3f)\n", rule->randomIntensityRange[0], rule->randomIntensityRange[1]);
 			if (rule->hasLocalSpacePolicy) Printf("  localspace=%s\n", rule->localSpacePolicy.GetChars());
@@ -2063,6 +2071,7 @@ namespace
 			if (rule.hasOffset) Printf("  offset=(%.3f, %.3f, %.3f)\n", rule.offset[0], rule.offset[1], rule.offset[2]);
 			if (rule.hasNudgeFromSurface) Printf("  nudgefromsurface=%.3f\n", rule.nudgeFromSurfaceDistance);
 			if (rule.hasDirection) Printf("  direction=(%.3f, %.3f, %.3f)\n", rule.direction[0], rule.direction[1], rule.direction[2]);
+			if (rule.hasEmissiveStableFrames) Printf("  emissivestableframes=%u\n", rule.emissiveStableFrames);
 			if (rule.hasFlicker) Printf("  flicker_frames=%u\n", rule.flickerFrames);
 			if (rule.hasRandom) Printf("  random=(%.3f, %.3f)\n", rule.randomIntensityRange[0], rule.randomIntensityRange[1]);
 			if (rule.hasLocalSpacePolicy) Printf("  localspace=%s\n", rule.localSpacePolicy.GetChars());
@@ -2137,6 +2146,8 @@ namespace
 		destination.shadowCast = source.shadowCast;
 		destination.hasFullbright = source.hasFullbright;
 		destination.fullbright = source.fullbright;
+		destination.hasEmissiveStableFrames = source.hasEmissiveStableFrames;
+		destination.emissiveStableFrames = source.emissiveStableFrames;
 		destination.hasActivationPolicy = source.hasActivationPolicy;
 		destination.activationPolicy = source.activationPolicy;
 		destination.hasTileFilter = source.hasTileFilter;
