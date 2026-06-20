@@ -43,7 +43,7 @@ Current map-local blocks:
 Current parser fields by block:
 
 - `actorrule`
-  `actorclass`, `shadowreceive`, `shadowcast`, `fullbright`, `tile`, `type`, `color`, `intensity`, `radius`, `range`, `offset`, `direction`, `flicker`, `random`, `localspace`
+  `actorclass`, `shadowreceive`, `shadowcast`, `fullbright`, `emissivestableframes`, `activation`, `tile`, `type`, `color`, `intensity`, `radius`, `range`, `offset`, `nudgefromsurface`, `direction`, `flicker`, `random`, `localspace`
 - `muzzleflashrule`
   `color`, `intensity`, `intensityrandom`, `radius`, `radiusrandom`, `delayseconds`, `delayrandomseconds`, `durationseconds`, `durationrandomseconds`, `offset`
 - `directional`
@@ -53,7 +53,7 @@ Current parser fields by block:
 - `actoroverride`
   `actorclass`, `shadowreceive`, `shadowcast`
 - `emissivematerialresponse`
-  `tile`, `tilerange`, `texture`, `materialresponse`, `materialresponsemin`, `materialresponsemax`
+  `tile`, `tilerange`, `texture`, `materialresponse`, `materialresponsemin`, `materialresponsemax`, `visibleglowblend`, `glowblend`
 - `emissiveoverride`
   `sector`, `wall`, `tile`, `intensityscale`, `reachscale`, `sectorresponse`, `signal sector`, `responseintensity`, `responsemin`, `responsemax`, `responseinputmin`, `responseinputmax`, `responseintensitymin`, `responseintensitymax`, `responsereachmin`, `responsereachmax`, `materialresponse`, `materialresponsemin`, `materialresponsemax`
 - `surfacelight`
@@ -67,7 +67,11 @@ Current practical notes:
 - `light` `anchor position` and `offset` values are authored in Build/world coordinates; the NRI renderer converts them to path-tracing render coordinates internally
 - `surfacelight` `position` and `normal` are authored in path-tracing render coordinates because they are captured directly from the aimed PT surface probe
 - `actorrule fullbright on` forces matching actor sprite and voxel surfaces onto the PT fullbright material path so they ignore scene lighting and render at full brightness
+- `actorrule emissivestableframes <count>` delays sampled-emissive surface admission until matching actor geometry has been stable for that many consecutive frames; visual fullbright still applies immediately
+- `actorrule activation surface` is the default actor-owned analytic-light behavior and waits for a matching rendered surface before emitting, while `activation immediate` emits as soon as the live actor/rule exists
+- `actorrule nudgefromsurface <distance>` moves an actor overlay point light away from nearby map geometry to reduce wall/floor clipping for impact or surface-adjacent effects
 - `actorrule random <min> <max>` adds a per-render-frame random intensity offset to the base intensity and is an alternative to `flicker`
+- `actorrule localspace <policy>` opts actor overlay placement into a named local-space policy when the renderer recognizes one; omit it for default world-space behavior
 - `actoroverride` is applied after `actorrule`, so explicit per-map shadow overrides win
 - `emissivematerialresponse` is global and is applied before map-local `emissiveoverride`, so a specific surface override can still opt out or change the clamp
 
@@ -336,7 +340,7 @@ Each hotkey edit writes the normalized `LIGHTOVR` file, prints the edited rule's
 
 For switch sectors whose "on" and "off" values are both below the global sector-emission neutral point, add `responseinputmin` and `responseinputmax`. When both fields are present, the raw sector signal maps directly from `responseinputmin` -> `responsemin` to `responseinputmax` -> `responsemax`, instead of using the global neutral response curve. The edit-mode sector-change message prints this authoring value as `signal=...`.
 
-Visible emissive material response is opt-in. For broad texture-based cases, add a global `emissivematerialresponse` rule with any mix of `texture`, `tile`, and `tilerange` selectors. `texture` matches the surface texture name case-insensitively and ignores a filename extension, so `#00707.PNG` can match a probed texture name like `#00707`; `tile` and `tilerange` match renderer texture ids like the existing `emissiveoverride tile` field. `materialresponsemin` and `materialresponsemax` clamp only the material's visible/direct/indirect emission, so a fixture can cast boosted light through `responsemax` while its visible panel stays within an off-to-normal range such as `0.0` to `1.0`; if either clamp is omitted, the corresponding `nri_ptsectoremissionmaterialmin` or `nri_ptsectoremissionmaterialmax` cvar supplies the fallback. Map-local `emissiveoverride` entries are applied after the global texture rule; use `materialresponse off` or per-rule `materialresponsemin`/`materialresponsemax` there when one surface needs different behavior.
+Visible emissive material response is opt-in. For broad texture-based cases, add a global `emissivematerialresponse` rule with any mix of `texture`, `tile`, and `tilerange` selectors. `texture` matches the surface texture name case-insensitively and ignores a filename extension, so `#00707.PNG` can match a probed texture name like `#00707`; `tile` and `tilerange` match renderer texture ids like the existing `emissiveoverride tile` field. `materialresponsemin` and `materialresponsemax` clamp only the material's visible/direct/indirect emission, so a fixture can cast boosted light through `responsemax` while its visible panel stays within an off-to-normal range such as `0.0` to `1.0`; if either clamp is omitted, the corresponding `nri_ptsectoremissionmaterialmin` or `nri_ptsectoremissionmaterialmax` cvar supplies the fallback. `visibleglowblend <scale>` tunes visible glowmap blending for matched materials; `glowblend` is accepted as an input alias, and normalized output writes `visibleglowblend`. Map-local `emissiveoverride` entries are applied after the global texture rule; use `materialresponse off` or per-rule `materialresponsemin`/`materialresponsemax` there when one surface needs different behavior.
 
 Disable edit mode with:
 
