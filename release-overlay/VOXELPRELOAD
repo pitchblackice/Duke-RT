@@ -680,3 +680,146 @@ actor DukePigCop allpicnums priority=high gpu=prefer reason=e4l11-verified-monst
 actor DukeRecon allpicnums priority=high gpu=prefer reason=e4l11-verified-monster-recon
 actor DukeTank allpicnums priority=high gpu=prefer reason=e4l11-verified-monster-tank
 
+
+map E5L1
+
+# Monster actors verified with listactors on 2026-06-20.
+actor DukeBoss1 allpicnums priority=high gpu=prefer reason=e5l1-verified-monster-boss1
+actor DukeFirefly allpicnums priority=high gpu=prefer reason=e5l1-verified-monster-firefly
+actor DukeLizMan allpicnums priority=high gpu=prefer reason=e5l1-verified-monster-lizman
+actor DukeLizManSpitting allpicnums priority=high gpu=prefer reason=e5l1-verified-monster-lizman-spitting
+actor DukeLizTrooper allpicnums priority=high gpu=prefer reason=e5l1-verified-monster-liztrooper
+actor DukeLizTrooperDucking allpicnums priority=high gpu=prefer reason=e5l1-verified-monster-liztrooper-ducking
+actor DukePigCop allpicnums priority=high gpu=prefer reason=e5l1-verified-monster-pigcop
+actor DukeRecon allpicnums priority=high gpu=prefer reason=e5l1-verified-monster-recon
+
+# Female actors verified with listactors on 2026-06-20.
+actor DukeFemale1 allpicnums priority=high gpu=prefer reason=e5l1-verified-female-1
+actor DukeFemale3 allpicnums priority=high gpu=prefer reason=e5l1-verified-female-3
+
+map E5L2
+
+# Monster actors verified with listactors on 2026-06-20.
+actor DukeBoss1Stayput allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-boss1-stayput
+actor DukeBoss3 allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-boss3
+actor DukeCommander allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-commander
+actor DukeCommanderStayput allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-commander-stayput
+actor DukeDrone allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-drone
+actor DukeLizMan allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-lizman
+actor DukeLizManStayput allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-lizman-stayput
+actor DukeLizTrooper allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-liztrooper
+actor DukeLizTrooperJetpack allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-liztrooper-jetpack
+actor DukeLizTrooperStayput allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-liztrooper-stayput
+actor DukeLizTrooperToilet allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-liztrooper-toilet
+actor DukeOctabrain allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-octabrain
+actor DukeOctabrainStayput allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-octabrain-stayput
+actor DukePigCop allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-pigcop
+actor DukePigCopDive allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-pigcop-dive
+actor DukePigCopStayput allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-pigcop-stayput
+actor DukeTank allpicnums priority=high gpu=prefer reason=e5l2-verified-monster-tank
+
+map E5L3
+
+# Monster actors verified with listactors on 2026-06-20.
+actor DukeBoss1 allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-boss1
+actor DukeBoss2Stayput allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-boss2-stayput
+actor DukeBoss3 allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-boss3
+actor DukeCommander allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-commander
+actor DukeCommanderStayput allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-commander-stayput
+actor DukeDrone allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-drone
+actor DukeLizMan allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-lizman
+actor DukeLizManJump allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-lizman-jump
+actor DukeLizTrooper allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-liztrooper
+actor DukeLizTrooperJetpack allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-liztrooper-jetpack
+actor DukeLizTrooperSitting allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-liztrooper-sitting
+actor DukeLizTrooperStayput allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-liztrooper-stayput
+actor DukeOctabrain allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-octabrain
+actor DukePigCop allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-pigcop
+actor DukePigCopDive allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-pigcop-dive
+actor DukeTank allpicnums priority=high gpu=prefer reason=e5l3-verified-monster-tank
+
+map E5L4
+
+# Monster actors verified with listactors on 2026-06-20.
+actor DukeBoss1Stayput allpicnums priority=high gpu=prefer reason=e5l4-verified-monster-boss1-stayput
+actor DukeCommander allpicnums priority=high gpu=prefer reason=e5l4-verified-monster-commander
+actor DukeCommanderStayput allpicnums priority=high gpu=prefer reason=e5l4-verified-monster-commander-stayput
+actor DukeDrone allpicnums priority=high gpu=prefer reason=e5l4-verified-monster-drone
+actor DukeFirefly allpicnums priority=high gpu=prefer reason=e5l4-verified-monster-firefly
+actor DukeLizMan allpicnums priority=high gpu=prefer reason=e5l4-verified-monster-lizman
+actor DukeLizManStayput allpicnums priority=high gpu=prefer reason=e5l4-verified-monster-lizman-stayput
+actor DukeLizTrooper allpicnums priority=high gpu=prefer reason=e5l4-verified-monster-liztrooper
+actor DukeLizTrooperJetpack allpicnums priority=high gpu=prefer reason=e5l4-verified-monster-liztrooper-jetpack
+actor DukeNewBeast allpicnums priority=high gpu=prefer reason=e5l4-verified-monster-newbeast
+actor DukeOctabrain allpicnums priority=high gpu=prefer reason=e5l4-verified-monster-octabrain
+
+map E5L5
+
+# Monster actors verified with listactors on 2026-06-20.
+actor DukeBoss1Stayput allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-boss1-stayput
+actor DukeBoss2Stayput allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-boss2-stayput
+actor DukeBoss3Stayput allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-boss3-stayput
+actor DukeCommander allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-commander
+actor DukeCommanderStayput allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-commander-stayput
+actor DukeDrone allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-drone
+actor DukeLizMan allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-lizman
+actor DukeLizManStayput allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-lizman-stayput
+actor DukeLizTrooper allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-liztrooper
+actor DukeLizTrooperJetpack allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-liztrooper-jetpack
+actor DukeLizTrooperStayput allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-liztrooper-stayput
+actor DukeOctabrain allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-octabrain
+actor DukePigCop allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-pigcop
+actor DukePigCopDive allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-pigcop-dive
+actor DukePigCopStayput allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-pigcop-stayput
+actor DukeTank allpicnums priority=high gpu=prefer reason=e5l5-verified-monster-tank
+
+# Female actors verified with listactors on 2026-06-20.
+actor DukeFemale5 allpicnums priority=high gpu=prefer reason=e5l5-verified-female-5
+
+map E5L6
+
+# Monster actors verified with listactors on 2026-06-20.
+actor DukeBoss1 allpicnums priority=high gpu=prefer reason=e5l6-verified-monster-boss1
+actor DukeBoss1Stayput allpicnums priority=high gpu=prefer reason=e5l6-verified-monster-boss1-stayput
+actor DukeFirefly allpicnums priority=high gpu=prefer reason=e5l6-verified-monster-firefly
+actor DukeLizTrooper allpicnums priority=high gpu=prefer reason=e5l6-verified-monster-liztrooper
+actor DukeLizTrooperDucking allpicnums priority=high gpu=prefer reason=e5l6-verified-monster-liztrooper-ducking
+actor DukeLizTrooperStayput allpicnums priority=high gpu=prefer reason=e5l6-verified-monster-liztrooper-stayput
+actor DukeOctabrain allpicnums priority=high gpu=prefer reason=e5l6-verified-monster-octabrain
+actor DukeOctabrainStayput allpicnums priority=high gpu=prefer reason=e5l6-verified-monster-octabrain-stayput
+actor DukePigCop allpicnums priority=high gpu=prefer reason=e5l6-verified-monster-pigcop
+actor DukePigCopStayput allpicnums priority=high gpu=prefer reason=e5l6-verified-monster-pigcop-stayput
+actor DukeRecon allpicnums priority=high gpu=prefer reason=e5l6-verified-monster-recon
+actor DukeShark allpicnums priority=high gpu=prefer reason=e5l6-verified-monster-shark
+
+# Female actors verified with listactors on 2026-06-20.
+actor DukeNaked allpicnums priority=high gpu=prefer reason=e5l6-verified-female-naked
+
+map E5L7
+
+# Monster actors verified with listactors on 2026-06-20.
+actor DukeBoss1 allpicnums priority=high gpu=prefer reason=e5l7-verified-monster-boss1
+actor DukeBoss2Stayput allpicnums priority=high gpu=prefer reason=e5l7-verified-monster-boss2-stayput
+actor DukeBoss3Stayput allpicnums priority=high gpu=prefer reason=e5l7-verified-monster-boss3-stayput
+actor DukeBoss5 allpicnums priority=high gpu=prefer reason=e5l7-verified-monster-boss5
+actor DukeCommander allpicnums priority=high gpu=prefer reason=e5l7-verified-monster-commander
+actor DukeCommanderStayput allpicnums priority=high gpu=prefer reason=e5l7-verified-monster-commander-stayput
+actor DukeLizMan allpicnums priority=high gpu=prefer reason=e5l7-verified-monster-lizman
+actor DukeLizTrooper allpicnums priority=high gpu=prefer reason=e5l7-verified-monster-liztrooper
+actor DukeLizTrooperJetpack allpicnums priority=high gpu=prefer reason=e5l7-verified-monster-liztrooper-jetpack
+actor DukeLizTrooperStayput allpicnums priority=high gpu=prefer reason=e5l7-verified-monster-liztrooper-stayput
+actor DukeOctabrain allpicnums priority=high gpu=prefer reason=e5l7-verified-monster-octabrain
+actor DukePigCopStayput allpicnums priority=high gpu=prefer reason=e5l7-verified-monster-pigcop-stayput
+actor DukeRecon allpicnums priority=high gpu=prefer reason=e5l7-verified-monster-recon
+
+map E5L8
+
+# Monster actors verified with listactors on 2026-06-20.
+actor DukeBoss1Stayput allpicnums priority=high gpu=prefer reason=e5l8-verified-monster-boss1-stayput
+actor DukeBoss3Stayput allpicnums priority=high gpu=prefer reason=e5l8-verified-monster-boss3-stayput
+actor DukeLizManStayput allpicnums priority=high gpu=prefer reason=e5l8-verified-monster-lizman-stayput
+actor DukeLizTrooper allpicnums priority=high gpu=prefer reason=e5l8-verified-monster-liztrooper
+actor DukeLizTrooperToilet allpicnums priority=high gpu=prefer reason=e5l8-verified-monster-liztrooper-toilet
+actor DukeOctabrain allpicnums priority=high gpu=prefer reason=e5l8-verified-monster-octabrain
+actor DukePigCop allpicnums priority=high gpu=prefer reason=e5l8-verified-monster-pigcop
+
