@@ -504,6 +504,15 @@ bool ExecuteNRIFrameGraph(
 				return false;
 			}
 			finalPresentSlot = FrameTextureSlot::PostBloomOutput;
+			if ((int)nri_ptbloomdebug > 0)
+			{
+				if (!NRIPassDispatcher::DispatchRawPresent(context, finalPresentSlot))
+				{
+					return false;
+				}
+				context.mResources.CopyFinalToActiveTarget();
+				return true;
+			}
 		}
 
 		const NRIMainUpscalerKind resolvedMain = context.mUpscalerService.ResolveMainUpscalerKind(false);

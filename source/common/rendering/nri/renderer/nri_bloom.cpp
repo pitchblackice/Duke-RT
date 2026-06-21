@@ -3,6 +3,7 @@
 #include "nri_pass_dispatch.h"
 #include "nri_cvars.h"
 #include "nri_shader_contracts.h"
+#include "printf.h"
 
 #include <iterator>
 
@@ -22,6 +23,45 @@ namespace
 	uint32_t GetDispatchSize(uint32_t size)
 	{
 		return (size + 7u) / 8u;
+	}
+
+	const char* GetBloomPipelineName(NRIRenderer::PipelineSlot slot)
+	{
+		switch (slot)
+		{
+		case NRIRenderer::PipelineSlot::BloomCopy: return "BloomCopy";
+		case NRIRenderer::PipelineSlot::BloomDownsample: return "BloomDownsample";
+		case NRIRenderer::PipelineSlot::BloomUpsample: return "BloomUpsample";
+		case NRIRenderer::PipelineSlot::BloomComposite: return "BloomComposite";
+		default: return "Unknown";
+		}
+	}
+
+	const char* GetBloomSlotName(NRIRenderer::FrameTextureSlot slot)
+	{
+		switch (slot)
+		{
+		case NRIRenderer::FrameTextureSlot::TaaHistoryPing: return "TaaHistoryPing";
+		case NRIRenderer::FrameTextureSlot::TaaHistoryPong: return "TaaHistoryPong";
+		case NRIRenderer::FrameTextureSlot::VendorOutput: return "VendorOutput";
+		case NRIRenderer::FrameTextureSlot::PostSharpenOutput: return "PostSharpenOutput";
+		case NRIRenderer::FrameTextureSlot::PostBloomOutput: return "PostBloomOutput";
+		case NRIRenderer::FrameTextureSlot::BloomPyramid0: return "BloomPyramid0";
+		case NRIRenderer::FrameTextureSlot::BloomPyramid1: return "BloomPyramid1";
+		case NRIRenderer::FrameTextureSlot::BloomPyramid2: return "BloomPyramid2";
+		case NRIRenderer::FrameTextureSlot::BloomPyramid3: return "BloomPyramid3";
+		case NRIRenderer::FrameTextureSlot::BloomPyramid4: return "BloomPyramid4";
+		case NRIRenderer::FrameTextureSlot::BloomPyramid5: return "BloomPyramid5";
+		case NRIRenderer::FrameTextureSlot::BloomPyramid6: return "BloomPyramid6";
+		case NRIRenderer::FrameTextureSlot::BloomPyramid7: return "BloomPyramid7";
+		case NRIRenderer::FrameTextureSlot::Count: return "Count";
+		default: return "Other";
+		}
+	}
+
+	bool ShouldTraceBloom()
+	{
+		return (int)nri_ptbloomdebug > 0 && (int)nri_pttraceframes > 0;
 	}
 
 	uint32_t ResolveBloomLevelCount(const NRIPassDispatchContext& context)
@@ -100,10 +140,28 @@ namespace
 		NRIPassDispatchContext& context,
 		NRIRenderer::PipelineSlot pipelineSlot,
 		const NRIBloomDispatchDesc& desc,
-		bool threshold)
+		bool threshold,
+		uint32_t descriptorIndex)
 	{
+		if (descriptorIndex >= NRIRenderer::BloomDescriptorSetCount)
+		{
+			if ((int)nri_ptbloomdebug > 0)
+			{
+				Printf(TEXTCOLOR_ORANGE "NRI bloom dispatch skipped: pipeline=%s descriptor=%u reason=descriptor-ring-exhausted\n",
+					GetBloomPipelineName(pipelineSlot),
+					descriptorIndex);
+			}
+			return false;
+		}
 		if (desc.inputSlot == NRIRenderer::FrameTextureSlot::Count || desc.outputSlot == NRIRenderer::FrameTextureSlot::Count)
 		{
+			if ((int)nri_ptbloomdebug > 0)
+			{
+				Printf(TEXTCOLOR_ORANGE "NRI bloom dispatch skipped: pipeline=%s input=%s output=%s reason=invalid-slot\n",
+					GetBloomPipelineName(pipelineSlot),
+					GetBloomSlotName(desc.inputSlot),
+					GetBloomSlotName(desc.outputSlot));
+			}
 			return false;
 		}
 
@@ -112,6 +170,21 @@ namespace
 		NRITextureResource& output = context.mTextures.Get(desc.outputSlot);
 		if (input.texture == nullptr || input.shaderView == nullptr || secondaryInput.shaderView == nullptr || output.texture == nullptr || output.storageView == nullptr)
 		{
+			if ((int)nri_ptbloomdebug > 0)
+			{
+				Printf(TEXTCOLOR_ORANGE "NRI bloom dispatch skipped: frame=%u debug=%d pipeline=%s input=%s tex=%p srv=%p secondary=%s srv=%p output=%s tex=%p uav=%p reason=missing-resource\n",
+					context.mFrame.frameIndex,
+					(int)nri_ptbloomdebug,
+					GetBloomPipelineName(pipelineSlot),
+					GetBloomSlotName(desc.inputSlot),
+					input.texture,
+					input.shaderView,
+					GetBloomSlotName(desc.secondaryInputSlot != NRIRenderer::FrameTextureSlot::Count ? desc.secondaryInputSlot : desc.inputSlot),
+					secondaryInput.shaderView,
+					GetBloomSlotName(desc.outputSlot),
+					output.texture,
+					output.storageView);
+			}
 			return false;
 		}
 
@@ -123,8 +196,10 @@ namespace
 			input.shaderView,
 			secondaryInput.shaderView
 		};
+		nri::DescriptorSet* inputSet = context.mBloomInputSets[descriptorIndex];
+		nri::DescriptorSet* outputSet = context.mBloomOutputSets[descriptorIndex];
 		nri::UpdateDescriptorRangeDesc inputUpdate = {};
-		inputUpdate.descriptorSet = context.mBloomInputSet;
+		inputUpdate.descriptorSet = inputSet;
 		inputUpdate.rangeIndex = 0;
 		inputUpdate.descriptors = inputs;
 		inputUpdate.descriptorNum = (uint32_t)std::size(inputs);
@@ -132,18 +207,50 @@ namespace
 
 		const nri::Descriptor* outputs[1] = { output.storageView };
 		nri::UpdateDescriptorRangeDesc outputUpdate = {};
-		outputUpdate.descriptorSet = context.mBloomOutputSet;
+		outputUpdate.descriptorSet = outputSet;
 		outputUpdate.rangeIndex = 0;
 		outputUpdate.descriptors = outputs;
 		outputUpdate.descriptorNum = (uint32_t)std::size(outputs);
 		context.mCommands.UpdateDescriptorRanges(&outputUpdate, 1);
 
 		const NRIBloomConstants constants = BuildBloomConstants(context, input, output, desc, threshold);
+		nri::Pipeline* pipeline = context.mPipelines.Get(pipelineSlot);
+		if (ShouldTraceBloom())
+		{
+			Printf("NRI bloom dispatch: frame=%u debug=%d pipeline=%s pipe=%p descriptor=%u level=%u/%u input=%s %ux%u tex=%p srv=%p secondary=%s srv=%p output=%s %ux%u tex=%p uav=%p threshold=%d flags=0x%x cutoff=%.3f fuzz=%.3f intensity=%.3f sigma=%.3f groups=%ux%u\n",
+				context.mFrame.frameIndex,
+				(int)nri_ptbloomdebug,
+				GetBloomPipelineName(pipelineSlot),
+				pipeline,
+				descriptorIndex,
+				desc.levelIndex,
+				desc.levelCount,
+				GetBloomSlotName(desc.inputSlot),
+				input.width,
+				input.height,
+				input.texture,
+				input.shaderView,
+				GetBloomSlotName(desc.secondaryInputSlot != NRIRenderer::FrameTextureSlot::Count ? desc.secondaryInputSlot : desc.inputSlot),
+				secondaryInput.shaderView,
+				GetBloomSlotName(desc.outputSlot),
+				output.width,
+				output.height,
+				output.texture,
+				output.storageView,
+				threshold ? 1 : 0,
+				constants.Flags,
+				constants.Cutoff,
+				constants.Fuzziness,
+				constants.Intensity,
+				constants.Sigma,
+				GetDispatchSize(output.width),
+				GetDispatchSize(output.height));
+		}
 		context.mCommands.SetPipelineLayout(context.mBloomPipelineLayout);
 		context.mCommands.SetRootConstants(&constants, sizeof(constants));
-		context.mCommands.SetDescriptorSet(0, context.mBloomInputSet);
-		context.mCommands.SetDescriptorSet(1, context.mBloomOutputSet);
-		context.mCommands.SetPipeline(context.mPipelines.Get(pipelineSlot));
+		context.mCommands.SetDescriptorSet(0, inputSet);
+		context.mCommands.SetDescriptorSet(1, outputSet);
+		context.mCommands.SetPipeline(pipeline);
 		context.mCommands.Dispatch(GetDispatchSize(output.width), GetDispatchSize(output.height), 1);
 		BarrierStorageTexture(context, output);
 		return true;
@@ -154,7 +261,7 @@ bool DispatchBloom(NRIPassDispatchContext& context, const NRIBloomDispatchDesc& 
 {
 	if (desc.mode == NRIBloomDispatchDesc::Mode::Copy)
 	{
-		return DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomCopy, desc, false);
+		return DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomCopy, desc, false, 0);
 	}
 
 	const int debugMode = (int)nri_ptbloomdebug;
@@ -164,10 +271,30 @@ bool DispatchBloom(NRIPassDispatchContext& context, const NRIBloomDispatchDesc& 
 		debugDesc.secondaryInputSlot = desc.inputSlot;
 		debugDesc.levelIndex = 0;
 		debugDesc.levelCount = 1;
-		return DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomCopy, debugDesc, false);
+		return DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomCopy, debugDesc, false, 0);
+	}
+	if (debugMode == 2)
+	{
+		NRIBloomDispatchDesc downsampleDesc = desc;
+		downsampleDesc.secondaryInputSlot = desc.inputSlot;
+		downsampleDesc.outputSlot = kBloomPyramidSlots[0];
+		downsampleDesc.levelIndex = 0;
+		downsampleDesc.levelCount = 1;
+		if (!DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomDownsample, downsampleDesc, false, 0))
+		{
+			return false;
+		}
+
+		NRIBloomDispatchDesc copyDesc = desc;
+		copyDesc.inputSlot = kBloomPyramidSlots[0];
+		copyDesc.secondaryInputSlot = kBloomPyramidSlots[0];
+		copyDesc.levelIndex = 0;
+		copyDesc.levelCount = 1;
+		return DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomCopy, copyDesc, false, 1);
 	}
 
 	const uint32_t levelCount = ResolveBloomLevelCount(context);
+	uint32_t descriptorIndex = 0;
 	NRIRenderer::FrameTextureSlot previousSlot = desc.inputSlot;
 	for (uint32_t level = 0; level < levelCount; ++level)
 	{
@@ -177,21 +304,11 @@ bool DispatchBloom(NRIPassDispatchContext& context, const NRIBloomDispatchDesc& 
 		downsampleDesc.outputSlot = kBloomPyramidSlots[level];
 		downsampleDesc.levelIndex = level;
 		downsampleDesc.levelCount = levelCount;
-		if (!DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomDownsample, downsampleDesc, level == 0))
+		if (!DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomDownsample, downsampleDesc, level == 0, descriptorIndex++))
 		{
 			return false;
 		}
 		previousSlot = kBloomPyramidSlots[level];
-	}
-
-	if (debugMode == 2)
-	{
-		NRIBloomDispatchDesc debugDesc = desc;
-		debugDesc.inputSlot = kBloomPyramidSlots[0];
-		debugDesc.secondaryInputSlot = kBloomPyramidSlots[0];
-		debugDesc.levelIndex = 0;
-		debugDesc.levelCount = levelCount;
-		return DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomCopy, debugDesc, false);
 	}
 
 	for (uint32_t level = levelCount - 1u; level > 0; --level)
@@ -202,7 +319,7 @@ bool DispatchBloom(NRIPassDispatchContext& context, const NRIBloomDispatchDesc& 
 		upsampleDesc.outputSlot = kBloomPyramidSlots[level - 1u];
 		upsampleDesc.levelIndex = level - 1u;
 		upsampleDesc.levelCount = levelCount;
-		if (!DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomUpsample, upsampleDesc, false))
+		if (!DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomUpsample, upsampleDesc, false, descriptorIndex++))
 		{
 			return false;
 		}
@@ -215,7 +332,7 @@ bool DispatchBloom(NRIPassDispatchContext& context, const NRIBloomDispatchDesc& 
 		debugDesc.secondaryInputSlot = kBloomPyramidSlots[0];
 		debugDesc.levelIndex = 0;
 		debugDesc.levelCount = levelCount;
-		return DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomCopy, debugDesc, false);
+		return DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomCopy, debugDesc, false, descriptorIndex++);
 	}
 
 	NRIBloomDispatchDesc compositeDesc = desc;
@@ -223,5 +340,5 @@ bool DispatchBloom(NRIPassDispatchContext& context, const NRIBloomDispatchDesc& 
 	compositeDesc.secondaryInputSlot = kBloomPyramidSlots[0];
 	compositeDesc.levelIndex = 0;
 	compositeDesc.levelCount = levelCount;
-	return DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomComposite, compositeDesc, false);
+	return DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomComposite, compositeDesc, false, descriptorIndex++);
 }

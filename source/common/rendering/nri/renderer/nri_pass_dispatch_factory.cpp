@@ -235,8 +235,8 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext()
 	init.rawPresentOutputSet = &mRawPresentOutputSet;
 	init.finalPresentFrameTextureSet = &mFinalPresentFrameTextureSet;
 	init.finalPresentOutputSet = &mFinalPresentOutputSet;
-	init.bloomInputSet = &mBloomInputSet;
-	init.bloomOutputSet = &mBloomOutputSet;
+	init.bloomInputSets = &mBloomInputSets;
+	init.bloomOutputSets = &mBloomOutputSets;
 	init.frameInputDescriptors = &mFrameInputDescriptors;
 	init.outputDescriptors = &mOutputDescriptors;
 	init.exposure = &mExposure;

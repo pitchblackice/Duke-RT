@@ -263,8 +263,8 @@ public:
 		nri::DescriptorSet** rawPresentOutputSet = nullptr;
 		nri::DescriptorSet** finalPresentFrameTextureSet = nullptr;
 		nri::DescriptorSet** finalPresentOutputSet = nullptr;
-		nri::DescriptorSet** bloomInputSet = nullptr;
-		nri::DescriptorSet** bloomOutputSet = nullptr;
+		std::array<nri::DescriptorSet*, NRIRenderer::BloomDescriptorSetCount>* bloomInputSets = nullptr;
+		std::array<nri::DescriptorSet*, NRIRenderer::BloomDescriptorSetCount>* bloomOutputSets = nullptr;
 		std::array<nri::Descriptor*, 14>* frameInputDescriptors = nullptr;
 		std::array<nri::Descriptor*, 15>* outputDescriptors = nullptr;
 		NRIExposureController* exposure = nullptr;
@@ -317,8 +317,8 @@ public:
 	nri::DescriptorSet*& mRawPresentOutputSet;
 	nri::DescriptorSet*& mFinalPresentFrameTextureSet;
 	nri::DescriptorSet*& mFinalPresentOutputSet;
-	nri::DescriptorSet*& mBloomInputSet;
-	nri::DescriptorSet*& mBloomOutputSet;
+	std::array<nri::DescriptorSet*, NRIRenderer::BloomDescriptorSetCount>& mBloomInputSets;
+	std::array<nri::DescriptorSet*, NRIRenderer::BloomDescriptorSetCount>& mBloomOutputSets;
 	std::array<nri::Descriptor*, 14>& mFrameInputDescriptors;
 	std::array<nri::Descriptor*, 15>& mOutputDescriptors;
 	NRIExposureController& mExposure;
