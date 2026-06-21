@@ -157,6 +157,16 @@ bool DispatchBloom(NRIPassDispatchContext& context, const NRIBloomDispatchDesc& 
 		return DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomCopy, desc, false);
 	}
 
+	const int debugMode = (int)nri_ptbloomdebug;
+	if (debugMode == 1)
+	{
+		NRIBloomDispatchDesc debugDesc = desc;
+		debugDesc.secondaryInputSlot = desc.inputSlot;
+		debugDesc.levelIndex = 0;
+		debugDesc.levelCount = 1;
+		return DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomCopy, debugDesc, false);
+	}
+
 	const uint32_t levelCount = ResolveBloomLevelCount(context);
 	NRIRenderer::FrameTextureSlot previousSlot = desc.inputSlot;
 	for (uint32_t level = 0; level < levelCount; ++level)
@@ -174,6 +184,16 @@ bool DispatchBloom(NRIPassDispatchContext& context, const NRIBloomDispatchDesc& 
 		previousSlot = kBloomPyramidSlots[level];
 	}
 
+	if (debugMode == 2)
+	{
+		NRIBloomDispatchDesc debugDesc = desc;
+		debugDesc.inputSlot = kBloomPyramidSlots[0];
+		debugDesc.secondaryInputSlot = kBloomPyramidSlots[0];
+		debugDesc.levelIndex = 0;
+		debugDesc.levelCount = levelCount;
+		return DispatchBloomPass(context, NRIRenderer::PipelineSlot::BloomCopy, debugDesc, false);
+	}
+
 	for (uint32_t level = levelCount - 1u; level > 0; --level)
 	{
 		NRIBloomDispatchDesc upsampleDesc = desc;
@@ -188,7 +208,7 @@ bool DispatchBloom(NRIPassDispatchContext& context, const NRIBloomDispatchDesc& 
 		}
 	}
 
-	if ((int)nri_ptbloomdebug > 0)
+	if (debugMode == 3)
 	{
 		NRIBloomDispatchDesc debugDesc = desc;
 		debugDesc.inputSlot = kBloomPyramidSlots[0];
