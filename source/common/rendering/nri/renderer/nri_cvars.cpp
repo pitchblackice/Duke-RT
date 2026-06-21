@@ -533,7 +533,7 @@ CUSTOM_CVAR(Float, nri_ptbloomintensity, 0.053125f, CVAR_ARCHIVE | CVAR_GLOBALCO
 	}
 }
 
-CUSTOM_CVAR(Float, nri_ptbloomsigma, 0.796875f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptbloomsigma, 0.3f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
