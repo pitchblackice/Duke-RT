@@ -103,6 +103,8 @@ bool NRIDescriptorSetManager::AllocateDescriptorSets(NRIRenderer& renderer)
 		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mPresentPipelineLayout, 1, &renderer.mRawPresentOutputSet, 1, 0) == nri::Result::SUCCESS &&
 		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mPresentPipelineLayout, 0, &renderer.mFinalPresentFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
 		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mPresentPipelineLayout, 1, &renderer.mFinalPresentOutputSet, 1, 0) == nri::Result::SUCCESS &&
+		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mBloomPipelineLayout, 0, &renderer.mBloomInputSet, 1, 0) == nri::Result::SUCCESS &&
+		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mBloomPipelineLayout, 1, &renderer.mBloomOutputSet, 1, 0) == nri::Result::SUCCESS &&
 		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mExposurePipelineLayout, 0, &renderer.mExposureInputSets[0], 1, 0) == nri::Result::SUCCESS &&
 		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mExposurePipelineLayout, 1, &renderer.mExposureOutputSets[0], 1, 0) == nri::Result::SUCCESS &&
 		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mExposurePipelineLayout, 0, &renderer.mExposureInputSets[1], 1, 0) == nri::Result::SUCCESS &&

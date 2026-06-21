@@ -221,6 +221,7 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext()
 	init.pipelineLayout = &mPipelineLayout;
 	init.taaPipelineLayout = &mTaaPipelineLayout;
 	init.presentPipelineLayout = &mPresentPipelineLayout;
+	init.bloomPipelineLayout = &mBloomPipelineLayout;
 	init.samplerSet = &mSamplerSet;
 	init.frameTextureSet = &mFrameTextureSet;
 	init.outputSet = &mOutputSet;
@@ -234,6 +235,8 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext()
 	init.rawPresentOutputSet = &mRawPresentOutputSet;
 	init.finalPresentFrameTextureSet = &mFinalPresentFrameTextureSet;
 	init.finalPresentOutputSet = &mFinalPresentOutputSet;
+	init.bloomInputSet = &mBloomInputSet;
+	init.bloomOutputSet = &mBloomOutputSet;
 	init.frameInputDescriptors = &mFrameInputDescriptors;
 	init.outputDescriptors = &mOutputDescriptors;
 	init.exposure = &mExposure;

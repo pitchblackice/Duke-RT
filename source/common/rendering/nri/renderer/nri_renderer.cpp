@@ -1937,6 +1937,8 @@ void NRIRenderer::Shutdown()
 	mRawPresentOutputSet = nullptr;
 	mFinalPresentFrameTextureSet = nullptr;
 	mFinalPresentOutputSet = nullptr;
+	mBloomInputSet = nullptr;
+	mBloomOutputSet = nullptr;
 	mExposureInputSets = {};
 	mExposureOutputSets = {};
 	mAutoExposureInputSourceSlot = FrameTextureSlot::Count;

@@ -1,5 +1,7 @@
 #include "nri_frame_graph.h"
 
+#include "nri_bloom.h"
+#include "nri_cvars.h"
 #include "nri_pass_dispatch.h"
 #include "../system/nri_renderdevice.h"
 #include "nri_diagnostic_names.h"
@@ -468,7 +470,11 @@ bool ExecuteNRIFrameGraph(
 
 	if (useResolvedPresent)
 	{
-		context.mSelfTest.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, denoise, true, true);
+		const bool bloomEnabled = !!nri_ptbloom;
+		const char* resolvedPassListName = bloomEnabled
+			? "TraceOpaque,Composition,TraceTransparent,Exposure,UpscaleChain,Bloom,FinalPresent,CopyFinal"
+			: presentRoute.passListName;
+		context.mSelfTest.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, resolvedPassListName, denoise, true, true);
 		if (!logState.phaseGResolvedPresentPath)
 		{
 			Printf("ptdebug 0 now routes through Composition, placeholder TraceTransparent, DispatchUpscaleChain, and the minimal FinalPresent presenter.\n");
@@ -486,10 +492,24 @@ bool ExecuteNRIFrameGraph(
 		}
 
 		const FrameTextureSlot resolvedPresentSlot = context.mUseUpscaledInFinal ? context.mUpscaledInputSlot : context.mHistoryOutputSlot;
+		FrameTextureSlot finalPresentSlot = resolvedPresentSlot;
+		if (bloomEnabled)
+		{
+			NRIBloomDispatchDesc bloomDesc = {};
+			bloomDesc.mode = NRIBloomDispatchDesc::Mode::Copy;
+			bloomDesc.inputSlot = resolvedPresentSlot;
+			bloomDesc.outputSlot = FrameTextureSlot::PostBloomOutput;
+			if (!DispatchBloom(context, bloomDesc))
+			{
+				return false;
+			}
+			finalPresentSlot = FrameTextureSlot::PostBloomOutput;
+		}
+
 		const NRIMainUpscalerKind resolvedMain = context.mUpscalerService.ResolveMainUpscalerKind(false);
 		const NRIPostSharpenKind resolvedPost = context.mUpscalerService.ResolvePostSharpenKind(false);
-		context.mUpscalerService.TraceTemporalState("resolved-present", resolvedMain, resolvedPost, context.mUpscalerService.ShouldRunAppTaaForFrameGraph(resolvedMain), resolvedPresentSlot, context.mHistoryOutputSlot);
-		if (!NRIPassDispatcher::DispatchFinalPresent(context, resolvedPresentSlot))
+		context.mUpscalerService.TraceTemporalState("resolved-present", resolvedMain, resolvedPost, context.mUpscalerService.ShouldRunAppTaaForFrameGraph(resolvedMain), finalPresentSlot, context.mHistoryOutputSlot);
+		if (!NRIPassDispatcher::DispatchFinalPresent(context, finalPresentSlot))
 		{
 			return false;
 		}

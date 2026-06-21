@@ -1900,6 +1900,8 @@ private:
 	nri::DescriptorSet* mRawPresentOutputSet = nullptr;
 	nri::DescriptorSet* mFinalPresentFrameTextureSet = nullptr;
 	nri::DescriptorSet* mFinalPresentOutputSet = nullptr;
+	nri::DescriptorSet* mBloomInputSet = nullptr;
+	nri::DescriptorSet* mBloomOutputSet = nullptr;
 	std::array<nri::DescriptorSet*, 2> mExposureInputSets = {};
 	std::array<nri::DescriptorSet*, 2> mExposureOutputSets = {};
 	FrameTextureSlot mAutoExposureInputSourceSlot = FrameTextureSlot::Count;

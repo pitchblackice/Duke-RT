@@ -249,6 +249,7 @@ public:
 		nri::PipelineLayout** pipelineLayout = nullptr;
 		nri::PipelineLayout** taaPipelineLayout = nullptr;
 		nri::PipelineLayout** presentPipelineLayout = nullptr;
+		nri::PipelineLayout** bloomPipelineLayout = nullptr;
 		nri::DescriptorSet** samplerSet = nullptr;
 		nri::DescriptorSet** frameTextureSet = nullptr;
 		nri::DescriptorSet** outputSet = nullptr;
@@ -262,6 +263,8 @@ public:
 		nri::DescriptorSet** rawPresentOutputSet = nullptr;
 		nri::DescriptorSet** finalPresentFrameTextureSet = nullptr;
 		nri::DescriptorSet** finalPresentOutputSet = nullptr;
+		nri::DescriptorSet** bloomInputSet = nullptr;
+		nri::DescriptorSet** bloomOutputSet = nullptr;
 		std::array<nri::Descriptor*, 14>* frameInputDescriptors = nullptr;
 		std::array<nri::Descriptor*, 15>* outputDescriptors = nullptr;
 		NRIExposureController* exposure = nullptr;
@@ -300,6 +303,7 @@ public:
 	nri::PipelineLayout*& mPipelineLayout;
 	nri::PipelineLayout*& mTaaPipelineLayout;
 	nri::PipelineLayout*& mPresentPipelineLayout;
+	nri::PipelineLayout*& mBloomPipelineLayout;
 	nri::DescriptorSet*& mSamplerSet;
 	nri::DescriptorSet*& mFrameTextureSet;
 	nri::DescriptorSet*& mOutputSet;
@@ -313,6 +317,8 @@ public:
 	nri::DescriptorSet*& mRawPresentOutputSet;
 	nri::DescriptorSet*& mFinalPresentFrameTextureSet;
 	nri::DescriptorSet*& mFinalPresentOutputSet;
+	nri::DescriptorSet*& mBloomInputSet;
+	nri::DescriptorSet*& mBloomOutputSet;
 	std::array<nri::Descriptor*, 14>& mFrameInputDescriptors;
 	std::array<nri::Descriptor*, 15>& mOutputDescriptors;
 	NRIExposureController& mExposure;
