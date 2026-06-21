@@ -8,10 +8,19 @@ Texture2D<float4> gSecondaryInputTexture : register(t1, space0);
 
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gOutputTexture, u, 0, 1);
 
-float3 LoadClamped(int2 pixelPos, uint2 size)
+float3 SanitizeColor(float3 color)
 {
-	const int2 clampedPos = clamp(pixelPos, int2(0, 0), int2(size) - 1);
-	return gInputTexture.Load(int3(clampedPos, 0)).rgb;
+	if (any(isnan(color)) || any(isinf(color)))
+	{
+		return 0.0;
+	}
+
+	return max(color, 0.0);
+}
+
+float3 LoadClamped(uint2 pixelPos, uint2 maxPixel)
+{
+	return SanitizeColor(gInputTexture.Load(int3(min(pixelPos, maxPixel), 0)).rgb);
 }
 
 float Bt709Luminance(float3 color)
@@ -30,27 +39,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 
 	const uint2 inputSize = uint2(max(gBloomConstants.InputWidth, 1u), max(gBloomConstants.InputHeight, 1u));
-	const int2 basePixel = int2(dispatchThreadId.xy) * 2;
-
-	const float3 a = LoadClamped(basePixel + int2(-2, -2), inputSize);
-	const float3 b = LoadClamped(basePixel + int2( 0, -2), inputSize);
-	const float3 c = LoadClamped(basePixel + int2( 2, -2), inputSize);
-	const float3 d = LoadClamped(basePixel + int2(-2,  0), inputSize);
-	const float3 e = LoadClamped(basePixel + int2( 0,  0), inputSize);
-	const float3 f = LoadClamped(basePixel + int2( 2,  0), inputSize);
-	const float3 g = LoadClamped(basePixel + int2(-2,  2), inputSize);
-	const float3 h = LoadClamped(basePixel + int2( 0,  2), inputSize);
-	const float3 i = LoadClamped(basePixel + int2( 2,  2), inputSize);
-	const float3 j = LoadClamped(basePixel + int2(-1, -1), inputSize);
-	const float3 k = LoadClamped(basePixel + int2( 1, -1), inputSize);
-	const float3 l = LoadClamped(basePixel + int2(-1,  1), inputSize);
-	const float3 m = LoadClamped(basePixel + int2( 1,  1), inputSize);
+	const uint2 maxPixel = inputSize - 1u;
+	const uint2 basePixel = dispatchThreadId.xy * 2u;
 
 	float3 color =
-		e * 0.125 +
-		(a + c + g + i) * 0.03125 +
-		(b + d + f + h) * 0.0625 +
-		(j + k + l + m) * 0.125;
+		(
+			LoadClamped(basePixel, maxPixel) +
+			LoadClamped(basePixel + uint2(1u, 0u), maxPixel) +
+			LoadClamped(basePixel + uint2(0u, 1u), maxPixel) +
+			LoadClamped(basePixel + uint2(1u, 1u), maxPixel)
+		) * 0.25;
 
 	if ((gBloomConstants.Flags & NRI_BLOOM_FLAG_THRESHOLD) != 0u)
 	{
