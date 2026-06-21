@@ -2598,11 +2598,6 @@ FString SerializeLightOverlayDatabase(const ParsedLightOverlayDatabase& database
 				surfaceLights.push_back(&rule);
 			}
 		}
-		std::sort(surfaceLights.begin(), surfaceLights.end(), [](const auto* left, const auto* right)
-		{
-			const int idCompare = left->id.CompareNoCase(right->id);
-			return idCompare != 0 ? idCompare < 0 : left->source.orderIndex < right->source.orderIndex;
-		});
 		for (const auto* rule : surfaceLights)
 		{
 			AppendSurfaceLightRuleBlock(text, *rule);

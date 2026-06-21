@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <ctime>
 #include <memory>
 
 #include "lightoverlay_editor.h"
@@ -354,6 +355,20 @@ namespace
 		return baseId;
 	}
 
+	static int CountSurfaceLightEditorRulesForMap(const ParsedLightOverlayDatabase& database, const FString& mapName)
+	{
+		int count = 0;
+		for (const auto& rule : database.surfaceLightRules)
+		{
+			if (rule.mapName.CompareNoCase(mapName) == 0)
+			{
+				++count;
+			}
+		}
+
+		return count;
+	}
+
 	static bool HasSurfaceLightEditorRuleId(const ParsedLightOverlayDatabase& database, const FString& mapName, const FString& id)
 	{
 		for (const auto& rule : database.surfaceLightRules)
@@ -367,24 +382,38 @@ namespace
 		return false;
 	}
 
-	static FString BuildSurfaceLightEditorRuleId(const ParsedLightOverlayDatabase& database, const FString& mapName, const PathTracingEmissiveLightEditTarget& target)
+	static FString BuildSurfaceLightEditorTimestampSuffix()
 	{
-		FString baseId = FStringf("SurfaceLight_S%d_W%d_T%d", target.sectorIndex, target.wallIndex, target.textureId);
-		if (!HasSurfaceLightEditorRuleId(database, mapName, baseId))
-		{
-			return baseId;
-		}
+		const std::time_t now = std::time(nullptr);
+		std::tm utcTime = {};
+#if defined(_WIN32)
+		gmtime_s(&utcTime, &now);
+#else
+		gmtime_r(&now, &utcTime);
+#endif
+		return FStringf(
+			"%d-%d-%04d-%02d%02dZ",
+			utcTime.tm_mon + 1,
+			utcTime.tm_mday,
+			utcTime.tm_year + 1900,
+			utcTime.tm_hour,
+			utcTime.tm_min);
+	}
 
-		for (int suffix = 2; suffix < 1000000; ++suffix)
+	static FString BuildSurfaceLightEditorRuleId(const ParsedLightOverlayDatabase& database, const FString& mapName, const PathTracingEmissiveLightEditTarget&)
+	{
+		const FString timestamp = BuildSurfaceLightEditorTimestampSuffix();
+
+		for (int index = CountSurfaceLightEditorRulesForMap(database, mapName); index < 1000000; ++index)
 		{
-			FString candidate = FStringf("%s_%d", baseId.GetChars(), suffix);
+			FString candidate = FStringf("surfacelight_%d_%s", index, timestamp.GetChars());
 			if (!HasSurfaceLightEditorRuleId(database, mapName, candidate))
 			{
 				return candidate;
 			}
 		}
 
-		return FStringf("%s_%u", baseId.GetChars(), (unsigned)I_msTime());
+		return FStringf("surfacelight_%u_%s", (unsigned)I_msTime(), timestamp.GetChars());
 	}
 
 	static uint64_t HashSurfaceLightEditorText(uint64_t hash, const char* text)
@@ -961,6 +990,12 @@ namespace
 			return;
 		}
 
+		if (!ReloadActorLightEditorOverlays())
+		{
+			Printf("NRI PT emissive light editor: not writing emissiveoverride because the current LIGHTOVR reload has parse errors.\n");
+			return;
+		}
+
 		FString writablePath;
 		int writableLumpNum = -1;
 		if (!ActorLightEditorResolveWritableSource(writablePath, &writableLumpNum))
@@ -1043,6 +1078,12 @@ namespace
 			Printf(
 				"NRI PT emissive light editor: cannot create surfacelight: %s.\n",
 				target.failureReason.IsEmpty() ? "no PT surface is aimed" : target.failureReason.GetChars());
+			return;
+		}
+
+		if (!ReloadActorLightEditorOverlays())
+		{
+			Printf("NRI PT emissive light editor: not writing surfacelight because the current LIGHTOVR reload has parse errors.\n");
 			return;
 		}
 
