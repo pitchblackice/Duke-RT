@@ -519,6 +519,82 @@ CUSTOM_CVAR(Float, nri_ptautoexposureadaptdown, 1.0f, CVAR_ARCHIVE | CVAR_GLOBAL
 	}
 }
 
+CVAR(Bool, nri_ptbloom, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CUSTOM_CVAR(Float, nri_ptbloomintensity, 0.10f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	else if (self > 1.0f)
+	{
+		self = 1.0f;
+	}
+}
+
+CUSTOM_CVAR(Float, nri_ptbloomsigma, 0.10f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	else if (self > 1.0f)
+	{
+		self = 1.0f;
+	}
+}
+
+CUSTOM_CVAR(Float, nri_ptbloomcutoff, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	else if (self > 16.0f)
+	{
+		self = 16.0f;
+	}
+}
+
+CUSTOM_CVAR(Float, nri_ptbloomfuzziness, 0.25f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	else if (self > 1.0f)
+	{
+		self = 1.0f;
+	}
+}
+
+CUSTOM_CVAR(Int, nri_ptbloomlevels, 6, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 1)
+	{
+		self = 1;
+	}
+	else if (self > 8)
+	{
+		self = 8;
+	}
+}
+
+CVAR(Bool, nri_ptbloomenergyconstrained, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CUSTOM_CVAR(Int, nri_ptbloomdebug, 0, 0)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 3)
+	{
+		self = 3;
+	}
+}
+
 
 // Moved from source/common/rendering/nri/renderer/nri_renderer.cpp
 

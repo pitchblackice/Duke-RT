@@ -1079,6 +1079,7 @@ OptionMenu "VideoOptions" protected
 	StaticText "$VK_RESTART"
 	Option "HDR / SDR",							"nri_ptoutputmode",				"NRIPTOutputMode"
 	Option "Settings Profile",					"nri_settingsprofile",			"NRISettingsProfile"
+	Option "Bloom",								"nri_ptbloom",					"OnOff"
 	CVarStaticText "nri_settingsprofilewarning"
 	StaticText ""
 
@@ -1141,6 +1142,15 @@ OptionMenu "NRIOptions" protected
 	Slider "Render Scale",						"nri_renderscale",				0.33, 1.0, 0.01, 2
 	Slider "Sharpness",							"nri_sharpness",				0.0, 1.0, 0.05, 2
 	StaticText "Frame generation currently targets windowed D3D12."
+	StaticText "----------------"
+	StaticText "Bloom"
+	Option "Bloom",								"nri_ptbloom",					"OnOff"
+	Slider "Bloom Intensity",					"nri_ptbloomintensity",			0.0, 1.0, 0.01, 2
+	Slider "Bloom Sigma",						"nri_ptbloomsigma",				0.0, 1.0, 0.01, 2
+	Slider "Bloom Cutoff",						"nri_ptbloomcutoff",			0.0, 16.0, 0.05, 2
+	Slider "Bloom Fuzziness",					"nri_ptbloomfuzziness",			0.0, 1.0, 0.01, 2
+	Slider "Bloom Levels",						"nri_ptbloomlevels",			1, 8, 1, 0
+	Option "Bloom Energy Constrained",			"nri_ptbloomenergyconstrained",	"OnOff"
 	StaticText "----------------"
 	StaticText "Night Vision"
 	Option "Night Vision Presenter",			"nri_ptnightvision",			"OnOff"
