@@ -2631,7 +2631,6 @@ NRIRenderer::ExposureDomain NRIRenderer::ResolveFrameTextureExposureDomain(Frame
 		return NRIShouldRunAppTaa(mainKind) ? ExposureDomain::PreExposedHDR : ExposureDomain::SceneHDR;
 	case FrameTextureSlot::VendorOutput:
 		return ExposureDomain::SceneHDR;
-	case FrameTextureSlot::PostBloomOutput:
 	case FrameTextureSlot::BloomPyramid0:
 	case FrameTextureSlot::BloomPyramid1:
 	case FrameTextureSlot::BloomPyramid2:
@@ -2640,7 +2639,8 @@ NRIRenderer::ExposureDomain NRIRenderer::ResolveFrameTextureExposureDomain(Frame
 	case FrameTextureSlot::BloomPyramid5:
 	case FrameTextureSlot::BloomPyramid6:
 	case FrameTextureSlot::BloomPyramid7:
-		return ExposureDomain::SceneHDR;
+	case FrameTextureSlot::PostBloomOutput:
+		return mainKind == NRIMainUpscalerKind::Off && NRIShouldRunAppTaa(mainKind) ? ExposureDomain::PreExposedHDR : ExposureDomain::SceneHDR;
 	case FrameTextureSlot::PostSharpenOutput:
 		if (postSharpenKind == NRIPostSharpenKind::Off)
 		{

@@ -27,17 +27,24 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint2 inputSize = uint2(max(gBloomConstants.InputWidth, 1u), max(gBloomConstants.InputHeight, 1u));
 	const uint2 outputExtent = uint2(max(gBloomConstants.OutputWidth, 1u), max(gBloomConstants.OutputHeight, 1u));
 	const int2 centerPixel = int2(min((dispatchThreadId.xy * inputSize) / outputExtent, inputSize - 1u));
+	const int radius = 1 + (int)round(saturate(gBloomConstants.Sigma) * 2.0);
+	const float sigma = lerp(0.65, 2.0, saturate(gBloomConstants.Sigma));
+	const float invTwoSigmaSq = 0.5 / max(sigma * sigma, 0.0001);
 
-	const float3 upsampled =
-		LoadClamped(centerPixel + int2(-1, -1), inputSize) * 0.0625 +
-		LoadClamped(centerPixel + int2( 0, -1), inputSize) * 0.1250 +
-		LoadClamped(centerPixel + int2( 1, -1), inputSize) * 0.0625 +
-		LoadClamped(centerPixel + int2(-1,  0), inputSize) * 0.1250 +
-		LoadClamped(centerPixel + int2( 0,  0), inputSize) * 0.2500 +
-		LoadClamped(centerPixel + int2( 1,  0), inputSize) * 0.1250 +
-		LoadClamped(centerPixel + int2(-1,  1), inputSize) * 0.0625 +
-		LoadClamped(centerPixel + int2( 0,  1), inputSize) * 0.1250 +
-		LoadClamped(centerPixel + int2( 1,  1), inputSize) * 0.0625;
+	float3 upsampled = 0.0;
+	float weightSum = 0.0;
+	[loop]
+	for (int y = -radius; y <= radius; ++y)
+	{
+		[loop]
+		for (int x = -radius; x <= radius; ++x)
+		{
+			const float weight = exp(-(float)(x * x + y * y) * invTwoSigmaSq);
+			upsampled += LoadClamped(centerPixel + int2(x, y), inputSize) * weight;
+			weightSum += weight;
+		}
+	}
+	upsampled /= max(weightSum, 0.0001);
 
 	const float3 existing = gOutputTexture[dispatchThreadId.xy].rgb;
 	gOutputTexture[dispatchThreadId.xy] = float4(max(existing + upsampled, 0.0), 1.0);
