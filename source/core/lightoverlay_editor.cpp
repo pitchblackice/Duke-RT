@@ -1146,7 +1146,7 @@ namespace
 		rule.hasRadius = true;
 		rule.radius = SurfaceLightEditorDefaultRadius;
 		rule.hasSectorResponse = true;
-		rule.sectorResponse = true;
+		rule.sectorResponse = false;
 		rule.hasSignalSector = target.sectorIndex >= 0;
 		rule.signalSector = target.sectorIndex;
 		rule.hasResponseIntensity = true;

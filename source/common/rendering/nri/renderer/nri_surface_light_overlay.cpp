@@ -7,6 +7,7 @@
 #include "texturemanager.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <utility>
@@ -148,6 +149,7 @@ bool BuildSurfaceLightOverlay(
 	};
 
 	nri_scene::SceneView surfaceLightView = {};
+	std::vector<std::array<float, 3>> surfaceLightColors;
 	for (const auto& rule : resolved.surfaceLightRules)
 	{
 		if (!rule.hasPosition || !rule.hasNormal)
@@ -208,6 +210,12 @@ bool BuildSurfaceLightOverlay(
 		const float offset = rule.hasOffset ? std::max(0.0f, rule.offset) : 0.5f;
 		const float halfWidth = std::max(1.0f, rule.hasSize ? rule.size[0] : 32.0f) * 0.5f;
 		const float halfHeight = std::max(1.0f, rule.hasSize ? rule.size[1] : 32.0f) * 0.5f;
+		const float lightColor[3] =
+		{
+			rule.hasColor ? std::max(rule.color[0], 0.0f) : 1.0f,
+			rule.hasColor ? std::max(rule.color[1], 0.0f) : 1.0f,
+			rule.hasColor ? std::max(rule.color[2], 0.0f) : 1.0f,
+		};
 		const float center[3] =
 		{
 			rule.position[0] + normal[0] * offset,
@@ -246,13 +254,14 @@ bool BuildSurfaceLightOverlay(
 		surface.material.palette = 0;
 		surface.material.shade = 0;
 		surface.material.alpha = 1.0f;
-		surface.material.flags = nri_scene::MaterialFlag_Fullbright | nri_scene::MaterialFlag_Flat;
+		surface.material.flags = nri_scene::MaterialFlag_Fullbright | nri_scene::MaterialFlag_Flat | nri_scene::MaterialFlag_TintEmission;
 		surface.provenance.sourceType = nri_scene::SurfaceSourceType::SurfaceLightOverlay;
 		surface.provenance.sectorIndex = rule.hasSector ? rule.sector : -1;
 		surface.provenance.wallIndex = rule.hasWall ? rule.wall : -1;
 		surface.provenance.mapChunkIndex = -1;
 		surface.provenance.cstat = BuildSurfaceLightRuleId(rule);
 		surfaceLightView.opaqueFlats.push_back(std::move(surface));
+		surfaceLightColors.push_back({ lightColor[0], lightColor[1], lightColor[2] });
 	}
 
 	if (surfaceLightView.opaqueFlats.empty())
@@ -266,7 +275,7 @@ bool BuildSurfaceLightOverlay(
 	for (size_t i = 0; i < outMaterials.materials.size(); ++i)
 	{
 		nri_scene::MaterialData& material = outMaterials.materials[i];
-		material.flags |= nri_scene::MaterialFlag_Fullbright | nri_scene::MaterialFlag_Flat;
+		material.flags |= nri_scene::MaterialFlag_Fullbright | nri_scene::MaterialFlag_Flat | nri_scene::MaterialFlag_TintEmission;
 		material.lightingFlags |=
 			nri_scene::MaterialLightingFlag_MaterialFullbright |
 			nri_scene::MaterialLightingFlag_NoShadowReceive |
@@ -275,9 +284,10 @@ bool BuildSurfaceLightOverlay(
 		material.emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
 		material.emissiveTextureIndex = material.textureIndex;
 		material.emissiveIntensity = 1.0f;
-		material.emissiveColor[0] = 1.0f;
-		material.emissiveColor[1] = 1.0f;
-		material.emissiveColor[2] = 1.0f;
+		const std::array<float, 3> lightColor = i < surfaceLightColors.size() ? surfaceLightColors[i] : std::array<float, 3>{ 1.0f, 1.0f, 1.0f };
+		material.emissiveColor[0] = lightColor[0];
+		material.emissiveColor[1] = lightColor[1];
+		material.emissiveColor[2] = lightColor[2];
 		if (i < outMaterials.lightMetadata.size())
 		{
 			nri_scene::MaterialLightingMetadata& metadata = outMaterials.lightMetadata[i];
@@ -290,9 +300,9 @@ bool BuildSurfaceLightOverlay(
 			metadata.emissiveMode = nri_scene::MaterialEmissiveMode_None;
 			metadata.emissiveTextureIndex = UINT32_MAX;
 			metadata.emissiveIntensity = 0.0f;
-			metadata.emissiveColor[0] = 1.0f;
-			metadata.emissiveColor[1] = 1.0f;
-			metadata.emissiveColor[2] = 1.0f;
+			metadata.emissiveColor[0] = material.emissiveColor[0];
+			metadata.emissiveColor[1] = material.emissiveColor[1];
+			metadata.emissiveColor[2] = material.emissiveColor[2];
 		}
 	}
 

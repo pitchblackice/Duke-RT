@@ -41,6 +41,7 @@ enum MaterialFlags : uint32_t
 	MaterialFlag_FacingBillboard = 1u << 9,
 	MaterialFlag_PointSampled = 1u << 10,
 	MaterialFlag_PlainMirror = 1u << 11,
+	MaterialFlag_TintEmission = 1u << 12,
 };
 
 enum PrimitiveFlags : uint32_t
