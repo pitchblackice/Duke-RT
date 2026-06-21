@@ -112,6 +112,8 @@ LIGHTOVR
     actorrule "RPGFlight"
     {
         actorclass "DukeRPG"
+        shadowreceive on
+        shadowcast off
         activation immediate
         type "point"
         color 1.0 0.7 0.3
@@ -119,8 +121,6 @@ LIGHTOVR
         radius 256.0
         offset 0.0 -2.0 8.0
         flicker 16
-        shadowcast off
-        shadowreceive on
     }
 
     actorrule "ShrinkerHit"
@@ -3958,7 +3958,1708 @@ LIGHTOVR
         }
     }
 
+    map "E3L1"
+    {
+        directional "EditorDirectional"
+        {
+            color 1.0 0.4 0.4
+            intensity 1.5
+            direction -0.409487 0.51446 0.753426
+            angularsize 0.03
+            shadow on
+        }
+        surfacelight "Water"
+        {
+            anchor surface
+            position 3293.95 -160.01 2248.53
+            normal -0.0 -1.0 0.0
+            size 28.0 28.0
+            offset 0.5
+            sector 16
+            tile 1590
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 0.8
+            intensity 0.5
+            radius 416.0
+            sectorresponse off
+            signal sector 16
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "DiningRoom1"
+        {
+            anchor surface
+            position 2338.3 207.99 1733.61
+            normal 0.0 -1.0 0.0
+            size 28.0 24.0
+            offset 0.5
+            sector 70
+            tile 1602
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 224.0
+            sectorresponse off
+            signal sector 70
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "DiningRoom2"
+        {
+            anchor surface
+            position 2367.6 207.99 1559.65
+            normal 0.0 -1.0 0.0
+            size 28.0 24.0
+            offset 0.5
+            sector 101
+            tile 1602
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 224.0
+            sectorresponse off
+            signal sector 101
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "DiningRoom3"
+        {
+            anchor surface
+            position 2341.74 207.99 1382.82
+            normal 0.0 -1.0 -0.0
+            size 28.0 24.0
+            offset 0.5
+            sector 64
+            tile 1602
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 224.0
+            sectorresponse off
+            signal sector 64
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "TrapDoor"
+        {
+            anchor surface
+            position 2318.18 187.99 1930.04
+            normal 0.0 -1.0 0.0
+            size 16.0 16.0
+            offset 0.5
+            sector 246
+            tile 1602
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 160.0
+            sectorresponse off
+            signal sector 246
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "LongHall"
+        {
+            anchor surface
+            position 2191.96 231.99 1567.39
+            normal 0.0 -1.0 0.0
+            size 128.0 32.0
+            offset 0.5
+            sector 334
+            tile 1602
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 352.0
+            sectorresponse off
+            signal sector 334
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "HiddenRoomUnderDining"
+        {
+            anchor surface
+            position 2575.0 247.99 1591.57
+            normal 0.0 -1.0 0.0
+            size 68.0 16.0
+            offset 0.5
+            sector 156
+            tile 979
+            fixture texture "#00703"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 192.0
+            sectorresponse off
+            signal sector 156
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "Vent1"
+        {
+            anchor surface
+            position 2559.0 231.99 1435.17
+            normal 0.0 -1.0 0.0
+            size 8.0 8.0
+            offset 0.5
+            sector 198
+            tile 1130
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 96.0
+            sectorresponse off
+            signal sector 198
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "Vent2"
+        {
+            anchor surface
+            position 2559.81 231.99 1146.51
+            normal 0.0 -1.0 0.0
+            size 8.0 8.0
+            offset 0.5
+            sector 198
+            tile 1130
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 96.0
+            sectorresponse off
+            signal sector 198
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "KaitenSide"
+        {
+            anchor surface
+            position 1697.47 235.99 706.399
+            normal 0.0 -1.0 0.0
+            size 32.0 32.0
+            offset 0.5
+            sector 228
+            tile 1602
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 352.0
+            sectorresponse off
+            signal sector 228
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "SecondVent"
+        {
+            anchor surface
+            position 1587.42 171.99 775.0
+            normal 0.0 -1.0 0.0
+            size 12.0 8.0
+            offset 0.5
+            sector 117
+            tile 1130
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 64.0
+            sectorresponse off
+            signal sector 117
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "KaitenSide2"
+        {
+            anchor surface
+            position 1663.86 171.99 1023.92
+            normal 0.0 -1.0 -0.0
+            size 84.0 28.0
+            offset 0.5
+            sector 227
+            tile 1602
+            fixture texture "#00701"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 256.0
+            sectorresponse off
+            signal sector 227
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "Kitchen1"
+        {
+            anchor surface
+            position 1535.72 171.99 959.873
+            normal 0.0 -1.0 0.0
+            size 84.0 28.0
+            offset 0.5
+            sector 279
+            tile 1602
+            fixture texture "#00701"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 256.0
+            sectorresponse off
+            signal sector 279
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "Kitchen2"
+        {
+            anchor surface
+            position 1406.8 171.99 958.754
+            normal 0.0 -1.0 0.0
+            size 84.0 28.0
+            offset 0.5
+            sector 279
+            tile 1602
+            fixture texture "#00701"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 288.0
+            sectorresponse off
+            signal sector 279
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "Kitchen3"
+        {
+            anchor surface
+            position 1342.88 171.99 872.437
+            normal 0.0 -1.0 0.0
+            size 84.0 28.0
+            offset 0.5
+            sector 278
+            tile 1602
+            fixture texture "#00701"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 224.0
+            sectorresponse off
+            signal sector 278
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "Kitchen4"
+        {
+            anchor surface
+            position 1445.0 171.99 1110.28
+            normal -0.0 -1.0 -0.0
+            size 16.0 36.0
+            offset 0.5
+            sector 288
+            tile 1602
+            fixture texture "#00701"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.25
+            radius 256.0
+            sectorresponse off
+            signal sector 288
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "Water2"
+        {
+            anchor surface
+            position 3035.85 -158.21 1296.0
+            normal 0.0 -0.0 1.0
+            size 20.0 12.0
+            offset 0.5
+            sector 142
+            wall 891
+            tile 1928
+            fixture texture "#00703"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 0.8
+            intensity 0.25
+            radius 512.0
+            sectorresponse off
+            signal sector 142
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "LastAreaHall"
+        {
+            anchor surface
+            position 1242.34 55.99 1590.98
+            normal -0.0 -1.0 0.0
+            size 16.0 28.0
+            offset 0.5
+            sector 271
+            tile 1538
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 192.0
+            sectorresponse off
+            signal sector 271
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "Reception"
+        {
+            anchor surface
+            position 1857.52 179.99 1888.14
+            normal -0.0 -1.0 0.0
+            size 64.0 16.0
+            offset 0.5
+            sector 238
+            tile 1602
+            fixture texture "#00701"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 0.8 0.8
+            intensity 0.25
+            radius 176.0
+            sectorresponse off
+            signal sector 238
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+    }
+
+    map "E3L2"
+    {
+        directional "EditorDirectional"
+        {
+            color 1.0 0.4 0.4
+            intensity 1.5
+            direction 0.59487 0.81446 0.253426
+            angularsize 0.03
+            shadow on
+        }
+        surfacelight "EntryHall"
+        {
+            anchor surface
+            position -320.218 143.99 -936.322
+            normal -0.0 -1.0 0.0
+            size 40.0 96.0
+            offset 0.5
+            sector 114
+            tile 1160
+            fixture texture "#00127"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 0.8
+            intensity 0.75
+            radius 512.0
+            sectorresponse off
+            signal sector 114
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "ATM"
+        {
+            anchor surface
+            position -9.65973 119.99 -1951.45
+            normal -0.0 -1.0 0.0
+            size 32.0 32.0
+            offset 0.5
+            sector 84
+            tile 4174
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 0.8
+            intensity 0.25
+            radius 256.0
+            sectorresponse on
+            signal sector 84
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "PuzzleRoom"
+        {
+            anchor surface
+            position -2220.0 116.437 -1551.16
+            normal 1.0 0.0 0.0
+            size 32.0 32.0
+            offset 0.5
+            sector 174
+            wall 1569
+            tile 1242
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 0.6 0.6
+            intensity 0.7
+            radius 256.0
+            sectorresponse off
+            signal sector 174
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+    }
+
+    map "E3L3"
+    {
+        directional "EditorDirectional"
+        {
+            color 1.0 0.4 0.4
+            intensity 1.5
+            direction -0.409487 0.51446 0.753426
+            angularsize 0.03
+            shadow on
+        }
+        surfacelight "LockLight1"
+        {
+            anchor surface
+            position 2057.03 -168.0 3046.65
+            normal -0.0 1.0 -0.0
+            size 8.0 24.0
+            offset 0.5
+            sector 258
+            tile 1578
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 128.0
+            sectorresponse off
+            signal sector 258
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "LockLight2"
+        {
+            anchor surface
+            position 1952.94 -352.0 2223.23
+            normal -0.0 1.0 0.0
+            size 8.0 24.0
+            rotation 270.0
+            offset 0.5
+            sector 86
+            tile 1959
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 128.0
+            sectorresponse off
+            signal sector 86
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "FallsLight"
+        {
+            anchor surface
+            position 2368.0 -72.7697 3535.77
+            normal -1.0 0.0 0.0
+            size 20.0 20.0
+            offset 0.5
+            sector 121
+            wall 688
+            tile 1590
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.25
+            radius 512.0
+            sectorresponse off
+            signal sector 121
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "CaveEggLight"
+        {
+            anchor surface
+            position 3529.94 -1817.52 2516.49
+            normal 0.242536 -0.970143 0.0
+            size 100.0 20.0
+            offset 0.5
+            sector 175
+            tile 1888
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 736.0
+            sectorresponse on
+            signal sector 175
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "CaveEggUnderwaterLight"
+        {
+            anchor surface
+            position -26.2919 -2134.4 2416.09
+            normal -0.997459 0.0 -0.071247
+            size 20.0 20.0
+            offset 0.5
+            sector 67
+            wall 326
+            tile 1957
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 448.0
+            sectorresponse off
+            signal sector 67
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "EggRoomDoor"
+        {
+            anchor surface
+            position -1882.44 -2148.01 2329.27
+            normal 0.0 -1.0 0.0
+            size 32.0 32.0
+            offset 0.5
+            sector 239
+            tile 1122
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 384.0
+            sectorresponse off
+            signal sector 239
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "EggRoom"
+        {
+            anchor surface
+            position -1941.89 -2148.01 2203.96
+            normal 0.0 -1.0 0.0
+            size 60.0 20.0
+            offset 0.5
+            sector 239
+            tile 1122
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 288.0
+            sectorresponse on
+            signal sector 239
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "OfficeLight1"
+        {
+            anchor surface
+            position -1343.1 -2028.01 2241.43
+            normal 0.0 -1.0 0.0
+            size 28.0 132.0
+            offset 0.5
+            sector 255
+            tile 1992
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.25
+            radius 376.0
+            sectorresponse off
+            signal sector 255
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "OfficeLight2"
+        {
+            anchor surface
+            position -1342.52 -2156.01 2080.24
+            normal 0.0 -1.0 0.0
+            size 28.0 68.0
+            rotation 270.0
+            offset 0.5
+            sector 16
+            tile 1992
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 160.0
+            sectorresponse off
+            signal sector 16
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+    }
+
     map "E3L4"
+    {
+        directional "EditorDirectional"
+        {
+            color 1.0 0.4 0.4
+            intensity 1.5
+            direction -0.409487 0.51446 0.753426
+            angularsize 0.03
+            shadow on
+        }
+        surfacelight "EntryHall"
+        {
+            anchor surface
+            position 2018.55 -404.01 3151.93
+            normal 0.0 -1.0 0.0
+            size 36.0 88.0
+            offset 0.5
+            sector 231
+            tile 4175
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 0.7
+            intensity 0.25
+            radius 352.0
+            sectorresponse off
+            signal sector 231
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "UpstairsElevatorHall1"
+        {
+            anchor surface
+            position 2685.48 419.99 2226.21
+            normal 0.0 -1.0 -0.0
+            size 16.0 76.0
+            offset 0.5
+            sector 155
+            tile 1160
+            fixture texture "#00701"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 224.0
+            sectorresponse off
+            signal sector 155
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "UpstairsElevatorHall3"
+        {
+            anchor surface
+            position 2875.27 419.99 2224.64
+            normal 0.0 -1.0 0.0
+            size 16.0 76.0
+            offset 0.5
+            sector 154
+            tile 1160
+            fixture texture "#00701"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 224.0
+            sectorresponse off
+            signal sector 154
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "StairsDoor"
+        {
+            anchor surface
+            position 2641.84 475.99 3695.23
+            normal 0.0 -1.0 0.0
+            size 16.0 76.0
+            offset 0.5
+            sector 207
+            tile 1602
+            fixture texture "#00701"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 128.0
+            sectorresponse off
+            signal sector 207
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "FanArea"
+        {
+            anchor surface
+            position 2432.0 -269.764 2475.71
+            normal -1.0 0.0 0.0
+            size 36.0 16.0
+            offset 0.5
+            sector 88
+            wall 516
+            tile 4183
+            fixture texture "#00705"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.25
+            radius 640.0
+            sectorresponse off
+            signal sector 88
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "ExitDoorEntry"
+        {
+            anchor surface
+            position 3298.21 -524.01 2142.53
+            normal 0.0 -1.0 0.0
+            size 32.0 8.0
+            offset 0.5
+            sector 140
+            tile 1602
+            fixture texture "#00708"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.25
+            radius 376.0
+            sectorresponse off
+            signal sector 140
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "LockLight"
+        {
+            anchor surface
+            position 2658.9 -552.0 2770.72
+            normal -0.0 1.0 0.0
+            size 12.0 20.0
+            rotation 345.0
+            offset 0.5
+            sector 174
+            tile 1603
+            fixture texture "#00703"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 128.0
+            sectorresponse off
+            signal sector 174
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "UpperOfficeSteps1"
+        {
+            anchor surface
+            position 2896.1 404.068 3648.0
+            normal 0.0 0.0 1.0
+            size 12.0 12.0
+            offset 0.5
+            sector 42
+            wall 254
+            tile 1615
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 160.0
+            sectorresponse off
+            signal sector 42
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "UpperOfficeSteps2"
+        {
+            anchor surface
+            position 3089.18 354.39 3648.0
+            normal 0.0 0.0 1.0
+            size 12.0 12.0
+            offset 0.5
+            sector 54
+            wall 302
+            tile 1615
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 160.0
+            sectorresponse off
+            signal sector 54
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "UpperOfficeSteps3"
+        {
+            anchor surface
+            position 3231.58 331.0 3648.0
+            normal 0.0 -0.0 1.0
+            size 12.0 12.0
+            offset 0.5
+            sector 62
+            wall 334
+            tile 985
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 160.0
+            sectorresponse off
+            signal sector 62
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "UpperOfficeLowerFloor1"
+        {
+            anchor surface
+            position 3456.0 328.016 3675.92
+            normal -1.0 0.0 0.0
+            size 32.0 8.0
+            offset 1.0
+            sector 204
+            wall 1331
+            tile 1571
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.05
+            radius 768.0
+            sectorresponse off
+            signal sector 204
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "UpperOfficeLowerFloor2"
+        {
+            anchor surface
+            position 3456.0 326.37 3550.41
+            normal -1.0 0.0 0.0
+            size 32.0 8.0
+            offset 1.0
+            sector 202
+            wall 1311
+            tile 1571
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.05
+            radius 768.0
+            sectorresponse off
+            signal sector 202
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "UpperOfficeLowerFloor3"
+        {
+            anchor surface
+            position 3456.0 328.136 3425.08
+            normal -1.0 0.0 0.0
+            size 32.0 8.0
+            offset 1.0
+            sector 202
+            wall 1311
+            tile 1571
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.05
+            radius 768.0
+            sectorresponse off
+            signal sector 202
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "UpperOfficeLowerFloor4"
+        {
+            anchor surface
+            position 3456.0 328.634 3296.55
+            normal -1.0 0.0 0.0
+            size 32.0 8.0
+            offset 1.0
+            sector 201
+            wall 1278
+            tile 1571
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.0
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "EleShaft1"
+        {
+            anchor surface
+            position 2270.95 333.255 1944.0
+            normal 0.0 -0.0 1.0
+            size 12.0 16.0
+            offset 0.5
+            sector 146
+            wall 925
+            tile 1527
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 288.0
+            sectorresponse off
+            signal sector 146
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "EleShaft2"
+        {
+            anchor surface
+            position 2271.11 87.545 1944.0
+            normal 0.0 -0.0 1.0
+            size 12.0 16.0
+            offset 0.5
+            sector 146
+            wall 925
+            tile 1527
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 288.0
+            sectorresponse off
+            signal sector 146
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "EleShaft3"
+        {
+            anchor surface
+            position 2270.84 -78.265 1944.0
+            normal 0.0 0.0 1.0
+            size 12.0 16.0
+            offset 0.5
+            sector 146
+            wall 925
+            tile 1527
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 288.0
+            sectorresponse off
+            signal sector 146
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "EleShaft4"
+        {
+            anchor surface
+            position 2270.61 -235.261 1944.0
+            normal 0.0 0.0 1.0
+            size 12.0 16.0
+            offset 0.5
+            sector 146
+            wall 925
+            tile 1527
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 288.0
+            sectorresponse off
+            signal sector 146
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "EleShaft5"
+        {
+            anchor surface
+            position 2271.1 -422.257 1944.0
+            normal 0.0 0.0 1.0
+            size 12.0 16.0
+            offset 0.5
+            sector 146
+            wall 925
+            tile 1527
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 288.0
+            sectorresponse off
+            signal sector 146
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "LowerHallEntry1"
+        {
+            anchor surface
+            position 2462.1 -416.01 2221.18
+            normal 0.0 -1.0 0.0
+            size 24.0 96.0
+            offset 0.5
+            sector 149
+            tile 1602
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 320.0
+            sectorresponse off
+            signal sector 149
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "LowerHallEntry2"
+        {
+            anchor surface
+            position 2723.34 -416.01 2465.49
+            normal 0.0 -1.0 0.0
+            size 16.0 76.0
+            offset 0.5
+            sector 153
+            tile 1602
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 224.0
+            sectorresponse off
+            signal sector 153
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "EntryNook"
+        {
+            anchor surface
+            position 2333.76 -393.383 3328.0
+            normal 0.0 0.0 -1.0
+            size 16.0 16.0
+            offset 0.5
+            sector 171
+            wall 1076
+            tile 4174
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 288.0
+            sectorresponse off
+            signal sector 171
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "Doctor1"
+        {
+            anchor surface
+            position 3096.09 -536.01 2106.69
+            normal 0.0 -1.0 0.0
+            size 8.0 60.0
+            offset 0.5
+            sector 142
+            tile 1578
+            fixture texture "#00701"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 192.0
+            sectorresponse off
+            signal sector 142
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "Doctor2"
+        {
+            anchor surface
+            position 3107.35 -536.01 2304.14
+            normal 0.0 -1.0 0.0
+            size 8.0 44.0
+            offset 0.5
+            sector 83
+            tile 1578
+            fixture texture "#00701"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 160.0
+            sectorresponse off
+            signal sector 83
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+    }
+
+    map "E3L5"
+    {
+        directional "EditorDirectional"
+        {
+            color 1.0 0.4 0.4
+            intensity 1.5
+            direction -0.409487 0.51446 0.753426
+            angularsize 0.03
+            shadow on
+        }
+        surfacelight "EntryReception"
+        {
+            anchor surface
+            position 2479.12 79.99 -1425.53
+            normal 0.0 -1.0 -0.0
+            size 12.0 44.0
+            offset 0.5
+            sector 39
+            tile 1160
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 224.0
+            sectorresponse off
+            signal sector 39
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "EntryLeftHall1"
+        {
+            anchor surface
+            position 2236.23 47.99 -1248.14
+            normal 0.0 -1.0 0.0
+            size 12.0 44.0
+            rotation 270.0
+            offset 0.5
+            sector 106
+            tile 1602
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 192.0
+            sectorresponse off
+            signal sector 106
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "EntryLeftHall2"
+        {
+            anchor surface
+            position 1968.64 111.99 -1423.14
+            normal 0.0 -1.0 -0.0
+            size 32.0 136.0
+            offset 0.5
+            sector 187
+            tile 1602
+            fixture texture "#00705"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 256.0
+            sectorresponse off
+            signal sector 187
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "LockLight1"
+        {
+            anchor surface
+            position 2302.7 -32.0 -898.006
+            normal 0.0 1.0 -0.0
+            size 20.0 8.0
+            offset 0.5
+            sector 206
+            tile 1603
+            fixture texture "#00128"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 96.0
+            sectorresponse off
+            signal sector 206
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "VentLight1"
+        {
+            anchor surface
+            position 1840.07 191.99 -423.801
+            normal -0.0 -1.0 0.0
+            size 12.0 12.0
+            offset 0.5
+            sector 93
+            tile 1131
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 64.0
+            sectorresponse off
+            signal sector 93
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "VentLight2"
+        {
+            anchor surface
+            position 1919.14 191.99 -424.621
+            normal 0.0 -1.0 0.0
+            size 12.0 12.0
+            offset 0.5
+            sector 94
+            tile 1131
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 64.0
+            sectorresponse off
+            signal sector 94
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "VentLight3"
+        {
+            anchor surface
+            position 2042.74 191.99 -423.558
+            normal 0.0 -1.0 0.0
+            size 12.0 12.0
+            offset 0.5
+            sector 96
+            tile 1131
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 64.0
+            sectorresponse off
+            signal sector 96
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "VentLight4"
+        {
+            anchor surface
+            position 2144.73 191.99 -421.668
+            normal -0.0 -1.0 0.0
+            size 12.0 12.0
+            offset 0.5
+            sector 91
+            tile 1131
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 64.0
+            sectorresponse off
+            signal sector 91
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "VentLight5"
+        {
+            anchor surface
+            position 2247.68 191.99 -426.167
+            normal 0.0 -1.0 0.0
+            size 12.0 12.0
+            rotation 30.0
+            offset 0.5
+            sector 151
+            tile 1131
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 64.0
+            sectorresponse off
+            signal sector 151
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "VentLight6"
+        {
+            anchor surface
+            position 2265.56 191.99 -518.663
+            normal 0.0 -1.0 0.0
+            size 12.0 12.0
+            rotation 90.0
+            offset 0.5
+            sector 124
+            tile 1131
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 64.0
+            sectorresponse off
+            signal sector 124
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "VentLight7"
+        {
+            anchor surface
+            position 2262.35 191.99 -631.004
+            normal -0.0 -1.0 0.0
+            size 12.0 12.0
+            rotation 90.0
+            offset 0.5
+            sector 122
+            tile 1131
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 64.0
+            sectorresponse off
+            signal sector 122
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "VentLight8"
+        {
+            anchor surface
+            position 2262.97 191.99 -712.897
+            normal 0.0 -1.0 0.0
+            size 12.0 12.0
+            rotation 90.0
+            offset 0.5
+            sector 122
+            tile 1131
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 64.0
+            sectorresponse off
+            signal sector 122
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "VentLight9"
+        {
+            anchor surface
+            position 2262.74 191.99 -838.545
+            normal 0.0 -1.0 0.0
+            size 12.0 12.0
+            rotation 90.0
+            offset 0.5
+            sector 126
+            tile 1131
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 64.0
+            sectorresponse off
+            signal sector 126
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "VentLight10"
+        {
+            anchor surface
+            position 2263.26 191.99 -950.841
+            normal -0.0 -1.0 0.0
+            size 12.0 12.0
+            rotation 90.0
+            offset 0.5
+            sector 121
+            tile 1131
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 64.0
+            sectorresponse off
+            signal sector 121
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "VentLight11"
+        {
+            anchor surface
+            position 2262.9 191.99 -1034.06
+            normal 0.0 -1.0 0.0
+            size 12.0 12.0
+            rotation 90.0
+            offset 0.5
+            sector 121
+            tile 1131
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 64.0
+            sectorresponse off
+            signal sector 121
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "VentLight12"
+        {
+            anchor surface
+            position 2142.51 191.99 -1038.29
+            normal 0.0 -1.0 0.0
+            size 12.0 12.0
+            rotation 90.0
+            offset 0.5
+            sector 101
+            tile 1131
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 64.0
+            sectorresponse off
+            signal sector 101
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "VentLight13"
+        {
+            anchor surface
+            position 2045.7 191.99 -1039.57
+            normal 0.0 -1.0 0.0
+            size 12.0 12.0
+            rotation 90.0
+            offset 0.5
+            sector 101
+            tile 1131
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 64.0
+            sectorresponse off
+            signal sector 101
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "VentLight14"
+        {
+            anchor surface
+            position 1982.97 191.99 -1038.44
+            normal 0.0 -1.0 0.0
+            size 12.0 12.0
+            rotation 90.0
+            offset 0.5
+            sector 89
+            tile 1131
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 64.0
+            sectorresponse off
+            signal sector 89
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "VentLight15"
+        {
+            anchor surface
+            position 1983.3 191.99 -955.921
+            normal 0.0 -1.0 0.0
+            size 12.0 12.0
+            rotation 90.0
+            offset 0.5
+            sector 99
+            tile 1131
+            fixture texture "#00124"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 32.0
+            sectorresponse off
+            signal sector 99
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+        surfacelight "surfacelight_19_6-21-2026-2140Z"
+        {
+            anchor surface
+            position 1851.05 32.0 -536.614
+            normal -0.0 1.0 -0.0
+            size 16.0 8.0
+            offset 0.5
+            sector 169
+            tile 1543
+            fixture texture "#00703"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.5
+            radius 128.0
+            sectorresponse off
+            signal sector 169
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
+        }
+    }
+
+    map "E3L6"
+    {
+        directional "EditorDirectional"
+        {
+            color 1.0 0.4 0.4
+            intensity 1.5
+            direction -0.409487 0.51446 0.753426
+            angularsize 0.03
+            shadow on
+        }
+    }
+
+    map "E3L7"
+    {
+        directional "EditorDirectional"
+        {
+            color 1.0 0.4 0.4
+            intensity 1.5
+            direction -0.409487 0.51446 0.753426
+            angularsize 0.03
+            shadow on
+        }
+    }
+
+    map "E3L8"
+    {
+        directional "EditorDirectional"
+        {
+            color 1.0 0.4 0.4
+            intensity 1.5
+            direction -0.409487 0.51446 0.753426
+            angularsize 0.03
+            shadow on
+        }
+    }
+
+    map "E3L9"
     {
         directional "EditorDirectional"
         {
