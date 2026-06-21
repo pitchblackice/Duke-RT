@@ -73,6 +73,9 @@ actor DukePigCop allpicnums priority=high gpu=prefer reason=e1l1-verified-monste
 actor DukePigCopDive allpicnums priority=high gpu=prefer reason=e1l1-verified-monster-pigcop-dive
 actor DukePigCopStayput allpicnums priority=high gpu=prefer reason=e1l1-verified-monster-pigcop-stayput
 
+# Female actors verified with listactors on 2026-06-20.
+actor DukePodFemale allpicnums priority=high gpu=prefer reason=e1l1-verified-female-pod
+
 map E1L2
 
 # Large repeated admissions observed while traversing E1L2.
@@ -90,6 +93,12 @@ actor DukePigCopDive allpicnums priority=high gpu=prefer reason=e1l2-verified-mo
 actor DukePigCopStayput allpicnums priority=high gpu=prefer reason=e1l2-verified-monster-pigcop-stayput
 actor DukeRecon allpicnums priority=high gpu=prefer reason=e1l2-verified-monster-recon
 
+# Female actors verified with listactors on 2026-06-20.
+actor DukeFemale1 allpicnums priority=high gpu=prefer reason=e1l2-verified-female-1
+actor DukeFemale2 allpicnums priority=high gpu=prefer reason=e1l2-verified-female-2
+actor DukeFemale3 allpicnums priority=high gpu=prefer reason=e1l2-verified-female-3
+actor DukePodFemale allpicnums priority=high gpu=prefer reason=e1l2-verified-female-pod
+
 map E1L3
 
 picrange 931-933 priority=high gpu=prefer reason=e1l3-large-prop-variants
@@ -106,6 +115,9 @@ actor DukePigCopDive allpicnums priority=high gpu=prefer reason=e1l3-verified-mo
 actor DukePigCopStayput allpicnums priority=high gpu=prefer reason=e1l3-verified-monster-pigcop-stayput
 actor DukeRecon allpicnums priority=high gpu=prefer reason=e1l3-verified-monster-recon
 
+# Female actors verified with listactors on 2026-06-20.
+actor DukePodFemale allpicnums priority=high gpu=prefer reason=e1l3-verified-female-pod
+
 map E1L4
 
 pic 1397 priority=high gpu=prefer reason=e1l4-large-babe-variant
@@ -119,6 +131,9 @@ actor DukeLizTrooperStayput allpicnums priority=high gpu=prefer reason=e1l4-veri
 actor DukeOctabrain allpicnums priority=high gpu=prefer reason=e1l4-verified-monster-octabrain
 actor DukeOctabrainStayput allpicnums priority=high gpu=prefer reason=e1l4-verified-monster-octabrain-stayput
 actor DukePigCop allpicnums priority=high gpu=prefer reason=e1l4-verified-monster-pigcop
+
+# Female actors verified with listactors on 2026-06-20.
+actor DukePodFemale allpicnums priority=high gpu=prefer reason=e1l4-verified-female-pod
 
 map E1L5
 
@@ -137,6 +152,10 @@ actor DukeOctabrain allpicnums priority=high gpu=prefer reason=e1l5-verified-mon
 actor DukePigCop allpicnums priority=high gpu=prefer reason=e1l5-verified-monster-pigcop
 actor DukePigCopStayput allpicnums priority=high gpu=prefer reason=e1l5-verified-monster-pigcop-stayput
 
+# Female actors verified with listactors on 2026-06-20.
+actor DukeFemale4 allpicnums priority=high gpu=prefer reason=e1l5-verified-female-4
+actor DukePodFemale allpicnums priority=high gpu=prefer reason=e1l5-verified-female-pod
+
 map E1L6
 
 # Largest E1L6 runtime GPU admissions observed in tools/logs/preload-test.log.
@@ -149,6 +168,9 @@ actor DukeLizTrooperStayput allpicnums priority=high gpu=prefer reason=e1l6-veri
 actor DukeOctabrain allpicnums priority=high gpu=prefer reason=e1l6-verified-monster-octabrain
 actor DukePigCop allpicnums priority=high gpu=prefer reason=e1l6-verified-monster-pigcop
 actor DukePigCopStayput allpicnums priority=high gpu=prefer reason=e1l6-verified-monster-pigcop-stayput
+
+# Female actors verified with listactors on 2026-06-20.
+actor DukePodFemale allpicnums priority=high gpu=prefer reason=e1l6-verified-female-pod
 
 map E1L7
 
@@ -189,6 +211,10 @@ actor DukeLizTrooper allpicnums priority=high gpu=prefer reason=e2l2-verified-mo
 actor DukeOctabrain allpicnums priority=high gpu=prefer reason=e2l2-verified-monster-octabrain
 actor DukeOctabrainStayput allpicnums priority=high gpu=prefer reason=e2l2-verified-monster-octabrain-stayput
 
+# Female actors verified with listactors on 2026-06-20.
+actor DukeFemale5 allpicnums priority=high gpu=prefer reason=e2l2-verified-female-5
+actor DukeFemale6 allpicnums priority=high gpu=prefer reason=e2l2-verified-female-6
+
 map E2L3
 
 pic 832 priority=high gpu=prefer reason=e2l3-frequent-large-runtime-prop
@@ -218,6 +244,10 @@ actor DukeLizTrooperJetpack allpicnums priority=high gpu=prefer reason=e2l4-veri
 actor DukeLizTrooperShoot allpicnums priority=high gpu=prefer reason=e2l4-verified-monster-liztrooper-shoot
 actor DukeLizTrooperStayput allpicnums priority=high gpu=prefer reason=e2l4-verified-monster-liztrooper-stayput
 
+# Female actors verified with listactors on 2026-06-20.
+actor DukeFemale6 allpicnums priority=high gpu=prefer reason=e2l4-verified-female-6
+actor DukePodFemale allpicnums priority=high gpu=prefer reason=e2l4-verified-female-pod
+
 map E2L5
 
 # Largest E2L5 runtime GPU admissions observed in tools/logs/loading-data.log.
@@ -237,6 +267,10 @@ actor DukeLizTrooperDucking allpicnums priority=high gpu=prefer reason=e2l5-veri
 actor DukeLizTrooperJetpack allpicnums priority=high gpu=prefer reason=e2l5-verified-monster-liztrooper-jetpack
 actor DukeLizTrooperRunning allpicnums priority=high gpu=prefer reason=e2l5-verified-monster-liztrooper-running
 actor DukeLizTrooperShoot allpicnums priority=high gpu=prefer reason=e2l5-verified-monster-liztrooper-shoot
+
+# Female actors verified with listactors on 2026-06-20.
+actor DukeFemale5 allpicnums priority=high gpu=prefer reason=e2l5-verified-female-5
+actor DukePodFemale allpicnums priority=high gpu=prefer reason=e2l5-verified-female-pod
 
 map E2L6
 
@@ -298,6 +332,9 @@ actor DukeLizTrooperDucking allpicnums priority=high gpu=prefer reason=e2l8-veri
 actor DukeLizTrooperStayput allpicnums priority=high gpu=prefer reason=e2l8-verified-monster-liztrooper-stayput
 actor DukeOctabrain allpicnums priority=high gpu=prefer reason=e2l8-verified-monster-octabrain
 
+# Female actors verified with listactors on 2026-06-20.
+actor DukeFemale5 allpicnums priority=high gpu=prefer reason=e2l8-verified-female-5
+
 map E2L9
 
 # Largest E2L9 runtime GPU admissions observed in tools/logs/loading-data-3.log.
@@ -323,6 +360,9 @@ actor DukeLizTrooperJetpack allpicnums priority=high gpu=prefer reason=e2l9-veri
 actor DukeLizTrooperStayput allpicnums priority=high gpu=prefer reason=e2l9-verified-monster-liztrooper-stayput
 actor DukeOctabrain allpicnums priority=high gpu=prefer reason=e2l9-verified-monster-octabrain
 
+# Female actors verified with listactors on 2026-06-20.
+actor DukePodFemale allpicnums priority=high gpu=prefer reason=e2l9-verified-female-pod
+
 map E2L10
 
 # Monster actors verified with listactors on 2026-06-20.
@@ -337,6 +377,9 @@ actor DukeBoss1 allpicnums priority=high gpu=prefer reason=e2l11-verified-monste
 actor DukeLizTrooper allpicnums priority=high gpu=prefer reason=e2l11-verified-monster-liztrooper
 actor DukeLizTrooperDucking allpicnums priority=high gpu=prefer reason=e2l11-verified-monster-liztrooper-ducking
 actor DukeLizTrooperJetpack allpicnums priority=high gpu=prefer reason=e2l11-verified-monster-liztrooper-jetpack
+
+# Female actors verified with listactors on 2026-06-20.
+actor DukeFemale5 allpicnums priority=high gpu=prefer reason=e2l11-verified-female-5
 
 map E3L1
 
