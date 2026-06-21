@@ -496,7 +496,7 @@ bool ExecuteNRIFrameGraph(
 		if (bloomEnabled)
 		{
 			NRIBloomDispatchDesc bloomDesc = {};
-			bloomDesc.mode = NRIBloomDispatchDesc::Mode::Copy;
+			bloomDesc.mode = NRIBloomDispatchDesc::Mode::Filter;
 			bloomDesc.inputSlot = resolvedPresentSlot;
 			bloomDesc.outputSlot = FrameTextureSlot::PostBloomOutput;
 			if (!DispatchBloom(context, bloomDesc))
