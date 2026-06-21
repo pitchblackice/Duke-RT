@@ -689,6 +689,7 @@ public:
 		uint32_t flickerTimeIndex,
 		uint32_t renderFrameIndex,
 		uint32_t maxActiveLights,
+		const float* currentCameraPos = nullptr,
 		const std::unordered_map<int32_t, std::vector<AnalyticLightRegistry::ActorOverlayRule>>* actorOverlayRules = nullptr,
 		const std::unordered_map<uint32_t, AnalyticLightRegistry::ActorOverlayRule>* actorOverlayRulesById = nullptr,
 		const std::vector<AnalyticLightRegistry::MapOverlayRule>* mapOverlayRules = nullptr);

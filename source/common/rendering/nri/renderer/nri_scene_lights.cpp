@@ -2641,6 +2641,7 @@ void NRIRenderer::RefreshSceneLightSystem(
 			gameplayLightTimeIndex,
 			mFrameIndex,
 			NRI_MAX_RUNTIME_POINT_LIGHTS,
+			mCurrentCameraPos,
 			actorOverlayRules.empty() ? nullptr : &actorOverlayRules,
 			actorOverlayRulesById.empty() ? nullptr : &actorOverlayRulesById,
 			mapOverlayRules.empty() ? nullptr : &mapOverlayRules);
@@ -3580,6 +3581,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 	uint32_t flickerTimeIndex,
 	uint32_t renderFrameIndex,
 	uint32_t maxActiveLights,
+	const float* currentCameraPos,
 	const std::unordered_map<int32_t, std::vector<AnalyticLightRegistry::ActorOverlayRule>>* actorOverlayRules,
 	const std::unordered_map<uint32_t, AnalyticLightRegistry::ActorOverlayRule>* actorOverlayRulesById,
 	const std::vector<AnalyticLightRegistry::MapOverlayRule>* mapOverlayRules)
@@ -3605,17 +3607,11 @@ void SceneLightSystem::RebuildAnalyticLights(
 	std::unordered_map<uint64_t, size_t> keyToLightIndex;
 	keyToLightIndex.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.transientLights.size() + mAnalyticLights.spriteTileRules.size() * 4u + overlayRuleCount * 2u + mapOverlayRuleCount);
 
-	auto tryAppendLight = [this, &nextLights, &keyToLightIndex, maxActiveLights](const SceneAnalyticLight& light)
+	auto tryAppendLight = [this, &nextLights, &keyToLightIndex](const SceneAnalyticLight& light)
 	{
 		if (keyToLightIndex.find(light.stableKey) != keyToLightIndex.end())
 		{
 			mAnalyticLights.dedupedMatchCount++;
-			return;
-		}
-
-		if (nextLights.size() >= maxActiveLights)
-		{
-			mAnalyticLights.truncatedLightCount++;
 			return;
 		}
 
@@ -3959,6 +3955,26 @@ void SceneLightSystem::RebuildAnalyticLights(
 			light.radius = rule.radius;
 			tryAppendLight(light);
 		}
+	}
+
+	if (nextLights.size() > maxActiveLights)
+	{
+		mAnalyticLights.truncatedLightCount = (uint32_t)(nextLights.size() - maxActiveLights);
+		if (currentCameraPos != nullptr)
+		{
+			auto distanceSqToCamera = [currentCameraPos](const SceneAnalyticLight& light)
+			{
+				const float dx = light.position[0] - currentCameraPos[0];
+				const float dy = light.position[1] - currentCameraPos[1];
+				const float dz = light.position[2] - currentCameraPos[2];
+				return dx * dx + dy * dy + dz * dz;
+			};
+			std::stable_sort(nextLights.begin(), nextLights.end(), [&distanceSqToCamera](const SceneAnalyticLight& left, const SceneAnalyticLight& right)
+			{
+				return distanceSqToCamera(left) < distanceSqToCamera(right);
+			});
+		}
+		nextLights.resize(maxActiveLights);
 	}
 
 	std::vector<uint64_t> nextTopologyKeys;
