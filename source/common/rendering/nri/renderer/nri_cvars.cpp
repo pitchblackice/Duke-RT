@@ -519,9 +519,9 @@ CUSTOM_CVAR(Float, nri_ptautoexposureadaptdown, 1.0f, CVAR_ARCHIVE | CVAR_GLOBAL
 	}
 }
 
-CVAR(Bool, nri_ptbloom, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptbloom, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CUSTOM_CVAR(Float, nri_ptbloomintensity, 0.10f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptbloomintensity, 0.053125f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -533,7 +533,7 @@ CUSTOM_CVAR(Float, nri_ptbloomintensity, 0.10f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG
 	}
 }
 
-CUSTOM_CVAR(Float, nri_ptbloomsigma, 0.10f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptbloomsigma, 0.796875f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -545,7 +545,7 @@ CUSTOM_CVAR(Float, nri_ptbloomsigma, 0.10f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 }
 
-CUSTOM_CVAR(Float, nri_ptbloomcutoff, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptbloomcutoff, 0.65f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -557,7 +557,7 @@ CUSTOM_CVAR(Float, nri_ptbloomcutoff, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 }
 
-CUSTOM_CVAR(Float, nri_ptbloomfuzziness, 0.25f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptbloomfuzziness, 0.146875f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -581,7 +581,7 @@ CUSTOM_CVAR(Int, nri_ptbloomlevels, 6, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 }
 
-CVAR(Bool, nri_ptbloomenergyconstrained, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptbloomenergyconstrained, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CUSTOM_CVAR(Int, nri_ptbloomdebug, 0, 0)
 {
