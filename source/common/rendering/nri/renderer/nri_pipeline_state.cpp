@@ -241,6 +241,48 @@ bool NRIPipelineStateManager::CreateExposurePipelineLayout(NRIRenderer& renderer
 	return renderer.mFrameBuffer->mCore.CreatePipelineLayout(*renderer.mFrameBuffer->mDevice, desc, renderer.mExposurePipelineLayout) == nri::Result::SUCCESS;
 }
 
+bool NRIPipelineStateManager::CreateBloomPipelineLayout(NRIRenderer& renderer)
+{
+	nri::DescriptorRangeDesc inputRange = {};
+	inputRange.baseRegisterIndex = 0;
+	inputRange.descriptorNum = NRI_BLOOM_INPUT_DESCRIPTOR_NUM;
+	inputRange.descriptorType = nri::DescriptorType::TEXTURE;
+	inputRange.shaderStages = PipelineComputeStage();
+	inputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+
+	nri::DescriptorRangeDesc outputRange = {};
+	outputRange.baseRegisterIndex = 0;
+	outputRange.descriptorNum = NRI_BLOOM_OUTPUT_DESCRIPTOR_NUM;
+	outputRange.descriptorType = nri::DescriptorType::STORAGE_TEXTURE;
+	outputRange.shaderStages = PipelineComputeStage();
+	outputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+
+	nri::DescriptorSetDesc descriptorSets[2] = {};
+	descriptorSets[0].registerSpace = NRI_BLOOM_SET_INPUTS;
+	descriptorSets[0].ranges = &inputRange;
+	descriptorSets[0].rangeNum = 1;
+	descriptorSets[0].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
+	descriptorSets[1].registerSpace = NRI_BLOOM_SET_OUTPUTS;
+	descriptorSets[1].ranges = &outputRange;
+	descriptorSets[1].rangeNum = 1;
+	descriptorSets[1].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
+
+	nri::RootConstantDesc rootConstant = {};
+	rootConstant.registerIndex = NRI_BLOOM_ROOT_REGISTER;
+	rootConstant.size = sizeof(NRIBloomConstants);
+	rootConstant.shaderStages = PipelineComputeStage();
+
+	nri::PipelineLayoutDesc desc = {};
+	desc.rootRegisterSpace = NRI_BLOOM_SET_ROOT;
+	desc.rootConstants = &rootConstant;
+	desc.rootConstantNum = 1;
+	desc.descriptorSets = descriptorSets;
+	desc.descriptorSetNum = (uint32_t)std::size(descriptorSets);
+	desc.shaderStages = PipelineComputeStage();
+
+	return renderer.mFrameBuffer->mCore.CreatePipelineLayout(*renderer.mFrameBuffer->mDevice, desc, renderer.mBloomPipelineLayout) == nri::Result::SUCCESS;
+}
+
 bool NRIPipelineStateManager::CreatePipelines(NRIRenderer& renderer)
 {
 	auto createPipeline = [&renderer](const char* fileName, NRIRenderer::PipelineSlot slot, nri::PipelineLayout* layout)
@@ -289,6 +331,10 @@ bool NRIPipelineStateManager::CreatePipelines(NRIRenderer& renderer)
 	const std::string exposureHistogramClear = "ExposureHistogramClear.cs." + suffix;
 	const std::string exposureHistogramBuild = "ExposureHistogramBuild.cs." + suffix;
 	const std::string exposureResolve = "ExposureResolve.cs." + suffix;
+	const std::string bloomCopy = "BloomCopy.cs." + suffix;
+	const std::string bloomDownsample = "BloomDownsample.cs." + suffix;
+	const std::string bloomUpsample = "BloomUpsample.cs." + suffix;
+	const std::string bloomComposite = "BloomComposite.cs." + suffix;
 
 	return
 		createPipeline(trace.c_str(), NRIRenderer::PipelineSlot::TraceOpaque, renderer.mPipelineLayout) &&
@@ -303,5 +349,9 @@ bool NRIPipelineStateManager::CreatePipelines(NRIRenderer& renderer)
 		createPipeline(dlssSrBefore.c_str(), NRIRenderer::PipelineSlot::DlssSrBefore, renderer.mPipelineLayout) &&
 		createPipeline(dlssBefore.c_str(), NRIRenderer::PipelineSlot::DlssBefore, renderer.mPipelineLayout) &&
 		createPipeline(dlssAfter.c_str(), NRIRenderer::PipelineSlot::DlssAfter, renderer.mPipelineLayout) &&
-		createPipeline(final.c_str(), NRIRenderer::PipelineSlot::Final, renderer.mPipelineLayout);
+		createPipeline(final.c_str(), NRIRenderer::PipelineSlot::Final, renderer.mPipelineLayout) &&
+		createPipeline(bloomCopy.c_str(), NRIRenderer::PipelineSlot::BloomCopy, renderer.mBloomPipelineLayout) &&
+		createPipeline(bloomDownsample.c_str(), NRIRenderer::PipelineSlot::BloomDownsample, renderer.mBloomPipelineLayout) &&
+		createPipeline(bloomUpsample.c_str(), NRIRenderer::PipelineSlot::BloomUpsample, renderer.mBloomPipelineLayout) &&
+		createPipeline(bloomComposite.c_str(), NRIRenderer::PipelineSlot::BloomComposite, renderer.mBloomPipelineLayout);
 }

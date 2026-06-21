@@ -1451,6 +1451,15 @@ public:
 		RrGuideNormalRoughness,
 		VendorOutput,
 		PostSharpenOutput,
+		PostBloomOutput,
+		BloomPyramid0,
+		BloomPyramid1,
+		BloomPyramid2,
+		BloomPyramid3,
+		BloomPyramid4,
+		BloomPyramid5,
+		BloomPyramid6,
+		BloomPyramid7,
 		Final,
 		Count
 	};
@@ -1484,6 +1493,10 @@ public:
 		DlssBefore,
 		DlssAfter,
 		Final,
+		BloomCopy,
+		BloomDownsample,
+		BloomUpsample,
+		BloomComposite,
 		Count
 	};
 
@@ -1870,6 +1883,7 @@ private:
 	nri::PipelineLayout* mTaaPipelineLayout = nullptr;
 	nri::PipelineLayout* mPresentPipelineLayout = nullptr;
 	nri::PipelineLayout* mExposurePipelineLayout = nullptr;
+	nri::PipelineLayout* mBloomPipelineLayout = nullptr;
 	std::array<nri::Pipeline*, (size_t)PipelineSlot::Count> mPipelines = {};
 	nri::DescriptorSet* mSamplerSet = nullptr;
 	std::vector<nri::DescriptorSet*> mSceneTextureSets;

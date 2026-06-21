@@ -9,5 +9,6 @@ public:
 	static bool CreateTaaPipelineLayout(NRIRenderer& renderer);
 	static bool CreatePresentPipelineLayout(NRIRenderer& renderer);
 	static bool CreateExposurePipelineLayout(NRIRenderer& renderer);
+	static bool CreateBloomPipelineLayout(NRIRenderer& renderer);
 	static bool CreatePipelines(NRIRenderer& renderer);
 };

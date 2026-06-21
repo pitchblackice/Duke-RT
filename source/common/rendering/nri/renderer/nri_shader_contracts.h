@@ -207,3 +207,41 @@ static_assert(offsetof(NRIExposureConstants, HighPercentile) == 64, "NRIExposure
 static_assert(offsetof(NRIExposureConstants, FallbackManualExposure) == 68, "NRIExposureConstants layout mismatch.");
 static_assert(offsetof(NRIExposureConstants, AdaptUpSpeed) == 72, "NRIExposureConstants layout mismatch.");
 static_assert(offsetof(NRIExposureConstants, AdaptDownSpeed) == 76, "NRIExposureConstants layout mismatch.");
+
+// Mirrors shaders/Include/BloomConstants.hlsli.
+constexpr uint32_t NRI_BLOOM_SET_INPUTS = 0;
+constexpr uint32_t NRI_BLOOM_SET_OUTPUTS = 1;
+constexpr uint32_t NRI_BLOOM_SET_ROOT = 2;
+constexpr uint32_t NRI_BLOOM_INPUT_DESCRIPTOR_NUM = 2;
+constexpr uint32_t NRI_BLOOM_OUTPUT_DESCRIPTOR_NUM = 1;
+constexpr uint32_t NRI_BLOOM_ROOT_REGISTER = 0;
+constexpr uint32_t NRI_BLOOM_FLAG_THRESHOLD = 0x1u;
+constexpr uint32_t NRI_BLOOM_FLAG_ENERGY_CONSTRAINED = 0x2u;
+constexpr uint32_t NRI_BLOOM_FLAG_DEBUG = 0x4u;
+
+struct NRIBloomConstants
+{
+	uint32_t InputWidth = 0;
+	uint32_t InputHeight = 0;
+	uint32_t OutputWidth = 0;
+	uint32_t OutputHeight = 0;
+	float Intensity = 0.0f;
+	float Sigma = 0.0f;
+	float Cutoff = 0.0f;
+	float Fuzziness = 0.0f;
+	uint32_t FrameIndex = 0;
+	uint32_t LevelIndex = 0;
+	uint32_t LevelCount = 0;
+	uint32_t Flags = 0;
+	float InputTexelSizeX = 0.0f;
+	float InputTexelSizeY = 0.0f;
+	float Reserved0 = 0.0f;
+	float Reserved1 = 0.0f;
+};
+
+static_assert(sizeof(NRIBloomConstants) == 64, "NRIBloomConstants must match BloomConstants.hlsli.");
+static_assert(alignof(NRIBloomConstants) == 4, "NRIBloomConstants must remain scalar-aligned for HLSL root constants.");
+static_assert(offsetof(NRIBloomConstants, InputWidth) == 0, "NRIBloomConstants layout mismatch.");
+static_assert(offsetof(NRIBloomConstants, Intensity) == 16, "NRIBloomConstants layout mismatch.");
+static_assert(offsetof(NRIBloomConstants, FrameIndex) == 32, "NRIBloomConstants layout mismatch.");
+static_assert(offsetof(NRIBloomConstants, InputTexelSizeX) == 48, "NRIBloomConstants layout mismatch.");

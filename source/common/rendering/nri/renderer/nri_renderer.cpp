@@ -1849,6 +1849,7 @@ bool NRIRenderer::Initialize()
 		NRIPipelineStateManager::CreateTaaPipelineLayout(*this) &&
 		NRIPipelineStateManager::CreatePresentPipelineLayout(*this) &&
 		NRIPipelineStateManager::CreateExposurePipelineLayout(*this) &&
+		NRIPipelineStateManager::CreateBloomPipelineLayout(*this) &&
 		NRIDescriptorSetManager::AllocateDescriptorSets(*this) &&
 		NRIDescriptorSetManager::UpdateSamplerSet(*this) &&
 		NRIPipelineStateManager::CreatePipelines(*this);
@@ -1914,6 +1915,11 @@ void NRIRenderer::Shutdown()
 	{
 		mFrameBuffer->mCore.DestroyPipelineLayout(mExposurePipelineLayout);
 		mExposurePipelineLayout = nullptr;
+	}
+	if (mBloomPipelineLayout != nullptr)
+	{
+		mFrameBuffer->mCore.DestroyPipelineLayout(mBloomPipelineLayout);
+		mBloomPipelineLayout = nullptr;
 	}
 
 	mSamplerSet = nullptr;
@@ -2622,6 +2628,16 @@ NRIRenderer::ExposureDomain NRIRenderer::ResolveFrameTextureExposureDomain(Frame
 	case FrameTextureSlot::TaaHistoryPong:
 		return NRIShouldRunAppTaa(mainKind) ? ExposureDomain::PreExposedHDR : ExposureDomain::SceneHDR;
 	case FrameTextureSlot::VendorOutput:
+		return ExposureDomain::SceneHDR;
+	case FrameTextureSlot::PostBloomOutput:
+	case FrameTextureSlot::BloomPyramid0:
+	case FrameTextureSlot::BloomPyramid1:
+	case FrameTextureSlot::BloomPyramid2:
+	case FrameTextureSlot::BloomPyramid3:
+	case FrameTextureSlot::BloomPyramid4:
+	case FrameTextureSlot::BloomPyramid5:
+	case FrameTextureSlot::BloomPyramid6:
+	case FrameTextureSlot::BloomPyramid7:
 		return ExposureDomain::SceneHDR;
 	case FrameTextureSlot::PostSharpenOutput:
 		if (postSharpenKind == NRIPostSharpenKind::Off)

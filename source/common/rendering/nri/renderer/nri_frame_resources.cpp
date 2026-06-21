@@ -13,6 +13,14 @@
 #include <algorithm>
 #include <cmath>
 
+namespace
+{
+	uint32_t BloomPyramidExtent(uint32_t extent, uint32_t level)
+	{
+		return std::max(1u, extent >> (level + 1u));
+	}
+}
+
 
 bool NRIFrameResources::CreateFrameTexture(NRIRenderer& renderer, uint32_t slot, uint32_t width, uint32_t height, nri::Format format)
 {
@@ -190,5 +198,14 @@ bool NRIFrameResources::EnsureFrameResources(NRIRenderer& renderer, uint32_t out
 		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::RrGuideNormalRoughness, renderWidth, renderHeight, rrGuideNormalRoughnessFormat) &&
 		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::VendorOutput, outputWidth, outputHeight, colorFormat) &&
 		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::PostSharpenOutput, outputWidth, outputHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::PostBloomOutput, outputWidth, outputHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::BloomPyramid0, BloomPyramidExtent(outputWidth, 0), BloomPyramidExtent(outputHeight, 0), colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::BloomPyramid1, BloomPyramidExtent(outputWidth, 1), BloomPyramidExtent(outputHeight, 1), colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::BloomPyramid2, BloomPyramidExtent(outputWidth, 2), BloomPyramidExtent(outputHeight, 2), colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::BloomPyramid3, BloomPyramidExtent(outputWidth, 3), BloomPyramidExtent(outputHeight, 3), colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::BloomPyramid4, BloomPyramidExtent(outputWidth, 4), BloomPyramidExtent(outputHeight, 4), colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::BloomPyramid5, BloomPyramidExtent(outputWidth, 5), BloomPyramidExtent(outputHeight, 5), colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::BloomPyramid6, BloomPyramidExtent(outputWidth, 6), BloomPyramidExtent(outputHeight, 6), colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::BloomPyramid7, BloomPyramidExtent(outputWidth, 7), BloomPyramidExtent(outputHeight, 7), colorFormat) &&
 		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::Final, targetWidth, targetHeight, finalFormat);
 }
