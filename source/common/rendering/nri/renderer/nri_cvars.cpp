@@ -125,7 +125,7 @@ namespace
 	constexpr const char* kMirrorsWithoutRayReconstructionWarning =
 		"Warning: mirrors are currently bugged when ray reconstruction is not used.";
 	constexpr const char* kMirrorsWithoutRayReconstructionMenuWarning =
-		"Known bug: mirrors can look glitchy without DLRR.";
+		"Warning: Ray reconstruction is recommended due to visual bugs with other upscalers/denoisers";
 
 	constexpr NRISettingsProfilePreset kNRISettingsProfilePresets[] = {
 		{ "Safe Mode", kNRIUpscalerOff, kNRIUpscalerModeNative, kNRIOutputSdr, true, kMirrorsWithoutRayReconstructionWarning },
@@ -1372,7 +1372,7 @@ CUSTOM_CVAR(Float, nri_ptruntimemutationneardistance, 1024.0f, 0)
 
 // Moved from source/common/rendering/nri/renderer/nri_settings_profiles.cpp
 
-CVAR(String, nri_settingsprofilewarning, "Known bug: mirrors can look glitchy without DLRR.", CVAR_GLOBALCONFIG)
+CVAR(String, nri_settingsprofilewarning, "Warning: Ray reconstruction is recommended due to visual bugs with other upscalers/denoisers", CVAR_GLOBALCONFIG)
 
 CUSTOM_CVAR(Int, nri_settingsprofile, NRI_SETTINGS_PROFILE_SAFE, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
