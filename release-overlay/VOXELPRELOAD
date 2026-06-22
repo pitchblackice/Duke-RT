@@ -25,6 +25,10 @@ global
 actor DukeExplosion2 picrange=1891-1910 priority=force gpu=prefer reason=spawned-explosion-actor
 picrange 1891-1910 priority=force gpu=prefer reason=spawned-explosion-tiles
 
+# Fire effect that appears in pretty much every map
+picrange 2270-2283 priority=force gpu=prefer reason=small-fire-loop
+picrange 2310-2323 priority=force gpu=prefer reason=large-fire-loop
+
 # Duke projectile/effect variants that can otherwise first appear after a map
 # has already started. These are intentionally global because weapons carry
 # between levels.
@@ -60,8 +64,6 @@ pic 1248 priority=force gpu=prefer reason=gas-tank-explosion-1
 pic 1249 priority=force gpu=prefer reason=gas-tank-explosion-2
 
 # Long-lived visible fire loops near the first-level complex voxel area.
-picrange 2270-2283 priority=force gpu=prefer reason=e1l1-small-fire-loop
-picrange 2310-2323 priority=force gpu=prefer reason=e1l1-large-fire-loop
 
 # Monster actors verified with listactors on 2026-06-20.
 actor DukeLizTrooper allpicnums priority=high gpu=prefer reason=e1l1-verified-monster-liztrooper
@@ -121,8 +123,6 @@ actor DukePodFemale allpicnums priority=high gpu=prefer reason=e1l3-verified-fem
 map E1L4
 
 pic 1397 priority=high gpu=prefer reason=e1l4-large-babe-variant
-picrange 2270-2283 priority=force gpu=prefer reason=e1l4-small-fire-loop
-picrange 2310-2323 priority=force gpu=prefer reason=e1l4-large-fire-loop
 
 # Monster actors verified with listactors on 2026-06-20.
 actor DukeLizTrooper allpicnums priority=high gpu=prefer reason=e1l4-verified-monster-liztrooper
