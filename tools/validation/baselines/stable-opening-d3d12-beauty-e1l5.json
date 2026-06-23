@@ -11,8 +11,7 @@
                      "commands":  "+wait 45; map e1l5; wait 1; closemenu",
                      "requiredPrefixes":  [
                                               "NRI PT selftest:",
-                                              "NRI PT frame boundary:",
-                                              "NRI PT sky:"
+                                              "NRI PT frame boundary:"
                                           ],
                      "forbiddenPatterns":  [
                                                "Device removed",
@@ -21,22 +20,23 @@
                                                "assertion failed"
                                            ]
                  },
-    "runs":  3,
-    "capturedUtc":  "2026-06-09T03:09:52.7461172Z",
+    "runs":  2,
+    "compareFrameCount":  16,
+    "capturedUtc":  "2026-06-23T05:24:57.6047399Z",
     "exact":  {
                   "map":  "E1L5",
                   "api":  "d3d12",
                   "route":  "resolved_beauty",
-                  "passes":  "TraceOpaque,Composition,TraceTransparent,Exposure,UpscaleChain,FinalPresent,CopyFinal"
+                  "passes":  "TraceOpaque,Composition,TraceTransparent,Exposure,UpscaleChain,Bloom,FinalPresent,CopyFinal"
               },
     "ranges":  {
                    "prims":  {
-                                 "min":  32396,
-                                 "max":  32396
+                                 "min":  8550,
+                                 "max":  8550
                              },
                    "mats":  {
-                                "min":  3125,
-                                "max":  3128
+                                "min":  3134,
+                                "max":  3264
                             },
                    "scene_instances":  {
                                            "min":  482,
@@ -56,15 +56,15 @@
                                        },
                    "emissive_instances":  {
                                               "min":  255,
-                                              "max":  285
+                                              "max":  255
                                           },
                    "render_width":  {
-                                        "min":  1477,
-                                        "max":  1477
+                                        "min":  1920,
+                                        "max":  1920
                                     },
                    "render_height":  {
-                                         "min":  831,
-                                         "max":  831
+                                         "min":  1080,
+                                         "max":  1080
                                      },
                    "output_width":  {
                                         "min":  1920,

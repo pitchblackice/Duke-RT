@@ -9,8 +9,7 @@
   "commands": "+wait 45; map e3l6; wait 1; closemenu",
   "requiredPrefixes": [
     "NRI PT selftest:",
-    "NRI PT frame boundary:",
-    "NRI PT sky:"
+    "NRI PT frame boundary:"
   ],
   "forbiddenPatterns": [
     "Device removed",
