@@ -1210,6 +1210,12 @@ public:
 		uint32_t sceneLightActorOverlaySurfaceCandidateScans = 0;
 		uint32_t sceneLightActorOverlayIndexedCandidateCount = 0;
 		uint32_t sceneLightTopologyKeyCount = 0;
+		uint32_t sceneLightTopologyRebuildCount = 0;
+		uint32_t sceneLightPropertyOnlyUpdateCount = 0;
+		uint32_t sceneLightTopologySortSkippedCount = 0;
+		uint32_t sceneLightTopologyAddedKeyCount = 0;
+		uint32_t sceneLightTopologyRemovedKeyCount = 0;
+		uint32_t sceneLightTopologyReboundKeyCount = 0;
 		double sceneLightTopologySortMs = 0.0;
 		uint32_t traceOpaqueDispatchX = 0;
 		uint32_t traceOpaqueDispatchY = 0;

@@ -349,6 +349,12 @@ public:
 		uint32_t actorOverlaySurfaceCandidateScans = 0;
 		uint32_t actorOverlayIndexedCandidateCount = 0;
 		uint32_t topologyKeyCount = 0;
+		uint32_t topologyRebuildCount = 0;
+		uint32_t propertyOnlyUpdateCount = 0;
+		uint32_t topologySortSkippedCount = 0;
+		uint32_t topologyAddedKeyCount = 0;
+		uint32_t topologyRemovedKeyCount = 0;
+		uint32_t topologyReboundKeyCount = 0;
 		uint32_t transientMuzzleSlotCount = 0;
 		uint32_t transientMuzzleActiveCount = 0;
 		uint32_t dedupedMatchCount = 0;

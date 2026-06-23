@@ -2694,6 +2694,12 @@ void NRIRenderer::RefreshSceneLightSystem(
 	mLastPerfShellTraceStats.sceneLightActorOverlaySurfaceCandidateScans = analyticStats.actorOverlaySurfaceCandidateScans;
 	mLastPerfShellTraceStats.sceneLightActorOverlayIndexedCandidateCount = analyticStats.actorOverlayIndexedCandidateCount;
 	mLastPerfShellTraceStats.sceneLightTopologyKeyCount = analyticStats.topologyKeyCount;
+	mLastPerfShellTraceStats.sceneLightTopologyRebuildCount = analyticStats.topologyRebuildCount;
+	mLastPerfShellTraceStats.sceneLightPropertyOnlyUpdateCount = analyticStats.propertyOnlyUpdateCount;
+	mLastPerfShellTraceStats.sceneLightTopologySortSkippedCount = analyticStats.topologySortSkippedCount;
+	mLastPerfShellTraceStats.sceneLightTopologyAddedKeyCount = analyticStats.topologyAddedKeyCount;
+	mLastPerfShellTraceStats.sceneLightTopologyRemovedKeyCount = analyticStats.topologyRemovedKeyCount;
+	mLastPerfShellTraceStats.sceneLightTopologyReboundKeyCount = analyticStats.topologyReboundKeyCount;
 	mLastPerfShellTraceStats.sceneLightTopologySortMs = analyticStats.topologySortMs;
 	if (hadDirectionalLightState && directionalLightStateChanged)
 	{
@@ -3664,6 +3670,12 @@ void SceneLightSystem::RebuildAnalyticLights(
 	mAnalyticLights.actorOverlaySurfaceCandidateScans = 0;
 	mAnalyticLights.actorOverlayIndexedCandidateCount = 0;
 	mAnalyticLights.topologyKeyCount = 0;
+	mAnalyticLights.topologyRebuildCount = 0;
+	mAnalyticLights.propertyOnlyUpdateCount = 0;
+	mAnalyticLights.topologySortSkippedCount = 0;
+	mAnalyticLights.topologyAddedKeyCount = 0;
+	mAnalyticLights.topologyRemovedKeyCount = 0;
+	mAnalyticLights.topologyReboundKeyCount = 0;
 	mAnalyticLights.topologySortMs = 0.0;
 	nextLights.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.transientLights.size() + mAnalyticLights.spriteTileRules.size() + overlayRuleCount + mapOverlayRuleCount);
 	std::unordered_map<uint64_t, size_t> keyToLightIndex;
@@ -4129,9 +4141,17 @@ void SceneLightSystem::RebuildAnalyticLights(
 		nextDiagnosticFlags.emplace(light.stableKey, diagnosticFlags);
 	}
 	mAnalyticLights.topologyKeyCount = (uint32_t)nextTopologyKeys.size();
-	const auto topologySortStart = std::chrono::steady_clock::now();
-	std::sort(nextTopologyKeys.begin(), nextTopologyKeys.end());
-	mAnalyticLights.topologySortMs = DurationMs(topologySortStart, std::chrono::steady_clock::now());
+	if (std::is_sorted(nextTopologyKeys.begin(), nextTopologyKeys.end()))
+	{
+		mAnalyticLights.topologySortSkippedCount = 1;
+		mAnalyticLights.topologySortMs = 0.0;
+	}
+	else
+	{
+		const auto topologySortStart = std::chrono::steady_clock::now();
+		std::sort(nextTopologyKeys.begin(), nextTopologyKeys.end());
+		mAnalyticLights.topologySortMs = DurationMs(topologySortStart, std::chrono::steady_clock::now());
+	}
 	mAnalyticLights.topologyChanged = nextTopologyKeys != mAnalyticLights.activeTopologyKeys;
 	mAnalyticLights.propertiesChanged = false;
 	mAnalyticLights.addedTopologyKeys.clear();
@@ -4167,6 +4187,14 @@ void SceneLightSystem::RebuildAnalyticLights(
 			mAnalyticLights.reboundTopologyKeys.push_back(entry.first);
 		}
 	}
+	mAnalyticLights.topologyAddedKeyCount = (uint32_t)mAnalyticLights.addedTopologyKeys.size();
+	mAnalyticLights.topologyRemovedKeyCount = (uint32_t)mAnalyticLights.removedTopologyKeys.size();
+	mAnalyticLights.topologyReboundKeyCount = (uint32_t)mAnalyticLights.reboundTopologyKeys.size();
+	mAnalyticLights.topologyRebuildCount = mAnalyticLights.topologyChanged ? 1u : 0u;
+	mAnalyticLights.propertyOnlyUpdateCount =
+		!mAnalyticLights.topologyChanged &&
+		mAnalyticLights.propertiesChanged &&
+		mAnalyticLights.topologyReboundKeyCount == 0 ? 1u : 0u;
 	mAnalyticLights.lastBuildTopologyChanged = mAnalyticLights.topologyChanged;
 	mAnalyticLights.lastBuildPropertiesChanged = mAnalyticLights.propertiesChanged;
 	mAnalyticLights.activeTopologyKeys = std::move(nextTopologyKeys);
