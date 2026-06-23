@@ -695,6 +695,12 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		mLastPerfShellTraceStats.persistentDynamicWallSurfaceCount = persistentDynamicStats.wallSurfaceCount;
 		mLastPerfShellTraceStats.persistentDynamicFlatSurfaceCount = persistentDynamicStats.flatSurfaceCount;
 		mLastPerfShellTraceStats.persistentDynamicSpriteSurfaceCount = persistentDynamicStats.spriteSurfaceCount;
+		const PersistentDynamicEmissiveHighWaterStats& persistentDynamicHighWater = mSceneLights.GetPersistentDynamicEmissiveHighWaterStats();
+		mLastPerfShellTraceStats.persistentDynamicHighWaterSurfaceCount = persistentDynamicHighWater.surfaceCount;
+		mLastPerfShellTraceStats.persistentDynamicHighWaterPrimitiveCount = persistentDynamicHighWater.primitiveCount;
+		mLastPerfShellTraceStats.persistentDynamicHighWaterMaterialCount = persistentDynamicHighWater.materialCount;
+		mLastPerfShellTraceStats.persistentDynamicHighWaterActorSurfaceCount = persistentDynamicHighWater.surfaceStats.actorSurfaceCount;
+		mLastPerfShellTraceStats.persistentDynamicHighWaterSpriteSurfaceCount = persistentDynamicHighWater.surfaceStats.spriteSurfaceCount;
 
 		const PersistentDynamicEmissiveCache& persistentDynamicCache = mSceneLights.GetPersistentDynamicEmissiveCache();
 		const bool shouldUsePersistentDynamicEmissive = persistentDynamicCache.valid;

@@ -645,6 +645,7 @@ public:
 		uint32_t surfaceCount = 0;
 		uint32_t primitiveCount = 0;
 		uint32_t materialCount = 0;
+		PersistentDynamicSurfaceStats surfaceStats = {};
 		nri_scene::SceneView sceneView;
 		nri_scene::GeometryData geometry;
 		nri_scene::MaterialBridgeData materialBridge;

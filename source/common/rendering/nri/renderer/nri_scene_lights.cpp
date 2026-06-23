@@ -2974,47 +2974,54 @@ void SceneLightSystem::ResetPersistentDynamicEmissiveHighWaterStats()
 
 SceneLightSystem::PersistentDynamicSurfaceStats SceneLightSystem::GatherPersistentDynamicEmissiveSurfaceStats() const
 {
-	PersistentDynamicSurfaceStats stats = {};
 	if (!mPersistentDynamicEmissiveCache.valid)
 	{
-		return stats;
+		return {};
 	}
 
-	stats.wallSurfaceCount = (uint32_t)mPersistentDynamicEmissiveCache.sceneView.opaqueWalls.size();
-	stats.flatSurfaceCount = (uint32_t)mPersistentDynamicEmissiveCache.sceneView.opaqueFlats.size();
-	stats.spriteSurfaceCount = (uint32_t)mPersistentDynamicEmissiveCache.sceneView.opaqueSprites.size();
+	return mPersistentDynamicEmissiveCache.surfaceStats;
+}
 
-	auto accumulate = [&stats](const auto& surfaces)
+namespace
+{
+	SceneLightSystem::PersistentDynamicSurfaceStats BuildPersistentDynamicSurfaceStats(const nri_scene::SceneView& sceneView)
 	{
-		for (const auto& surface : surfaces)
+		SceneLightSystem::PersistentDynamicSurfaceStats stats = {};
+		stats.wallSurfaceCount = (uint32_t)sceneView.opaqueWalls.size();
+		stats.flatSurfaceCount = (uint32_t)sceneView.opaqueFlats.size();
+		stats.spriteSurfaceCount = (uint32_t)sceneView.opaqueSprites.size();
+		auto accumulate = [&stats](const auto& surfaces)
 		{
-			if (surface.provenance.actorIndex >= 0)
+			for (const auto& surface : surfaces)
 			{
-				stats.actorSurfaceCount++;
-			}
-			else
-			{
-				stats.nonActorSurfaceCount++;
-			}
+				if (surface.provenance.actorIndex >= 0)
+				{
+					stats.actorSurfaceCount++;
+				}
+				else
+				{
+					stats.nonActorSurfaceCount++;
+				}
 
-			switch (surface.provenance.sourceType)
-			{
-			case nri_scene::SurfaceSourceType::FacingSprite:
-				stats.actorFacingSpriteCount++;
-				break;
-			case nri_scene::SurfaceSourceType::VoxelProxySprite:
-				stats.actorVoxelSpriteCount++;
-				break;
-			default:
-				break;
+				switch (surface.provenance.sourceType)
+				{
+				case nri_scene::SurfaceSourceType::FacingSprite:
+					stats.actorFacingSpriteCount++;
+					break;
+				case nri_scene::SurfaceSourceType::VoxelProxySprite:
+					stats.actorVoxelSpriteCount++;
+					break;
+				default:
+					break;
+				}
 			}
-		}
-	};
+		};
 
-	accumulate(mPersistentDynamicEmissiveCache.sceneView.opaqueWalls);
-	accumulate(mPersistentDynamicEmissiveCache.sceneView.opaqueFlats);
-	accumulate(mPersistentDynamicEmissiveCache.sceneView.opaqueSprites);
-	return stats;
+		accumulate(sceneView.opaqueWalls);
+		accumulate(sceneView.opaqueFlats);
+		accumulate(sceneView.opaqueSprites);
+		return stats;
+	}
 }
 
 void SceneLightSystem::UpdatePersistentDynamicEmissiveHighWaterStats(const PersistentDynamicSurfaceStats& currentStats)
@@ -3269,6 +3276,7 @@ void SceneLightSystem::PrunePersistentDynamicEmissiveCacheToLiveActors(const Per
 
 	next.primitiveCount = (uint32_t)next.geometry.primitives.size();
 	next.materialCount = (uint32_t)next.materialBridge.materials.size();
+	next.surfaceStats = BuildPersistentDynamicSurfaceStats(next.sceneView);
 	next.sceneView.stats.totalDrawItems = next.surfaceCount;
 	next.sceneView.stats.wallDrawItems = (uint32_t)next.sceneView.opaqueWalls.size();
 	next.sceneView.stats.flatDrawItems = (uint32_t)next.sceneView.opaqueFlats.size();
@@ -3377,6 +3385,7 @@ bool SceneLightSystem::RebuildPersistentDynamicEmissiveCache(
 
 	next.primitiveCount = (uint32_t)next.geometry.primitives.size();
 	next.materialCount = (uint32_t)next.materialBridge.materials.size();
+	next.surfaceStats = BuildPersistentDynamicSurfaceStats(next.sceneView);
 	next.sceneView.stats.totalDrawItems = next.surfaceCount;
 	next.sceneView.stats.wallDrawItems = (uint32_t)next.sceneView.opaqueWalls.size();
 	next.sceneView.stats.flatDrawItems = (uint32_t)next.sceneView.opaqueFlats.size();

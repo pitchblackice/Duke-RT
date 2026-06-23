@@ -4711,7 +4711,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneLightTopologyKeyCount,
 			shell.sceneLightTopologySortMs);
 		Printf(
-			"PERF pt cache detail NRI: frame=%llu mutation_active=%u mutation_valid=%u mutation_excl_static=%u mutation_cached_surfaces=%u mutation_cached_tris=%u mutation_cached_mats=%u mutation_cached_states=%u mutation_mat_cache_hits=%u mutation_mat_cache_misses=%u mutation_mat_cache_stores=%u anim_slice_cached_states=%u anim_slice_cache_hits=%u anim_slice_cache_misses=%u anim_slice_cache_stores=%u anim_slice_apply_hits=%u anim_slice_apply_misses=%u anim_slice_sync_skip_hits=%u anim_gpu_cache_hits=%u anim_gpu_cache_misses=%u anim_gpu_cache_stores=%u persistent_actor=%u persistent_non_actor=%u persistent_walls=%u persistent_flats=%u persistent_sprites=%u\n",
+			"PERF pt cache detail NRI: frame=%llu mutation_active=%u mutation_valid=%u mutation_excl_static=%u mutation_cached_surfaces=%u mutation_cached_tris=%u mutation_cached_mats=%u mutation_cached_states=%u mutation_mat_cache_hits=%u mutation_mat_cache_misses=%u mutation_mat_cache_stores=%u anim_slice_cached_states=%u anim_slice_cache_hits=%u anim_slice_cache_misses=%u anim_slice_cache_stores=%u anim_slice_apply_hits=%u anim_slice_apply_misses=%u anim_slice_sync_skip_hits=%u anim_gpu_cache_hits=%u anim_gpu_cache_misses=%u anim_gpu_cache_stores=%u persistent_actor=%u persistent_non_actor=%u persistent_walls=%u persistent_flats=%u persistent_sprites=%u persistent_highwater_surfaces=%u persistent_highwater_prims=%u persistent_highwater_mats=%u persistent_highwater_actor=%u persistent_highwater_sprites=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.runtimeMutationActiveChunkCount,
 			shell.runtimeMutationValidChunkCount,
@@ -4737,7 +4737,12 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.persistentDynamicNonActorSurfaceCount,
 			shell.persistentDynamicWallSurfaceCount,
 			shell.persistentDynamicFlatSurfaceCount,
-			shell.persistentDynamicSpriteSurfaceCount);
+			shell.persistentDynamicSpriteSurfaceCount,
+			shell.persistentDynamicHighWaterSurfaceCount,
+			shell.persistentDynamicHighWaterPrimitiveCount,
+			shell.persistentDynamicHighWaterMaterialCount,
+			shell.persistentDynamicHighWaterActorSurfaceCount,
+			shell.persistentDynamicHighWaterSpriteSurfaceCount);
 		Printf(
 			"PERF pt mutation detail NRI: frame=%llu structural_ms=%.3f material_refresh_ms=%.3f structural=%u material_refresh=%u refresh_delta=%u refresh_delta_mask=0x%x refresh_hwcanvas=%u refresh_animated=%u struct_delta=%u struct_delta_mask=0x%x struct_view=%u struct_static_anim_flip=%u struct_excl_static_flip=%u struct_force_topology=%u struct_invalid=%u hwcanvas_chunks=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,

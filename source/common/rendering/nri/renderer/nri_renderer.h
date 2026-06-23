@@ -1187,6 +1187,11 @@ public:
 		uint32_t persistentDynamicWallSurfaceCount = 0;
 		uint32_t persistentDynamicFlatSurfaceCount = 0;
 		uint32_t persistentDynamicSpriteSurfaceCount = 0;
+		uint32_t persistentDynamicHighWaterSurfaceCount = 0;
+		uint32_t persistentDynamicHighWaterPrimitiveCount = 0;
+		uint32_t persistentDynamicHighWaterMaterialCount = 0;
+		uint32_t persistentDynamicHighWaterActorSurfaceCount = 0;
+		uint32_t persistentDynamicHighWaterSpriteSurfaceCount = 0;
 		uint32_t dynamicMergeLiveSurfaceCount = 0;
 		uint32_t dynamicMergePersistentCacheSurfaceCount = 0;
 		uint32_t dynamicMergeAppendedPersistentSurfaceCount = 0;
@@ -1601,6 +1606,7 @@ private:
 	using StaticMapChunkAtlas = ::StaticMapChunkAtlas;
 
 	using PersistentDynamicEmissiveCache = SceneLightSystem::PersistentDynamicEmissiveCache;
+	using PersistentDynamicEmissiveHighWaterStats = SceneLightSystem::PersistentDynamicEmissiveHighWaterStats;
 
 	using PersistentVoxelBatch = ::PersistentVoxelBatch;
 
