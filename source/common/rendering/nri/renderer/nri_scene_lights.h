@@ -575,6 +575,20 @@ public:
 		uint32_t persistentVoxelRecordCount = 0;
 	};
 
+	struct SurfaceRecordIndex
+	{
+		std::unordered_map<uint32_t, std::vector<uint32_t>> spriteRecordsByTextureId;
+		std::unordered_map<int32_t, std::vector<uint32_t>> spriteRecordsByActorIndex;
+		std::unordered_map<uint64_t, std::vector<uint32_t>> spriteRecordsByActorTexture;
+
+		void Clear()
+		{
+			spriteRecordsByTextureId.clear();
+			spriteRecordsByActorIndex.clear();
+			spriteRecordsByActorTexture.clear();
+		}
+	};
+
 	struct FrameAssemblyInput
 	{
 		uint64_t frameSerial = 0;
@@ -892,6 +906,7 @@ private:
 	PersistentDynamicEmissiveHighWaterStats mPersistentDynamicEmissiveHighWaterStats = {};
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	std::vector<SurfaceRecord> mSurfaceRecords;
+	SurfaceRecordIndex mSurfaceRecordIndex = {};
 	FrameAppendStats mFrameAppendStats = {};
 	uint64_t mFrameSerial = 0;
 	uint32_t mNextRuntimePointLightId = 1;

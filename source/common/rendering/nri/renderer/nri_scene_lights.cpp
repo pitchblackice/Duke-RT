@@ -1115,6 +1115,11 @@ namespace
 		}
 	}
 
+	uint64_t BuildActorTextureSurfaceIndexKey(int32_t actorIndex, uint32_t textureId)
+	{
+		return ((uint64_t)(uint32_t)actorIndex << 32) | (uint64_t)textureId;
+	}
+
 	DVector2 ComputeSectorCenter2D(const sectortype* sec)
 	{
 		if (sec == nullptr || sec->walls.Size() == 0)
@@ -3407,6 +3412,7 @@ void SceneLightSystem::BeginFrame(uint64_t frameSerial)
 {
 	mFrameSerial = frameSerial;
 	mSurfaceRecords.clear();
+	mSurfaceRecordIndex.Clear();
 	mFrameAppendStats = {};
 	mAnalyticLights.matchedSurfaceCount = 0;
 	mAnalyticLights.actorOverlayRuleCount = 0;
@@ -3687,17 +3693,20 @@ void SceneLightSystem::RebuildAnalyticLights(
 
 	for (const AnalyticLightHeuristicRule& rule : mAnalyticLights.spriteTileRules)
 	{
-		for (const SurfaceRecord& record : mSurfaceRecords)
+		const auto candidateIt = mSurfaceRecordIndex.spriteRecordsByTextureId.find(rule.textureId);
+		if (candidateIt == mSurfaceRecordIndex.spriteRecordsByTextureId.end())
 		{
+			continue;
+		}
+
+		for (uint32_t recordIndex : candidateIt->second)
+		{
+			if (recordIndex >= mSurfaceRecords.size())
+			{
+				continue;
+			}
 			mAnalyticLights.spriteRecordCandidateScans++;
-			if ((record.material.materialFlags & nri_scene::MaterialFlag_Sprite) == 0)
-			{
-				continue;
-			}
-			if (record.material.textureId != rule.textureId)
-			{
-				continue;
-			}
+			const SurfaceRecord& record = mSurfaceRecords[recordIndex];
 
 			mAnalyticLights.matchedSurfaceCount++;
 
@@ -3737,6 +3746,48 @@ void SceneLightSystem::RebuildAnalyticLights(
 		auto findActorOverlaySurface = [this, &surfaceMatchesActorRule](const AnalyticLightRegistry::ActorOverlayRule& rule) -> const SurfaceRecord*
 		{
 			mAnalyticLights.actorOverlaySurfaceLookups++;
+			const std::vector<uint32_t>* indexedCandidates = nullptr;
+			if (rule.actorIndex >= 0)
+			{
+				if (rule.hasTileFilter)
+				{
+					const auto candidateIt = mSurfaceRecordIndex.spriteRecordsByActorTexture.find(BuildActorTextureSurfaceIndexKey(rule.actorIndex, rule.tileFilter));
+					if (candidateIt != mSurfaceRecordIndex.spriteRecordsByActorTexture.end())
+					{
+						indexedCandidates = &candidateIt->second;
+					}
+				}
+				else
+				{
+					const auto candidateIt = mSurfaceRecordIndex.spriteRecordsByActorIndex.find(rule.actorIndex);
+					if (candidateIt != mSurfaceRecordIndex.spriteRecordsByActorIndex.end())
+					{
+						indexedCandidates = &candidateIt->second;
+					}
+				}
+
+				if (indexedCandidates != nullptr)
+				{
+					mAnalyticLights.actorOverlayIndexedCandidateCount += (uint32_t)indexedCandidates->size();
+					for (uint32_t recordIndex : *indexedCandidates)
+					{
+						if (recordIndex >= mSurfaceRecords.size())
+						{
+							continue;
+						}
+						mAnalyticLights.actorOverlaySurfaceCandidateScans++;
+						const SurfaceRecord& record = mSurfaceRecords[recordIndex];
+						if (surfaceMatchesActorRule(record, rule))
+						{
+							return &record;
+						}
+					}
+					return nullptr;
+				}
+
+				return nullptr;
+			}
+
 			mAnalyticLights.actorOverlayFullRecordScans++;
 			for (const SurfaceRecord& record : mSurfaceRecords)
 			{
@@ -6400,7 +6451,17 @@ void SceneLightSystem::AppendSurfaceRecord(SurfaceRecord record, uint32_t materi
 		record.materialIndex += materialIndexBase;
 	}
 
+	const uint32_t recordIndex = (uint32_t)mSurfaceRecords.size();
 	mSurfaceRecords.push_back(record);
+	if ((record.material.materialFlags & nri_scene::MaterialFlag_Sprite) != 0)
+	{
+		mSurfaceRecordIndex.spriteRecordsByTextureId[record.material.textureId].push_back(recordIndex);
+		if (record.provenance.actorIndex >= 0)
+		{
+			mSurfaceRecordIndex.spriteRecordsByActorIndex[record.provenance.actorIndex].push_back(recordIndex);
+			mSurfaceRecordIndex.spriteRecordsByActorTexture[BuildActorTextureSurfaceIndexKey(record.provenance.actorIndex, record.material.textureId)].push_back(recordIndex);
+		}
+	}
 	mFrameAppendStats.totalRecordCount++;
 	switch (record.source)
 	{
