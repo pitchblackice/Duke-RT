@@ -1,0 +1,158 @@
+﻿{
+    "name":  "explosion-voxel-burst-d3d12",
+    "scenarioPath":  "tools/validation/perf-scenarios/explosion-voxel-burst-d3d12.json",
+    "scenario":  {
+                     "name":  "explosion-voxel-burst-d3d12",
+                     "backend":  "d3d12",
+                     "description":  "User save for explosion/particle voxel actor burst behavior.",
+                     "save":  {
+                                  "dir":  "M:/Raze/tools/perf-saves/Duke.WorldTour",
+                                  "name":  "explosionburst01",
+                                  "settleTics":  35,
+                                  "warmupTics":  35
+                              },
+                     "capture":  {
+                                     "loopTraceFrames":  256,
+                                     "timeoutSeconds":  180,
+                                     "runs":  3,
+                                     "stopWhenLoopTraceFramesCaptured":  true
+                                 },
+                     "launch":  {
+                                    "file":  "M:/Raze/full-voxel-overlay",
+                                    "gameGrp":  "C:/Program Files (x86)/Steam/steamapps/common/Duke Nukem 3D Twentieth Anniversary World Tour/DUKE3D.GRP",
+                                    "extraArgs":  [
+                                                      "+set",
+                                                      "nri_ptbloom",
+                                                      "true"
+                                                  ]
+                                },
+                     "requiredPrefixes":  [
+                                              "PERF loop trace:",
+                                              "PERF render trace NRI:",
+                                              "PERF pt shell trace NRI:"
+                                          ],
+                     "baselineCompare":  {
+                                             "allowRelativeRegressionPercent":  15.0,
+                                             "fields":  [
+                                                            "PERF loop trace/frame_ms",
+                                                            "PERF render trace NRI/total",
+                                                            "PERF render trace NRI/mats",
+                                                            "PERF pt shell trace NRI/select",
+                                                            "PERF pt shell trace NRI/lights",
+                                                            "PERF pt scene light detail NRI/rebuild_analytic"
+                                                        ]
+                                         }
+                 },
+    "runs":  3,
+    "capturedUtc":  "2026-06-23T04:49:11.2079703Z",
+    "sourceSummaryPath":  "tools/logs/perf-baseline/explosion-voxel-burst-d3d12/summary.json",
+    "baselineCompare":  {
+                            "allowRelativeRegressionPercent":  15.0,
+                            "fields":  [
+                                           "PERF loop trace/frame_ms",
+                                           "PERF render trace NRI/total",
+                                           "PERF render trace NRI/mats",
+                                           "PERF pt shell trace NRI/select",
+                                           "PERF pt shell trace NRI/lights",
+                                           "PERF pt scene light detail NRI/rebuild_analytic"
+                                       ]
+                        },
+    "thresholds":  null,
+    "loopTrace":  {
+                      "samples":  768,
+                      "p50":  21.864,
+                      "p90":  34.111,
+                      "p95":  40.547,
+                      "p99":  76.636,
+                      "max":  98.488,
+                      "framesOver50":  29,
+                      "framesOver100":  0,
+                      "framesOver200":  0
+                  },
+    "fields":  [
+                   {
+                       "key":  "PERF loop trace/frame_ms",
+                       "prefix":  "PERF loop trace",
+                       "field":  "frame_ms",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  25.831,
+                       "p50":  21.864,
+                       "p90":  34.111,
+                       "p95":  40.547,
+                       "p99":  76.636,
+                       "max":  98.488,
+                       "maxFrame":  104
+                   },
+                   {
+                       "key":  "PERF render trace NRI/total",
+                       "prefix":  "PERF render trace NRI",
+                       "field":  "total",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  24.076,
+                       "p50":  20.128,
+                       "p90":  32.377,
+                       "p95":  37.492,
+                       "p99":  74.882,
+                       "max":  96.931,
+                       "maxFrame":  104
+                   },
+                   {
+                       "key":  "PERF pt shell trace NRI/select",
+                       "prefix":  "PERF pt shell trace NRI",
+                       "field":  "select",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  22.662,
+                       "p50":  18.633,
+                       "p90":  31.01,
+                       "p95":  36.091,
+                       "p99":  73.445,
+                       "max":  95.421,
+                       "maxFrame":  104
+                   },
+                   {
+                       "key":  "PERF render trace NRI/mats",
+                       "prefix":  "PERF render trace NRI",
+                       "field":  "mats",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  2.898,
+                       "p50":  2.889,
+                       "p90":  3.424,
+                       "p95":  3.594,
+                       "p99":  4.247,
+                       "max":  4.513,
+                       "maxFrame":  179
+                   },
+                   {
+                       "key":  "PERF pt shell trace NRI/lights",
+                       "prefix":  "PERF pt shell trace NRI",
+                       "field":  "lights",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  0.496,
+                       "p50":  0.492,
+                       "p90":  0.559,
+                       "p95":  0.589,
+                       "p99":  0.682,
+                       "max":  0.874,
+                       "maxFrame":  263
+                   },
+                   {
+                       "key":  "PERF pt scene light detail NRI/rebuild_analytic",
+                       "prefix":  "PERF pt scene light detail NRI",
+                       "field":  "rebuild_analytic",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  0.104,
+                       "p50":  0.113,
+                       "p90":  0.134,
+                       "p95":  0.14,
+                       "p99":  0.191,
+                       "max":  0.279,
+                       "maxFrame":  274
+                   }
+               ]
+}

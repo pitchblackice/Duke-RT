@@ -46,6 +46,7 @@ New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 
 $summaryPath = Join-Path $OutputDirectory "summary.json"
 $args = @(
+    "-NoProfile",
     "-ExecutionPolicy", "Bypass",
     "-File", (Join-Path $PSScriptRoot "run-nri-perf.ps1"),
     "-ScenarioPath", $ScenarioPath,
@@ -61,23 +62,34 @@ if ($File) {
     $args += @("-File", $File)
 }
 
-$process = Start-Process -FilePath "powershell" -ArgumentList $args -PassThru -Wait -NoNewWindow
-if ($process.ExitCode -ne 0) {
-    exit $process.ExitCode
+& powershell.exe @args
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
 }
 
 $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json
+$baselineCompare = Get-ObjectProperty -Object $scenario -Name "baselineCompare"
+$compareFieldList = @(Get-ObjectProperty -Object $baselineCompare -Name "fields")
+$baselineFields = @($summary.fields)
+if ($compareFieldList.Count -gt 0) {
+    $compareFieldKeys = @{}
+    foreach ($fieldKey in $compareFieldList) {
+        $compareFieldKeys[[string]$fieldKey] = $true
+    }
+    $baselineFields = @($summary.fields | Where-Object { $compareFieldKeys.ContainsKey([string]$_.key) })
+}
+
 $baseline = [pscustomobject]@{
     name = $name
-    scenarioPath = (Resolve-Path -LiteralPath $ScenarioPath).Path
+    scenarioPath = $ScenarioPath
     scenario = $scenario
     runs = $Runs
     capturedUtc = (Get-Date).ToUniversalTime().ToString("o")
-    sourceSummaryPath = (Resolve-Path -LiteralPath $summaryPath).Path
-    baselineCompare = Get-ObjectProperty -Object $scenario -Name "baselineCompare"
+    sourceSummaryPath = $summaryPath
+    baselineCompare = $baselineCompare
     thresholds = Get-ObjectProperty -Object $scenario -Name "thresholds"
     loopTrace = $summary.loopTrace
-    fields = $summary.fields
+    fields = $baselineFields
 }
 
 $outputDirectory = Split-Path -Parent $OutputPath

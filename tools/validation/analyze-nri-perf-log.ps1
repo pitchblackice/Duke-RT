@@ -10,7 +10,9 @@ param(
 
     [int]$MinLoopTraceSamples = 1,
 
-    [int]$WorstFrameCount = 10
+    [int]$WorstFrameCount = 10,
+
+    [int]$MaxForbiddenHits = 50
 )
 
 Set-StrictMode -Version Latest
@@ -189,7 +191,11 @@ $forbiddenPatterns = @(
     "Device removed",
     "device lost",
     "DXGI_ERROR_DEVICE",
-    "DRED",
+    "DRED after",
+    "DRED breadcrumb",
+    "DRED page fault",
+    "DRED page-fault",
+    "DeviceRemovedExtendedData",
     "NRI render failed",
     "validation error",
     "failed to create",
@@ -214,6 +220,7 @@ foreach ($prefix in $requiredPrefixes) {
 }
 
 $forbiddenHits = New-Object System.Collections.Generic.List[object]
+$suppressedForbiddenHitCount = 0
 $fieldSamples = @{}
 $fieldMaxValues = @{}
 $fieldMaxFrames = @{}
@@ -240,11 +247,16 @@ try {
 
             foreach ($pattern in $forbiddenPatterns) {
                 if ($line.IndexOf($pattern, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                    $forbiddenHits.Add([pscustomobject]@{
-                        line = $lineNumber
-                        pattern = $pattern
-                        text = $line
-                    })
+                    if ($forbiddenHits.Count -lt $MaxForbiddenHits) {
+                        $forbiddenHits.Add([pscustomobject]@{
+                            line = $lineNumber
+                            pattern = $pattern
+                            text = $line
+                        })
+                    }
+                    else {
+                        $suppressedForbiddenHitCount++
+                    }
                     break
                 }
             }
@@ -409,6 +421,9 @@ if ($forbiddenHits.Count -gt 0) {
     foreach ($hit in $forbiddenHits) {
         $errors.Add("forbidden pattern '$($hit.pattern)' at line $($hit.line)")
     }
+    if ($suppressedForbiddenHitCount -gt 0) {
+        $errors.Add("forbidden pattern hits suppressed: $suppressedForbiddenHitCount")
+    }
 }
 if ($loopFrames.Count -lt $MinLoopTraceSamples) {
     $errors.Add("loop trace samples $($loopFrames.Count) < required $MinLoopTraceSamples")
@@ -425,6 +440,7 @@ $summary = [pscustomobject]@{
     scenario = $scenario
     requiredPrefixes = $requiredHits
     forbiddenHits = $forbiddenHits.ToArray()
+    suppressedForbiddenHitCount = $suppressedForbiddenHitCount
     errors = $errors.ToArray()
     thresholdFailures = $thresholdFailures.ToArray()
     loopTrace = [pscustomobject]@{

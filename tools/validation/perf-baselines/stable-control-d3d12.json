@@ -1,0 +1,142 @@
+﻿{
+    "name":  "stable-control-d3d12",
+    "scenarioPath":  "tools/validation/perf-scenarios/stable-control-d3d12.json",
+    "scenario":  {
+                     "name":  "stable-control-d3d12",
+                     "backend":  "d3d12",
+                     "description":  "User low-variance control save with modest scene complexity.",
+                     "save":  {
+                                  "dir":  "M:/Raze/tools/perf-saves/Duke.WorldTour",
+                                  "name":  "control01",
+                                  "settleTics":  35,
+                                  "warmupTics":  35
+                              },
+                     "capture":  {
+                                     "loopTraceFrames":  256,
+                                     "timeoutSeconds":  180,
+                                     "runs":  3,
+                                     "stopWhenLoopTraceFramesCaptured":  true
+                                 },
+                     "launch":  {
+                                    "file":  "M:/Raze/full-voxel-overlay",
+                                    "gameGrp":  "C:/Program Files (x86)/Steam/steamapps/common/Duke Nukem 3D Twentieth Anniversary World Tour/DUKE3D.GRP",
+                                    "extraArgs":  [
+                                                      "+set",
+                                                      "nri_ptbloom",
+                                                      "true"
+                                                  ]
+                                },
+                     "requiredPrefixes":  [
+                                              "PERF loop trace:",
+                                              "PERF render trace NRI:",
+                                              "PERF pt shell trace NRI:"
+                                          ],
+                     "baselineCompare":  {
+                                             "allowRelativeRegressionPercent":  10.0,
+                                             "fields":  [
+                                                            "PERF loop trace/frame_ms",
+                                                            "PERF render trace NRI/total",
+                                                            "PERF render trace NRI/mats",
+                                                            "PERF pt shell trace NRI/select",
+                                                            "PERF pt shell trace NRI/lights"
+                                                        ]
+                                         }
+                 },
+    "runs":  3,
+    "capturedUtc":  "2026-06-23T04:49:11.4969828Z",
+    "sourceSummaryPath":  "tools/logs/perf-baseline/stable-control-d3d12/summary.json",
+    "baselineCompare":  {
+                            "allowRelativeRegressionPercent":  10.0,
+                            "fields":  [
+                                           "PERF loop trace/frame_ms",
+                                           "PERF render trace NRI/total",
+                                           "PERF render trace NRI/mats",
+                                           "PERF pt shell trace NRI/select",
+                                           "PERF pt shell trace NRI/lights"
+                                       ]
+                        },
+    "thresholds":  null,
+    "loopTrace":  {
+                      "samples":  768,
+                      "p50":  13.829,
+                      "p90":  14.26,
+                      "p95":  14.346,
+                      "p99":  15.603,
+                      "max":  86.302,
+                      "framesOver50":  1,
+                      "framesOver100":  0,
+                      "framesOver200":  0
+                  },
+    "fields":  [
+                   {
+                       "key":  "PERF loop trace/frame_ms",
+                       "prefix":  "PERF loop trace",
+                       "field":  "frame_ms",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  13.985,
+                       "p50":  13.829,
+                       "p90":  14.26,
+                       "p95":  14.346,
+                       "p99":  15.603,
+                       "max":  86.302,
+                       "maxFrame":  376
+                   },
+                   {
+                       "key":  "PERF render trace NRI/total",
+                       "prefix":  "PERF render trace NRI",
+                       "field":  "total",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  12.213,
+                       "p50":  12.194,
+                       "p90":  12.533,
+                       "p95":  12.628,
+                       "p99":  12.852,
+                       "max":  13.268,
+                       "maxFrame":  208
+                   },
+                   {
+                       "key":  "PERF pt shell trace NRI/select",
+                       "prefix":  "PERF pt shell trace NRI",
+                       "field":  "select",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  10.987,
+                       "p50":  10.983,
+                       "p90":  11.282,
+                       "p95":  11.397,
+                       "p99":  11.544,
+                       "max":  11.952,
+                       "maxFrame":  208
+                   },
+                   {
+                       "key":  "PERF render trace NRI/mats",
+                       "prefix":  "PERF render trace NRI",
+                       "field":  "mats",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  1.313,
+                       "p50":  1.111,
+                       "p90":  1.936,
+                       "p95":  2.01,
+                       "p99":  2.258,
+                       "max":  3.53,
+                       "maxFrame":  208
+                   },
+                   {
+                       "key":  "PERF pt shell trace NRI/lights",
+                       "prefix":  "PERF pt shell trace NRI",
+                       "field":  "lights",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  0.519,
+                       "p50":  0.509,
+                       "p90":  0.58,
+                       "p95":  0.603,
+                       "p99":  0.659,
+                       "max":  0.752,
+                       "maxFrame":  134
+                   }
+               ]
+}

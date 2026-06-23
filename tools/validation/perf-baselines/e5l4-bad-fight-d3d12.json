@@ -1,0 +1,174 @@
+﻿{
+    "name":  "e5l4-bad-fight-d3d12",
+    "scenarioPath":  "tools/validation/perf-scenarios/e5l4-bad-fight-d3d12.json",
+    "scenario":  {
+                     "name":  "e5l4-bad-fight-d3d12",
+                     "backend":  "d3d12",
+                     "description":  "User save near a severe normal-gameplay dynamic actor/material/light flood.",
+                     "save":  {
+                                  "dir":  "M:/Raze/tools/perf-saves/Duke.WorldTour",
+                                  "name":  "badfight01",
+                                  "settleTics":  35,
+                                  "warmupTics":  35
+                              },
+                     "capture":  {
+                                     "loopTraceFrames":  256,
+                                     "timeoutSeconds":  180,
+                                     "runs":  3,
+                                     "stopWhenLoopTraceFramesCaptured":  true
+                                 },
+                     "launch":  {
+                                    "file":  "M:/Raze/full-voxel-overlay",
+                                    "gameGrp":  "C:/Program Files (x86)/Steam/steamapps/common/Duke Nukem 3D Twentieth Anniversary World Tour/DUKE3D.GRP",
+                                    "extraArgs":  [
+                                                      "+set",
+                                                      "nri_ptbloom",
+                                                      "true"
+                                                  ]
+                                },
+                     "requiredPrefixes":  [
+                                              "PERF loop trace:",
+                                              "PERF render trace NRI:",
+                                              "PERF pt shell trace NRI:"
+                                          ],
+                     "baselineCompare":  {
+                                             "allowRelativeRegressionPercent":  15.0,
+                                             "fields":  [
+                                                            "PERF loop trace/frame_ms",
+                                                            "PERF render trace NRI/total",
+                                                            "PERF render trace NRI/mats",
+                                                            "PERF pt shell trace NRI/select",
+                                                            "PERF pt shell trace NRI/lights",
+                                                            "PERF pt scene select accounting NRI/unaccounted",
+                                                            "PERF pt scene light detail NRI/rebuild_analytic"
+                                                        ]
+                                         }
+                 },
+    "runs":  3,
+    "capturedUtc":  "2026-06-23T04:49:10.6033389Z",
+    "sourceSummaryPath":  "tools/logs/perf-baseline/e5l4-bad-fight-d3d12/summary.json",
+    "baselineCompare":  {
+                            "allowRelativeRegressionPercent":  15.0,
+                            "fields":  [
+                                           "PERF loop trace/frame_ms",
+                                           "PERF render trace NRI/total",
+                                           "PERF render trace NRI/mats",
+                                           "PERF pt shell trace NRI/select",
+                                           "PERF pt shell trace NRI/lights",
+                                           "PERF pt scene select accounting NRI/unaccounted",
+                                           "PERF pt scene light detail NRI/rebuild_analytic"
+                                       ]
+                        },
+    "thresholds":  null,
+    "loopTrace":  {
+                      "samples":  768,
+                      "p50":  119.012,
+                      "p90":  147.988,
+                      "p95":  154.016,
+                      "p99":  175.365,
+                      "max":  199.01,
+                      "framesOver50":  768,
+                      "framesOver100":  627,
+                      "framesOver200":  0
+                  },
+    "fields":  [
+                   {
+                       "key":  "PERF loop trace/frame_ms",
+                       "prefix":  "PERF loop trace",
+                       "field":  "frame_ms",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  119.827,
+                       "p50":  119.012,
+                       "p90":  147.988,
+                       "p95":  154.016,
+                       "p99":  175.365,
+                       "max":  199.01,
+                       "maxFrame":  319
+                   },
+                   {
+                       "key":  "PERF render trace NRI/total",
+                       "prefix":  "PERF render trace NRI",
+                       "field":  "total",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  112.043,
+                       "p50":  110.678,
+                       "p90":  138.935,
+                       "p95":  145.836,
+                       "p99":  160.538,
+                       "max":  184.682,
+                       "maxFrame":  319
+                   },
+                   {
+                       "key":  "PERF pt shell trace NRI/lights",
+                       "prefix":  "PERF pt shell trace NRI",
+                       "field":  "lights",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  58.438,
+                       "p50":  58.025,
+                       "p90":  83.36,
+                       "p95":  91.489,
+                       "p99":  106.152,
+                       "max":  121.076,
+                       "maxFrame":  319
+                   },
+                   {
+                       "key":  "PERF pt shell trace NRI/select",
+                       "prefix":  "PERF pt shell trace NRI",
+                       "field":  "select",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  51.607,
+                       "p50":  47.248,
+                       "p90":  77.039,
+                       "p95":  86.393,
+                       "p99":  103.384,
+                       "max":  128.053,
+                       "maxFrame":  150
+                   },
+                   {
+                       "key":  "PERF pt scene light detail NRI/rebuild_analytic",
+                       "prefix":  "PERF pt scene light detail NRI",
+                       "field":  "rebuild_analytic",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  52.998,
+                       "p50":  52.27,
+                       "p90":  76.224,
+                       "p95":  84.26,
+                       "p99":  97.452,
+                       "max":  110.608,
+                       "maxFrame":  319
+                   },
+                   {
+                       "key":  "PERF render trace NRI/mats",
+                       "prefix":  "PERF render trace NRI",
+                       "field":  "mats",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  19.916,
+                       "p50":  19.507,
+                       "p90":  26.008,
+                       "p95":  29.756,
+                       "p99":  34.055,
+                       "max":  50.999,
+                       "maxFrame":  259
+                   },
+                   {
+                       "key":  "PERF pt scene select accounting NRI/unaccounted",
+                       "prefix":  "PERF pt scene select accounting NRI",
+                       "field":  "unaccounted",
+                       "runs":  3,
+                       "samples":  768,
+                       "avg":  6.059,
+                       "p50":  5.773,
+                       "p90":  8.283,
+                       "p95":  9.224,
+                       "p99":  10.675,
+                       "max":  22.305,
+                       "maxFrame":  259
+                   }
+               ]
+}
