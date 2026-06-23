@@ -537,10 +537,25 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 	std::unordered_map<int32_t, std::vector<ActorOverlayMaterialRule>> actorOverlayRules;
 	if (resolvedLightOverlays.actorRules.Size() > 0)
 	{
+		const auto actorOverlayRuleBuildStart = std::chrono::steady_clock::now();
 		BuildActorOverlayMaterialRules(resolvedLightOverlays, actorOverlayRules);
+		if (tracePerf)
+		{
+			materialTraceEntry.actorOverlayRuleMapBuilds++;
+			materialTraceEntry.actorOverlayRuleBuildMs += DurationMs(actorOverlayRuleBuildStart, std::chrono::steady_clock::now());
+			for (const auto& entry : actorOverlayRules)
+			{
+				materialTraceEntry.actorOverlayRuleCount += (uint32_t)entry.second.size();
+			}
+		}
 		if (!actorOverlayRules.empty())
 		{
+			const auto stampStart = std::chrono::steady_clock::now();
 			StampActorOverlayRuleIdsOnSceneView(actorOverlayRules, sceneView);
+			if (tracePerf)
+			{
+				materialTraceEntry.actorOverlayStampMs += DurationMs(stampStart, std::chrono::steady_clock::now());
+			}
 			for (const auto& entry : actorOverlayRules)
 			{
 				uint32_t overrideBits = nri_material_policy::ActorMaterialOverride_None;
@@ -574,6 +589,7 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 	std::vector<SavedMaterialFlags> savedFlags;
 	if (actorOverridesForBuild != nullptr)
 	{
+		const auto fullbrightFlagStart = std::chrono::steady_clock::now();
 		savedFlags.reserve(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
 		auto applyFullbrightSurfaceFlags = [actorOverridesForBuild, &savedFlags](auto& surfaces)
 		{
@@ -599,6 +615,11 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 		applyFullbrightSurfaceFlags(sceneView.opaqueWalls);
 		applyFullbrightSurfaceFlags(sceneView.opaqueFlats);
 		applyFullbrightSurfaceFlags(sceneView.opaqueSprites);
+		if (tracePerf)
+		{
+			materialTraceEntry.fullbrightFlagMs += DurationMs(fullbrightFlagStart, std::chrono::steady_clock::now());
+			materialTraceEntry.fullbrightFlaggedSurfaces += (uint32_t)savedFlags.size();
+		}
 	}
 
 	if (tracePerf)
@@ -615,7 +636,12 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 	}
 	if (actorOverridesForBuild != nullptr)
 	{
+		const auto overrideApplyStart = std::chrono::steady_clock::now();
 		nri_material_policy::ApplyActorMaterialOverridesToBuiltMaterials(*actorOverridesForBuild, GetFullbrightBoostScale(), outMaterials);
+		if (tracePerf)
+		{
+			materialTraceEntry.actorOverrideApplyMs += DurationMs(overrideApplyStart, std::chrono::steady_clock::now());
+		}
 		for (const SavedMaterialFlags& saved : savedFlags)
 		{
 			*saved.flags = saved.value;

@@ -342,11 +342,19 @@ public:
 		uint32_t actorOverlayRuleCount = 0;
 		uint32_t actorOverlayMatchedSurfaceCount = 0;
 		uint32_t mapOverlayRuleCount = 0;
+		uint32_t spriteTileRuleCount = 0;
+		uint32_t spriteRecordCandidateScans = 0;
+		uint32_t actorOverlaySurfaceLookups = 0;
+		uint32_t actorOverlayFullRecordScans = 0;
+		uint32_t actorOverlaySurfaceCandidateScans = 0;
+		uint32_t actorOverlayIndexedCandidateCount = 0;
+		uint32_t topologyKeyCount = 0;
 		uint32_t transientMuzzleSlotCount = 0;
 		uint32_t transientMuzzleActiveCount = 0;
 		uint32_t dedupedMatchCount = 0;
 		uint32_t truncatedLightCount = 0;
 		uint32_t nextRuleId = 1;
+		double topologySortMs = 0.0;
 		bool topologyChanged = false;
 		bool propertiesChanged = false;
 		bool lastBuildTopologyChanged = false;
@@ -610,6 +618,27 @@ public:
 		uint32_t actorVoxelSpriteCount = 0;
 	};
 
+	struct PersistentDynamicMergeStats
+	{
+		uint32_t liveWallSurfaceCount = 0;
+		uint32_t liveFlatSurfaceCount = 0;
+		uint32_t liveSpriteSurfaceCount = 0;
+		uint32_t cacheWallSurfaceCount = 0;
+		uint32_t cacheFlatSurfaceCount = 0;
+		uint32_t cacheSpriteSurfaceCount = 0;
+		uint32_t appendedWallSurfaceCount = 0;
+		uint32_t appendedFlatSurfaceCount = 0;
+		uint32_t appendedSpriteSurfaceCount = 0;
+		uint32_t duplicateWallSurfaceCount = 0;
+		uint32_t duplicateFlatSurfaceCount = 0;
+		uint32_t duplicateSpriteSurfaceCount = 0;
+
+		uint32_t LiveSurfaceCount() const { return liveWallSurfaceCount + liveFlatSurfaceCount + liveSpriteSurfaceCount; }
+		uint32_t CacheSurfaceCount() const { return cacheWallSurfaceCount + cacheFlatSurfaceCount + cacheSpriteSurfaceCount; }
+		uint32_t AppendedSurfaceCount() const { return appendedWallSurfaceCount + appendedFlatSurfaceCount + appendedSpriteSurfaceCount; }
+		uint32_t DuplicateSurfaceCount() const { return duplicateWallSurfaceCount + duplicateFlatSurfaceCount + duplicateSpriteSurfaceCount; }
+	};
+
 	struct PersistentDynamicEmissiveCache
 	{
 		bool valid = false;
@@ -790,7 +819,7 @@ public:
 		const PersistentDynamicEmissiveCacheBuildServices& services);
 	PersistentDynamicSurfaceStats GatherPersistentDynamicEmissiveSurfaceStats() const;
 	void UpdatePersistentDynamicEmissiveHighWaterStats(const PersistentDynamicSurfaceStats& currentStats);
-	void MergePersistentDynamicEmissiveCacheIntoSceneView(nri_scene::SceneView& inOutSceneView) const;
+	PersistentDynamicMergeStats MergePersistentDynamicEmissiveCacheIntoSceneView(nri_scene::SceneView& inOutSceneView) const;
 	const PersistentDynamicEmissiveCache& GetPersistentDynamicEmissiveCache() const { return mPersistentDynamicEmissiveCache; }
 	const PersistentDynamicEmissiveHighWaterStats& GetPersistentDynamicEmissiveHighWaterStats() const { return mPersistentDynamicEmissiveHighWaterStats; }
 	const ActorSpriteDebugStats& GetActorSpriteDebugStats() const { return mActorSpriteDebugStats; }

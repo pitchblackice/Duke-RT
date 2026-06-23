@@ -168,6 +168,9 @@ public:
 	{
 		uint32_t calls = 0;
 		uint32_t overrideBuildCalls = 0;
+		uint32_t actorOverlayRuleMapBuilds = 0;
+		uint32_t actorOverlayRuleCount = 0;
+		uint32_t fullbrightFlaggedSurfaces = 0;
 		uint32_t materialCount = 0;
 		uint32_t actorMaterialCount = 0;
 		uint32_t textureCount = 0;
@@ -178,7 +181,11 @@ public:
 		uint32_t roughnessTextureCount = 0;
 		uint32_t emissiveTextureCount = 0;
 		double overrideBuildMs = 0.0;
+		double actorOverlayRuleBuildMs = 0.0;
+		double actorOverlayStampMs = 0.0;
+		double fullbrightFlagMs = 0.0;
 		double materialBuildMs = 0.0;
+		double actorOverrideApplyMs = 0.0;
 	};
 
 	static constexpr size_t MaterialBuildTraceSlotCount = (size_t)MaterialBuildTraceSlot::Count;
@@ -500,6 +507,12 @@ public:
 		double sceneSelectPersistentVoxelBatchMs = 0.0;
 		double sceneSelectPersistentEmissiveMs = 0.0;
 		double sceneSelectDynamicMergeMs = 0.0;
+		double sceneSelectDynamicMergeCopyMs = 0.0;
+		double sceneSelectDynamicMergeAppendMs = 0.0;
+		double sceneSelectDynamicMergeStatsMs = 0.0;
+		double sceneSelectDynamicMergeGeometryMs = 0.0;
+		double sceneSelectDynamicMergePortalAssignMs = 0.0;
+		double sceneSelectDynamicMergeMaterialMs = 0.0;
 		double sceneSelectLightMergeMs = 0.0;
 		double sceneSelectStaticInstancesMs = 0.0;
 		double sceneSelectMaterialBridgeMs = 0.0;
@@ -1174,6 +1187,21 @@ public:
 		uint32_t persistentDynamicWallSurfaceCount = 0;
 		uint32_t persistentDynamicFlatSurfaceCount = 0;
 		uint32_t persistentDynamicSpriteSurfaceCount = 0;
+		uint32_t dynamicMergeLiveSurfaceCount = 0;
+		uint32_t dynamicMergePersistentCacheSurfaceCount = 0;
+		uint32_t dynamicMergeAppendedPersistentSurfaceCount = 0;
+		uint32_t dynamicMergeDuplicatePersistentSurfaceCount = 0;
+		uint32_t dynamicMergeAppendedPersistentPrimitiveCount = 0;
+		uint32_t dynamicMergeAppendedPersistentMaterialCount = 0;
+		uint32_t sceneLightSpriteTileRuleCount = 0;
+		uint32_t sceneLightSpriteRecordCandidateScans = 0;
+		uint32_t sceneLightActorOverlayRuleCount = 0;
+		uint32_t sceneLightActorOverlaySurfaceLookups = 0;
+		uint32_t sceneLightActorOverlayFullRecordScans = 0;
+		uint32_t sceneLightActorOverlaySurfaceCandidateScans = 0;
+		uint32_t sceneLightActorOverlayIndexedCandidateCount = 0;
+		uint32_t sceneLightTopologyKeyCount = 0;
+		double sceneLightTopologySortMs = 0.0;
 		uint32_t traceOpaqueDispatchX = 0;
 		uint32_t traceOpaqueDispatchY = 0;
 		uint32_t traceOpaqueDispatchZ = 0;

@@ -35,6 +35,11 @@
 namespace
 {
 	constexpr uint32_t NRI_MAX_EMISSIVE_SURFACES_FOR_REFRESH = 4096u;
+
+	double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
+	{
+		return std::chrono::duration<double, std::milli>(end - start).count();
+	}
 }
 
 bool NRIRenderer::AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t& outId)
@@ -517,17 +522,27 @@ namespace
 	void AppendUniquePersistentEmissiveSurfaces(
 		const SurfaceContainer& source,
 		SurfaceContainer& destination,
-		std::unordered_set<uint64_t>& inOutSeenKeys)
+		std::unordered_set<uint64_t>& inOutSeenKeys,
+		uint32_t* appendedCount = nullptr,
+		uint32_t* duplicateCount = nullptr)
 	{
 		for (const auto& surface : source)
 		{
 			const uint64_t identityKey = BuildPersistentEmissiveSurfaceIdentityKey(surface);
 			if (!inOutSeenKeys.insert(identityKey).second)
 			{
+				if (duplicateCount != nullptr)
+				{
+					(*duplicateCount)++;
+				}
 				continue;
 			}
 
 			destination.push_back(surface);
+			if (appendedCount != nullptr)
+			{
+				(*appendedCount)++;
+			}
 		}
 	}
 
@@ -2665,6 +2680,16 @@ void NRIRenderer::RefreshSceneLightSystem(
 	mLastPerfShellTraceStats.sceneLightDynamicRecordCount = frameAppendStats.dynamicRecordCount;
 	mLastPerfShellTraceStats.sceneLightCapturedRecordCount = frameAppendStats.capturedRecordCount;
 	mLastPerfShellTraceStats.sceneLightPersistentVoxelRecordCount = frameAppendStats.persistentVoxelRecordCount;
+	const auto& analyticStats = mSceneLights.GetAnalyticLights();
+	mLastPerfShellTraceStats.sceneLightSpriteTileRuleCount = analyticStats.spriteTileRuleCount;
+	mLastPerfShellTraceStats.sceneLightSpriteRecordCandidateScans = analyticStats.spriteRecordCandidateScans;
+	mLastPerfShellTraceStats.sceneLightActorOverlayRuleCount = analyticStats.actorOverlayRuleCount;
+	mLastPerfShellTraceStats.sceneLightActorOverlaySurfaceLookups = analyticStats.actorOverlaySurfaceLookups;
+	mLastPerfShellTraceStats.sceneLightActorOverlayFullRecordScans = analyticStats.actorOverlayFullRecordScans;
+	mLastPerfShellTraceStats.sceneLightActorOverlaySurfaceCandidateScans = analyticStats.actorOverlaySurfaceCandidateScans;
+	mLastPerfShellTraceStats.sceneLightActorOverlayIndexedCandidateCount = analyticStats.actorOverlayIndexedCandidateCount;
+	mLastPerfShellTraceStats.sceneLightTopologyKeyCount = analyticStats.topologyKeyCount;
+	mLastPerfShellTraceStats.sceneLightTopologySortMs = analyticStats.topologySortMs;
 	if (hadDirectionalLightState && directionalLightStateChanged)
 	{
 		NoteLightHistoryChange("directional-light-change");
@@ -3011,12 +3036,19 @@ void SceneLightSystem::UpdatePersistentDynamicEmissiveHighWaterStats(const Persi
 	mPersistentDynamicEmissiveHighWaterStats.surfaceStats.actorVoxelSpriteCount = std::max(mPersistentDynamicEmissiveHighWaterStats.surfaceStats.actorVoxelSpriteCount, currentStats.actorVoxelSpriteCount);
 }
 
-void SceneLightSystem::MergePersistentDynamicEmissiveCacheIntoSceneView(nri_scene::SceneView& inOutSceneView) const
+SceneLightSystem::PersistentDynamicMergeStats SceneLightSystem::MergePersistentDynamicEmissiveCacheIntoSceneView(nri_scene::SceneView& inOutSceneView) const
 {
+	PersistentDynamicMergeStats stats = {};
+	stats.liveWallSurfaceCount = (uint32_t)inOutSceneView.opaqueWalls.size();
+	stats.liveFlatSurfaceCount = (uint32_t)inOutSceneView.opaqueFlats.size();
+	stats.liveSpriteSurfaceCount = (uint32_t)inOutSceneView.opaqueSprites.size();
 	if (!mPersistentDynamicEmissiveCache.valid)
 	{
-		return;
+		return stats;
 	}
+	stats.cacheWallSurfaceCount = (uint32_t)mPersistentDynamicEmissiveCache.sceneView.opaqueWalls.size();
+	stats.cacheFlatSurfaceCount = (uint32_t)mPersistentDynamicEmissiveCache.sceneView.opaqueFlats.size();
+	stats.cacheSpriteSurfaceCount = (uint32_t)mPersistentDynamicEmissiveCache.sceneView.opaqueSprites.size();
 
 	std::unordered_set<uint64_t> seenSurfaceKeys;
 	seenSurfaceKeys.reserve(
@@ -3041,15 +3073,22 @@ void SceneLightSystem::MergePersistentDynamicEmissiveCacheIntoSceneView(nri_scen
 	AppendUniquePersistentEmissiveSurfaces(
 		mPersistentDynamicEmissiveCache.sceneView.opaqueWalls,
 		inOutSceneView.opaqueWalls,
-		seenSurfaceKeys);
+		seenSurfaceKeys,
+		&stats.appendedWallSurfaceCount,
+		&stats.duplicateWallSurfaceCount);
 	AppendUniquePersistentEmissiveSurfaces(
 		mPersistentDynamicEmissiveCache.sceneView.opaqueFlats,
 		inOutSceneView.opaqueFlats,
-		seenSurfaceKeys);
+		seenSurfaceKeys,
+		&stats.appendedFlatSurfaceCount,
+		&stats.duplicateFlatSurfaceCount);
 	AppendUniquePersistentEmissiveSurfaces(
 		mPersistentDynamicEmissiveCache.sceneView.opaqueSprites,
 		inOutSceneView.opaqueSprites,
-		seenSurfaceKeys);
+		seenSurfaceKeys,
+		&stats.appendedSpriteSurfaceCount,
+		&stats.duplicateSpriteSurfaceCount);
+	return stats;
 }
 
 void SceneLightSystem::PrunePersistentDynamicEmissiveCacheToLiveActors(const PersistentDynamicEmissiveCacheBuildServices& services)
@@ -3603,6 +3642,14 @@ void SceneLightSystem::RebuildAnalyticLights(
 	const size_t mapOverlayRuleCount = mapOverlayRules != nullptr ? mapOverlayRules->size() : 0u;
 	mAnalyticLights.actorOverlayRuleCount = (uint32_t)overlayRuleCount;
 	mAnalyticLights.mapOverlayRuleCount = (uint32_t)mapOverlayRuleCount;
+	mAnalyticLights.spriteTileRuleCount = (uint32_t)mAnalyticLights.spriteTileRules.size();
+	mAnalyticLights.spriteRecordCandidateScans = 0;
+	mAnalyticLights.actorOverlaySurfaceLookups = 0;
+	mAnalyticLights.actorOverlayFullRecordScans = 0;
+	mAnalyticLights.actorOverlaySurfaceCandidateScans = 0;
+	mAnalyticLights.actorOverlayIndexedCandidateCount = 0;
+	mAnalyticLights.topologyKeyCount = 0;
+	mAnalyticLights.topologySortMs = 0.0;
 	nextLights.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.transientLights.size() + mAnalyticLights.spriteTileRules.size() + overlayRuleCount + mapOverlayRuleCount);
 	std::unordered_map<uint64_t, size_t> keyToLightIndex;
 	keyToLightIndex.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.transientLights.size() + mAnalyticLights.spriteTileRules.size() * 4u + overlayRuleCount * 2u + mapOverlayRuleCount);
@@ -3633,6 +3680,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 	{
 		for (const SurfaceRecord& record : mSurfaceRecords)
 		{
+			mAnalyticLights.spriteRecordCandidateScans++;
 			if ((record.material.materialFlags & nri_scene::MaterialFlag_Sprite) == 0)
 			{
 				continue;
@@ -3679,8 +3727,11 @@ void SceneLightSystem::RebuildAnalyticLights(
 
 		auto findActorOverlaySurface = [this, &surfaceMatchesActorRule](const AnalyticLightRegistry::ActorOverlayRule& rule) -> const SurfaceRecord*
 		{
+			mAnalyticLights.actorOverlaySurfaceLookups++;
+			mAnalyticLights.actorOverlayFullRecordScans++;
 			for (const SurfaceRecord& record : mSurfaceRecords)
 			{
+				mAnalyticLights.actorOverlaySurfaceCandidateScans++;
 				if (surfaceMatchesActorRule(record, rule))
 				{
 					return &record;
@@ -3881,8 +3932,10 @@ void SceneLightSystem::RebuildAnalyticLights(
 		}
 		else
 		{
+			mAnalyticLights.actorOverlayFullRecordScans++;
 			for (const SurfaceRecord& record : mSurfaceRecords)
 			{
+				mAnalyticLights.actorOverlaySurfaceCandidateScans++;
 				if ((record.material.materialFlags & nri_scene::MaterialFlag_Sprite) == 0 ||
 					record.provenance.actorIndex < 0)
 				{
@@ -4015,7 +4068,10 @@ void SceneLightSystem::RebuildAnalyticLights(
 		nextBindingHashes.emplace(light.stableKey, bindingHash);
 		nextDiagnosticFlags.emplace(light.stableKey, diagnosticFlags);
 	}
+	mAnalyticLights.topologyKeyCount = (uint32_t)nextTopologyKeys.size();
+	const auto topologySortStart = std::chrono::steady_clock::now();
 	std::sort(nextTopologyKeys.begin(), nextTopologyKeys.end());
+	mAnalyticLights.topologySortMs = DurationMs(topologySortStart, std::chrono::steady_clock::now());
 	mAnalyticLights.topologyChanged = nextTopologyKeys != mAnalyticLights.activeTopologyKeys;
 	mAnalyticLights.propertiesChanged = false;
 	mAnalyticLights.addedTopologyKeys.clear();

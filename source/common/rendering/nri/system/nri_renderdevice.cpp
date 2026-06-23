@@ -4089,12 +4089,18 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneDataSetMs,
 			shell.sceneDataSetCalls);
 		Printf(
-			"PERF pt scene select phases NRI: frame=%llu static_map=%.3f persistent_batch=%.3f persistent_emissive=%.3f dynamic_merge=%.3f light_merge=%.3f static_instances=%.3f material_bridge=%.3f palette=%.3f textures=%.3f material_split=%.3f buffer_upload=%.3f instance_handles=%.3f texture_prep=%.3f state_commit=%.3f\n",
+			"PERF pt scene select phases NRI: frame=%llu static_map=%.3f persistent_batch=%.3f persistent_emissive=%.3f dynamic_merge=%.3f dynamic_merge_copy=%.3f dynamic_merge_append=%.3f dynamic_merge_stats=%.3f dynamic_merge_geo=%.3f dynamic_merge_portal=%.3f dynamic_merge_material=%.3f light_merge=%.3f static_instances=%.3f material_bridge=%.3f palette=%.3f textures=%.3f material_split=%.3f buffer_upload=%.3f instance_handles=%.3f texture_prep=%.3f state_commit=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneSelectStaticMapMs,
 			shell.sceneSelectPersistentVoxelBatchMs,
 			shell.sceneSelectPersistentEmissiveMs,
 			shell.sceneSelectDynamicMergeMs,
+			shell.sceneSelectDynamicMergeCopyMs,
+			shell.sceneSelectDynamicMergeAppendMs,
+			shell.sceneSelectDynamicMergeStatsMs,
+			shell.sceneSelectDynamicMergeGeometryMs,
+			shell.sceneSelectDynamicMergePortalAssignMs,
+			shell.sceneSelectDynamicMergeMaterialMs,
 			shell.sceneSelectLightMergeMs,
 			shell.sceneSelectStaticInstancesMs,
 			shell.sceneSelectMaterialBridgeMs,
@@ -4106,7 +4112,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectTexturePrepMs,
 			shell.sceneSelectStateCommitMs);
 		Printf(
-			"PERF pt scene select accounting NRI: frame=%llu select=%.3f accounted=%.3f unaccounted=%.3f static_map=%.3f spacelink=%.3f mutation=%.3f dynamic_capture=%.3f dynamic_geo=%.3f local_player_reflection_geo=%.3f persistent_batch=%.3f persistent_emissive=%.3f persistent_dynamic=%.3f dynamic_merge=%.3f light_merge=%.3f debug_sphere=%.3f overlay=%.3f static_instances=%.3f material_bridge=%.3f palette=%.3f textures=%.3f material_split=%.3f buffer_upload=%.3f persistent_voxel_as=%.3f dynamic_as=%.3f instance_handles=%.3f world_tlas=%.3f scene_data=%.3f texture_prep=%.3f state_commit=%.3f\n",
+			"PERF pt scene select accounting NRI: frame=%llu select=%.3f accounted=%.3f unaccounted=%.3f static_map=%.3f spacelink=%.3f mutation=%.3f dynamic_capture=%.3f dynamic_geo=%.3f local_player_reflection_geo=%.3f persistent_batch=%.3f persistent_emissive=%.3f persistent_dynamic=%.3f dynamic_merge=%.3f dynamic_merge_copy=%.3f dynamic_merge_append=%.3f dynamic_merge_stats=%.3f dynamic_merge_geo=%.3f dynamic_merge_portal=%.3f dynamic_merge_material=%.3f dynamic_merge_live_surfaces=%u dynamic_merge_cache_surfaces=%u dynamic_merge_appended_surfaces=%u dynamic_merge_duplicate_surfaces=%u dynamic_merge_cache_prims=%u dynamic_merge_cache_mats=%u light_merge=%.3f debug_sphere=%.3f overlay=%.3f static_instances=%.3f material_bridge=%.3f palette=%.3f textures=%.3f material_split=%.3f buffer_upload=%.3f persistent_voxel_as=%.3f dynamic_as=%.3f instance_handles=%.3f world_tlas=%.3f scene_data=%.3f texture_prep=%.3f state_commit=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneSelectMs,
 			sceneSelectAccountedMs,
@@ -4121,6 +4127,18 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectPersistentEmissiveMs,
 			shell.persistentDynamicMs,
 			shell.sceneSelectDynamicMergeMs,
+			shell.sceneSelectDynamicMergeCopyMs,
+			shell.sceneSelectDynamicMergeAppendMs,
+			shell.sceneSelectDynamicMergeStatsMs,
+			shell.sceneSelectDynamicMergeGeometryMs,
+			shell.sceneSelectDynamicMergePortalAssignMs,
+			shell.sceneSelectDynamicMergeMaterialMs,
+			shell.dynamicMergeLiveSurfaceCount,
+			shell.dynamicMergePersistentCacheSurfaceCount,
+			shell.dynamicMergeAppendedPersistentSurfaceCount,
+			shell.dynamicMergeDuplicatePersistentSurfaceCount,
+			shell.dynamicMergeAppendedPersistentPrimitiveCount,
+			shell.dynamicMergeAppendedPersistentMaterialCount,
 			shell.sceneSelectLightMergeMs,
 			shell.runtimeDebugSphereMs,
 			shell.overlayAppendMs,
@@ -4663,7 +4681,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.persistentVoxelTexturePrewarmByteBudget,
 			shell.persistentVoxelTexturePrewarmMs);
 		Printf(
-			"PERF pt scene light detail NRI: frame=%llu records=%u static=%u mutation=%u captured=%u dynamic=%u persistent_voxel=%u append_static=%.3f append_mutation=%.3f append_captured=%.3f append_dynamic=%.3f append_persistent_voxel=%.3f rebuild_analytic=%.3f rebuild_emissive=%.3f rebuild_sector=%.3f\n",
+			"PERF pt scene light detail NRI: frame=%llu records=%u static=%u mutation=%u captured=%u dynamic=%u persistent_voxel=%u append_static=%.3f append_mutation=%.3f append_captured=%.3f append_dynamic=%.3f append_persistent_voxel=%.3f rebuild_analytic=%.3f rebuild_emissive=%.3f rebuild_sector=%.3f sprite_rules=%u sprite_record_scans=%u actor_overlay_rules=%u actor_surface_lookups=%u actor_full_scans=%u actor_surface_scans=%u actor_indexed_candidates=%u topology_keys=%u topology_sort=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneLightSurfaceRecordCount,
 			shell.sceneLightStaticRecordCount,
@@ -4678,7 +4696,16 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneLightPersistentVoxelAppendMs,
 			shell.sceneLightAnalyticMs,
 			shell.sceneLightEmissiveMs,
-			shell.sceneLightSectorMs);
+			shell.sceneLightSectorMs,
+			shell.sceneLightSpriteTileRuleCount,
+			shell.sceneLightSpriteRecordCandidateScans,
+			shell.sceneLightActorOverlayRuleCount,
+			shell.sceneLightActorOverlaySurfaceLookups,
+			shell.sceneLightActorOverlayFullRecordScans,
+			shell.sceneLightActorOverlaySurfaceCandidateScans,
+			shell.sceneLightActorOverlayIndexedCandidateCount,
+			shell.sceneLightTopologyKeyCount,
+			shell.sceneLightTopologySortMs);
 		Printf(
 			"PERF pt cache detail NRI: frame=%llu mutation_active=%u mutation_valid=%u mutation_excl_static=%u mutation_cached_surfaces=%u mutation_cached_tris=%u mutation_cached_mats=%u mutation_cached_states=%u mutation_mat_cache_hits=%u mutation_mat_cache_misses=%u mutation_mat_cache_stores=%u anim_slice_cached_states=%u anim_slice_cache_hits=%u anim_slice_cache_misses=%u anim_slice_cache_stores=%u anim_slice_apply_hits=%u anim_slice_apply_misses=%u anim_slice_sync_skip_hits=%u anim_gpu_cache_hits=%u anim_gpu_cache_misses=%u anim_gpu_cache_stores=%u persistent_actor=%u persistent_non_actor=%u persistent_walls=%u persistent_flats=%u persistent_sprites=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
@@ -5171,11 +5198,14 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			}
 
 			Printf(
-				"PERF pt material detail NRI: frame=%llu label=%s calls=%u override_builds=%u materials=%u actor_materials=%u textures=%u base=%u glow=%u normal=%u metallic=%u roughness=%u emissive=%u override_ms=%.3f material_ms=%.3f\n",
+				"PERF pt material detail NRI: frame=%llu label=%s calls=%u override_builds=%u actor_rule_map_builds=%u actor_rules=%u fullbright_flagged=%u materials=%u actor_materials=%u textures=%u base=%u glow=%u normal=%u metallic=%u roughness=%u emissive=%u override_ms=%.3f actor_rule_ms=%.3f stamp_ms=%.3f fullbright_flag_ms=%.3f material_ms=%.3f override_apply_ms=%.3f\n",
 				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 				NRIRenderer::GetMaterialBuildTraceSlotName((NRIRenderer::MaterialBuildTraceSlot)index),
 				entry.calls,
 				entry.overrideBuildCalls,
+				entry.actorOverlayRuleMapBuilds,
+				entry.actorOverlayRuleCount,
+				entry.fullbrightFlaggedSurfaces,
 				entry.materialCount,
 				entry.actorMaterialCount,
 				entry.textureCount,
@@ -5186,7 +5216,11 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				entry.roughnessTextureCount,
 				entry.emissiveTextureCount,
 				entry.overrideBuildMs,
-				entry.materialBuildMs);
+				entry.actorOverlayRuleBuildMs,
+				entry.actorOverlayStampMs,
+				entry.fullbrightFlagMs,
+				entry.materialBuildMs,
+				entry.actorOverrideApplyMs);
 		}
 		Printf(
 			"PERF pt actor overflow summary NRI: frame=%llu materials=%u base=%u normal=%u metallic=%u roughness=%u emissive=%u omitted=%u\n",

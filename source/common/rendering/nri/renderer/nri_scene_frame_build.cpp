@@ -704,18 +704,39 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			if (hasDynamicScene)
 			{
 				ScopedPtPerfTimer mergePerfTimer(mLastPerfShellTraceStats.sceneSelectDynamicMergeMs);
-				mergedDynamicSceneView = dynamicSceneView;
-				mSceneLights.MergePersistentDynamicEmissiveCacheIntoSceneView(mergedDynamicSceneView);
-				RebuildSceneViewStats(mergedDynamicSceneView);
+				{
+					ScopedPtPerfTimer copyPerfTimer(mLastPerfShellTraceStats.sceneSelectDynamicMergeCopyMs);
+					mergedDynamicSceneView = dynamicSceneView;
+				}
+				const SceneLightSystem::PersistentDynamicMergeStats mergeStats = [&]()
+				{
+					ScopedPtPerfTimer appendPerfTimer(mLastPerfShellTraceStats.sceneSelectDynamicMergeAppendMs);
+					return mSceneLights.MergePersistentDynamicEmissiveCacheIntoSceneView(mergedDynamicSceneView);
+				}();
+				{
+					ScopedPtPerfTimer statsPerfTimer(mLastPerfShellTraceStats.sceneSelectDynamicMergeStatsMs);
+					RebuildSceneViewStats(mergedDynamicSceneView);
+				}
+				mLastPerfShellTraceStats.dynamicMergeLiveSurfaceCount = mergeStats.LiveSurfaceCount();
+				mLastPerfShellTraceStats.dynamicMergePersistentCacheSurfaceCount = mergeStats.CacheSurfaceCount();
+				mLastPerfShellTraceStats.dynamicMergeAppendedPersistentSurfaceCount = mergeStats.AppendedSurfaceCount();
+				mLastPerfShellTraceStats.dynamicMergeDuplicatePersistentSurfaceCount = mergeStats.DuplicateSurfaceCount();
+				mLastPerfShellTraceStats.dynamicMergeAppendedPersistentPrimitiveCount = persistentDynamicCache.primitiveCount;
+				mLastPerfShellTraceStats.dynamicMergeAppendedPersistentMaterialCount = persistentDynamicCache.materialCount;
 
 				{
 					Clocker clock(NriPTGeometryBuild);
-					ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildMergedDynamicMs);
+					ScopedPtPerfTimer geometryPerfTimer(mLastPerfShellTraceStats.sceneSelectDynamicMergeGeometryMs);
+					ScopedPtPerfTimer legacyGeometryPerfTimer(mLastPerfShellTraceStats.geometryBuildMergedDynamicMs);
 					nri_scene::BuildGeometry(mergedDynamicSceneView, mergedDynamicGeometry);
+				}
+				{
+					ScopedPtPerfTimer portalPerfTimer(mLastPerfShellTraceStats.sceneSelectDynamicMergePortalAssignMs);
 					AssignGeometryPortalIndices(mMapWorld, mergedDynamicGeometry);
 				}
 				{
 					Clocker clock(NriPTMaterialBuild);
+					ScopedPtPerfTimer materialPerfTimer(mLastPerfShellTraceStats.sceneSelectDynamicMergeMaterialMs);
 					BuildMaterialsWithActorOverrides(mergedDynamicSceneView, mergedDynamicMaterialBridge, "dynamic_with_persistent_emissive");
 				}
 
