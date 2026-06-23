@@ -1193,6 +1193,10 @@ public:
 		uint32_t dynamicMergeDuplicatePersistentSurfaceCount = 0;
 		uint32_t dynamicMergeAppendedPersistentPrimitiveCount = 0;
 		uint32_t dynamicMergeAppendedPersistentMaterialCount = 0;
+		uint32_t dynamicMergeDeltaAppendAttempts = 0;
+		uint32_t dynamicMergeDeltaAppendUsed = 0;
+		uint32_t dynamicMergeDeltaAppendFallbacks = 0;
+		uint32_t dynamicMergeDeltaAppendFallbackNonZeroSurfaces = 0;
 		uint32_t sceneLightSpriteTileRuleCount = 0;
 		uint32_t sceneLightSpriteRecordCandidateScans = 0;
 		uint32_t sceneLightActorOverlayRuleCount = 0;

@@ -4112,7 +4112,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectTexturePrepMs,
 			shell.sceneSelectStateCommitMs);
 		Printf(
-			"PERF pt scene select accounting NRI: frame=%llu select=%.3f accounted=%.3f unaccounted=%.3f static_map=%.3f spacelink=%.3f mutation=%.3f dynamic_capture=%.3f dynamic_geo=%.3f local_player_reflection_geo=%.3f persistent_batch=%.3f persistent_emissive=%.3f persistent_dynamic=%.3f dynamic_merge=%.3f dynamic_merge_copy=%.3f dynamic_merge_append=%.3f dynamic_merge_stats=%.3f dynamic_merge_geo=%.3f dynamic_merge_portal=%.3f dynamic_merge_material=%.3f dynamic_merge_live_surfaces=%u dynamic_merge_cache_surfaces=%u dynamic_merge_appended_surfaces=%u dynamic_merge_duplicate_surfaces=%u dynamic_merge_cache_prims=%u dynamic_merge_cache_mats=%u light_merge=%.3f debug_sphere=%.3f overlay=%.3f static_instances=%.3f material_bridge=%.3f palette=%.3f textures=%.3f material_split=%.3f buffer_upload=%.3f persistent_voxel_as=%.3f dynamic_as=%.3f instance_handles=%.3f world_tlas=%.3f scene_data=%.3f texture_prep=%.3f state_commit=%.3f\n",
+			"PERF pt scene select accounting NRI: frame=%llu select=%.3f accounted=%.3f unaccounted=%.3f static_map=%.3f spacelink=%.3f mutation=%.3f dynamic_capture=%.3f dynamic_geo=%.3f local_player_reflection_geo=%.3f persistent_batch=%.3f persistent_emissive=%.3f persistent_dynamic=%.3f dynamic_merge=%.3f dynamic_merge_copy=%.3f dynamic_merge_append=%.3f dynamic_merge_stats=%.3f dynamic_merge_geo=%.3f dynamic_merge_portal=%.3f dynamic_merge_material=%.3f dynamic_merge_live_surfaces=%u dynamic_merge_cache_surfaces=%u dynamic_merge_appended_surfaces=%u dynamic_merge_duplicate_surfaces=%u dynamic_merge_cache_prims=%u dynamic_merge_cache_mats=%u dynamic_merge_delta_attempts=%u dynamic_merge_delta_used=%u dynamic_merge_delta_fallbacks=%u dynamic_merge_delta_fallback_nonzero=%u light_merge=%.3f debug_sphere=%.3f overlay=%.3f static_instances=%.3f material_bridge=%.3f palette=%.3f textures=%.3f material_split=%.3f buffer_upload=%.3f persistent_voxel_as=%.3f dynamic_as=%.3f instance_handles=%.3f world_tlas=%.3f scene_data=%.3f texture_prep=%.3f state_commit=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneSelectMs,
 			sceneSelectAccountedMs,
@@ -4139,6 +4139,10 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.dynamicMergeDuplicatePersistentSurfaceCount,
 			shell.dynamicMergeAppendedPersistentPrimitiveCount,
 			shell.dynamicMergeAppendedPersistentMaterialCount,
+			shell.dynamicMergeDeltaAppendAttempts,
+			shell.dynamicMergeDeltaAppendUsed,
+			shell.dynamicMergeDeltaAppendFallbacks,
+			shell.dynamicMergeDeltaAppendFallbackNonZeroSurfaces,
 			shell.sceneSelectLightMergeMs,
 			shell.runtimeDebugSphereMs,
 			shell.overlayAppendMs,
