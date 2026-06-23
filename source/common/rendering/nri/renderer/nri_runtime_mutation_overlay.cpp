@@ -209,6 +209,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationStructuralReplacementDeltaReasonMaskOr = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReasonMaskOr = 0;
 	mLastPerfShellTraceStats.runtimeMutationInvalidForceTopologyCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationForceTopologyProofChecks = 0;
+	mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeNoopCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeMaterialOnlyCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradePrepareFailedCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeNoReplacementCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeGeometryChangedCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeUnsafeReasonCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationInvalidAppliedCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentNoopSkipCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationInvalidFailedCount = 0;
@@ -2390,10 +2398,63 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		const bool structuralExcludeStaticFlip =
 			useOverlayReplacementState &&
 			replacement.excludeStaticChunk != desiredExcludeStaticChunk;
+		bool effectiveForceTopologyInvalidation = forceTopologyInvalidation;
+		bool effectiveStructuralReplacementDelta = structuralReplacementDelta;
+		if (forceTopologyInvalidation)
+		{
+			mLastPerfShellTraceStats.runtimeMutationForceTopologyProofChecks++;
+			const uint32_t dirtyOnlyStructuralReasonMask =
+				nri_scene::PTMapChunkMutationReason_SectorDirty |
+				nri_scene::PTMapChunkMutationReason_SectionDirty;
+			const uint32_t replacementStructuralReasonMask =
+				analyzedReplacementDelta ? (replacementDelta.reasonMask & structuralReasonMask) : structuralReasonMask;
+			const bool onlyDirtyStructuralReason =
+				(replacementStructuralReasonMask & ~dirtyOnlyStructuralReasonMask) == 0;
+			if (!chunkVisibleNow)
+			{
+				mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeUnsafeReasonCount++;
+			}
+			else if (!replacement.valid)
+			{
+				mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeNoReplacementCount++;
+			}
+			else if (!onlyDirtyStructuralReason)
+			{
+				mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeUnsafeReasonCount++;
+			}
+			else if (!prepareLiveChunkView())
+			{
+				mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradePrepareFailedCount++;
+			}
+			else
+			{
+				const uint64_t liveExactGeometrySignature = ComputeExactGeometrySignature(liveChunkView);
+				const uint64_t previousExactGeometrySignature = ComputeExactGeometrySignature(replacement.sceneView);
+				if (liveExactGeometrySignature == previousExactGeometrySignature)
+				{
+					const uint64_t liveAnimatedMaterialSignature = ComputeAnimatedMaterialSignature(liveChunkView);
+					effectiveForceTopologyInvalidation = false;
+					effectiveStructuralReplacementDelta = false;
+					mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeCount++;
+					if (liveAnimatedMaterialSignature == replacement.animatedMaterialSignature)
+					{
+						mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeNoopCount++;
+					}
+					else
+					{
+						mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeMaterialOnlyCount++;
+					}
+				}
+				else
+				{
+					mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeGeometryChangedCount++;
+				}
+			}
+		}
 		const bool needsStructuralRebuild =
 			structuralInvalid ||
-			forceTopologyInvalidation ||
-			structuralReplacementDelta ||
+			effectiveForceTopologyInvalidation ||
+			effectiveStructuralReplacementDelta ||
 			replacementViewChanged ||
 			structuralExcludeStaticFlip ||
 			structuralStaticAnimatedModeFlip;
@@ -2502,7 +2563,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				structuralTriggerMask |= RuntimeStructuralRebuildTrigger_ExcludeStaticFlip;
 			}
-			if (forceTopologyInvalidation)
+			if (effectiveForceTopologyInvalidation)
 			{
 				structuralTriggerMask |= RuntimeStructuralRebuildTrigger_ForceTopology;
 			}
@@ -2512,7 +2573,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			}
 			mLastPerfShellTraceStats.runtimeMutationStructuralRebuildChunks++;
 			recordRuntimeMutationStructuralTier(chunkVisibleNow, runtimeMutationDistanceTier, runtimeMutationCandidateSourceMask);
-			if (structuralReplacementDelta)
+			if (effectiveStructuralReplacementDelta)
 			{
 				mLastPerfShellTraceStats.runtimeMutationStructuralReplacementDeltaChunks++;
 				if (analyzedReplacementDelta)
@@ -2532,7 +2593,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				mLastPerfShellTraceStats.runtimeMutationStructuralExcludeStaticFlipChunks++;
 			}
-			if (forceTopologyInvalidation)
+			if (effectiveForceTopologyInvalidation)
 			{
 				mLastPerfShellTraceStats.runtimeMutationStructuralForcedTopologyChunks++;
 			}
@@ -2669,7 +2730,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 						replacement.triangleCount,
 						previousGeometryDirtyMaterialCount,
 						(uint32_t)replacement.materialBridge.materials.size(),
-						forceTopologyInvalidation);
+						effectiveForceTopologyInvalidation);
 				}
 			}
 		}
@@ -2953,9 +3014,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				residentEntry->valid &&
 				residentEntry->active &&
 				residentEntry->mappedInStaticScene;
-			const bool residentNoopIgnoreExcludeStatic = forceTopologyInvalidation;
+			const bool residentNoopIgnoreExcludeStatic = effectiveForceTopologyInvalidation;
 			const bool residentNoopSignatureCandidate =
-				forceTopologyInvalidation &&
+				effectiveForceTopologyInvalidation &&
 				replacement.residentAuthoritative &&
 				residentEntry != nullptr &&
 				residentEntry->valid &&

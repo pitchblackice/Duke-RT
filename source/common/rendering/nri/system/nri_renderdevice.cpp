@@ -4253,7 +4253,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectBufferUploadPersistentVoxelMaterialBatchBarrierCommands,
 			(unsigned long long)shell.sceneSelectBufferUploadPersistentVoxelMaterialBatchGapBytes);
 		Printf(
-			"PERF pt scene buffer dirty range detail NRI: frame=%llu dirty_range=%.3f dirty_checks=%u dirty_skips=%u dirty_forced_full=%u dirty_missing_mirror=%u dirty_size_mismatch=%u dirty_raw_ranges=%u dirty_ranges=%u dirty_changed=%llu dirty_uploaded=%llu dirty_gap=%llu dirty_reject_coalesce=%u range_uploads=%u range_upload_bytes=%llu range_fallbacks=%u range_fallback_fragmented=%u range_fallback_large=%u primitive_range_uploads=%u material_range_uploads=%u vertex_dirty_ranges=%u vertex_dirty_changed=%llu vertex_dirty_uploaded=%llu index_dirty_ranges=%u index_dirty_changed=%llu index_dirty_uploaded=%llu primitive_dirty_ranges=%u primitive_dirty_changed=%llu primitive_dirty_uploaded=%llu material_dirty_ranges=%u material_dirty_changed=%llu material_dirty_uploaded=%llu\n",
+			"PERF pt scene buffer dirty range detail NRI: frame=%llu dirty_range=%.3f dirty_checks=%u dirty_skips=%u dirty_forced_full=%u dirty_missing_mirror=%u dirty_size_mismatch=%u dirty_source_full=%u dirty_source_byte_scan=%u dirty_source_typed=%u dirty_raw_ranges=%u dirty_ranges=%u dirty_changed=%llu dirty_uploaded=%llu dirty_gap=%llu dirty_reject_coalesce=%u range_uploads=%u range_upload_bytes=%llu range_fallbacks=%u range_fallback_fragmented=%u range_fallback_large=%u primitive_range_uploads=%u material_range_uploads=%u vertex_dirty_ranges=%u vertex_dirty_changed=%llu vertex_dirty_uploaded=%llu index_dirty_ranges=%u index_dirty_changed=%llu index_dirty_uploaded=%llu primitive_dirty_ranges=%u primitive_dirty_changed=%llu primitive_dirty_uploaded=%llu material_dirty_ranges=%u material_dirty_changed=%llu material_dirty_uploaded=%llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneSelectBufferUploadDirtyRangeMs,
 			shell.sceneSelectBufferUploadDirtyRangeChecks,
@@ -4261,6 +4261,9 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectBufferUploadDirtyRangeForcedFull,
 			shell.sceneSelectBufferUploadDirtyRangeMissingMirror,
 			shell.sceneSelectBufferUploadDirtyRangeSizeMismatch,
+			shell.sceneSelectBufferUploadDirtyRangeSourceFull,
+			shell.sceneSelectBufferUploadDirtyRangeSourceByteScan,
+			shell.sceneSelectBufferUploadDirtyRangeSourceTyped,
 			shell.sceneSelectBufferUploadDirtyRangeRawRanges,
 			shell.sceneSelectBufferUploadDirtyRangeCoalescedRanges,
 			(unsigned long long)shell.sceneSelectBufferUploadDirtyRangeChangedBytes,
@@ -4769,9 +4772,17 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationStructuralInvalidChunks,
 			shell.runtimeMutationHardwareCanvasChunkCount);
 		Printf(
-			"PERF pt mutation outcomes NRI: frame=%llu invalid_force_topology=%u invalid_applied=%u resident_noop_skips=%u invalid_failed=%u invalid_sync_skip=%u resident_noop_candidates=%u resident_noop_mask=0x%x noop_block_not_authoritative=%u noop_block_resident_unavailable=%u noop_block_replacement_invalid=%u noop_block_exclude_static=%u noop_block_surface_count=%u noop_block_material_count=%u noop_block_primitive_count=%u valid_structural=%u valid_material=%u\n",
+			"PERF pt mutation outcomes NRI: frame=%llu invalid_force_topology=%u force_topology_proofs=%u force_topology_downgrades=%u force_topology_downgrade_noop=%u force_topology_downgrade_material=%u force_topology_proof_prepare_failed=%u force_topology_proof_no_replacement=%u force_topology_proof_geometry_changed=%u force_topology_proof_unsafe_reason=%u invalid_applied=%u resident_noop_skips=%u invalid_failed=%u invalid_sync_skip=%u resident_noop_candidates=%u resident_noop_mask=0x%x noop_block_not_authoritative=%u noop_block_resident_unavailable=%u noop_block_replacement_invalid=%u noop_block_exclude_static=%u noop_block_surface_count=%u noop_block_material_count=%u noop_block_primitive_count=%u valid_structural=%u valid_material=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.runtimeMutationInvalidForceTopologyCount,
+			shell.runtimeMutationForceTopologyProofChecks,
+			shell.runtimeMutationForceTopologyDowngradeCount,
+			shell.runtimeMutationForceTopologyDowngradeNoopCount,
+			shell.runtimeMutationForceTopologyDowngradeMaterialOnlyCount,
+			shell.runtimeMutationForceTopologyDowngradePrepareFailedCount,
+			shell.runtimeMutationForceTopologyDowngradeNoReplacementCount,
+			shell.runtimeMutationForceTopologyDowngradeGeometryChangedCount,
+			shell.runtimeMutationForceTopologyDowngradeUnsafeReasonCount,
 			shell.runtimeMutationInvalidAppliedCount,
 			shell.runtimeMutationResidentNoopSkipCount,
 			shell.runtimeMutationInvalidFailedCount,

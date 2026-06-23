@@ -1184,6 +1184,7 @@ bool NRIRenderer::UploadSceneBuffers(
 		}
 		if (forceFullDirty || bufferData == nullptr || mirror.empty() || mirror.size() != bufferSize)
 		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeSourceFull++;
 			if (forceFullDirty || bufferData == nullptr)
 			{
 				mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeForcedFull++;
@@ -1207,6 +1208,7 @@ bool NRIRenderer::UploadSceneBuffers(
 			return result;
 		}
 
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeSourceByteScan++;
 		const uint64_t maxGapBytes = (uint64_t)(int)nri_ptscenebufferdirtyrangegap;
 		const uint8_t* current = static_cast<const uint8_t*>(bufferData);
 		const uint8_t* previous = mirror.data();

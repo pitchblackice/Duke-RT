@@ -587,6 +587,9 @@ public:
 		uint32_t sceneSelectBufferUploadDirtyRangeForcedFull = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeMissingMirror = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeSizeMismatch = 0;
+		uint32_t sceneSelectBufferUploadDirtyRangeSourceFull = 0;
+		uint32_t sceneSelectBufferUploadDirtyRangeSourceByteScan = 0;
+		uint32_t sceneSelectBufferUploadDirtyRangeSourceTyped = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeRawRanges = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeCoalescedRanges = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeRejectedCoalesces = 0;
@@ -888,6 +891,14 @@ public:
 		uint32_t runtimeMutationStructuralReplacementDeltaReasonMaskOr = 0;
 		uint32_t runtimeMutationMaterialRefreshReasonMaskOr = 0;
 		uint32_t runtimeMutationInvalidForceTopologyCount = 0;
+		uint32_t runtimeMutationForceTopologyProofChecks = 0;
+		uint32_t runtimeMutationForceTopologyDowngradeCount = 0;
+		uint32_t runtimeMutationForceTopologyDowngradeNoopCount = 0;
+		uint32_t runtimeMutationForceTopologyDowngradeMaterialOnlyCount = 0;
+		uint32_t runtimeMutationForceTopologyDowngradePrepareFailedCount = 0;
+		uint32_t runtimeMutationForceTopologyDowngradeNoReplacementCount = 0;
+		uint32_t runtimeMutationForceTopologyDowngradeGeometryChangedCount = 0;
+		uint32_t runtimeMutationForceTopologyDowngradeUnsafeReasonCount = 0;
 		uint32_t runtimeMutationInvalidAppliedCount = 0;
 		uint32_t runtimeMutationResidentNoopSkipCount = 0;
 		uint32_t runtimeMutationInvalidFailedCount = 0;

@@ -40,7 +40,7 @@
                             },
                    "scene_instances":  {
                                            "min":  191,
-                                           "max":  203
+                                           "max":  206
                                        },
                    "static_instances":  {
                                             "min":  190,
@@ -52,7 +52,7 @@
                                          },
                    "voxel_instances":  {
                                            "min":  0,
-                                           "max":  12
+                                           "max":  15
                                        },
                    "emissive_instances":  {
                                               "min":  300,

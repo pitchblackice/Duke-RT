@@ -63,7 +63,29 @@ uint64_t GetNRISceneUploadGrownBufferSize(uint64_t currentCapacity, uint64_t req
 	}
 	if (currentCapacity == 0)
 	{
-		return minimumCapacity;
+		constexpr uint64_t kMinInitialHeadroom = 1ull * 1024ull * 1024ull;
+		constexpr uint64_t kMaxInitialHeadroom = 16ull * 1024ull * 1024ull;
+		const uint64_t proportionalHeadroom = minimumCapacity / 4u;
+		const uint64_t headroom = std::min<uint64_t>(
+			std::max<uint64_t>(proportionalHeadroom, kMinInitialHeadroom),
+			kMaxInitialHeadroom);
+		uint64_t initialCapacity =
+			minimumCapacity <= std::numeric_limits<uint64_t>::max() - headroom ?
+			minimumCapacity + headroom :
+			minimumCapacity;
+		if (stride > 1)
+		{
+			const uint64_t remainder = initialCapacity % stride;
+			if (remainder != 0)
+			{
+				const uint64_t alignmentPadding = stride - remainder;
+				initialCapacity =
+					initialCapacity <= std::numeric_limits<uint64_t>::max() - alignmentPadding ?
+					initialCapacity + alignmentPadding :
+					minimumCapacity;
+			}
+		}
+		return std::max<uint64_t>(initialCapacity, minimumCapacity);
 	}
 
 	uint64_t newCapacity = std::max<uint64_t>(currentCapacity, stride);
