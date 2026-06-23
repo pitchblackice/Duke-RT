@@ -162,13 +162,13 @@ $manifestPath = Join-Path $OutputDirectory "manifest.json"
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
 if (-not $SkipAnalyze) {
-    $analyzeArgs = @("-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot "analyze-explosion-repro.ps1"), "-LogDirectory", $OutputDirectory)
+    $analyzeArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot "analyze-explosion-repro.ps1"), "-LogDirectory", $OutputDirectory)
     if ($SummaryOutput) {
         $analyzeArgs += @("-SummaryOutput", $SummaryOutput)
     }
-    $analyze = Start-Process -FilePath "powershell" -ArgumentList $analyzeArgs -PassThru -Wait -NoNewWindow
-    if ($analyze.ExitCode -ne 0) {
-        exit $analyze.ExitCode
+    & powershell.exe @analyzeArgs
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
     }
 }
 
