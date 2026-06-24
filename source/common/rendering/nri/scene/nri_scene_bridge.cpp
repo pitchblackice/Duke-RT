@@ -1975,7 +1975,10 @@ namespace
 		}
 
 		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, (uint64_t)(uintptr_t)key.voxel);
 		hash = HashCombine64(hash, (uint64_t)(uintptr_t)key.model);
+		hash = HashCombine64(hash, key.sourcePicnum.isValid() ? (uint64_t)(uint32_t)key.sourcePicnum.GetIndex() : 0ull);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)key.resolvedVoxelIndex);
 		hash = HashCombine64(hash, (uint64_t)key.geometryState);
 		return hash;
 	}
