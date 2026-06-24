@@ -759,13 +759,28 @@ public:
 		uint32_t& outTileCountY,
 		uint32_t& outTileIndexCount,
 		uint32_t& outMaxTileOccupancy) const;
+
+	struct EmissiveSamplingUploadStats
+	{
+		uint32_t surfaceStatic = 0;
+		uint32_t surfaceCaptured = 0;
+		uint32_t surfaceRuntimeMutation = 0;
+		uint32_t surfaceDynamic = 0;
+		uint32_t surfacePersistentVoxel = 0;
+		uint32_t outputStaticRecords = 0;
+		uint32_t outputDynamicRecords = 0;
+		uint32_t outputPersistentVoxelRecords = 0;
+		uint32_t skippedPersistentVoxelSurfaces = 0;
+	};
+
 	void BuildEmissiveSamplingUpload(
 		const EmissiveSamplingBuildContext& context,
 		NRIEmissivePrimitiveHeaderGpuData& outHeader,
 		std::vector<NRIEmissivePrimitiveGpuData>& outPrimitives,
 		std::vector<float>& outCdf,
 		std::vector<NRIEmissiveMaterialResponseGpuData>& outMaterialResponses,
-		std::vector<NRIEmissivePrimitiveDebugRecord>& outDebugRecords) const;
+		std::vector<NRIEmissivePrimitiveDebugRecord>& outDebugRecords,
+		EmissiveSamplingUploadStats* outStats = nullptr) const;
 	uint64_t BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBuildContext& context) const;
 	void BuildSectorLightingUpload(
 		float sectorLightMultiplier,

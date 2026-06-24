@@ -4,6 +4,7 @@
 #include "nri_renderer.h"
 #include "nri_diagnostic_names.h"
 #include "nri_persistent_voxel_services.h"
+#include "nri_shader_contracts.h"
 #include "../scene/nri_hash.h"
 #include "../system/nri_renderdevice.h"
 #include "../../hwrenderer/data/hw_clock.h"
@@ -295,6 +296,23 @@ bool NRIAccelerationStructureManager::BuildEmissiveTopLevel(NRIRenderer& rendere
 	renderer.mEmissiveTlasInstanceCount = 0;
 	renderer.mEmissiveTlasStaticInstanceCount = 0;
 	renderer.mEmissiveTlasDynamicInstanceCount = 0;
+	renderer.mLastPerfShellTraceStats.emissiveAsEnabled = (bool)nri_ptemissivetlas;
+	renderer.mLastPerfShellTraceStats.emissiveAsRecords = (uint32_t)renderer.mBoundEmissivePrimitiveRecords.size();
+	for (const NRIRenderer::EmissivePrimitiveDebugRecord& record : renderer.mBoundEmissivePrimitiveRecords)
+	{
+		if (record.dataSource == nri_diag::SceneDataSourceStatic)
+		{
+			renderer.mLastPerfShellTraceStats.emissiveAsRecordsStatic++;
+		}
+		else if (record.dataSource == nri_diag::SceneDataSourceDynamic)
+		{
+			renderer.mLastPerfShellTraceStats.emissiveAsRecordsDynamic++;
+		}
+		else if (record.dataSource == nri_diag::SceneDataSourcePersistentVoxel)
+		{
+			renderer.mLastPerfShellTraceStats.emissiveAsRecordsPersistentVoxel++;
+		}
+	}
 
 	if (!nri_ptemissivetlas ||
 		renderer.mBoundEmissivePrimitiveRecords.empty() ||
@@ -354,6 +372,11 @@ bool NRIAccelerationStructureManager::BuildEmissiveTopLevel(NRIRenderer& rendere
 			if (chunkIndex >= 0)
 			{
 				emissiveStaticChunks[(size_t)chunkIndex] = 1u;
+				renderer.mLastPerfShellTraceStats.emissiveAsStaticRecordMatchedChunks++;
+			}
+			else
+			{
+				renderer.mLastPerfShellTraceStats.emissiveAsStaticRecordUnmatchedChunks++;
 			}
 		}
 		else if (record.dataSource == nri_diag::SceneDataSourceDynamic &&
@@ -361,7 +384,12 @@ bool NRIAccelerationStructureManager::BuildEmissiveTopLevel(NRIRenderer& rendere
 			dynamicBottomLevelAS != nullptr &&
 			dynamicBottomLevelAS->accelerationStructure != nullptr)
 		{
+			renderer.mLastPerfShellTraceStats.emissiveAsDynamicRecordCount++;
 			includeDynamicInstance = true;
+		}
+		else if (record.dataSource == nri_diag::SceneDataSourcePersistentVoxel)
+		{
+			renderer.mLastPerfShellTraceStats.emissiveAsPersistentVoxelIgnoredRecords++;
 		}
 	}
 
@@ -391,12 +419,21 @@ bool NRIAccelerationStructureManager::BuildEmissiveTopLevel(NRIRenderer& rendere
 		instance.transform[1][1] = 1.0f;
 		instance.transform[2][2] = 1.0f;
 		instance.instanceId = sceneInstanceIt->second;
-		instance.mask = 0xFF;
+		instance.mask = NRI_TLAS_MASK_ALL_WORKLOADS;
 		instance.shaderBindingTableLocalOffset = 0;
 		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 		instance.accelerationStructureHandle = renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
 		instances.push_back(instance);
 		renderer.mEmissiveTlasStaticInstanceCount++;
+		renderer.mLastPerfShellTraceStats.emissiveAsStaticChunkRefs++;
+		if (instance.mask == NRI_TLAS_MASK_ALL_WORKLOADS)
+		{
+			renderer.mLastPerfShellTraceStats.emissiveAsMaskAllWorkloadsRefs++;
+		}
+		else
+		{
+			renderer.mLastPerfShellTraceStats.emissiveAsMaskOtherRefs++;
+		}
 	}
 
 	if (includeDynamicInstance)
@@ -406,12 +443,21 @@ bool NRIAccelerationStructureManager::BuildEmissiveTopLevel(NRIRenderer& rendere
 		instance.transform[1][1] = 1.0f;
 		instance.transform[2][2] = 1.0f;
 		instance.instanceId = dynamicSceneInstanceIndex;
-		instance.mask = 0xFF;
+		instance.mask = NRI_TLAS_MASK_ALL_WORKLOADS;
 		instance.shaderBindingTableLocalOffset = 0;
 		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 		instance.accelerationStructureHandle = renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*dynamicBottomLevelAS->accelerationStructure);
 		instances.push_back(instance);
 		renderer.mEmissiveTlasDynamicInstanceCount = 1;
+		renderer.mLastPerfShellTraceStats.emissiveAsDynamicAggregateRefs = 1;
+		if (instance.mask == NRI_TLAS_MASK_ALL_WORKLOADS)
+		{
+			renderer.mLastPerfShellTraceStats.emissiveAsMaskAllWorkloadsRefs++;
+		}
+		else
+		{
+			renderer.mLastPerfShellTraceStats.emissiveAsMaskOtherRefs++;
+		}
 	}
 
 	if (instances.empty())
@@ -430,8 +476,10 @@ bool NRIAccelerationStructureManager::BuildEmissiveTopLevel(NRIRenderer& rendere
 		renderer.mEmissiveTopLevelAS.accelerationStructure != nullptr)
 	{
 		renderer.mEmissiveTlasInstanceCount = (uint32_t)instances.size();
+		renderer.mLastPerfShellTraceStats.emissiveAsPayloadCacheHits++;
 		return true;
 	}
+	renderer.mLastPerfShellTraceStats.emissiveAsPayloadCacheMisses++;
 
 	renderer.RetireTopLevelAccelerationStructure(renderer.mEmissiveTopLevelAS);
 	if (!renderer.EnsureStructuredBuffer(

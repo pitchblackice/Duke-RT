@@ -19,6 +19,7 @@
 #include "nri_scene_frame_selection.h"
 #include "nri_scene_frame_state.h"
 #include "nri_scene_upload.h"
+#include "nri_shader_contracts.h"
 #include "nri_static_scene_geometry.h"
 #include "nri_surface_light_overlay.h"
 #include "nri_runtime_mutation_shared.h"
@@ -1185,7 +1186,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						dynamicInstance.transform[0][0] = 1.0f;
 						dynamicInstance.transform[1][1] = 1.0f;
 						dynamicInstance.transform[2][2] = 1.0f;
-						dynamicInstance.mask = 0xFF;
+						dynamicInstance.mask = NRI_TLAS_MASK_ALL_WORKLOADS;
 						dynamicInstance.shaderBindingTableLocalOffset = 0;
 						dynamicInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 						dynamicInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*dynamicBottomLevelAS.accelerationStructure);
@@ -1530,7 +1531,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				instance.transform[1][1] = 1.0f;
 				instance.transform[2][2] = 1.0f;
 				instance.instanceId = 0;
-				instance.mask = 0xFF;
+				instance.mask = NRI_TLAS_MASK_ALL_WORKLOADS;
 				instance.shaderBindingTableLocalOffset = 0;
 				instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 				instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*dynamicBottomLevelAS.accelerationStructure);

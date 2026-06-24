@@ -87,7 +87,17 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 	std::vector<float> emissiveCdf;
 	std::vector<NRIEmissiveMaterialResponseGpuData> emissiveMaterialResponses;
 	std::vector<NRIEmissivePrimitiveDebugRecord> emissiveDebugRecords;
-	mSceneLights.BuildEmissiveSamplingUpload(context, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveMaterialResponses, emissiveDebugRecords);
+	SceneLightSystem::EmissiveSamplingUploadStats emissiveStats = {};
+	mSceneLights.BuildEmissiveSamplingUpload(context, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveMaterialResponses, emissiveDebugRecords, &emissiveStats);
+	mLastPerfShellTraceStats.emissiveSamplingSurfaceStatic = emissiveStats.surfaceStatic;
+	mLastPerfShellTraceStats.emissiveSamplingSurfaceCaptured = emissiveStats.surfaceCaptured;
+	mLastPerfShellTraceStats.emissiveSamplingSurfaceRuntimeMutation = emissiveStats.surfaceRuntimeMutation;
+	mLastPerfShellTraceStats.emissiveSamplingSurfaceDynamic = emissiveStats.surfaceDynamic;
+	mLastPerfShellTraceStats.emissiveSamplingSurfacePersistentVoxel = emissiveStats.surfacePersistentVoxel;
+	mLastPerfShellTraceStats.emissiveSamplingOutputStaticRecords = emissiveStats.outputStaticRecords;
+	mLastPerfShellTraceStats.emissiveSamplingOutputDynamicRecords = emissiveStats.outputDynamicRecords;
+	mLastPerfShellTraceStats.emissiveSamplingOutputPersistentVoxelRecords = emissiveStats.outputPersistentVoxelRecords;
+	mLastPerfShellTraceStats.emissiveSamplingSkippedPersistentVoxelSurfaces = emissiveStats.skippedPersistentVoxelSurfaces;
 
 	const auto ensureStructuredBufferBatched = [this, ioWaitedForWrites](NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after) -> bool
 	{

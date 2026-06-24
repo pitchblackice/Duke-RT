@@ -7,6 +7,7 @@
 #include "nri_render_geometry_helpers.h"
 #include "nri_ray_scene_builder.h"
 #include "nri_scene_upload.h"
+#include "nri_shader_contracts.h"
 #include "nri_sky_environment.h"
 #include "nri_static_scene_geometry.h"
 #include "nri_runtime_mutation_shared.h"
@@ -1085,7 +1086,7 @@ namespace
 
 		nri::TopLevelInstance instance = {};
 		nri_scene::SetTopLevelInstanceTransform(instance, nri_scene::MakeIdentityPTTransform3x4());
-		instance.mask = 0xFF;
+		instance.mask = NRI_TLAS_MASK_ALL_WORKLOADS;
 		instance.shaderBindingTableLocalOffset = 0;
 		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 		instance.accelerationStructureHandle = services.getAccelerationStructureHandle(services.user, accelerationStructure);

@@ -922,7 +922,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 
 		RayQuery<RAY_FLAG_FORCE_OPAQUE> rayQuery;
 		RayDesc ray = { startOrigin, traceMinDistance, direction, maxDistance };
-		rayQuery.TraceRayInline(gWorldTlas, RAY_FLAG_FORCE_OPAQUE, 0xFF, ray);
+		rayQuery.TraceRayInline(gWorldTlas, RAY_FLAG_FORCE_OPAQUE, NRI_TLAS_MASK_ALL_WORKLOADS, ray);
 
 		while (rayQuery.Proceed()) {}
 

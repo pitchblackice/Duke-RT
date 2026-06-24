@@ -4796,8 +4796,10 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 	std::vector<NRIEmissivePrimitiveGpuData>& outPrimitives,
 	std::vector<float>& outCdf,
 	std::vector<NRIEmissiveMaterialResponseGpuData>& outMaterialResponses,
-	std::vector<NRIEmissivePrimitiveDebugRecord>& outDebugRecords) const
+	std::vector<NRIEmissivePrimitiveDebugRecord>& outDebugRecords,
+	EmissiveSamplingUploadStats* outStats) const
 {
+	EmissiveSamplingUploadStats localStats = {};
 	outHeader = {};
 	outHeader.dominantIndex = UINT32_MAX;
 	outHeader.flags = 0u;
@@ -4963,18 +4965,24 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 		switch (surface.source)
 		{
 		case SceneLightRecordSource::StaticMapScene:
+			localStats.surfaceStatic++;
 			appendSurfacePrimitives(surface, context.staticGeometry, staticRanges, nri_diag::SceneDataSourceStatic, 0u);
 			break;
 		case SceneLightRecordSource::CapturedScene:
+			localStats.surfaceCaptured++;
 			appendSurfacePrimitives(surface, context.capturedGeometry, capturedRanges, nri_diag::SceneDataSourceDynamic, 0u);
 			break;
 		case SceneLightRecordSource::RuntimeMutationScene:
+			localStats.surfaceRuntimeMutation++;
 			appendSurfacePrimitives(surface, context.runtimeMutationGeometry, runtimeMutationRanges, nri_diag::SceneDataSourceDynamic, context.runtimeMutationPrimitiveBaseOffset);
 			break;
 		case SceneLightRecordSource::DynamicScene:
+			localStats.surfaceDynamic++;
 			appendSurfacePrimitives(surface, context.dynamicGeometry, dynamicRanges, nri_diag::SceneDataSourceDynamic, context.dynamicPrimitiveBaseOffset);
 			break;
 		case SceneLightRecordSource::PersistentVoxelScene:
+			localStats.surfacePersistentVoxel++;
+			localStats.skippedPersistentVoxelSurfaces++;
 			break;
 		default:
 			break;
@@ -5006,6 +5014,18 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 	{
 		outPrimitives.push_back(candidates[i].gpu);
 		outDebugRecords.push_back(candidates[i].debug);
+		if (candidates[i].debug.dataSource == nri_diag::SceneDataSourceStatic)
+		{
+			localStats.outputStaticRecords++;
+		}
+		else if (candidates[i].debug.dataSource == nri_diag::SceneDataSourceDynamic)
+		{
+			localStats.outputDynamicRecords++;
+		}
+		else if (candidates[i].debug.dataSource == nri_diag::SceneDataSourcePersistentVoxel)
+		{
+			localStats.outputPersistentVoxelRecords++;
+		}
 		totalPower += candidates[i].gpu.powerEstimate;
 		totalSelectionWeight += candidates[i].gpu.selectionWeight;
 		if (candidates[i].gpu.powerEstimate > dominantPower)
@@ -5018,6 +5038,10 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 	outHeader.activeCount = (uint32_t)outPrimitives.size();
 	outHeader.totalPower = totalPower;
 	outMaterialResponses[0].dataSource = (uint32_t)outMaterialResponses.size() - 1u;
+	if (outStats != nullptr)
+	{
+		*outStats = localStats;
+	}
 
 	if (outPrimitives.empty())
 	{

@@ -2,6 +2,7 @@
 
 #include "../scene/nri_hash.h"
 #include "nri_ray_scene_builder.h"
+#include "nri_shader_contracts.h"
 #include "nri_upload_hash.h"
 #include "printf.h"
 #include "../../hwrenderer/data/hw_clock.h"
@@ -1275,7 +1276,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 				persistentVoxelInstance.transform[row][column] = actor.instanceTransform[row * 4u + column];
 			}
 		}
-		persistentVoxelInstance.mask = 0xFF;
+		persistentVoxelInstance.mask = NRI_TLAS_MASK_ALL_WORKLOADS;
 		persistentVoxelInstance.shaderBindingTableLocalOffset = 0;
 		persistentVoxelInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 		const NRIAccelerationStructureResource* selectedAccelerationStructure = &meshResourceIt->second.accelerationStructure;
