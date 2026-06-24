@@ -3757,6 +3757,20 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.asStaticChunkOwnedBlas,
 			shell.asStaticSegmentBlas);
 		Printf(
+			"PERF pt static segment cache NRI: frame=%llu candidates=%u entries=%u hits=%u misses=%u duplicate_refs=%u resident_blas=%u builds_this_frame=%u builds_last_rebuild=%u invalidations=%u resident_bytes=%llu blas_build_enabled=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.asStaticSegmentCacheCandidates,
+			shell.asStaticSegmentCacheEntries,
+			shell.asStaticSegmentCacheHits,
+			shell.asStaticSegmentCacheMisses,
+			shell.asStaticSegmentCacheDuplicateRefs,
+			shell.asStaticSegmentCacheResidentBlas,
+			shell.asStaticSegmentCacheBuildsThisFrame,
+			shell.asStaticSegmentCacheBuildsLastRebuild,
+			shell.asStaticSegmentCacheInvalidations,
+			(unsigned long long)shell.asStaticSegmentCacheResidentBytes,
+			shell.asStaticSegmentCacheBlasBuildEnabled ? 1u : 0u);
+		Printf(
 			"PERF pt world tlas detail NRI: frame=%llu total=%.3f retire=%.3f instance_upload=%.3f create=%.3f memory=%.3f scratch=%.3f descriptor=%.3f build=%.3f barrier=%.3f calls=%u instances=%u creates=%u scratch_queries=%u scratch_grows=%u scratch_requested=%llu memory_bytes=%llu descriptor_creates=%u barriers=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.worldTlasMs,

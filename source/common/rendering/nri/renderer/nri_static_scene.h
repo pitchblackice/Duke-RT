@@ -52,6 +52,47 @@ struct StaticMapChunkAtlas
 	std::vector<FreeRange> freeMaterialRanges;
 };
 
+struct StaticGeometrySegmentKey
+{
+	uint64_t geometrySignature = 0;
+	uint32_t vertexOffset = 0;
+	uint32_t vertexCount = 0;
+	uint32_t indexOffset = 0;
+	uint32_t indexCount = 0;
+	uint32_t primitiveOffset = 0;
+	uint32_t primitiveCount = 0;
+	uint32_t materialOffset = 0;
+	uint32_t materialCount = 0;
+	uint32_t sourceChunkIndex = UINT32_MAX;
+};
+
+struct StaticMapSegmentBlasCache
+{
+	struct Entry
+	{
+		StaticGeometrySegmentKey key = {};
+		uint32_t firstChunkListIndex = UINT32_MAX;
+		uint32_t refCount = 0;
+		uint32_t sourceChunkRefs = 0;
+		uint64_t scratchSize = 0;
+		NRIAccelerationStructureResource accelerationStructure;
+	};
+
+	bool valid = false;
+	bool blasBuildEnabled = false;
+	uint64_t buildSerial = 0;
+	uint32_t candidateCount = 0;
+	uint32_t entryCount = 0;
+	uint32_t cacheHits = 0;
+	uint32_t cacheMisses = 0;
+	uint32_t duplicateRefs = 0;
+	uint32_t residentBlasCount = 0;
+	uint32_t buildsThisFrame = 0;
+	uint32_t invalidations = 0;
+	uint64_t residentMemoryBytes = 0;
+	std::vector<Entry> entries;
+};
+
 struct StaticMapSceneCache
 {
 	struct ChunkCache
@@ -123,6 +164,7 @@ struct StaticMapSceneCache
 	nri_scene::MaterialBridgeData materialBridge;
 	std::vector<nri_scene::MaterialData> gpuMaterials;
 	std::vector<ChunkCache> chunks;
+	StaticMapSegmentBlasCache segmentBlasCache;
 	uint32_t tlasInstanceCount = 0;
 };
 

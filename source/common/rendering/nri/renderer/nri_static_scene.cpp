@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <utility>
 
 
 namespace
@@ -40,6 +41,229 @@ namespace
 		return
 			nri::AccelerationStructureBits::PREFER_FAST_TRACE |
 			nri::AccelerationStructureBits::ALLOW_UPDATE;
+	}
+
+	static uint64_t ResolveStaticSegmentGeometrySignature(const StaticMapSceneCache::ChunkCache& chunk)
+	{
+		if (chunk.exactGeometrySignature != 0)
+		{
+			return chunk.exactGeometrySignature;
+		}
+		if (chunk.geometryPayloadHash != 0)
+		{
+			return chunk.geometryPayloadHash;
+		}
+		return chunk.geometryTopologySignature;
+	}
+
+	static StaticGeometrySegmentKey BuildStaticSegmentKey(
+		const StaticMapSceneCache::ChunkCache& chunk,
+		const StaticMapChunkAtlas::ChunkEntry& atlasChunk)
+	{
+		StaticGeometrySegmentKey key = {};
+		key.geometrySignature = ResolveStaticSegmentGeometrySignature(chunk);
+		key.vertexOffset = atlasChunk.vertexOffset;
+		key.vertexCount = atlasChunk.vertexCount;
+		key.indexOffset = atlasChunk.indexOffset;
+		key.indexCount = atlasChunk.indexCount;
+		key.primitiveOffset = atlasChunk.primitiveOffset;
+		key.primitiveCount = atlasChunk.primitiveCount;
+		key.materialOffset = atlasChunk.materialOffset;
+		key.materialCount = atlasChunk.materialCount;
+		key.sourceChunkIndex = atlasChunk.chunkIndex;
+		return key;
+	}
+
+	static bool StaticSegmentKeysEqual(const StaticGeometrySegmentKey& lhs, const StaticGeometrySegmentKey& rhs)
+	{
+		return
+			lhs.geometrySignature == rhs.geometrySignature &&
+			lhs.vertexOffset == rhs.vertexOffset &&
+			lhs.vertexCount == rhs.vertexCount &&
+			lhs.indexOffset == rhs.indexOffset &&
+			lhs.indexCount == rhs.indexCount &&
+			lhs.primitiveOffset == rhs.primitiveOffset &&
+			lhs.primitiveCount == rhs.primitiveCount &&
+			lhs.materialOffset == rhs.materialOffset &&
+			lhs.materialCount == rhs.materialCount &&
+			lhs.sourceChunkIndex == rhs.sourceChunkIndex;
+	}
+
+	static StaticMapSegmentBlasCache::Entry* FindStaticSegmentCacheEntry(
+		StaticMapSegmentBlasCache& cache,
+		const StaticGeometrySegmentKey& key)
+	{
+		for (StaticMapSegmentBlasCache::Entry& entry : cache.entries)
+		{
+			if (StaticSegmentKeysEqual(entry.key, key))
+			{
+				return &entry;
+			}
+		}
+		return nullptr;
+	}
+
+	template<typename Services>
+	static void DestroyStaticSegmentBlasCacheResources(
+		StaticMapSegmentBlasCache& cache,
+		const Services& services)
+	{
+		if (services.destroyAccelerationStructureResource != nullptr)
+		{
+			for (StaticMapSegmentBlasCache::Entry& entry : cache.entries)
+			{
+				services.destroyAccelerationStructureResource(services.user, entry.accelerationStructure);
+				entry.scratchSize = 0;
+			}
+		}
+		cache = {};
+	}
+
+	template<typename Services>
+	static bool PopulateStaticSegmentBlasCache(
+		StaticMapSceneCache& staticScene,
+		const StaticMapChunkAtlas& atlas,
+		const std::vector<NRIStaticMapBlasBuildInput>& blasBuildInputs,
+		const Services& services,
+		nri::Buffer* vertexBuffer,
+		nri::Buffer* indexBuffer,
+		bool buildResidentBlas,
+		uint64_t& maxScratchSize)
+	{
+		const uint32_t invalidatedEntries =
+			staticScene.segmentBlasCache.valid ? staticScene.segmentBlasCache.entryCount : 0;
+		DestroyStaticSegmentBlasCacheResources(staticScene.segmentBlasCache, services);
+
+		StaticMapSegmentBlasCache& cache = staticScene.segmentBlasCache;
+		cache.valid = true;
+		cache.blasBuildEnabled = buildResidentBlas;
+		cache.buildSerial = staticScene.buildSerial;
+		cache.invalidations = invalidatedEntries;
+		cache.entries.reserve(blasBuildInputs.size());
+
+		for (const NRIStaticMapBlasBuildInput& buildInput : blasBuildInputs)
+		{
+			if (buildInput.chunkListIndex >= staticScene.chunks.size() ||
+				buildInput.chunkListIndex >= atlas.chunks.size())
+			{
+				continue;
+			}
+
+			const StaticMapSceneCache::ChunkCache& chunk = staticScene.chunks[buildInput.chunkListIndex];
+			const StaticMapChunkAtlas::ChunkEntry& atlasChunk = atlas.chunks[buildInput.chunkListIndex];
+			if (!chunk.active || !atlasChunk.valid || atlasChunk.indexCount == 0 || atlasChunk.primitiveCount == 0)
+			{
+				continue;
+			}
+
+			cache.candidateCount++;
+			const StaticGeometrySegmentKey key = BuildStaticSegmentKey(chunk, atlasChunk);
+			if (StaticMapSegmentBlasCache::Entry* existing = FindStaticSegmentCacheEntry(cache, key))
+			{
+				existing->refCount++;
+				existing->sourceChunkRefs++;
+				cache.cacheHits++;
+				cache.duplicateRefs++;
+				continue;
+			}
+
+			StaticMapSegmentBlasCache::Entry entry = {};
+			entry.key = key;
+			entry.firstChunkListIndex = buildInput.chunkListIndex;
+			entry.refCount = 1;
+			entry.sourceChunkRefs = 1;
+			cache.cacheMisses++;
+
+			if (buildResidentBlas)
+			{
+				NRIStaticMapBlasBuildInput segmentBuildInput = {};
+				segmentBuildInput.chunkListIndex = buildInput.chunkListIndex;
+				segmentBuildInput.vertexCount = atlas.vertexCount;
+				segmentBuildInput.indexOffsetBytes = (uint64_t)key.indexOffset * sizeof(uint32_t);
+				segmentBuildInput.indexCount = key.indexCount;
+				nri::BottomLevelGeometryDesc geometryDesc =
+					nri_static_scene::BuildStaticMapBlasGeometryDesc(segmentBuildInput, vertexBuffer, indexBuffer);
+
+				nri::AccelerationStructureDesc blasDesc = {};
+				blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
+				blasDesc.flags = GetStaticMapChunkBlasBuildBits();
+				blasDesc.geometryOrInstanceNum = 1;
+				blasDesc.geometries = &geometryDesc;
+				if (services.createBottomLevelAccelerationStructure == nullptr ||
+					!services.createBottomLevelAccelerationStructure(services.user, blasDesc, entry.accelerationStructure))
+				{
+					DestroyStaticSegmentBlasCacheResources(cache, services);
+					return false;
+				}
+
+				entry.scratchSize =
+					services.getAccelerationStructureBuildScratchBufferSize != nullptr ?
+					services.getAccelerationStructureBuildScratchBufferSize(services.user, entry.accelerationStructure) :
+					0;
+				maxScratchSize = std::max(maxScratchSize, entry.scratchSize);
+				cache.residentBlasCount++;
+				cache.residentMemoryBytes += entry.accelerationStructure.memorySize;
+			}
+
+			cache.entries.push_back(std::move(entry));
+		}
+
+		cache.entryCount = (uint32_t)cache.entries.size();
+		return true;
+	}
+
+	template<typename Services>
+	static void BuildStaticSegmentBlasCacheResources(
+		StaticMapSegmentBlasCache& cache,
+		const StaticMapChunkAtlas& atlas,
+		const Services& services,
+		nri::Buffer* vertexBuffer,
+		nri::Buffer* indexBuffer,
+		NRIBufferResource& scratchBuffer,
+		bool needsInitialScratchBarrier,
+		std::vector<NRIAccelerationStructureResource*>& barrierResources)
+	{
+		if (!cache.blasBuildEnabled || cache.entries.empty())
+		{
+			return;
+		}
+
+		bool needsScratchBarrier = needsInitialScratchBarrier;
+		for (StaticMapSegmentBlasCache::Entry& entry : cache.entries)
+		{
+			if (entry.accelerationStructure.accelerationStructure == nullptr)
+			{
+				continue;
+			}
+
+			if (needsScratchBarrier && services.cmdScratchReuseBarrier != nullptr)
+			{
+				services.cmdScratchReuseBarrier(services.user, scratchBuffer);
+			}
+
+			NRIStaticMapBlasBuildInput buildInput = {};
+			buildInput.chunkListIndex = entry.firstChunkListIndex;
+			buildInput.vertexCount = atlas.vertexCount;
+			buildInput.indexOffsetBytes = (uint64_t)entry.key.indexOffset * sizeof(uint32_t);
+			buildInput.indexCount = entry.key.indexCount;
+			nri::BottomLevelGeometryDesc geometryDesc =
+				nri_static_scene::BuildStaticMapBlasGeometryDesc(buildInput, vertexBuffer, indexBuffer);
+
+			nri::BuildBottomLevelAccelerationStructureDesc build = {};
+			build.dst = entry.accelerationStructure.accelerationStructure;
+			build.geometries = &geometryDesc;
+			build.geometryNum = 1;
+			build.scratchBuffer = scratchBuffer.buffer;
+			build.scratchOffset = 0;
+			if (services.cmdBuildBottomLevelAccelerationStructure != nullptr)
+			{
+				services.cmdBuildBottomLevelAccelerationStructure(services.user, build);
+			}
+
+			cache.buildsThisFrame++;
+			barrierResources.push_back(&entry.accelerationStructure);
+			needsScratchBarrier = true;
+		}
 	}
 
 	static bool ShouldTracePtPerf()
@@ -969,6 +1193,7 @@ bool nri_static_scene::BuildStaticMapAccelerationStructures(
 	if (services.destroyAccelerationStructureResource != nullptr)
 	{
 		services.destroyAccelerationStructureResource(services.user, staticResources.topLevelAS);
+		DestroyStaticSegmentBlasCacheResources(staticScene.segmentBlasCache, services);
 		for (auto& chunk : staticScene.chunks)
 		{
 			services.destroyAccelerationStructureResource(services.user, chunk.accelerationStructure);
@@ -1006,6 +1231,19 @@ bool nri_static_scene::BuildStaticMapAccelerationStructures(
 		maxScratchSize = std::max(maxScratchSize, scratchSize);
 	}
 
+	if (!PopulateStaticSegmentBlasCache(
+		staticScene,
+		staticResources.chunkAtlas,
+		blasBuildInputs,
+		services,
+		staticResources.vertexBuffer.buffer,
+		staticResources.indexBuffer.buffer,
+		nri_ptstaticsegmentblasbuild,
+		maxScratchSize))
+	{
+		return false;
+	}
+
 	if (services.createScratchBuffer == nullptr ||
 		!services.createScratchBuffer(services.user, staticResources.scratchBuffer, maxScratchSize))
 	{
@@ -1039,6 +1277,16 @@ bool nri_static_scene::BuildStaticMapAccelerationStructures(
 
 		blasBarrierResources.push_back(&chunk.accelerationStructure);
 	}
+
+	BuildStaticSegmentBlasCacheResources(
+		staticScene.segmentBlasCache,
+		staticResources.chunkAtlas,
+		services,
+		staticResources.vertexBuffer.buffer,
+		staticResources.indexBuffer.buffer,
+		staticResources.scratchBuffer,
+		!blasBuildInputs.empty(),
+		blasBarrierResources);
 
 	if (!blasBarrierResources.empty() && services.cmdAccelerationReadBarriers != nullptr)
 	{
@@ -1131,6 +1379,7 @@ bool nri_static_scene::BuildLiveStaticMapAccelerationStructures(
 	{
 		services.destroyAccelerationStructureResource(services.user, *input.topLevelAS);
 		services.destroyAccelerationStructureResource(services.user, *input.emissiveTopLevelAS);
+		DestroyStaticSegmentBlasCacheResources(staticScene.segmentBlasCache, services);
 		for (auto& chunk : staticScene.chunks)
 		{
 			services.destroyAccelerationStructureResource(services.user, chunk.accelerationStructure);
@@ -1168,6 +1417,19 @@ bool nri_static_scene::BuildLiveStaticMapAccelerationStructures(
 		maxScratchSize = std::max(maxScratchSize, scratchSize);
 	}
 
+	if (!PopulateStaticSegmentBlasCache(
+		staticScene,
+		atlas,
+		blasBuildInputs,
+		services,
+		input.staticVertexBuffer->buffer,
+		input.staticIndexBuffer->buffer,
+		nri_ptstaticsegmentblasbuild,
+		maxScratchSize))
+	{
+		return false;
+	}
+
 	if (services.createScratchBuffer == nullptr ||
 		!services.createScratchBuffer(services.user, *input.scratchBuffer, maxScratchSize))
 	{
@@ -1201,6 +1463,16 @@ bool nri_static_scene::BuildLiveStaticMapAccelerationStructures(
 
 		blasBarrierResources.push_back(&chunk.accelerationStructure);
 	}
+
+	BuildStaticSegmentBlasCacheResources(
+		staticScene.segmentBlasCache,
+		atlas,
+		services,
+		input.staticVertexBuffer->buffer,
+		input.staticIndexBuffer->buffer,
+		*input.scratchBuffer,
+		!blasBuildInputs.empty(),
+		blasBarrierResources);
 
 	if (!blasBarrierResources.empty() && services.cmdAccelerationReadBarriers != nullptr)
 	{
@@ -1253,6 +1525,7 @@ void nri_static_scene::DestroyStaticMapSceneResources(
 
 	if (services.destroyAccelerationStructureResource != nullptr)
 	{
+		DestroyStaticSegmentBlasCacheResources(staticScene.segmentBlasCache, services);
 		for (auto& chunk : staticScene.chunks)
 		{
 			services.destroyAccelerationStructureResource(services.user, chunk.accelerationStructure);
@@ -1321,6 +1594,7 @@ void nri_static_scene::DestroyLiveStaticMapSceneCache(
 
 	if (services.destroyAccelerationStructureResource != nullptr)
 	{
+		DestroyStaticSegmentBlasCacheResources(staticScene.segmentBlasCache, services);
 		for (auto& chunk : staticScene.chunks)
 		{
 			services.destroyAccelerationStructureResource(services.user, chunk.accelerationStructure);

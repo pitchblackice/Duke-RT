@@ -1278,6 +1278,17 @@ public:
 		uint32_t asStaticSegmentAnimatedChunks = 0;
 		uint32_t asStaticSegmentAtlasEligibleChunks = 0;
 		uint32_t asStaticSegmentRegistryMappedChunks = 0;
+		uint32_t asStaticSegmentCacheCandidates = 0;
+		uint32_t asStaticSegmentCacheEntries = 0;
+		uint32_t asStaticSegmentCacheHits = 0;
+		uint32_t asStaticSegmentCacheMisses = 0;
+		uint32_t asStaticSegmentCacheDuplicateRefs = 0;
+		uint32_t asStaticSegmentCacheResidentBlas = 0;
+		uint32_t asStaticSegmentCacheBuildsThisFrame = 0;
+		uint32_t asStaticSegmentCacheBuildsLastRebuild = 0;
+		uint32_t asStaticSegmentCacheInvalidations = 0;
+		uint64_t asStaticSegmentCacheResidentBytes = 0;
+		bool asStaticSegmentCacheBlasBuildEnabled = false;
 		uint32_t asDynamicUniqueGeometrySignatures = 0;
 		uint32_t asBlasCacheHits = 0;
 		uint32_t asBlasBuiltThisFrame = 0;

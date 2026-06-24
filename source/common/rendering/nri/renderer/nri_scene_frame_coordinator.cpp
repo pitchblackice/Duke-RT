@@ -837,6 +837,23 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 				}
 			}
 		}
+		const StaticMapSegmentBlasCache& segmentCache = mStaticMapScene.segmentBlasCache;
+		if (segmentCache.valid && segmentCache.buildSerial == mStaticMapScene.buildSerial)
+		{
+			mLastPerfShellTraceStats.asStaticSegmentCacheCandidates = segmentCache.candidateCount;
+			mLastPerfShellTraceStats.asStaticSegmentCacheEntries = segmentCache.entryCount;
+			mLastPerfShellTraceStats.asStaticSegmentCacheHits = segmentCache.cacheHits;
+			mLastPerfShellTraceStats.asStaticSegmentCacheMisses = segmentCache.cacheMisses;
+			mLastPerfShellTraceStats.asStaticSegmentCacheDuplicateRefs = segmentCache.duplicateRefs;
+			mLastPerfShellTraceStats.asStaticSegmentCacheResidentBlas = segmentCache.residentBlasCount;
+			mLastPerfShellTraceStats.asStaticSegmentCacheBuildsThisFrame =
+				mBuiltStaticMapSceneASLastFrame ? segmentCache.buildsThisFrame : 0;
+			mLastPerfShellTraceStats.asStaticSegmentCacheBuildsLastRebuild = segmentCache.buildsThisFrame;
+			mLastPerfShellTraceStats.asStaticSegmentCacheInvalidations = segmentCache.invalidations;
+			mLastPerfShellTraceStats.asStaticSegmentCacheResidentBytes = segmentCache.residentMemoryBytes;
+			mLastPerfShellTraceStats.asStaticSegmentCacheBlasBuildEnabled = segmentCache.blasBuildEnabled;
+			mLastPerfShellTraceStats.asStaticSegmentBlas = segmentCache.residentBlasCount;
+		}
 	}
 	mLastPerfShellTraceStats.asBlasBuiltThisFrame =
 		mLastPerfShellTraceStats.dynamicAsCreateCalls +
