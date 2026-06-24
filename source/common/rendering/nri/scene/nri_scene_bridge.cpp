@@ -4462,15 +4462,20 @@ namespace
 		auto found = gVoxelMeshCache.find(model);
 		if (found == gVoxelMeshCache.end())
 		{
+			gDynamicCapturePerfStats.voxelMeshCacheMisses++;
 			if (!CanBuildVoxelMeshThisFrame())
 			{
 				outDeferred = true;
 				gDynamicCapturePerfStats.voxelMeshCacheDeferred++;
+				gDynamicCapturePerfStats.modelBudgetTruncations++;
 				return nullptr;
 			}
 
 			VoxelMeshCacheEntry entry = {};
-			model->BuildCpuMesh(entry.mesh);
+			{
+				ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelMeshBuildMs);
+				model->BuildCpuMesh(entry.mesh);
+			}
 			entry.built = true;
 			entry.valid = entry.mesh.vertices.Size() > 0 && entry.mesh.indices.Size() >= 3;
 			gVoxelMeshBuildsThisFrame++;
@@ -4480,6 +4485,10 @@ namespace
 				gDynamicCapturePerfStats.voxelMeshCacheInvalid++;
 			}
 			found = gVoxelMeshCache.emplace(model, std::move(entry)).first;
+		}
+		else
+		{
+			gDynamicCapturePerfStats.voxelMeshCacheHits++;
 		}
 
 		const VoxelMeshCacheEntry& entry = found->second;
@@ -4790,6 +4799,7 @@ namespace
 		};
 		if (cacheUpdateConsumesActorBudget && !TrySpendVoxelCacheUpdateBudget(budget))
 		{
+			gDynamicCapturePerfStats.modelBudgetTruncations++;
 			return deferDesiredVariant(VoxelActorPendingReason::ActorBudget);
 		}
 
@@ -4856,6 +4866,7 @@ namespace
 		const uint32_t triangleCount = indexCount / 3u;
 		if (!TrySpendVoxelTriangleBudget(triangleCount, budget))
 		{
+			gDynamicCapturePerfStats.modelBudgetTruncations++;
 			if (cacheSurfaceUpdate)
 			{
 				return deferDesiredVariant(VoxelActorPendingReason::TriangleBudget);
@@ -4872,6 +4883,7 @@ namespace
 		bool hasExactSurface = false;
 		{
 			ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelSurfaceMs);
+			gDynamicCapturePerfStats.modelSurfaceBuilds++;
 			hasExactSurface = BuildVoxelMeshSurface(sprite, drawListType, cacheLookup, *mesh, voxelMaterial, exactSurface);
 		}
 		if (!hasExactSurface)
@@ -4949,6 +4961,10 @@ namespace
 	{
 		const bool rootMeshCapture = BeginVoxelMeshCacheFrame();
 		std::vector<HWSprite*> sprites;
+		if (sprites.capacity() < list.sprites.Size())
+		{
+			gDynamicCapturePerfStats.modelScratchGrows++;
+		}
 		sprites.reserve(list.sprites.Size());
 		auto finish = [&]()
 		{
@@ -4962,18 +4978,30 @@ namespace
 				sprites.push_back(sprite);
 			}
 		}
+		gDynamicCapturePerfStats.modelActorCandidates += (uint32_t)sprites.size();
 
-		const DVector3& viewPos = di.Viewpoint.Pos;
-		std::stable_sort(sprites.begin(), sprites.end(), [&viewPos](const HWSprite* a, const HWSprite* b)
+		if (sprites.size() > 1)
 		{
-			const double adx = (double)a->x - viewPos.X;
-			const double ady = (double)a->y + viewPos.Y;
-			const double adz = (double)a->z + viewPos.Z;
-			const double bdx = (double)b->x - viewPos.X;
-			const double bdy = (double)b->y + viewPos.Y;
-			const double bdz = (double)b->z + viewPos.Z;
-			return adx * adx + ady * ady + adz * adz < bdx * bdx + bdy * bdy + bdz * bdz;
-		});
+			const DVector3& viewPos = di.Viewpoint.Pos;
+			{
+				ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelSortMs);
+				std::stable_sort(sprites.begin(), sprites.end(), [&viewPos](const HWSprite* a, const HWSprite* b)
+				{
+					const double adx = (double)a->x - viewPos.X;
+					const double ady = (double)a->y + viewPos.Y;
+					const double adz = (double)a->z + viewPos.Z;
+					const double bdx = (double)b->x - viewPos.X;
+					const double bdy = (double)b->y + viewPos.Y;
+					const double bdz = (double)b->z + viewPos.Z;
+					return adx * adx + ady * ady + adz * adz < bdx * bdx + bdy * bdy + bdz * bdz;
+				});
+			}
+			gDynamicCapturePerfStats.modelActorSorted += (uint32_t)sprites.size();
+		}
+		else
+		{
+			gDynamicCapturePerfStats.modelActorSortSkipped += (uint32_t)sprites.size();
+		}
 
 		VoxelCaptureBudget budget = MakeVoxelCaptureBudget();
 		for (auto* sprite : sprites)

@@ -47,6 +47,43 @@ function Add-ThresholdFailure {
     }
 }
 
+function Get-StringArrayProperty {
+    param(
+        [object]$Object,
+        [string]$Name,
+        [string[]]$Default = @()
+    )
+
+    $value = Get-ObjectProperty -Object $Object -Name $Name
+    if ($null -eq $value) {
+        return $Default
+    }
+    return @($value | ForEach-Object { [string]$_ })
+}
+
+function Add-RegressionFailure {
+    param(
+        [System.Collections.Generic.List[string]]$Errors,
+        [string]$Name,
+        [string]$Metric,
+        [double]$Current,
+        [double]$Baseline,
+        [double]$Multiplier
+    )
+
+    if ($Baseline -le 0.0) {
+        if ($Current -gt 0.0) {
+            $Errors.Add("$Name $Metric regressed: current=$([Math]::Round($Current, 3)) baseline=$([Math]::Round($Baseline, 3))")
+        }
+        return
+    }
+
+    $limit = $Baseline * $Multiplier
+    if ($Current -gt $limit) {
+        $Errors.Add("$Name $Metric regressed: current=$([Math]::Round($Current, 3)) baseline=$([Math]::Round($Baseline, 3)) limit=$([Math]::Round($limit, 3))")
+    }
+}
+
 $summary = Get-Content -LiteralPath $SummaryPath -Raw | ConvertFrom-Json
 $baseline = Get-Content -LiteralPath $BaselinePath -Raw | ConvertFrom-Json
 $scenario = if ($ScenarioPath) {
@@ -57,7 +94,8 @@ else {
 }
 
 $errors = New-Object System.Collections.Generic.List[string]
-if (-not [bool]$summary.ok) {
+$summaryOk = [bool](Get-ObjectProperty -Object $summary -Name "ok" -Default $true)
+if (-not $summaryOk) {
     $errors.Add("summary ok=false")
     foreach ($errorText in @($summary.errors)) {
         $errors.Add([string]$errorText)
@@ -95,12 +133,27 @@ if ($null -ne $thresholds) {
 
 $baselineCompare = Get-ObjectProperty -Object $scenario -Name "baselineCompare" -Default (Get-ObjectProperty -Object $baseline -Name "baselineCompare")
 $allowRelativeRegressionPercent = [double](Get-ObjectProperty -Object $baselineCompare -Name "allowRelativeRegressionPercent" -Default 10.0)
+$fieldMetrics = Get-StringArrayProperty -Object $baselineCompare -Name "fieldMetrics" -Default @("avg", "p95")
+$loopTraceMetrics = Get-StringArrayProperty -Object $baselineCompare -Name "loopTraceMetrics" -Default @()
 $fieldList = @(Get-ObjectProperty -Object $baselineCompare -Name "fields")
 if ($fieldList.Count -eq 0) {
     $fieldList = @($baseline.fields | ForEach-Object { [string]$_.key })
 }
 
 $multiplier = 1.0 + ($allowRelativeRegressionPercent / 100.0)
+foreach ($metric in $loopTraceMetrics) {
+    if (-not $summary.loopTrace.PSObject.Properties.Name.Contains($metric)) {
+        $errors.Add("current summary missing loopTrace metric '$metric'")
+        continue
+    }
+    if (-not $baseline.loopTrace.PSObject.Properties.Name.Contains($metric)) {
+        $errors.Add("baseline missing loopTrace metric '$metric'")
+        continue
+    }
+
+    Add-RegressionFailure -Errors $errors -Name "loopTrace" -Metric $metric -Current ([double]$summary.loopTrace.$metric) -Baseline ([double]$baseline.loopTrace.$metric) -Multiplier $multiplier
+}
+
 foreach ($key in $fieldList) {
     $fieldKey = [string]$key
     if (-not $currentFields.ContainsKey($fieldKey)) {
@@ -114,16 +167,17 @@ foreach ($key in $fieldList) {
 
     $current = $currentFields[$fieldKey]
     $base = $baselineFields[$fieldKey]
-    foreach ($metric in @("avg", "p95")) {
-        $baseValue = [double]$base.$metric
-        $currentValue = [double]$current.$metric
-        if ($baseValue -le 0.0) {
+    foreach ($metric in $fieldMetrics) {
+        if (-not $current.PSObject.Properties.Name.Contains($metric)) {
+            $errors.Add("current field '$fieldKey' missing metric '$metric'")
             continue
         }
-        $limit = $baseValue * $multiplier
-        if ($currentValue -gt $limit) {
-            $errors.Add("field '$fieldKey' $metric regressed: current=$([Math]::Round($currentValue, 3)) baseline=$([Math]::Round($baseValue, 3)) limit=$([Math]::Round($limit, 3))")
+        if (-not $base.PSObject.Properties.Name.Contains($metric)) {
+            $errors.Add("baseline field '$fieldKey' missing metric '$metric'")
+            continue
         }
+
+        Add-RegressionFailure -Errors $errors -Name "field '$fieldKey'" -Metric $metric -Current ([double]$current.$metric) -Baseline ([double]$base.$metric) -Multiplier $multiplier
     }
 }
 
@@ -134,4 +188,4 @@ if ($errors.Count -gt 0) {
     exit 1
 }
 
-Write-Host "NRI perf baseline compare passed: summary=$SummaryPath baseline=$BaselinePath fields=$($fieldList.Count) allowed_regression_percent=$allowRelativeRegressionPercent"
+Write-Host "NRI perf baseline compare passed: summary=$SummaryPath baseline=$BaselinePath fields=$($fieldList.Count) field_metrics=$($fieldMetrics -join ',') loop_metrics=$($loopTraceMetrics -join ',') allowed_regression_percent=$allowRelativeRegressionPercent"

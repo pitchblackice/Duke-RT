@@ -338,6 +338,15 @@ public:
 			*outStats = batchStats;
 		}
 
+		renderer.mLastPerfShellTraceStats.persistentVoxelBatchCacheEntryMs += batchStats.persistentVoxelBatchCacheEntryMs;
+		renderer.mLastPerfShellTraceStats.persistentVoxelBatchSortMs += batchStats.persistentVoxelBatchSortMs;
+		renderer.mLastPerfShellTraceStats.persistentVoxelBatchInstanceSyncMs += batchStats.persistentVoxelBatchInstanceSyncMs;
+		renderer.mLastPerfShellTraceStats.persistentVoxelBatchExistingActorMapMs += batchStats.persistentVoxelBatchExistingActorMapMs;
+		renderer.mLastPerfShellTraceStats.persistentVoxelBatchActorLoopMs += batchStats.persistentVoxelBatchActorLoopMs;
+		renderer.mLastPerfShellTraceStats.persistentVoxelBatchMaterialVariantMs += batchStats.persistentVoxelBatchMaterialVariantMs;
+		renderer.mLastPerfShellTraceStats.persistentVoxelBatchMeshAdmissionMs += batchStats.persistentVoxelBatchMeshAdmissionMs;
+		renderer.mLastPerfShellTraceStats.persistentVoxelBatchMaterialBridgeMs += batchStats.persistentVoxelBatchMaterialBridgeMs;
+		renderer.mLastPerfShellTraceStats.persistentVoxelBatchStateMs += batchStats.persistentVoxelBatchStateMs;
 		renderer.mLastPerfShellTraceStats.geometryBuildPersistentVoxelVariantMs += batchStats.geometryBuildPersistentVoxelVariantMs;
 		renderer.mLastPerfShellTraceStats.geometryBuildPersistentVoxelAppendMs += batchStats.geometryBuildPersistentVoxelAppendMs;
 		renderer.mLastPerfShellTraceStats.geometryBuildPersistentVoxelRebuildMs += batchStats.geometryBuildPersistentVoxelRebuildMs;
@@ -360,6 +369,10 @@ public:
 		renderer.mLastPerfShellTraceStats.persistentVoxelOnboardingActorBudgetHits += batchStats.persistentVoxelOnboardingActorBudgetHits;
 		renderer.mLastPerfShellTraceStats.persistentVoxelOnboardingAdmittedCount += batchStats.persistentVoxelOnboardingAdmittedCount;
 		renderer.mLastPerfShellTraceStats.persistentVoxelOnboardingTextureBudgetHits += batchStats.persistentVoxelOnboardingTextureBudgetHits;
+		renderer.mLastPerfShellTraceStats.persistentVoxelOnboardingAdmissionPendingCount += batchStats.persistentVoxelOnboardingAdmissionPendingCount;
+		renderer.mLastPerfShellTraceStats.persistentVoxelOnboardingTexturePrewarmDeferredCount += batchStats.persistentVoxelOnboardingTexturePrewarmDeferredCount;
+		renderer.mLastPerfShellTraceStats.persistentVoxelOnboardingMaterialInvalidCount += batchStats.persistentVoxelOnboardingMaterialInvalidCount;
+		renderer.mLastPerfShellTraceStats.persistentVoxelOnboardingBudgetDeferredCount += batchStats.persistentVoxelOnboardingBudgetDeferredCount;
 		renderer.mLastPerfShellTraceStats.persistentVoxelOnboardingEstimatedBytes += batchStats.persistentVoxelOnboardingEstimatedBytes;
 		renderer.mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += batchStats.persistentVoxelOnboardingDeferredBytes;
 		renderer.mLastPerfShellTraceStats.persistentVoxelOnboardingAdmittedBytes += batchStats.persistentVoxelOnboardingAdmittedBytes;

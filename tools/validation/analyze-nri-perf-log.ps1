@@ -272,6 +272,13 @@ try {
             }
 
             $pairs = Read-KeyValuePairs -Text $body
+            if ($prefix -eq "PERF pt resource waits NRI") {
+                foreach ($match in [regex]::Matches($body, '([A-Za-z_][A-Za-z0-9_]*)=([0-9]+)/([0-9]+(?:\.[0-9]+)?)')) {
+                    $name = $match.Groups[1].Value
+                    $pairs["${name}_count"] = $match.Groups[2].Value
+                    $pairs["${name}_ms"] = $match.Groups[3].Value
+                }
+            }
             $frame = $null
             if ($pairs.Contains("frame")) {
                 $frameValue = ConvertTo-DoubleOrNull $pairs["frame"]
@@ -365,6 +372,13 @@ $worstFrames = @($loopFrames | Sort-Object @{ Expression = "frame_ms"; Descendin
         selectAccounting = if ($records.ContainsKey("PERF pt scene select accounting NRI")) { $records["PERF pt scene select accounting NRI"] } else { $null }
         sceneLight = if ($records.ContainsKey("PERF pt scene light detail NRI")) { $records["PERF pt scene light detail NRI"] } else { $null }
         texture = if ($records.ContainsKey("PERF pt texture detail NRI")) { $records["PERF pt texture detail NRI"] } else { $null }
+        sceneState = if ($records.ContainsKey("PERF pt scene state detail NRI")) { $records["PERF pt scene state detail NRI"] } else { $null }
+        dynamicCapture = if ($records.ContainsKey("PERF pt dynamic capture detail NRI")) { $records["PERF pt dynamic capture detail NRI"] } else { $null }
+        bufferUpload = if ($records.ContainsKey("PERF pt scene buffer upload detail NRI")) { $records["PERF pt scene buffer upload detail NRI"] } else { $null }
+        dirtyRange = if ($records.ContainsKey("PERF pt scene buffer dirty range detail NRI")) { $records["PERF pt scene buffer dirty range detail NRI"] } else { $null }
+        material = if ($records.ContainsKey("PERF pt material detail NRI")) { $records["PERF pt material detail NRI"] } else { $null }
+        dynamicAs = if ($records.ContainsKey("PERF pt dynamic as input NRI")) { $records["PERF pt dynamic as input NRI"] } else { $null }
+        resourceWaits = if ($records.ContainsKey("PERF pt resource waits NRI")) { $records["PERF pt resource waits NRI"] } else { $null }
     }
 })
 

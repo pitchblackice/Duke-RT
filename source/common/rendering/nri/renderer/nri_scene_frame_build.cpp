@@ -520,10 +520,20 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				mLastPerfShellTraceStats.dynamicCaptureVoxelCacheDeferred += captureStats.voxelCacheDeferred;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelMeshBuilds += captureStats.voxelMeshCacheBuilds;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelMeshDeferred += captureStats.voxelMeshCacheDeferred;
+				mLastPerfShellTraceStats.dynamicCaptureVoxelMeshHits += captureStats.voxelMeshCacheHits;
+				mLastPerfShellTraceStats.dynamicCaptureVoxelMeshMisses += captureStats.voxelMeshCacheMisses;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelMeshInvalid += captureStats.voxelMeshCacheInvalid;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelCanonicalSurfaceBuilds += captureStats.voxelCanonicalSurfaceBuilds;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelCanonicalSurfaceHits += captureStats.voxelCanonicalSurfaceHits;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelCanonicalSurfaceInvalid += captureStats.voxelCanonicalSurfaceInvalid;
+				mLastPerfShellTraceStats.dynamicCaptureModelActorCandidates += captureStats.modelActorCandidates;
+				mLastPerfShellTraceStats.dynamicCaptureModelActorSorted += captureStats.modelActorSorted;
+				mLastPerfShellTraceStats.dynamicCaptureModelActorSortSkipped += captureStats.modelActorSortSkipped;
+				mLastPerfShellTraceStats.dynamicCaptureModelScratchReuses += captureStats.modelScratchReuses;
+				mLastPerfShellTraceStats.dynamicCaptureModelScratchGrows += captureStats.modelScratchGrows;
+				mLastPerfShellTraceStats.dynamicCaptureModelScratchFallbacks += captureStats.modelScratchFallbacks;
+				mLastPerfShellTraceStats.dynamicCaptureModelBudgetTruncations += captureStats.modelBudgetTruncations;
+				mLastPerfShellTraceStats.dynamicCaptureModelSurfaceBuilds += captureStats.modelSurfaceBuilds;
 				mLastPerfShellTraceStats.voxelCacheActorEntries = dynamicSceneView.stats.voxelCacheEntries;
 				mLastPerfShellTraceStats.voxelCacheActorSurfaces = dynamicSceneView.stats.voxelCacheActorSurfaces;
 				mLastPerfShellTraceStats.voxelCacheUniqueMeshKeys = dynamicSceneView.stats.voxelCacheUniqueMeshKeys;
@@ -567,7 +577,9 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				mLastPerfShellTraceStats.dynamicCaptureModelSpritesMs += captureStats.modelSpritesMs;
 				mLastPerfShellTraceStats.dynamicCaptureModelClassifyMs += captureStats.modelClassifyMs;
 				mLastPerfShellTraceStats.dynamicCaptureModelMeshMs += captureStats.modelMeshMs;
+				mLastPerfShellTraceStats.dynamicCaptureModelMeshBuildMs += captureStats.modelMeshBuildMs;
 				mLastPerfShellTraceStats.dynamicCaptureModelSurfaceMs += captureStats.modelSurfaceMs;
+				mLastPerfShellTraceStats.dynamicCaptureModelSortMs += captureStats.modelSortMs;
 				mLastPerfShellTraceStats.dynamicCaptureModelStoreMs += captureStats.modelStoreMs;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelFrameMs += captureStats.voxelFrameMs;
 				mLastPerfShellTraceStats.dynamicCaptureStatsMs += captureStats.statsMs;
@@ -669,17 +681,20 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectPersistentVoxelBatchMs);
 			const MemoryTelemetry telemetry = GetMemoryTelemetry();
-			mPersistentVoxels.PumpAdmissionQueue(
-				"runtime",
-				mMapWorld.buildSerial,
-				mFrameIndex,
-				persistentVoxelSettings,
-				telemetry.totalTrackedBytes,
-				mFrameBuffer != nullptr ? mFrameBuffer->GetAdapterLocalBudgetBytes() : 0ull,
-				(int)nri_ptloadingtrace,
-				(bool)nri_voxelstats,
-				BuildNRIPersistentVoxelResetServices(*this),
-				BuildNRIPersistentVoxelAdmissionServices(*this));
+			{
+				ScopedPtPerfTimer admissionPumpTimer(mLastPerfShellTraceStats.sceneSelectPersistentVoxelAdmissionPumpMs);
+				mPersistentVoxels.PumpAdmissionQueue(
+					"runtime",
+					mMapWorld.buildSerial,
+					mFrameIndex,
+					persistentVoxelSettings,
+					telemetry.totalTrackedBytes,
+					mFrameBuffer != nullptr ? mFrameBuffer->GetAdapterLocalBudgetBytes() : 0ull,
+					(int)nri_ptloadingtrace,
+					(bool)nri_voxelstats,
+					BuildNRIPersistentVoxelResetServices(*this),
+					BuildNRIPersistentVoxelAdmissionServices(*this));
+			}
 			return EnsurePersistentVoxelBatch();
 		}();
 

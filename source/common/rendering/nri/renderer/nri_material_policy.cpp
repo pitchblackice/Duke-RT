@@ -329,17 +329,16 @@ namespace
 		return rule.lightType.IsEmpty() || rule.lightType.CompareNoCase("point") == 0;
 	}
 
-	struct ActorOverlayMaterialRule
+	struct ActorOverlayStampStats
 	{
-		uint32_t ruleId = 0;
-		bool hasTileFilter = false;
-		uint32_t tileFilter = 0;
-		uint32_t overrideBits = nri_material_policy::ActorMaterialOverride_None;
+		uint32_t stampedSpriteSurfaces = 0;
+		uint32_t skippedNonSpriteSurfaces = 0;
+		uint32_t skippedNoActorSurfaces = 0;
 	};
 
 	void BuildActorOverlayMaterialRules(
 		const ResolvedLightOverlaySet& resolved,
-		std::unordered_map<int32_t, std::vector<ActorOverlayMaterialRule>>& outRules)
+		nri_material_policy::ActorOverlayMaterialRuleMap& outRules)
 	{
 		if (resolved.actorRules.Size() == 0)
 		{
@@ -375,7 +374,7 @@ namespace
 					continue;
 				}
 
-				ActorOverlayMaterialRule rule = {};
+				nri_material_policy::ActorOverlayMaterialRule rule = {};
 				rule.ruleId = BuildActorOverlayRuleId(resolvedRule);
 				rule.hasTileFilter = resolvedRule.hasTileFilter;
 				rule.tileFilter = resolvedRule.hasTileFilter && resolvedRule.tileFilter >= 0 ? (uint32_t)resolvedRule.tileFilter : 0u;
@@ -401,16 +400,48 @@ namespace
 		}
 	}
 
-	void StampActorOverlayRuleIdsOnSurface(
-		const std::vector<ActorOverlayMaterialRule>& actorRules,
-		nri_scene::SurfaceRef& surface)
+	const nri_material_policy::ActorOverlayMaterialRuleMap& GetActorOverlayMaterialRulesForFrame(
+		const ResolvedLightOverlaySet& resolved,
+		uint32_t frameIndex,
+		nri_material_policy::ActorOverlayMaterialRuleCache& cache,
+		bool& outBuilt,
+		bool& outCacheHit)
 	{
-		if (surface.provenance.actorIndex < 0 ||
-			(surface.material.flags & nri_scene::MaterialFlag_Sprite) == 0)
+		outBuilt = false;
+		outCacheHit = false;
+		const uint32_t actorRuleCount = (uint32_t)resolved.actorRules.Size();
+		if (cache.valid &&
+			cache.frameIndex == frameIndex &&
+			cache.resolvedGeneration == resolved.resolvedGeneration &&
+			cache.actorRuleCount == actorRuleCount)
 		{
-			return;
+			outCacheHit = true;
+			return cache.rules;
 		}
 
+		cache.valid = true;
+		cache.frameIndex = frameIndex;
+		cache.resolvedGeneration = resolved.resolvedGeneration;
+		cache.actorRuleCount = actorRuleCount;
+		cache.totalRuleCount = 0;
+		cache.rules.clear();
+		if (actorRuleCount > 0)
+		{
+			BuildActorOverlayMaterialRules(resolved, cache.rules);
+			for (const auto& entry : cache.rules)
+			{
+				cache.totalRuleCount += (uint32_t)entry.second.size();
+			}
+			outBuilt = true;
+		}
+		return cache.rules;
+	}
+
+	void StampActorOverlayRuleIdsOnSurface(
+		const std::vector<nri_material_policy::ActorOverlayMaterialRule>& actorRules,
+		nri_scene::SurfaceRef& surface,
+		ActorOverlayStampStats& stats)
+	{
 		uint32_t textureId = 0;
 		if (surface.material.texture != nullptr)
 		{
@@ -432,20 +463,36 @@ namespace
 
 			surface.provenance.actorOverlayRuleIds[surface.provenance.actorOverlayRuleCount++] = rule.ruleId;
 		}
+		if (surface.provenance.actorOverlayRuleCount > 0)
+		{
+			stats.stampedSpriteSurfaces++;
+		}
 	}
 
 	void StampActorOverlayRuleIdsOnSceneView(
-		const std::unordered_map<int32_t, std::vector<ActorOverlayMaterialRule>>& actorOverlayRules,
-		nri_scene::SceneView& sceneView)
+		const nri_material_policy::ActorOverlayMaterialRuleMap& actorOverlayRules,
+		nri_scene::SceneView& sceneView,
+		ActorOverlayStampStats& stats)
 	{
-		auto stampSurfaces = [&actorOverlayRules](auto& surfaces)
+		auto stampSurfaces = [&actorOverlayRules, &stats](auto& surfaces)
 		{
 			for (auto& surface : surfaces)
 			{
+				if (surface.provenance.actorIndex < 0)
+				{
+					stats.skippedNoActorSurfaces++;
+					continue;
+				}
+				if ((surface.material.flags & nri_scene::MaterialFlag_Sprite) == 0)
+				{
+					stats.skippedNonSpriteSurfaces++;
+					continue;
+				}
+
 				const auto it = actorOverlayRules.find(surface.provenance.actorIndex);
 				if (it != actorOverlayRules.end())
 				{
-					StampActorOverlayRuleIdsOnSurface(it->second, surface);
+					StampActorOverlayRuleIdsOnSurface(it->second, surface, stats);
 				}
 			}
 		};
@@ -534,29 +581,49 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 		}
 	}
 
-	std::unordered_map<int32_t, std::vector<ActorOverlayMaterialRule>> actorOverlayRules;
+	const nri_material_policy::ActorOverlayMaterialRuleMap* actorOverlayRules = nullptr;
 	if (resolvedLightOverlays.actorRules.Size() > 0)
 	{
 		const auto actorOverlayRuleBuildStart = std::chrono::steady_clock::now();
-		BuildActorOverlayMaterialRules(resolvedLightOverlays, actorOverlayRules);
+		bool actorOverlayRulesBuilt = false;
+		bool actorOverlayRuleCacheHit = false;
+		const auto& cachedActorOverlayRules = GetActorOverlayMaterialRulesForFrame(
+			resolvedLightOverlays,
+			mFrameIndex,
+			mActorOverlayMaterialRuleCache,
+			actorOverlayRulesBuilt,
+			actorOverlayRuleCacheHit);
 		if (tracePerf)
 		{
-			materialTraceEntry.actorOverlayRuleMapBuilds++;
-			materialTraceEntry.actorOverlayRuleBuildMs += DurationMs(actorOverlayRuleBuildStart, std::chrono::steady_clock::now());
-			for (const auto& entry : actorOverlayRules)
+			if (actorOverlayRuleCacheHit)
 			{
-				materialTraceEntry.actorOverlayRuleCount += (uint32_t)entry.second.size();
+				materialTraceEntry.actorOverlayRuleMapCacheHits++;
 			}
+			else
+			{
+				materialTraceEntry.actorOverlayRuleMapCacheMisses++;
+			}
+			if (actorOverlayRulesBuilt)
+			{
+				materialTraceEntry.actorOverlayRuleMapBuilds++;
+				materialTraceEntry.actorOverlayRuleBuildMs += DurationMs(actorOverlayRuleBuildStart, std::chrono::steady_clock::now());
+			}
+			materialTraceEntry.actorOverlayRuleCount += mActorOverlayMaterialRuleCache.totalRuleCount;
 		}
-		if (!actorOverlayRules.empty())
+		actorOverlayRules = &cachedActorOverlayRules;
+		if (!actorOverlayRules->empty())
 		{
 			const auto stampStart = std::chrono::steady_clock::now();
-			StampActorOverlayRuleIdsOnSceneView(actorOverlayRules, sceneView);
+			ActorOverlayStampStats stampStats = {};
+			StampActorOverlayRuleIdsOnSceneView(*actorOverlayRules, sceneView, stampStats);
 			if (tracePerf)
 			{
 				materialTraceEntry.actorOverlayStampMs += DurationMs(stampStart, std::chrono::steady_clock::now());
+				materialTraceEntry.actorOverlayStampedSpriteSurfaces += stampStats.stampedSpriteSurfaces;
+				materialTraceEntry.actorOverlaySkippedNonSpriteSurfaces += stampStats.skippedNonSpriteSurfaces;
+				materialTraceEntry.actorOverlaySkippedNoActorSurfaces += stampStats.skippedNoActorSurfaces;
 			}
-			for (const auto& entry : actorOverlayRules)
+			for (const auto& entry : *actorOverlayRules)
 			{
 				uint32_t overrideBits = nri_material_policy::ActorMaterialOverride_None;
 				for (const auto& rule : entry.second)

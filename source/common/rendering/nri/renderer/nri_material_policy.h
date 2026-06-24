@@ -32,6 +32,16 @@ namespace nri_material_policy
 
 	using ActorMaterialOverrideMap = std::unordered_map<int32_t, ActorMaterialOverrideState>;
 
+	struct ActorOverlayMaterialRule
+	{
+		uint32_t ruleId = 0;
+		bool hasTileFilter = false;
+		uint32_t tileFilter = 0;
+		uint32_t overrideBits = ActorMaterialOverride_None;
+	};
+
+	using ActorOverlayMaterialRuleMap = std::unordered_map<int32_t, std::vector<ActorOverlayMaterialRule>>;
+
 	struct ActorMaterialOverrideCache
 	{
 		bool valid = false;
@@ -39,6 +49,16 @@ namespace nri_material_policy
 		uint32_t resolvedGeneration = 0;
 		bool hasFullbrightOverrides = false;
 		ActorMaterialOverrideMap overrides;
+	};
+
+	struct ActorOverlayMaterialRuleCache
+	{
+		bool valid = false;
+		uint32_t frameIndex = UINT32_MAX;
+		uint32_t resolvedGeneration = 0;
+		uint32_t actorRuleCount = 0;
+		uint32_t totalRuleCount = 0;
+		ActorOverlayMaterialRuleMap rules;
 	};
 
 	bool HasActorMaterialOverrideRules(const ResolvedLightOverlaySet& resolved);

@@ -492,6 +492,15 @@ struct NRIPersistentVoxelMaterialUploadStats
 
 struct NRIPersistentVoxelBatchStats
 {
+	double persistentVoxelBatchCacheEntryMs = 0.0;
+	double persistentVoxelBatchSortMs = 0.0;
+	double persistentVoxelBatchInstanceSyncMs = 0.0;
+	double persistentVoxelBatchExistingActorMapMs = 0.0;
+	double persistentVoxelBatchActorLoopMs = 0.0;
+	double persistentVoxelBatchMaterialVariantMs = 0.0;
+	double persistentVoxelBatchMeshAdmissionMs = 0.0;
+	double persistentVoxelBatchMaterialBridgeMs = 0.0;
+	double persistentVoxelBatchStateMs = 0.0;
 	double geometryBuildPersistentVoxelVariantMs = 0.0;
 	double geometryBuildPersistentVoxelAppendMs = 0.0;
 	double geometryBuildPersistentVoxelRebuildMs = 0.0;
@@ -514,6 +523,10 @@ struct NRIPersistentVoxelBatchStats
 	uint32_t persistentVoxelOnboardingActorBudgetHits = 0;
 	uint32_t persistentVoxelOnboardingAdmittedCount = 0;
 	uint32_t persistentVoxelOnboardingTextureBudgetHits = 0;
+	uint32_t persistentVoxelOnboardingAdmissionPendingCount = 0;
+	uint32_t persistentVoxelOnboardingTexturePrewarmDeferredCount = 0;
+	uint32_t persistentVoxelOnboardingMaterialInvalidCount = 0;
+	uint32_t persistentVoxelOnboardingBudgetDeferredCount = 0;
 	uint64_t persistentVoxelOnboardingEstimatedBytes = 0;
 	uint64_t persistentVoxelOnboardingDeferredBytes = 0;
 	uint64_t persistentVoxelOnboardingAdmittedBytes = 0;

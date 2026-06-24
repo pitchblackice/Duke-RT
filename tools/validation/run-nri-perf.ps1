@@ -193,6 +193,32 @@ function Convert-RunSummariesToAggregate {
     }
 
     $loopRows = @($RunSummaries | ForEach-Object { $_.loopTrace })
+    $aggregateWorstFrames = @()
+    for ($summaryIndex = 0; $summaryIndex -lt $RunSummaries.Count; ++$summaryIndex) {
+        $runNumber = $summaryIndex + 1
+        foreach ($worstFrame in @($RunSummaries[$summaryIndex].worstFrames)) {
+            $aggregateWorstFrames += [pscustomobject]@{
+                run = $runNumber
+                frame = $worstFrame.frame
+                frame_ms = $worstFrame.frame_ms
+                line = $worstFrame.line
+                loop = $worstFrame.loop
+                render = $worstFrame.render
+                shell = $worstFrame.shell
+                selectAccounting = $worstFrame.selectAccounting
+                sceneLight = $worstFrame.sceneLight
+                texture = $worstFrame.texture
+                sceneState = $worstFrame.sceneState
+                dynamicCapture = $worstFrame.dynamicCapture
+                bufferUpload = $worstFrame.bufferUpload
+                dirtyRange = $worstFrame.dirtyRange
+                material = $worstFrame.material
+                dynamicAs = $worstFrame.dynamicAs
+                resourceWaits = $worstFrame.resourceWaits
+            }
+        }
+    }
+    $aggregateWorstFrames = @($aggregateWorstFrames | Sort-Object @{ Expression = "frame_ms"; Descending = $true } | Select-Object -First 10)
     $allErrors = @($RunResults | ForEach-Object { @($_.errors) }) + @($RunSummaries | ForEach-Object { @($_.errors) })
     $allForbidden = @($RunSummaries | ForEach-Object { @($_.forbiddenHits) })
     $ok = (@($RunResults | Where-Object { -not $_.ok }).Count -eq 0) -and (@($RunSummaries | Where-Object { -not $_.ok }).Count -eq 0)
@@ -218,6 +244,7 @@ function Convert-RunSummariesToAggregate {
             framesOver200 = (@($loopRows | ForEach-Object { [int]$_.framesOver200 }) | Measure-Object -Sum).Sum
         }
         fields = @($aggregateFields | Sort-Object @{ Expression = "p95"; Descending = $true }, @{ Expression = "avg"; Descending = $true }, key)
+        worstFrames = $aggregateWorstFrames
         runs = $RunResults
         runSummaries = $RunSummaries
     }
