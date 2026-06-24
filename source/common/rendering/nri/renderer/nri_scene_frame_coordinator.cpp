@@ -49,6 +49,8 @@
 #include <cstring>
 #include <limits>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace
 {
@@ -747,6 +749,95 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 	}
 	mLastPerfShellTraceStats.asStaticUniqueGeometrySignatures = mLastPerfShellTraceStats.asStaticChunkOwnedBlas;
 	mLastPerfShellTraceStats.asStaticSegmentBlas = 0;
+	{
+		std::unordered_map<uint64_t, uint32_t> staticSegmentSignatureRefs;
+		staticSegmentSignatureRefs.reserve(mStaticMapScene.chunks.size());
+		std::unordered_set<uint32_t> portalChunks;
+		portalChunks.reserve(mMapWorld.portals.size() * 2u);
+		if (mMapWorld.valid)
+		{
+			for (const nri_scene::PTMapPortal& portal : mMapWorld.portals)
+			{
+				if (portal.sourceChunkIndex != UINT32_MAX)
+				{
+					portalChunks.insert(portal.sourceChunkIndex);
+				}
+				const uint32_t targetEnd = std::min<uint32_t>(
+					portal.firstTarget + portal.targetCount,
+					(uint32_t)mMapWorld.portalTargets.size());
+				for (uint32_t targetIndex = portal.firstTarget; targetIndex < targetEnd; ++targetIndex)
+				{
+					const nri_scene::PTMapPortalTarget& target = mMapWorld.portalTargets[targetIndex];
+					if (target.chunkIndex != UINT32_MAX)
+					{
+						portalChunks.insert(target.chunkIndex);
+					}
+				}
+			}
+		}
+		for (uint32_t chunkListIndex = 0; chunkListIndex < mStaticMapScene.chunks.size(); ++chunkListIndex)
+		{
+			const StaticMapSceneCache::ChunkCache& chunk = mStaticMapScene.chunks[chunkListIndex];
+			if (!chunk.active || chunk.primitiveCount == 0)
+			{
+				continue;
+			}
+			mLastPerfShellTraceStats.asStaticSegmentCandidateChunks++;
+			const uint64_t segmentSignature =
+				chunk.exactGeometrySignature != 0 ? chunk.exactGeometrySignature :
+				(chunk.geometryPayloadHash != 0 ? chunk.geometryPayloadHash : chunk.geometryTopologySignature);
+			if (segmentSignature != 0)
+			{
+				staticSegmentSignatureRefs[segmentSignature]++;
+			}
+			if (chunk.hasAnimatedTextureCandidates || chunk.animatedRefreshSuppressed)
+			{
+				mLastPerfShellTraceStats.asStaticSegmentAnimatedChunks++;
+			}
+			if (portalChunks.find(chunk.chunkIndex) != portalChunks.end())
+			{
+				mLastPerfShellTraceStats.asStaticSegmentPortalChunks++;
+			}
+			if (mMapWorld.valid &&
+				chunk.chunkIndex < mMapWorld.chunks.size() &&
+				mMapWorld.chunks[chunk.chunkIndex].localSpaceIndex != UINT32_MAX)
+			{
+				mLastPerfShellTraceStats.asStaticSegmentLocalSpaceChunks++;
+			}
+			if (mStaticMapChunkAtlas.valid &&
+				chunkListIndex < mStaticMapChunkAtlas.chunks.size())
+			{
+				const StaticMapChunkAtlas::ChunkEntry& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
+				if (atlasChunk.valid &&
+					atlasChunk.primitiveCount == chunk.primitiveCount &&
+					atlasChunk.indexCount == chunk.indexCount &&
+					atlasChunk.vertexCount == chunk.vertexCount)
+				{
+					mLastPerfShellTraceStats.asStaticSegmentAtlasEligibleChunks++;
+				}
+			}
+		}
+		for (const auto& pair : staticSegmentSignatureRefs)
+		{
+			mLastPerfShellTraceStats.asStaticSegmentUniqueGeometrySignatures++;
+			if (pair.second > 1)
+			{
+				mLastPerfShellTraceStats.asStaticSegmentDuplicateKeys++;
+				mLastPerfShellTraceStats.asStaticSegmentDuplicateRefs += pair.second - 1u;
+			}
+		}
+		const ResidentMapChunkRegistry& registry = mStaticSceneResidency.Registry();
+		if (registry.valid)
+		{
+			for (const ResidentMapChunkRegistry::Entry& entry : registry.entries)
+			{
+				if (entry.valid && entry.active && entry.mappedInStaticScene)
+				{
+					mLastPerfShellTraceStats.asStaticSegmentRegistryMappedChunks++;
+				}
+			}
+		}
+	}
 	mLastPerfShellTraceStats.asBlasBuiltThisFrame =
 		mLastPerfShellTraceStats.dynamicAsCreateCalls +
 		mLastPerfShellTraceStats.persistentVoxelAsBuilds +

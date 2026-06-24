@@ -1269,6 +1269,15 @@ public:
 		uint32_t asStaticUniqueGeometrySignatures = 0;
 		uint32_t asStaticSegmentBlas = 0;
 		uint32_t asStaticChunkOwnedBlas = 0;
+		uint32_t asStaticSegmentCandidateChunks = 0;
+		uint32_t asStaticSegmentUniqueGeometrySignatures = 0;
+		uint32_t asStaticSegmentDuplicateKeys = 0;
+		uint32_t asStaticSegmentDuplicateRefs = 0;
+		uint32_t asStaticSegmentPortalChunks = 0;
+		uint32_t asStaticSegmentLocalSpaceChunks = 0;
+		uint32_t asStaticSegmentAnimatedChunks = 0;
+		uint32_t asStaticSegmentAtlasEligibleChunks = 0;
+		uint32_t asStaticSegmentRegistryMappedChunks = 0;
 		uint32_t asDynamicUniqueGeometrySignatures = 0;
 		uint32_t asBlasCacheHits = 0;
 		uint32_t asBlasBuiltThisFrame = 0;
