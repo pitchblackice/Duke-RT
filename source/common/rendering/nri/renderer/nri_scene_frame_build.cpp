@@ -73,6 +73,62 @@ namespace
 		return false;
 	}
 
+	static void RecordDynamicOverlayBlasModelStats(
+		NRIRenderer::PerfShellTraceStats& stats,
+		const std::vector<NRIRenderer::SceneBufferUploadDomainSpan>& uploadSpans)
+	{
+		stats.dynamicOverlayBlasBuildEnabled = (bool)nri_ptdynamicoverlayblasbuild;
+		stats.dynamicOverlayBlasRouteEnabled = (bool)nri_ptdynamicoverlayblasroute;
+		stats.dynamicOverlayBlasBuildBudget = (uint32_t)std::max(0, (int)nri_ptdynamicoverlayblasbuilds);
+
+		for (const NRIRenderer::SceneBufferUploadDomainSpan& span : uploadSpans)
+		{
+			if (span.vertexCount == 0 &&
+				span.indexCount == 0 &&
+				span.primitiveCount == 0 &&
+				span.materialCount == 0)
+			{
+				continue;
+			}
+
+			stats.dynamicOverlayBlasDomainCount++;
+			stats.dynamicOverlayBlasVertexCount += span.vertexCount;
+			stats.dynamicOverlayBlasIndexCount += span.indexCount;
+			stats.dynamicOverlayBlasPrimitiveCount += span.primitiveCount;
+			stats.dynamicOverlayBlasMaterialCount += span.materialCount;
+
+			if (!stats.dynamicOverlayBlasBuildEnabled && !stats.dynamicOverlayBlasRouteEnabled)
+			{
+				stats.dynamicOverlayBlasRejectDisabled += span.primitiveCount;
+			}
+
+			switch (span.domain)
+			{
+			case NRIRenderer::SceneBufferUploadDomain::Dynamic:
+				stats.dynamicOverlayBlasEligibleDomains++;
+				stats.dynamicOverlayBlasEligiblePrimitives += span.primitiveCount;
+				stats.dynamicOverlayBlasRejectMaterialBase += span.primitiveCount;
+				break;
+			case NRIRenderer::SceneBufferUploadDomain::RuntimeMutation:
+				stats.dynamicOverlayBlasRejectRuntimeMutation += span.primitiveCount;
+				break;
+			case NRIRenderer::SceneBufferUploadDomain::LocalPlayerReflection:
+				stats.dynamicOverlayBlasRejectLocalPlayerReflection += span.primitiveCount;
+				break;
+			case NRIRenderer::SceneBufferUploadDomain::StaticOverlay:
+			case NRIRenderer::SceneBufferUploadDomain::PersistentVoxelMaterial:
+			case NRIRenderer::SceneBufferUploadDomain::Count:
+			default:
+				stats.dynamicOverlayBlasRejectStaticOverlay += span.primitiveCount;
+				break;
+			}
+		}
+
+		stats.dynamicOverlayBlasFallbackDomains = stats.dynamicOverlayBlasDomainCount;
+		stats.dynamicOverlayBlasFallbackPrimitives = stats.dynamicOverlayBlasPrimitiveCount;
+		stats.dynamicOverlayBlasMonolithicRefs = stats.dynamicOverlayBlasPrimitiveCount != 0 ? 1u : 0u;
+	}
+
 	static bool TryComputeCapturedSurfaceNormal(const nri_scene::SurfaceRef& surface, float outNormal[3])
 	{
 		if (surface.vertices.size() < 3)
@@ -1037,6 +1093,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				NRIAccelerationStructureResource& dynamicBottomLevelAS = GetCurrentDynamicBottomLevelAS();
 				if (buffersReady)
 				{
+					RecordDynamicOverlayBlasModelStats(mLastPerfShellTraceStats, sceneUploadDomainSpans);
 					bool persistentVoxelAsReady = true;
 					bool dynamicAsReady = true;
 					if (hasPersistentVoxelOverlay)

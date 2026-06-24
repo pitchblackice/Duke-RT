@@ -1292,6 +1292,12 @@ CVAR(Bool, nri_ptstaticsegmentblasbuild, false, 0)
 
 CVAR(Bool, nri_ptstaticsegmentroute, false, 0)
 
+CVAR(Bool, nri_ptdynamicoverlayblasbuild, false, 0)
+
+CVAR(Bool, nri_ptdynamicoverlayblasroute, false, 0)
+
+CVAR(Int, nri_ptdynamicoverlayblasbuilds, 1, 0)
+
 
 // Moved from source/common/rendering/nri/renderer/nri_renderer_settings.cpp
 
