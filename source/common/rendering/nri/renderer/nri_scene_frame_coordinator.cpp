@@ -691,6 +691,7 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 	mLastPerfShellTraceStats.voxelSharedBlasUniqueDesiredKeys = sharedBlasStats.uniqueDesiredKeys;
 	mLastPerfShellTraceStats.voxelSharedBlasResidentAssets = sharedBlasStats.residentSharedAssets;
 	mLastPerfShellTraceStats.voxelSharedBlasQueuedAssets = sharedBlasStats.queuedSharedAssets;
+	mLastPerfShellTraceStats.voxelSharedBlasEligibleBuildKeys = sharedBlasStats.eligibleBuildKeys;
 	mLastPerfShellTraceStats.voxelSharedBlasBuildAttempts = sharedBlasStats.buildAttempts;
 	mLastPerfShellTraceStats.voxelSharedBlasBuildSuccesses = sharedBlasStats.buildSuccesses;
 	mLastPerfShellTraceStats.voxelSharedBlasBuildFailures = sharedBlasStats.buildFailures;
@@ -701,6 +702,13 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 	mLastPerfShellTraceStats.voxelSharedBlasRoutedShared = sharedBlasStats.routedShared;
 	mLastPerfShellTraceStats.voxelSharedBlasFallbackLastValid = sharedBlasStats.fallbackLastValid;
 	mLastPerfShellTraceStats.voxelSharedBlasRejectMissingKey = sharedBlasStats.rejectMissingKey;
+	mLastPerfShellTraceStats.voxelSharedBlasRejectDisabled = sharedBlasStats.rejectDisabled;
+	mLastPerfShellTraceStats.voxelSharedBlasRejectNonLocal = sharedBlasStats.rejectNonLocal;
+	mLastPerfShellTraceStats.voxelSharedBlasRejectTransformKeyed = sharedBlasStats.rejectTransformKeyed;
+	mLastPerfShellTraceStats.voxelSharedBlasRejectMissingBuffers = sharedBlasStats.rejectMissingBuffers;
+	mLastPerfShellTraceStats.voxelSharedBlasRejectInvalidCounts = sharedBlasStats.rejectInvalidCounts;
+	mLastPerfShellTraceStats.voxelSharedBlasRejectBuildBudget = sharedBlasStats.rejectBuildBudget;
+	mLastPerfShellTraceStats.voxelSharedBlasRejectGeometryMismatch = sharedBlasStats.rejectGeometryMismatch;
 	mLastPerfShellTraceStats.asWorldTlasObjects = mTopLevelAS.accelerationStructure != nullptr && mActiveTlasInstanceCount > 0 ? 1u : 0u;
 	mLastPerfShellTraceStats.asWorldTlasEntries = mActiveTlasInstanceCount;
 	mLastPerfShellTraceStats.asEmissiveTlasObjects = mEmissiveTopLevelAS.accelerationStructure != nullptr && mEmissiveTlasInstanceCount > 0 ? 1u : 0u;

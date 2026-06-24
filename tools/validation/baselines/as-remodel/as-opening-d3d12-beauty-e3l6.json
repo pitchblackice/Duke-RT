@@ -136,9 +136,9 @@
                                               }
                                           ]
                  },
-    "runs":  3,
+    "runs":  1,
     "compareFrameCount":  16,
-    "capturedUtc":  "2026-06-24T08:02:17.8899941Z",
+    "capturedUtc":  "2026-06-24T08:20:56.4524018Z",
     "exact":  {
                   "map":  "E3L6",
                   "api":  "d3d12",
@@ -395,6 +395,10 @@
                                                                                              "min":  0,
                                                                                              "max":  0
                                                                                          },
+                                                                "eligible_build_keys":  {
+                                                                                            "min":  0,
+                                                                                            "max":  0
+                                                                                        },
                                                                 "build_attempts":  {
                                                                                        "min":  0,
                                                                                        "max":  0
@@ -413,7 +417,7 @@
                                                                                },
                                                                 "cache_misses":  {
                                                                                      "min":  0,
-                                                                                     "max":  0
+                                                                                     "max":  15
                                                                                  },
                                                                 "actor_refs":  {
                                                                                    "min":  0,
@@ -434,7 +438,35 @@
                                                                 "reject_missing_key":  {
                                                                                            "min":  0,
                                                                                            "max":  0
-                                                                                       }
+                                                                                       },
+                                                                "reject_disabled":  {
+                                                                                        "min":  0,
+                                                                                        "max":  4
+                                                                                    },
+                                                                "reject_non_local":  {
+                                                                                         "min":  0,
+                                                                                         "max":  0
+                                                                                     },
+                                                                "reject_transform_keyed":  {
+                                                                                               "min":  0,
+                                                                                               "max":  0
+                                                                                           },
+                                                                "reject_missing_buffers":  {
+                                                                                               "min":  0,
+                                                                                               "max":  0
+                                                                                           },
+                                                                "reject_invalid_counts":  {
+                                                                                              "min":  0,
+                                                                                              "max":  0
+                                                                                          },
+                                                                "reject_build_budget":  {
+                                                                                            "min":  0,
+                                                                                            "max":  0
+                                                                                        },
+                                                                "reject_geometry_mismatch":  {
+                                                                                                 "min":  0,
+                                                                                                 "max":  0
+                                                                                             }
                                                             }
                      }
 }

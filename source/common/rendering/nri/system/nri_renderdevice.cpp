@@ -3783,12 +3783,13 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.hitMetadataLegacyPrimitiveOffsetMatches,
 			shell.hitMetadataPersistentMaterialBaseRecords);
 		Printf(
-			"PERF pt voxel shared blas NRI: frame=%llu active_actors=%u unique_desired_keys=%u resident_shared_assets=%u queued_shared_assets=%u build_attempts=%u build_successes=%u build_failures=%u cache_hits=%u cache_misses=%u actor_refs=%u routed_legacy=%u routed_shared=%u fallback_last_valid=%u reject_missing_key=%u\n",
+			"PERF pt voxel shared blas NRI: frame=%llu active_actors=%u unique_desired_keys=%u resident_shared_assets=%u queued_shared_assets=%u eligible_build_keys=%u build_attempts=%u build_successes=%u build_failures=%u cache_hits=%u cache_misses=%u actor_refs=%u routed_legacy=%u routed_shared=%u fallback_last_valid=%u reject_missing_key=%u reject_disabled=%u reject_non_local=%u reject_transform_keyed=%u reject_missing_buffers=%u reject_invalid_counts=%u reject_build_budget=%u reject_geometry_mismatch=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.voxelSharedBlasActiveActors,
 			shell.voxelSharedBlasUniqueDesiredKeys,
 			shell.voxelSharedBlasResidentAssets,
 			shell.voxelSharedBlasQueuedAssets,
+			shell.voxelSharedBlasEligibleBuildKeys,
 			shell.voxelSharedBlasBuildAttempts,
 			shell.voxelSharedBlasBuildSuccesses,
 			shell.voxelSharedBlasBuildFailures,
@@ -3798,7 +3799,14 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.voxelSharedBlasRoutedLegacy,
 			shell.voxelSharedBlasRoutedShared,
 			shell.voxelSharedBlasFallbackLastValid,
-			shell.voxelSharedBlasRejectMissingKey);
+			shell.voxelSharedBlasRejectMissingKey,
+			shell.voxelSharedBlasRejectDisabled,
+			shell.voxelSharedBlasRejectNonLocal,
+			shell.voxelSharedBlasRejectTransformKeyed,
+			shell.voxelSharedBlasRejectMissingBuffers,
+			shell.voxelSharedBlasRejectInvalidCounts,
+			shell.voxelSharedBlasRejectBuildBudget,
+			shell.voxelSharedBlasRejectGeometryMismatch);
 		if (shader.valid)
 		{
 			const auto& c = shader.counters;

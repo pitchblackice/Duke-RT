@@ -55,6 +55,8 @@ struct NRIPersistentVoxelSettings
 	uint64_t residentMaxBytes = 0;
 	uint64_t residentMinHeadroomBytes = 0;
 	uint32_t residentMaxColdMaps = 0;
+	bool sharedBlasBuildEnabled = false;
+	uint32_t sharedBlasBuildsPerFrame = 0;
 	bool transformKeyed = false;
 	std::array<int32_t, 3> excludeIndices = { -1, -1, -1 };
 	uint32_t excludeMinPrimitives = 0;

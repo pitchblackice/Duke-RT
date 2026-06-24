@@ -1045,6 +1045,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						NRIPersistentVoxelAccelerationBuildStats persistentVoxelAsStats = {};
 						persistentVoxelAsReady = mPersistentVoxels.BuildAccelerationStructures(
 							mFrameIndex,
+							persistentVoxelSettings,
 							(bool)nri_voxelstats,
 							BuildNRIPersistentVoxelResetServices(*this),
 							BuildNRIPersistentVoxelAccelerationServices(*this),

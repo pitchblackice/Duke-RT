@@ -730,6 +730,7 @@ public:
 		NRIPersistentVoxelBatchStats& outStats);
 	bool BuildAccelerationStructures(
 		uint32_t frameIndex,
+		const NRIPersistentVoxelSettings& settings,
 		bool voxelStatsEnabled,
 		const NRIPersistentVoxelResetServices& resetServices,
 		const NRIPersistentVoxelAccelerationServices& accelerationServices,

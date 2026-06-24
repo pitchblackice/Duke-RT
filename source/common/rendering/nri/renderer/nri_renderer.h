@@ -1290,6 +1290,7 @@ public:
 		uint32_t voxelSharedBlasUniqueDesiredKeys = 0;
 		uint32_t voxelSharedBlasResidentAssets = 0;
 		uint32_t voxelSharedBlasQueuedAssets = 0;
+		uint32_t voxelSharedBlasEligibleBuildKeys = 0;
 		uint32_t voxelSharedBlasBuildAttempts = 0;
 		uint32_t voxelSharedBlasBuildSuccesses = 0;
 		uint32_t voxelSharedBlasBuildFailures = 0;
@@ -1300,6 +1301,13 @@ public:
 		uint32_t voxelSharedBlasRoutedShared = 0;
 		uint32_t voxelSharedBlasFallbackLastValid = 0;
 		uint32_t voxelSharedBlasRejectMissingKey = 0;
+		uint32_t voxelSharedBlasRejectDisabled = 0;
+		uint32_t voxelSharedBlasRejectNonLocal = 0;
+		uint32_t voxelSharedBlasRejectTransformKeyed = 0;
+		uint32_t voxelSharedBlasRejectMissingBuffers = 0;
+		uint32_t voxelSharedBlasRejectInvalidCounts = 0;
+		uint32_t voxelSharedBlasRejectBuildBudget = 0;
+		uint32_t voxelSharedBlasRejectGeometryMismatch = 0;
 		uint32_t sceneDataSetCalls = 0;
 		uint32_t sceneTextureCacheCount = 0;
 		uint32_t sceneTextureCacheMisses = 0;

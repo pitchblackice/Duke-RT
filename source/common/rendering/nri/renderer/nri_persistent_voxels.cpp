@@ -1083,7 +1083,6 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			return left->identityKey < right->identityKey;
 		});
 	NRIRaySceneBuilder raySceneBuilder(instances, sceneInstances);
-	sharedBlasCache.BeginFrame();
 	for (PersistentVoxelBatch::ActorEntry* actorPtr : persistentVoxelTlasActors)
 	{
 		PersistentVoxelBatch::ActorEntry& actor = *actorPtr;
@@ -4571,12 +4570,14 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 
 bool NRIPersistentVoxelResidency::BuildAccelerationStructures(
 	uint32_t frameIndex,
+	const NRIPersistentVoxelSettings& settings,
 	bool voxelStatsEnabled,
 	const NRIPersistentVoxelResetServices& resetServices,
 	const NRIPersistentVoxelAccelerationServices& accelerationServices,
 	NRIPersistentVoxelAccelerationBuildStats& outStats)
 {
 	outStats.calls++;
+	sharedBlasCache.BeginFrame();
 	if (!batch.valid || batch.actors.empty())
 	{
 		Reset("persistent-voxel-empty-instance-batch", false, voxelStatsEnabled, resetServices);
@@ -4585,6 +4586,9 @@ bool NRIPersistentVoxelResidency::BuildAccelerationStructures(
 
 	std::unordered_set<uint64_t> builtMeshKeys;
 	builtMeshKeys.reserve(batch.actors.size());
+	std::unordered_set<uint64_t> consideredSharedBlasKeys;
+	consideredSharedBlasKeys.reserve(batch.actors.size());
+	uint32_t sharedBlasBuildsThisFrame = 0;
 	auto countActiveActorsUsingMeshResource = [&](uint64_t meshResourceKey) -> uint32_t
 	{
 		uint32_t count = 0;
@@ -4596,6 +4600,84 @@ bool NRIPersistentVoxelResidency::BuildAccelerationStructures(
 			}
 		}
 		return count;
+	};
+	auto maybeBuildSharedBlas = [&](const PersistentVoxelBatch::ActorEntry& actor, PersistentVoxelMeshVariantResource& meshResource) -> void
+	{
+		if (actor.meshResourceKey == 0 || !consideredSharedBlasKeys.insert(actor.meshResourceKey).second)
+		{
+			return;
+		}
+		if (!settings.sharedBlasBuildEnabled)
+		{
+			sharedBlasCache.RecordBuildDisabled(actor.meshResourceKey);
+			return;
+		}
+		if (meshResource.meshBakeSpace != nri_scene::VoxelMeshBakeSpace::LocalSpace)
+		{
+			sharedBlasCache.RecordBuildReject(actor.meshResourceKey, "non-local");
+			return;
+		}
+		if (settings.transformKeyed)
+		{
+			sharedBlasCache.RecordBuildReject(actor.meshResourceKey, "transform-keyed");
+			return;
+		}
+		if (meshResource.vertexBuffer.buffer == nullptr || meshResource.indexBuffer.buffer == nullptr)
+		{
+			sharedBlasCache.RecordBuildReject(actor.meshResourceKey, "missing-buffers");
+			return;
+		}
+		if (meshResource.vertexCount == 0 || meshResource.indexCount == 0 || meshResource.primitiveCount == 0)
+		{
+			sharedBlasCache.RecordBuildReject(actor.meshResourceKey, "invalid-counts");
+			return;
+		}
+		const NRIPersistentVoxelSharedBlasEntry* existingSharedEntry = sharedBlasCache.Find(actor.meshResourceKey);
+		if (existingSharedEntry != nullptr && existingSharedEntry->state == NRIPersistentVoxelSharedBlasState::Resident)
+		{
+			if (existingSharedEntry->geometrySignature != actor.geometrySignature ||
+				existingSharedEntry->vertexCount != meshResource.vertexCount ||
+				existingSharedEntry->indexCount != meshResource.indexCount ||
+				existingSharedEntry->primitiveCount != meshResource.primitiveCount)
+			{
+				sharedBlasCache.RecordBuildReject(actor.meshResourceKey, "geometry-mismatch");
+			}
+			return;
+		}
+		if (sharedBlasBuildsThisFrame >= settings.sharedBlasBuildsPerFrame)
+		{
+			sharedBlasCache.RecordBuildReject(actor.meshResourceKey, "build-budget");
+			return;
+		}
+
+		NRIPersistentVoxelSharedBlasEntry& sharedEntry = sharedBlasCache.PrepareBuild(
+			actor.meshResourceKey,
+			actor.geometrySignature,
+			meshResource.vertexCount,
+			meshResource.indexCount,
+			meshResource.primitiveCount,
+			frameIndex);
+		if (!accelerationServices.BuildBottomLevel(
+			meshResource.vertexBuffer,
+			meshResource.indexBuffer,
+			meshResource.vertexCount,
+			0u,
+			meshResource.indexCount,
+			meshResource.primitiveCount,
+			sharedEntry.accelerationStructure))
+		{
+			resetServices.RetireAccelerationStructure(sharedEntry.accelerationStructure);
+			sharedBlasCache.MarkBuildFailure(sharedEntry);
+			return;
+		}
+		if (!accelerationServices.BarrierBuildInputs(meshResource.vertexBuffer, meshResource.indexBuffer))
+		{
+			resetServices.RetireAccelerationStructure(sharedEntry.accelerationStructure);
+			sharedBlasCache.MarkBuildFailure(sharedEntry);
+			return;
+		}
+		sharedBlasCache.MarkBuildSuccess(sharedEntry, frameIndex);
+		sharedBlasBuildsThisFrame++;
 	};
 	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
 	{
@@ -4634,6 +4716,7 @@ bool NRIPersistentVoxelResidency::BuildAccelerationStructures(
 			meshResource.indexBuffer.buffer == nullptr;
 		if (!needsBuild)
 		{
+			maybeBuildSharedBlas(actor, meshResource);
 			if (voxelStatsEnabled)
 			{
 				Printf("PERF pt voxel blas NRI: frame=%u action=reuse reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u blas=1 tlas_ready=%u tlas_published=%u ready=1\n",
@@ -4705,6 +4788,7 @@ bool NRIPersistentVoxelResidency::BuildAccelerationStructures(
 				meshResource.tlasReadyFrame,
 				meshResource.tlasPublished ? 1u : 0u);
 		}
+		maybeBuildSharedBlas(actor, meshResource);
 	}
 
 	outStats.uniqueMeshBuilds += (uint32_t)builtMeshKeys.size();
@@ -4743,10 +4827,10 @@ void NRIPersistentVoxelResidency::Reset(
 	batch = {};
 	instances.clear();
 	actorRejectedSignatures.clear();
-	sharedBlasCache.Reset();
 	services.InvalidateSceneDataDescriptors();
 	if (!clearSharedResources)
 	{
+		sharedBlasCache.BeginFrame();
 		return;
 	}
 
@@ -4764,6 +4848,10 @@ void NRIPersistentVoxelResidency::Reset(
 		services.RetireBuffer(pair.second.indexBuffer);
 		services.RetireAccelerationStructure(pair.second.accelerationStructure);
 	}
+	sharedBlasCache.RetireAll([&](NRIAccelerationStructureResource& resource)
+	{
+		services.RetireAccelerationStructure(resource);
+	});
 	meshVariantResources.clear();
 	materialVariantResources.clear();
 	publishedMeshKeys.clear();
