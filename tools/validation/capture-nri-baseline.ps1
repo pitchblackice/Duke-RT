@@ -48,6 +48,100 @@ foreach ($field in $numericFields) {
     }
 }
 
+$baselinePrefixes = New-Object System.Collections.Generic.List[string]
+if ($scenario.PSObject.Properties.Name.Contains("baselinePrefixes")) {
+    foreach ($prefix in @($scenario.baselinePrefixes)) {
+        if (-not $baselinePrefixes.Contains([string]$prefix)) {
+            $baselinePrefixes.Add([string]$prefix)
+        }
+    }
+}
+if ($scenario.PSObject.Properties.Name.Contains("prefixAssertions")) {
+    foreach ($assertion in @($scenario.prefixAssertions)) {
+        if ($assertion.PSObject.Properties.Name.Contains("prefix") -and -not $baselinePrefixes.Contains([string]$assertion.prefix)) {
+            $baselinePrefixes.Add([string]$assertion.prefix)
+        }
+    }
+}
+
+$prefixRanges = [ordered]@{}
+$prefixBaselineExcludedFields = @(
+    "line",
+    "frame",
+    "stats_frame",
+    "total",
+    "retire",
+    "instance_upload",
+    "create",
+    "memory",
+    "scratch",
+    "descriptor",
+    "build",
+    "barrier"
+)
+foreach ($prefix in $baselinePrefixes) {
+    $records = @()
+    foreach ($summary in $summaries) {
+        if ($summary.PSObject.Properties.Name.Contains("prefixRecords")) {
+            $property = $summary.prefixRecords.PSObject.Properties[$prefix]
+            if ($null -ne $property) {
+                $records += @($property.Value)
+            }
+        }
+    }
+
+    if ($records.Count -eq 0) {
+        continue
+    }
+
+    $fields = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($record in $records) {
+        foreach ($property in $record.PSObject.Properties) {
+            if ($prefixBaselineExcludedFields -contains $property.Name) {
+                continue
+            }
+
+            $parsed = 0.0
+            if ([double]::TryParse(
+                [string]$property.Value,
+                [System.Globalization.NumberStyles]::Float,
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [ref]$parsed)) {
+                [void]$fields.Add($property.Name)
+            }
+        }
+    }
+
+    $fieldRanges = [ordered]@{}
+    foreach ($field in $fields) {
+        $values = @()
+        foreach ($record in $records) {
+            if (-not $record.PSObject.Properties.Name.Contains($field)) {
+                continue
+            }
+            $parsed = 0.0
+            if ([double]::TryParse(
+                [string]$record.$field,
+                [System.Globalization.NumberStyles]::Float,
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [ref]$parsed)) {
+                $values += $parsed
+            }
+        }
+
+        if ($values.Count -gt 0) {
+            $fieldRanges[$field] = [pscustomobject]@{
+                min = ($values | Measure-Object -Minimum).Minimum
+                max = ($values | Measure-Object -Maximum).Maximum
+            }
+        }
+    }
+
+    if ($fieldRanges.Count -gt 0) {
+        $prefixRanges[$prefix] = [pscustomobject]$fieldRanges
+    }
+}
+
 $firstFrame = $frames | Select-Object -First 1
 $baseline = [pscustomobject]@{
     name = $name
@@ -62,6 +156,7 @@ $baseline = [pscustomobject]@{
         passes = if ($firstFrame) { $firstFrame.passes } else { $null }
     }
     ranges = $ranges
+    prefixRanges = $prefixRanges
 }
 
 $outputDirectory = Split-Path -Parent $OutputPath

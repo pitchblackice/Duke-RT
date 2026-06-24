@@ -1,0 +1,30 @@
+﻿{
+    "capturedUtc":  "2026-06-24T07:29:01.0567954Z",
+    "sourceCommit":  "37ffd8d3e0",
+    "runs":  3,
+    "razePath":  "build/terminal-ninja/raze.exe",
+    "gameGrp":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Duke Nukem 3D Twentieth Anniversary World Tour\\DUKE3D.GRP",
+    "file":  "M:\\Raze\\full-voxel-overlay",
+    "baselineDirectory":  "M:\\Raze\\tools\\validation\\baselines\\as-remodel",
+    "logDirectory":  "M:\\Raze\\tools\\logs\\as-remodel-baselines\\20260624-002714",
+    "baselines":  [
+                      {
+                          "name":  "as-opening-d3d12-beauty-e3l6",
+                          "scenarioPath":  "M:\\Raze\\tools\\validation\\scenarios\\as-opening-d3d12-beauty-e3l6.json",
+                          "baselinePath":  "M:\\Raze\\tools\\validation\\baselines\\as-remodel\\as-opening-d3d12-beauty-e3l6.json",
+                          "compareCommand":  "powershell -NoProfile -ExecutionPolicy Bypass -File tools\\validation\\compare-nri-baseline.ps1 -SummaryPath \u003csummary.json\u003e -BaselinePath M:\\Raze\\tools\\validation\\baselines\\as-remodel\\as-opening-d3d12-beauty-e3l6.json"
+                      },
+                      {
+                          "name":  "as-opening-d3d12-beauty-e1l5",
+                          "scenarioPath":  "M:\\Raze\\tools\\validation\\scenarios\\as-opening-d3d12-beauty-e1l5.json",
+                          "baselinePath":  "M:\\Raze\\tools\\validation\\baselines\\as-remodel\\as-opening-d3d12-beauty-e1l5.json",
+                          "compareCommand":  "powershell -NoProfile -ExecutionPolicy Bypass -File tools\\validation\\compare-nri-baseline.ps1 -SummaryPath \u003csummary.json\u003e -BaselinePath M:\\Raze\\tools\\validation\\baselines\\as-remodel\\as-opening-d3d12-beauty-e1l5.json"
+                      },
+                      {
+                          "name":  "as-opening-d3d12-beauty-e2l4",
+                          "scenarioPath":  "M:\\Raze\\tools\\validation\\scenarios\\as-opening-d3d12-beauty-e2l4.json",
+                          "baselinePath":  "M:\\Raze\\tools\\validation\\baselines\\as-remodel\\as-opening-d3d12-beauty-e2l4.json",
+                          "compareCommand":  "powershell -NoProfile -ExecutionPolicy Bypass -File tools\\validation\\compare-nri-baseline.ps1 -SummaryPath \u003csummary.json\u003e -BaselinePath M:\\Raze\\tools\\validation\\baselines\\as-remodel\\as-opening-d3d12-beauty-e2l4.json"
+                      }
+                  ]
+}

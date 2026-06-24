@@ -27,6 +27,23 @@ if ($ScenarioPath) {
     if (-not $RequiredPrefix -and $scenario.PSObject.Properties.Name.Contains("requiredPrefixes")) {
         $RequiredPrefix = @($scenario.requiredPrefixes)
     }
+    if ($scenario.PSObject.Properties.Name.Contains("prefixAssertions")) {
+        if (-not $RequiredPrefix) {
+            $RequiredPrefix = @("NRI PT selftest:")
+        }
+        $prefixSet = [ordered]@{}
+        foreach ($prefix in @($RequiredPrefix)) {
+            if ($prefix) {
+                $prefixSet[[string]$prefix] = $true
+            }
+        }
+        foreach ($assertion in @($scenario.prefixAssertions)) {
+            if ($assertion.PSObject.Properties.Name.Contains("prefix")) {
+                $prefixSet[[string]$assertion.prefix] = $true
+            }
+        }
+        $RequiredPrefix = @($prefixSet.Keys)
+    }
     if (-not $ForbiddenPattern -and $scenario.PSObject.Properties.Name.Contains("forbiddenPatterns")) {
         $ForbiddenPattern = @($scenario.forbiddenPatterns)
     }
@@ -48,6 +65,13 @@ $loadingResult = [pscustomobject]@{
 if ($null -ne $scenario -and $scenario.PSObject.Properties.Name.Contains("loadingAssertions")) {
     $loadingResult = Test-NriLoadingAssertions -Summary $summary -Assertions $scenario.loadingAssertions
 }
+$prefixResult = [pscustomobject]@{
+    ok = $true
+    errors = @()
+}
+if ($null -ne $scenario -and $scenario.PSObject.Properties.Name.Contains("prefixAssertions")) {
+    $prefixResult = Test-NriPrefixAssertions -Summary $summary -Assertions $scenario.prefixAssertions
+}
 
 if ($SummaryOutput) {
     $summaryDirectory = Split-Path -Parent $SummaryOutput
@@ -57,11 +81,14 @@ if ($SummaryOutput) {
     $summary | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $SummaryOutput -Encoding UTF8
 }
 
-if (-not $result.ok -or -not $loadingResult.ok) {
+if (-not $result.ok -or -not $loadingResult.ok -or -not $prefixResult.ok) {
     foreach ($errorText in $result.errors) {
         Write-Error $errorText -ErrorAction Continue
     }
     foreach ($errorText in $loadingResult.errors) {
+        Write-Error $errorText -ErrorAction Continue
+    }
+    foreach ($errorText in $prefixResult.errors) {
         Write-Error $errorText -ErrorAction Continue
     }
     exit 1

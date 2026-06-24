@@ -127,11 +127,30 @@ if ($scenario.PSObject.Properties.Name.Contains("commands")) {
 function Get-NriScenarioRequiredPrefixes {
     param([object]$Scenario)
 
+    $prefixes = @()
     if ($Scenario.PSObject.Properties.Name.Contains("requiredPrefixes")) {
-        return @($Scenario.requiredPrefixes)
+        $prefixes = @($Scenario.requiredPrefixes)
+    }
+    else {
+        $prefixes = @("NRI PT selftest:")
     }
 
-    return @("NRI PT selftest:")
+    if ($Scenario.PSObject.Properties.Name.Contains("prefixAssertions")) {
+        $prefixSet = [ordered]@{}
+        foreach ($prefix in @($prefixes)) {
+            if ($prefix) {
+                $prefixSet[[string]$prefix] = $true
+            }
+        }
+        foreach ($assertion in @($Scenario.prefixAssertions)) {
+            if ($assertion.PSObject.Properties.Name.Contains("prefix")) {
+                $prefixSet[[string]$assertion.prefix] = $true
+            }
+        }
+        $prefixes = @($prefixSet.Keys)
+    }
+
+    return $prefixes
 }
 
 function Get-NriScenarioForbiddenPatterns {
@@ -200,7 +219,14 @@ if ($CaptureWhenPassed) {
                 if ($scenario.PSObject.Properties.Name.Contains("loadingAssertions")) {
                     $loadingResult = Test-NriLoadingAssertions -Summary $summary -Assertions $scenario.loadingAssertions
                 }
-                if ($result.ok -and $loadingResult.ok) {
+                $prefixResult = [pscustomobject]@{
+                    ok = $true
+                    errors = @()
+                }
+                if ($scenario.PSObject.Properties.Name.Contains("prefixAssertions")) {
+                    $prefixResult = Test-NriPrefixAssertions -Summary $summary -Assertions $scenario.prefixAssertions
+                }
+                if ($result.ok -and $loadingResult.ok -and $prefixResult.ok) {
                     if ($SummaryOutput) {
                         $summaryDirectory = Split-Path -Parent $SummaryOutput
                         if ($summaryDirectory) {

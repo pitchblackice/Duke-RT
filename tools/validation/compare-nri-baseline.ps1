@@ -58,6 +58,46 @@ if ($baseline.PSObject.Properties.Name.Contains("ranges")) {
     }
 }
 
+if ($baseline.PSObject.Properties.Name.Contains("prefixRanges")) {
+    if (-not $summary.PSObject.Properties.Name.Contains("prefixRecords")) {
+        $errors.Add("summary is missing prefixRecords")
+    }
+    else {
+        foreach ($prefixProperty in $baseline.prefixRanges.PSObject.Properties) {
+            $prefix = $prefixProperty.Name
+            $summaryPrefixProperty = $summary.prefixRecords.PSObject.Properties[$prefix]
+            $records = if ($null -ne $summaryPrefixProperty) { @($summaryPrefixProperty.Value) } else { @() }
+            if ($records.Count -eq 0) {
+                $errors.Add("summary has no records for prefix '$prefix'")
+                continue
+            }
+
+            foreach ($fieldProperty in $prefixProperty.Value.PSObject.Properties) {
+                $field = $fieldProperty.Name
+                $range = $fieldProperty.Value
+                foreach ($record in $records) {
+                    if (-not $record.PSObject.Properties.Name.Contains($field)) {
+                        $errors.Add("prefix '$prefix' record missing ranged field '$field'")
+                        continue
+                    }
+                    $value = 0.0
+                    if (-not [double]::TryParse(
+                        [string]$record.$field,
+                        [System.Globalization.NumberStyles]::Float,
+                        [System.Globalization.CultureInfo]::InvariantCulture,
+                        [ref]$value)) {
+                        $errors.Add("prefix '$prefix' field '$field' value '$($record.$field)' is not numeric")
+                        continue
+                    }
+                    if ($value -lt [double]$range.min -or $value -gt [double]$range.max) {
+                        $errors.Add("prefix '$prefix' field '$field' value $value outside baseline range $($range.min)..$($range.max)")
+                    }
+                }
+            }
+        }
+    }
+}
+
 if ($errors.Count -gt 0) {
     foreach ($errorText in $errors) {
         Write-Error $errorText -ErrorAction Continue

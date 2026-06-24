@@ -90,6 +90,50 @@ function ConvertTo-NriInt64 {
     return $null
 }
 
+function ConvertTo-NriDouble {
+    param([object]$Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    $parsed = 0.0
+    if ([double]::TryParse(
+        [string]$Value,
+        [System.Globalization.NumberStyles]::Float,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [ref]$parsed)) {
+        return $parsed
+    }
+
+    return $null
+}
+
+function Test-NriObjectHasProperty {
+    param(
+        [object]$Object,
+        [string]$Name
+    )
+
+    return $null -ne $Object -and $Object.PSObject.Properties.Name.Contains($Name)
+}
+
+function Get-NriAssertionNumericValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Object,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Field
+    )
+
+    if (-not (Test-NriObjectHasProperty -Object $Object -Name $Field)) {
+        return $null
+    }
+
+    return ConvertTo-NriDouble (Get-NriObjectPropertyValue -Object $Object -Name $Field)
+}
+
 function Get-NriValidationLogSummary {
     param(
         [Parameter(Mandatory = $true)]
@@ -115,6 +159,10 @@ function Get-NriValidationLogSummary {
     $selfTestFrames = New-Object System.Collections.Generic.List[object]
     $acceptedFrames = New-Object System.Collections.Generic.List[object]
     $loadingSummaries = New-Object System.Collections.Generic.List[object]
+    $prefixRecords = [ordered]@{}
+    foreach ($prefix in $RequiredPrefixes) {
+        $prefixRecords[$prefix] = New-Object System.Collections.Generic.List[object]
+    }
 
     $lineNumber = 0
     $stream = [System.IO.File]::Open($resolved.Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
@@ -132,6 +180,11 @@ function Get-NriValidationLogSummary {
                 foreach ($prefix in $RequiredPrefixes) {
                     if (Test-NriLinePrefix -Line $line -Prefix $prefix) {
                         $requiredHits[$prefix] = [int]$requiredHits[$prefix] + 1
+                        $record = ConvertFrom-NriKeyValueLine -Line $line -Prefix $prefix
+                        if ($null -ne $record) {
+                            $record | Add-Member -NotePropertyName "line" -NotePropertyValue $lineNumber
+                            $prefixRecords[$prefix].Add($record)
+                        }
                     }
                 }
 
@@ -174,9 +227,15 @@ function Get-NriValidationLogSummary {
         $stream.Dispose()
     }
 
+    $prefixRecordArrays = [ordered]@{}
+    foreach ($entry in $prefixRecords.GetEnumerator()) {
+        $prefixRecordArrays[$entry.Key] = $entry.Value.ToArray()
+    }
+
     [pscustomobject]@{
         path = $resolved.Path
         requiredPrefixes = $requiredHits
+        prefixRecords = [pscustomobject]$prefixRecordArrays
         forbiddenHits = $forbiddenHits.ToArray()
         loadingSummaryCount = $loadingSummaries.Count
         loadingSummaries = $loadingSummaries.ToArray()
@@ -186,6 +245,225 @@ function Get-NriValidationLogSummary {
         acceptedSelfTestFrameCount = $acceptedFrames.Count
         selfTestFrames = $selfTestFrames.ToArray()
         acceptedSelfTestFrames = $acceptedFrames.ToArray()
+    }
+}
+
+function Get-NriPrefixRecords {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Summary,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Prefix
+    )
+
+    if ($null -eq $Summary -or -not $Summary.PSObject.Properties.Name.Contains("prefixRecords")) {
+        return @()
+    }
+    $property = $Summary.prefixRecords.PSObject.Properties[$Prefix]
+    if ($null -eq $property) {
+        return @()
+    }
+    return @($property.Value)
+}
+
+function Test-NriFieldCondition {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Record,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Field,
+
+        [Parameter(Mandatory = $true)]
+        [object]$Condition,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Prefix,
+
+        [Parameter(Mandatory = $true)]
+        [object]$Errors
+    )
+
+    if (-not (Test-NriObjectHasProperty -Object $Record -Name $Field)) {
+        $Errors.Add("prefix '$Prefix' record missing field '$Field'")
+        return
+    }
+
+    $rawValue = Get-NriObjectPropertyValue -Object $Record -Name $Field
+    $line = if (Test-NriObjectHasProperty -Object $Record -Name "line") { " line $($Record.line)" } else { "" }
+
+    if (Test-NriObjectHasProperty -Object $Condition -Name "exact") {
+        if ([string]$rawValue -ne [string]$Condition.exact) {
+            $Errors.Add("prefix '$Prefix'$line field '$Field' expected '$($Condition.exact)' actual '$rawValue'")
+        }
+    }
+
+    $numericValue = ConvertTo-NriDouble $rawValue
+    if (Test-NriObjectHasProperty -Object $Condition -Name "min") {
+        $minValue = [double](Get-NriObjectPropertyValue -Object $Condition -Name "min")
+        if ($null -eq $numericValue) {
+            $Errors.Add("prefix '$Prefix'$line field '$Field' is not numeric")
+        }
+        elseif ($numericValue -lt $minValue) {
+            $Errors.Add("prefix '$Prefix'$line field '$Field' $numericValue < min $minValue")
+        }
+    }
+    if (Test-NriObjectHasProperty -Object $Condition -Name "max") {
+        $maxValue = [double](Get-NriObjectPropertyValue -Object $Condition -Name "max")
+        if ($null -eq $numericValue) {
+            $Errors.Add("prefix '$Prefix'$line field '$Field' is not numeric")
+        }
+        elseif ($numericValue -gt $maxValue) {
+            $Errors.Add("prefix '$Prefix'$line field '$Field' $numericValue > max $maxValue")
+        }
+    }
+}
+
+function Test-NriRelationAssertion {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Record,
+
+        [Parameter(Mandatory = $true)]
+        [object]$Relation,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Prefix,
+
+        [Parameter(Mandatory = $true)]
+        [object]$Errors
+    )
+
+    if (-not (Test-NriObjectHasProperty -Object $Relation -Name "left") -or
+        -not (Test-NriObjectHasProperty -Object $Relation -Name "operator")) {
+        $Errors.Add("prefix '$Prefix' relation is missing left/operator")
+        return
+    }
+
+    $left = Get-NriAssertionNumericValue -Object $Record -Field ([string]$Relation.left)
+    if ($null -eq $left) {
+        $Errors.Add("prefix '$Prefix' relation left field '$($Relation.left)' is missing or nonnumeric")
+        return
+    }
+
+    $right = $null
+    $rightLabel = $null
+    if (Test-NriObjectHasProperty -Object $Relation -Name "rightField") {
+        $rightLabel = [string]$Relation.rightField
+        $right = Get-NriAssertionNumericValue -Object $Record -Field $rightLabel
+    }
+    elseif (Test-NriObjectHasProperty -Object $Relation -Name "rightValue") {
+        $rightLabel = [string]$Relation.rightValue
+        $right = ConvertTo-NriDouble $Relation.rightValue
+    }
+    else {
+        $Errors.Add("prefix '$Prefix' relation for '$($Relation.left)' is missing rightField/rightValue")
+        return
+    }
+
+    if ($null -eq $right) {
+        $Errors.Add("prefix '$Prefix' relation right '$rightLabel' is missing or nonnumeric")
+        return
+    }
+
+    $ok = $false
+    switch ([string]$Relation.operator) {
+        "eq" { $ok = $left -eq $right }
+        "ne" { $ok = $left -ne $right }
+        "le" { $ok = $left -le $right }
+        "lt" { $ok = $left -lt $right }
+        "ge" { $ok = $left -ge $right }
+        "gt" { $ok = $left -gt $right }
+        default {
+            $Errors.Add("prefix '$Prefix' relation has unsupported operator '$($Relation.operator)'")
+            return
+        }
+    }
+
+    if (-not $ok) {
+        $Errors.Add("prefix '$Prefix' relation failed: $($Relation.left)=$left $($Relation.operator) $rightLabel=$right")
+    }
+}
+
+function Test-NriPrefixAssertions {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Summary,
+
+        [object]$Assertions
+    )
+
+    $errors = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $Assertions) {
+        return [pscustomobject]@{
+            ok = $true
+            errors = $errors.ToArray()
+        }
+    }
+
+    foreach ($assertion in @($Assertions)) {
+        if (-not (Test-NriObjectHasProperty -Object $assertion -Name "prefix")) {
+            $errors.Add("prefix assertion missing prefix")
+            continue
+        }
+
+        $prefix = [string]$assertion.prefix
+        $records = @(Get-NriPrefixRecords -Summary $Summary -Prefix $prefix)
+        if (Test-NriObjectHasProperty -Object $assertion -Name "minCount") {
+            $minCount = [int](Get-NriObjectPropertyValue -Object $assertion -Name "minCount")
+            if ($records.Count -lt $minCount) {
+                $errors.Add("prefix '$prefix' count $($records.Count) < minCount $minCount")
+            }
+        }
+        if (Test-NriObjectHasProperty -Object $assertion -Name "maxCount") {
+            $maxCount = [int](Get-NriObjectPropertyValue -Object $assertion -Name "maxCount")
+            if ($records.Count -gt $maxCount) {
+                $errors.Add("prefix '$prefix' count $($records.Count) > maxCount $maxCount")
+            }
+        }
+        if (Test-NriObjectHasProperty -Object $assertion -Name "exactCount") {
+            $exactCount = [int](Get-NriObjectPropertyValue -Object $assertion -Name "exactCount")
+            if ($records.Count -ne $exactCount) {
+                $errors.Add("prefix '$prefix' count $($records.Count) != exactCount $exactCount")
+            }
+        }
+
+        if ($records.Count -eq 0) {
+            continue
+        }
+
+        $applyTo = if (Test-NriObjectHasProperty -Object $assertion -Name "applyTo") { [string]$assertion.applyTo } else { "all" }
+        $selectedRecords = @($records)
+        if ($applyTo -eq "first") {
+            $selectedRecords = @($records | Select-Object -First 1)
+        }
+        elseif ($applyTo -eq "last") {
+            $selectedRecords = @($records | Select-Object -Last 1)
+        }
+        elseif ($applyTo -ne "all") {
+            $errors.Add("prefix '$prefix' has unsupported applyTo '$applyTo'")
+            continue
+        }
+
+        foreach ($record in $selectedRecords) {
+            if (Test-NriObjectHasProperty -Object $assertion -Name "fields") {
+                foreach ($fieldProperty in $assertion.fields.PSObject.Properties) {
+                    Test-NriFieldCondition -Record $record -Field $fieldProperty.Name -Condition $fieldProperty.Value -Prefix $prefix -Errors $errors
+                }
+            }
+
+            if (Test-NriObjectHasProperty -Object $assertion -Name "relations") {
+                foreach ($relation in @($assertion.relations)) {
+                    Test-NriRelationAssertion -Record $record -Relation $relation -Prefix $prefix -Errors $errors
+                }
+            }
+        }
+    }
+
+    [pscustomobject]@{
+        ok = $errors.Count -eq 0
+        errors = $errors.ToArray()
     }
 }
 
@@ -376,4 +654,4 @@ function Test-NriValidationSummary {
     }
 }
 
-Export-ModuleMember -Function ConvertFrom-NriKeyValueLine, Test-NriTruthyValue, Get-NriValidationLogSummary, Test-NriValidationSummary, Test-NriLoadingAssertions
+Export-ModuleMember -Function ConvertFrom-NriKeyValueLine, Test-NriTruthyValue, Get-NriValidationLogSummary, Test-NriValidationSummary, Test-NriLoadingAssertions, Test-NriPrefixAssertions
