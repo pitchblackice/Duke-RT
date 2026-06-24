@@ -135,4 +135,22 @@ namespace nri_runtime_mutation
 		if (entry.wallsChanged && entry.flatsChanged) score += 1u << 16;
 		return score;
 	}
+
+	uint32_t ScoreRuntimeInvisibleProofTraceEntry(const NRIRenderer::RuntimeInvisibleProofTraceEntry& entry)
+	{
+		uint32_t score = entry.previousTriangleCount * 8u;
+		score += entry.previousMaterialCount * 4u;
+		score += entry.previousSurfaceCount * 2u;
+		if (entry.safeResidentNoopCandidate) score += 1u << 22;
+		if (entry.exactSignatureMatch) score += 1u << 21;
+		if (entry.animatedMaterialMatch) score += 1u << 20;
+		if (entry.residentAuthoritative) score += 1u << 19;
+		if (entry.residentAvailable) score += 1u << 18;
+		if (entry.portalChunk) score += 1u << 17;
+		if (entry.hardwareCanvas) score += 1u << 16;
+		if (entry.hasAnimatedTextureCandidates || entry.animatedRefreshSuppressed || entry.staticAnimatedReplacement) score += 1u << 15;
+		if (entry.visibleFloor || entry.visibleCeiling) score += 1u << 15;
+		if (entry.excludeStaticChunk) score += 1u << 14;
+		return score;
+	}
 }

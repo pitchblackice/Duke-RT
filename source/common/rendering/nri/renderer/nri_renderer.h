@@ -204,6 +204,7 @@ public:
 	static constexpr size_t RuntimeStructuralRebuildTraceCount = 8;
 	static constexpr size_t RuntimeGeometryDirtyTraceCount = 8;
 	static constexpr size_t RuntimeRecurringChunkTraceCount = 8;
+	static constexpr size_t RuntimeInvisibleProofTraceCount = 8;
 
 	using RuntimeMutationTraceAction = ::RuntimeMutationTraceAction;
 	using RuntimeMutationTopTraceEntry = ::RuntimeMutationTopTraceEntry;
@@ -356,6 +357,37 @@ public:
 		uint32_t lastMaterialCount = 0;
 		uint64_t previousStateSignature = 0;
 		uint64_t lastStateSignature = 0;
+	};
+
+	struct RuntimeInvisibleProofTraceEntry
+	{
+		bool valid = false;
+		uint32_t score = 0;
+		uint32_t chunkIndex = UINT32_MAX;
+		int32_t sectorIndex = -1;
+		uint32_t reasonMask = 0;
+		uint32_t sourceMask = 0;
+		uint32_t previousSurfaceCount = 0;
+		uint32_t previousTriangleCount = 0;
+		uint32_t previousMaterialCount = 0;
+		uint32_t residentPrimitiveCount = 0;
+		uint32_t residentMaterialCount = 0;
+		bool replacementValid = false;
+		bool residentAuthoritative = false;
+		bool residentAvailable = false;
+		bool visibleFloor = false;
+		bool visibleCeiling = false;
+		bool exactSignatureCached = false;
+		bool exactSignatureMatch = false;
+		bool animatedMaterialMatch = false;
+		bool excludeStaticChunk = false;
+		bool staticAnimatedReplacement = false;
+		bool hasAnimatedTextureCandidates = false;
+		bool animatedRefreshSuppressed = false;
+		bool hardwareCanvas = false;
+		bool portalChunk = false;
+		bool sectorLightingCandidate = false;
+		bool safeResidentNoopCandidate = false;
 	};
 
 	struct PerfShellTraceStats
@@ -1322,6 +1354,7 @@ public:
 		std::array<RuntimeStructuralRebuildTraceEntry, RuntimeStructuralRebuildTraceCount> runtimeStructuralRebuildEntries = {};
 		std::array<RuntimeGeometryDirtyTraceEntry, RuntimeGeometryDirtyTraceCount> runtimeGeometryDirtyEntries = {};
 		std::array<RuntimeRecurringChunkTraceEntry, RuntimeRecurringChunkTraceCount> runtimeRecurringChunkEntries = {};
+		std::array<RuntimeInvisibleProofTraceEntry, RuntimeInvisibleProofTraceCount> runtimeInvisibleProofEntries = {};
 		std::array<nri_scene::VoxelDuplicateVariantTraceEntry, nri_scene::VoxelDuplicateVariantTraceCount> voxelCacheDuplicateTopEntries = {};
 		std::array<nri_scene::DynamicVoxelEscapeTraceEntry, nri_scene::DynamicVoxelEscapeTraceCount> dynamicVoxelEscapeTopEntries = {};
 		std::array<nri_scene::DynamicVoxelEscapeTraceEntry, nri_scene::DynamicVoxelEscapeTraceCount> dynamicVoxelUnexpectedEscapeTopEntries = {};

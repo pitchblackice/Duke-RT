@@ -5164,6 +5164,45 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				entry.residentGeometryDirty ? 1u : 0u,
 				entry.recoveredEmpty ? 1u : 0u);
 		}
+		for (size_t index = 0; index < NRIRenderer::RuntimeInvisibleProofTraceCount; ++index)
+		{
+			const auto& entry = shell.runtimeInvisibleProofEntries[index];
+			if (!entry.valid)
+			{
+				continue;
+			}
+
+			Printf(
+				"PERF pt mutation invisible proof NRI: frame=%llu rank=%u chunk=%u sector=%d reasons=0x%x sources=0x%x score=%u prev_surfaces=%u prev_tris=%u prev_mats=%u resident_prims=%u resident_mats=%u replacement_valid=%u resident_authoritative=%u resident_available=%u visible_floor=%u visible_ceiling=%u exact_cached=%u exact_match=%u animated_match=%u exclude_static=%u static_anim=%u has_anim=%u anim_suppressed=%u hardware_canvas=%u portal=%u sector_light=%u safe_resident_noop=%u\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				(unsigned)(index + 1),
+				entry.chunkIndex,
+				entry.sectorIndex,
+				entry.reasonMask,
+				entry.sourceMask,
+				entry.score,
+				entry.previousSurfaceCount,
+				entry.previousTriangleCount,
+				entry.previousMaterialCount,
+				entry.residentPrimitiveCount,
+				entry.residentMaterialCount,
+				entry.replacementValid ? 1u : 0u,
+				entry.residentAuthoritative ? 1u : 0u,
+				entry.residentAvailable ? 1u : 0u,
+				entry.visibleFloor ? 1u : 0u,
+				entry.visibleCeiling ? 1u : 0u,
+				entry.exactSignatureCached ? 1u : 0u,
+				entry.exactSignatureMatch ? 1u : 0u,
+				entry.animatedMaterialMatch ? 1u : 0u,
+				entry.excludeStaticChunk ? 1u : 0u,
+				entry.staticAnimatedReplacement ? 1u : 0u,
+				entry.hasAnimatedTextureCandidates ? 1u : 0u,
+				entry.animatedRefreshSuppressed ? 1u : 0u,
+				entry.hardwareCanvas ? 1u : 0u,
+				entry.portalChunk ? 1u : 0u,
+				entry.sectorLightingCandidate ? 1u : 0u,
+				entry.safeResidentNoopCandidate ? 1u : 0u);
+		}
 		for (size_t index = 0; index < NRIRenderer::RuntimeSectorDirtyTruthTraceCount; ++index)
 		{
 			const auto& entry = shell.runtimeSectorDirtyTruthEntries[index];

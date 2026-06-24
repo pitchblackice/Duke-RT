@@ -356,6 +356,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeStructuralRebuildEntries = {};
 	mLastPerfShellTraceStats.runtimeGeometryDirtyEntries = {};
 	mLastPerfShellTraceStats.runtimeRecurringChunkEntries = {};
+	mLastPerfShellTraceStats.runtimeInvisibleProofEntries = {};
 	if (mRuntimeRecurringChunkTrackerBuildSerial != mMapWorld.buildSerial)
 	{
 		mRuntimeRecurringChunkTrackerBuildSerial = mMapWorld.buildSerial;
@@ -508,6 +509,63 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mLastPerfShellTraceStats.runtimeMutationTopEntries,
 			entry,
 			ScoreRuntimeMutationTopTraceEntry);
+	};
+	const auto recordRuntimeInvisibleProofEntry =
+		[this](const nri_scene::PTMapChunk& mapChunk,
+			uint32_t reasonMask,
+			uint32_t sourceMask,
+			const RuntimeMapMutationCache::ChunkReplacement& replacement,
+			const ResidentMapChunkRegistry::Entry* residentEntry,
+			bool visibleFloor,
+			bool visibleCeiling,
+			bool exactSignatureCached,
+			bool exactSignatureMatch,
+			bool animatedMaterialMatch,
+			bool hardwareCanvas,
+			bool portalChunk,
+			bool sectorLightingCandidate,
+			bool safeResidentNoopCandidate)
+	{
+		if (!ShouldTracePtPerf())
+		{
+			return;
+		}
+
+		RuntimeInvisibleProofTraceEntry entry = {};
+		entry.valid = true;
+		entry.chunkIndex = mapChunk.chunkIndex;
+		entry.sectorIndex = mapChunk.sectorIndex;
+		entry.reasonMask = reasonMask;
+		entry.sourceMask = sourceMask;
+		entry.previousSurfaceCount = replacement.surfaceCount;
+		entry.previousTriangleCount = replacement.triangleCount;
+		entry.previousMaterialCount = (uint32_t)replacement.materialBridge.materials.size();
+		entry.residentPrimitiveCount = residentEntry != nullptr ? residentEntry->primitiveCount : 0u;
+		entry.residentMaterialCount = residentEntry != nullptr ? residentEntry->materialCount : 0u;
+		entry.replacementValid = replacement.valid;
+		entry.residentAuthoritative = replacement.residentAuthoritative;
+		entry.residentAvailable =
+			residentEntry != nullptr &&
+			residentEntry->valid &&
+			residentEntry->active &&
+			residentEntry->mappedInStaticScene;
+		entry.visibleFloor = visibleFloor;
+		entry.visibleCeiling = visibleCeiling;
+		entry.exactSignatureCached = exactSignatureCached;
+		entry.exactSignatureMatch = exactSignatureMatch;
+		entry.animatedMaterialMatch = animatedMaterialMatch;
+		entry.excludeStaticChunk = replacement.excludeStaticChunk;
+		entry.staticAnimatedReplacement = replacement.staticAnimatedReplacement;
+		entry.hasAnimatedTextureCandidates = residentEntry != nullptr && residentEntry->hasAnimatedTextureCandidates;
+		entry.animatedRefreshSuppressed = residentEntry != nullptr && residentEntry->animatedRefreshSuppressed;
+		entry.hardwareCanvas = hardwareCanvas;
+		entry.portalChunk = portalChunk;
+		entry.sectorLightingCandidate = sectorLightingCandidate;
+		entry.safeResidentNoopCandidate = safeResidentNoopCandidate;
+		InsertRankedTraceEntry(
+			mLastPerfShellTraceStats.runtimeInvisibleProofEntries,
+			entry,
+			ScoreRuntimeInvisibleProofTraceEntry);
 	};
 
 	const auto recordSectorDirtyTruthEntry =
@@ -806,6 +864,32 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				entry.valid &&
 				entry.hasAnimatedTextureCandidates &&
 				entry.animatedRefreshSuppressed;
+		}
+
+		return false;
+	};
+	const auto isFlatPlaneMarkedVisible = [](const std::vector<uint32_t>& visibleFlatPlaneWords, int32_t sectorIndex, bool ceiling) -> bool
+	{
+		if (sectorIndex < 0)
+		{
+			return false;
+		}
+
+		const uint32_t planeIndex = (uint32_t)sectorIndex * 2u + (ceiling ? 1u : 0u);
+		const uint32_t wordIndex = planeIndex / 32u;
+		const uint32_t bitIndex = planeIndex % 32u;
+		return wordIndex < visibleFlatPlaneWords.size() && ((visibleFlatPlaneWords[wordIndex] >> bitIndex) & 1u) != 0u;
+	};
+	const auto mapChunkHasPortalSurface = [this](const nri_scene::PTMapChunk& mapChunk) -> bool
+	{
+		const uint32_t begin = mapChunk.firstSurface;
+		const uint32_t end = std::min<uint32_t>(begin + mapChunk.surfaceCount, (uint32_t)mMapWorld.surfaces.size());
+		for (uint32_t surfaceIndex = begin; surfaceIndex < end; ++surfaceIndex)
+		{
+			if (mMapWorld.surfaces[surfaceIndex].kind == nri_scene::PTMapSurfaceKind::Portal)
+			{
+				return true;
+			}
 		}
 
 		return false;
@@ -2416,6 +2500,65 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				(replacementStructuralReasonMask & ~dirtyOnlyStructuralReasonMask) == 0;
 			if (!chunkVisibleNow)
 			{
+				const bool exactSignatureCached = replacement.exactGeometrySignature != 0;
+				const bool residentAvailable =
+					residentEntry != nullptr &&
+					residentEntry->valid &&
+					residentEntry->active &&
+					residentEntry->mappedInStaticScene;
+				bool exactSignatureMatch = false;
+				bool animatedMaterialMatch = false;
+				if (replacement.valid && residentAvailable)
+				{
+					if (replacement.exactGeometrySignature == 0)
+					{
+						replacement.exactGeometrySignature = ComputeExactGeometrySignature(replacement.sceneView);
+					}
+					exactSignatureMatch = replacement.exactGeometrySignature == residentEntry->exactGeometrySignature;
+					animatedMaterialMatch = replacement.animatedMaterialSignature == residentEntry->animatedMaterialSignature;
+				}
+				const bool visibleFloor = isFlatPlaneMarkedVisible(mCurrentVisibleFlatPlaneWords, mapChunk.sectorIndex, false);
+				const bool visibleCeiling = isFlatPlaneMarkedVisible(mCurrentVisibleFlatPlaneWords, mapChunk.sectorIndex, true);
+				const bool hardwareCanvas =
+					replacement.valid &&
+					SceneViewUsesHardwareCanvasTexture(replacement.sceneView);
+				const bool portalChunk = mapChunkHasPortalSurface(mapChunk);
+				const bool sectorLightingCandidate =
+					(normalizedReasonMask &
+						(nri_scene::PTMapChunkMutationReason_SectorDirty |
+							nri_scene::PTMapChunkMutationReason_SectorMaterial)) != 0;
+				const bool safeResidentNoopCandidate =
+					replacement.residentAuthoritative &&
+					replacement.valid &&
+					residentAvailable &&
+					exactSignatureMatch &&
+					animatedMaterialMatch &&
+					replacement.surfaceCount == residentEntry->materialCount &&
+					replacement.triangleCount == residentEntry->primitiveCount &&
+					(uint32_t)replacement.materialBridge.materials.size() == residentEntry->materialCount &&
+					!replacement.staticAnimatedReplacement &&
+					!hardwareCanvas &&
+					!portalChunk &&
+					!sectorLightingCandidate &&
+					!visibleFloor &&
+					!visibleCeiling &&
+					!residentEntry->hasAnimatedTextureCandidates &&
+					!residentEntry->animatedRefreshSuppressed;
+				recordRuntimeInvisibleProofEntry(
+					mapChunk,
+					normalizedReasonMask,
+					runtimeMutationCandidateSourceMask,
+					replacement,
+					residentEntry,
+					visibleFloor,
+					visibleCeiling,
+					exactSignatureCached,
+					exactSignatureMatch,
+					animatedMaterialMatch,
+					hardwareCanvas,
+					portalChunk,
+					sectorLightingCandidate,
+					safeResidentNoopCandidate);
 				mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeUnsafeReasonCount++;
 				mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeInvisibleCount++;
 			}
