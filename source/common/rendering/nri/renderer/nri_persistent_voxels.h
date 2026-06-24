@@ -66,6 +66,7 @@ struct PersistentVoxelMeshVariantResource
 {
 	uint64_t resourceKey = 0;
 	uint64_t meshKeyHash = 0;
+	uint64_t geometrySignature = 0;
 	uint64_t transformBasisSignature = 0;
 	nri_scene::VoxelMeshBakeSpace meshBakeSpace = nri_scene::VoxelMeshBakeSpace::Unknown;
 	uint32_t primitiveCount = 0;
@@ -256,13 +257,16 @@ struct NRIPersistentVoxelPreloadServices
 {
 	using PumpAdmissionQueueFn = bool (*)(void* user, const char* phase);
 	using EnsureBatchFn = bool (*)(void* user, NRIPersistentVoxelBatchStats* outStats);
+	using WarmSharedBlasFn = bool (*)(void* user, const std::vector<nri_scene::PrecachedVoxelVariantView>& variants, uint32_t frameIndex);
 
 	void* user = nullptr;
 	PumpAdmissionQueueFn pumpAdmissionQueue = nullptr;
 	EnsureBatchFn ensureBatch = nullptr;
+	WarmSharedBlasFn warmSharedBlas = nullptr;
 
 	bool PumpAdmissionQueue(const char* phase) const;
 	bool EnsureBatch(NRIPersistentVoxelBatchStats* outStats = nullptr) const;
+	bool WarmSharedBlas(const std::vector<nri_scene::PrecachedVoxelVariantView>& variants, uint32_t frameIndex) const;
 };
 
 struct NRIPersistentVoxelAdmissionServices
@@ -735,6 +739,14 @@ public:
 		const NRIPersistentVoxelResetServices& resetServices,
 		const NRIPersistentVoxelAccelerationServices& accelerationServices,
 		NRIPersistentVoxelAccelerationBuildStats& outStats);
+	bool WarmSharedBlasForLoading(
+		const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
+		uint32_t frameIndex,
+		const NRIPersistentVoxelSettings& settings,
+		int loadingTraceLevel,
+		bool voxelStatsEnabled,
+		const NRIPersistentVoxelResetServices& resetServices,
+		const NRIPersistentVoxelAccelerationServices& accelerationServices);
 	NRIPersistentVoxelDescriptorSnapshot BuildDescriptorSnapshot(
 		const NRIBufferResource& fallbackVertexBuffer,
 		const NRIBufferResource& fallbackIndexBuffer,

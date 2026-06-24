@@ -112,6 +112,7 @@ NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars()
 	settings.residentMaxColdMaps = (int)nri_ptvoxelresidentmaxcoldmaps < 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxelresidentmaxcoldmaps;
 	settings.sharedBlasBuildEnabled = (bool)nri_ptvoxelsharedblasbuild;
 	settings.sharedBlasBuildsPerFrame = (int)nri_ptvoxelsharedblasbuilds <= 0 ? 0u : (uint32_t)(int)nri_ptvoxelsharedblasbuilds;
+	settings.sharedBlasLoadingWarmupEnabled = (bool)nri_ptvoxelsharedblasloading;
 	settings.sharedBlasRouteEnabled = (bool)nri_ptvoxelsharedblasroute;
 	settings.transformKeyed = (bool)nri_ptvoxeltransformkeyed;
 	settings.excludeIndices = {

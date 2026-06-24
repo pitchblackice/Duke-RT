@@ -5956,6 +5956,7 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 			PrecachedVoxelVariantView view = {};
 			view.meshKeyHash = request.meshVariantHash;
 			view.materialKeyHash = materialVariantHash;
+			view.geometrySignature = request.meshVariantHash;
 			view.meshVariantHash = request.meshVariantHash;
 			view.materialVariantHash = materialVariantHash;
 			view.sourceBits = request.sourceBits | context.sourceBits;

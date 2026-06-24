@@ -235,6 +235,18 @@ public:
 		{
 			return EnsureBatch(static_cast<NRIRenderer&>(*static_cast<NRIRenderer*>(user)), outStats);
 		};
+		preloadServices.warmSharedBlas = [](void* user, const std::vector<nri_scene::PrecachedVoxelVariantView>& variants, uint32_t frameIndex) -> bool
+		{
+			NRIRenderer& renderer = *static_cast<NRIRenderer*>(user);
+			return renderer.mPersistentVoxels.WarmSharedBlasForLoading(
+				variants,
+				frameIndex,
+				BuildNRIPersistentVoxelSettingsFromCVars(),
+				(int)nri_ptloadingtrace,
+				(bool)nri_voxelstats,
+				BuildResetServices(renderer),
+				BuildAccelerationServices(renderer));
+		};
 		return renderer.mPersistentVoxels.PreloadResources(
 			variants,
 			cacheEntries,

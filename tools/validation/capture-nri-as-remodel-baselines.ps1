@@ -50,7 +50,8 @@ if ($Scenario.Count -eq 0) {
         "as-opening-d3d12-beauty-e1l5",
         "as-opening-d3d12-beauty-e2l4",
         "as-opening-d3d12-e1l1-voxels",
-        "as-loading-d3d12-e1l1-voxels"
+        "as-loading-d3d12-e1l1-voxels",
+        "as-loading-d3d12-e1l1-shared-blas-route"
     )
 }
 
