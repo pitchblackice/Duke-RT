@@ -49,8 +49,6 @@
 #include <cstring>
 #include <limits>
 #include <string>
-#include <unordered_set>
-
 
 namespace
 {
@@ -668,6 +666,48 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 	mLastPerfShellTraceStats.persistentVoxelInstanceMaterialCount = persistentVoxelStatus.instanceMaterialCount;
 	mLastPerfShellTraceStats.persistentVoxelInstanceMinPrimitiveCount = persistentVoxelStatus.instanceMinPrimitiveCount;
 	mLastPerfShellTraceStats.persistentVoxelInstanceMaxPrimitiveCount = persistentVoxelStatus.instanceMaxPrimitiveCount;
+	mLastPerfShellTraceStats.asWorldTlasObjects = mTopLevelAS.accelerationStructure != nullptr && mActiveTlasInstanceCount > 0 ? 1u : 0u;
+	mLastPerfShellTraceStats.asWorldTlasEntries = mActiveTlasInstanceCount;
+	mLastPerfShellTraceStats.asEmissiveTlasObjects = mEmissiveTopLevelAS.accelerationStructure != nullptr && mEmissiveTlasInstanceCount > 0 ? 1u : 0u;
+	mLastPerfShellTraceStats.asEmissiveTlasEntries = mEmissiveTlasInstanceCount;
+	mLastPerfShellTraceStats.asEntriesStatic = mLastPerfShellTraceStats.sceneInstanceStaticCount;
+	mLastPerfShellTraceStats.asEntriesDynamic = mLastPerfShellTraceStats.sceneInstanceDynamicCount;
+	mLastPerfShellTraceStats.asEntriesVoxel = mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount;
+	mLastPerfShellTraceStats.asSceneRecords = mLastPerfShellTraceStats.sceneInstanceCount;
+	mLastPerfShellTraceStats.asBlasDynamic = HasAnyDynamicBottomLevelAS() ? 1u : 0u;
+	mLastPerfShellTraceStats.asDynamicUniqueGeometrySignatures = mLastPerfShellTraceStats.asBlasDynamic;
+	mLastPerfShellTraceStats.asMonolithicDynamicBlasBuilds = mLastPerfShellTraceStats.dynamicAsCreateCalls > 0 ? 1u : 0u;
+	mLastPerfShellTraceStats.asBlasVoxelUnique = mLastPerfShellTraceStats.persistentVoxelSharedMeshResources;
+	mLastPerfShellTraceStats.asBlasVoxelActor = mLastPerfShellTraceStats.persistentVoxelMeshVariantResourceCount;
+	mLastPerfShellTraceStats.asVoxelUniqueGeometryKeys =
+		mLastPerfShellTraceStats.persistentVoxelSharedMeshResources != 0 ?
+		mLastPerfShellTraceStats.persistentVoxelSharedMeshResources :
+		mLastPerfShellTraceStats.voxelCacheUniqueMeshKeys;
+	mLastPerfShellTraceStats.asVoxelActorInstances = mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount;
+	mLastPerfShellTraceStats.asVoxelSharedBlasRefs =
+		mLastPerfShellTraceStats.asVoxelActorInstances > mLastPerfShellTraceStats.asVoxelUniqueGeometryKeys ?
+		mLastPerfShellTraceStats.asVoxelActorInstances - mLastPerfShellTraceStats.asVoxelUniqueGeometryKeys :
+		0u;
+	for (const StaticMapSceneCache::ChunkCache& chunk : mStaticMapScene.chunks)
+	{
+		if (!chunk.active || chunk.accelerationStructure.accelerationStructure == nullptr)
+		{
+			continue;
+		}
+		mLastPerfShellTraceStats.asBlasStatic++;
+		mLastPerfShellTraceStats.asStaticChunkOwnedBlas++;
+	}
+	mLastPerfShellTraceStats.asStaticUniqueGeometrySignatures = mLastPerfShellTraceStats.asStaticChunkOwnedBlas;
+	mLastPerfShellTraceStats.asStaticSegmentBlas = 0;
+	mLastPerfShellTraceStats.asBlasBuiltThisFrame =
+		mLastPerfShellTraceStats.dynamicAsCreateCalls +
+		mLastPerfShellTraceStats.persistentVoxelAsBuilds +
+		mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateCount +
+		mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasUpdateCount;
+	mLastPerfShellTraceStats.asBlasCacheHits =
+		mLastPerfShellTraceStats.dynamicAsReuseCount +
+		mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasReuseCount +
+		mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasScratchCacheHitCount;
 	mLastPerfShellTraceStats.usedStaticMapScene = mUsedStaticMapSceneLastFrame;
 	mLastPerfShellTraceStats.usedDynamicOverlay = mGpuSceneHasDynamicOverlay;
 	mLastPerfShellTraceStats.usedPersistentDynamicEmissiveCache = inputs.usingPersistentDynamicEmissiveCache;

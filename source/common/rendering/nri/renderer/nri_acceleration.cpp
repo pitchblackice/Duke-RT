@@ -546,56 +546,78 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 	{
 		return false;
 	}
-	renderer.RetireTopLevelAccelerationStructure(topLevelAS);
+	{
+		ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.worldTlasRetireMs);
+		renderer.RetireTopLevelAccelerationStructure(topLevelAS);
+	}
 
 	static NRIRenderer::SceneBufferDebugStats sTlasInstanceStats = { "TLASInstance" };
-	if (!renderer.EnsureStructuredBuffer(
-		tlasInstanceBuffer,
-		sTlasInstanceStats,
-		instances.data(),
-		instances.size() * sizeof(nri::TopLevelInstance),
-		sizeof(nri::TopLevelInstance),
-		nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT,
-		NRIResourceAccelerationStructureBuildInputAccess(),
-		tlasInstanceWritesQuiesced,
-		"world_tlas_instance_upload"))
 	{
-		return false;
+		ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.worldTlasInstanceUploadMs);
+		if (!renderer.EnsureStructuredBuffer(
+			tlasInstanceBuffer,
+			sTlasInstanceStats,
+			instances.data(),
+			instances.size() * sizeof(nri::TopLevelInstance),
+			sizeof(nri::TopLevelInstance),
+			nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT,
+			NRIResourceAccelerationStructureBuildInputAccess(),
+			tlasInstanceWritesQuiesced,
+			"world_tlas_instance_upload"))
+		{
+			return false;
+		}
 	}
 
 	nri::AccelerationStructureDesc tlasDesc = {};
 	tlasDesc.type = nri::AccelerationStructureType::TOP_LEVEL;
 	tlasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
 	tlasDesc.geometryOrInstanceNum = (uint32_t)instances.size();
-	if (renderer.mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*renderer.mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, tlasDesc, topLevelAS.accelerationStructure) != nri::Result::SUCCESS)
 	{
-		return false;
-	}
-
-	{
-		nri::MemoryDesc memoryDesc = {};
-		renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*topLevelAS.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
-		topLevelAS.memorySize = memoryDesc.size;
-		topLevelAS.memoryLocation = nri::MemoryLocation::DEVICE;
-	}
-
-	const uint64_t requiredScratchSize = renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*topLevelAS.accelerationStructure);
-	if (topLevelScratchBuffer.buffer == nullptr || topLevelScratchBuffer.size < requiredScratchSize)
-	{
-		if (topLevelScratchBuffer.buffer != nullptr)
-		{
-			renderer.WaitForCommandsTracked("world_tlas_scratch_resize");
-		}
-		renderer.DestroyBufferResource(topLevelScratchBuffer);
-		if (!renderer.CreateBufferWithoutView(topLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+		ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.worldTlasCreateMs);
+		renderer.mLastPerfShellTraceStats.worldTlasCreateCalls++;
+		if (renderer.mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*renderer.mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, tlasDesc, topLevelAS.accelerationStructure) != nri::Result::SUCCESS)
 		{
 			return false;
 		}
 	}
 
-	if (renderer.mFrameBuffer->mRayTracing.CreateAccelerationStructureDescriptor(*topLevelAS.accelerationStructure, topLevelAS.descriptor) != nri::Result::SUCCESS)
 	{
-		return false;
+		ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.worldTlasMemoryMs);
+		nri::MemoryDesc memoryDesc = {};
+		renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*topLevelAS.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
+		topLevelAS.memorySize = memoryDesc.size;
+		topLevelAS.memoryLocation = nri::MemoryLocation::DEVICE;
+		renderer.mLastPerfShellTraceStats.worldTlasMemoryBytes = memoryDesc.size;
+	}
+
+	{
+		ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.worldTlasScratchMs);
+		renderer.mLastPerfShellTraceStats.worldTlasScratchQueries++;
+		const uint64_t requiredScratchSize = renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*topLevelAS.accelerationStructure);
+		renderer.mLastPerfShellTraceStats.worldTlasScratchRequestedBytes = requiredScratchSize;
+		if (topLevelScratchBuffer.buffer == nullptr || topLevelScratchBuffer.size < requiredScratchSize)
+		{
+			renderer.mLastPerfShellTraceStats.worldTlasScratchGrowCount++;
+			if (topLevelScratchBuffer.buffer != nullptr)
+			{
+				renderer.WaitForCommandsTracked("world_tlas_scratch_resize");
+			}
+			renderer.DestroyBufferResource(topLevelScratchBuffer);
+			if (!renderer.CreateBufferWithoutView(topLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+			{
+				return false;
+			}
+		}
+	}
+
+	{
+		ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.worldTlasDescriptorMs);
+		renderer.mLastPerfShellTraceStats.worldTlasDescriptorCreateCalls++;
+		if (renderer.mFrameBuffer->mRayTracing.CreateAccelerationStructureDescriptor(*topLevelAS.accelerationStructure, topLevelAS.descriptor) != nri::Result::SUCCESS)
+		{
+			return false;
+		}
 	}
 
 	nri::BuildTopLevelAccelerationStructureDesc tlasBuild = {};
@@ -605,7 +627,10 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 	tlasBuild.instanceOffset = 0;
 	tlasBuild.scratchBuffer = topLevelScratchBuffer.buffer;
 	tlasBuild.scratchOffset = 0;
-	renderer.mFrameBuffer->mRayTracing.CmdBuildTopLevelAccelerationStructures(*renderer.mFrameBuffer->mCommandBuffer, &tlasBuild, 1);
+	{
+		ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.worldTlasBuildMs);
+		renderer.mFrameBuffer->mRayTracing.CmdBuildTopLevelAccelerationStructures(*renderer.mFrameBuffer->mCommandBuffer, &tlasBuild, 1);
+	}
 
 	nri::BufferBarrierDesc tlasBarrier = {};
 	tlasBarrier.buffer = renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*topLevelAS.accelerationStructure);
@@ -649,7 +674,11 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 	nri::BarrierDesc barrierDesc = {};
 	barrierDesc.buffers = barriers.data();
 	barrierDesc.bufferNum = (uint32_t)barriers.size();
-	renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, barrierDesc);
+	{
+		ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.worldTlasBarrierMs);
+		renderer.mLastPerfShellTraceStats.worldTlasBarrierCount = barrierDesc.bufferNum;
+		renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, barrierDesc);
+	}
 
 	if (outTlasInstanceCount != nullptr)
 	{

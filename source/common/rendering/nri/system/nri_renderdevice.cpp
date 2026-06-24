@@ -3714,6 +3714,55 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.persistentVoxelInstanceMaterialCount,
 			shell.persistentVoxelInstanceMinPrimitiveCount,
 			shell.persistentVoxelInstanceMaxPrimitiveCount);
+		Printf(
+			"PERF pt as model NRI: frame=%llu world_tlas_objects=%u world_tlas_entries=%u emissive_tlas_objects=%u emissive_tlas_entries=%u blas_static=%u blas_dynamic=%u blas_voxel_unique=%u blas_voxel_actor=%u entries_static=%u entries_dynamic=%u entries_voxel=%u scene_records=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.asWorldTlasObjects,
+			shell.asWorldTlasEntries,
+			shell.asEmissiveTlasObjects,
+			shell.asEmissiveTlasEntries,
+			shell.asBlasStatic,
+			shell.asBlasDynamic,
+			shell.asBlasVoxelUnique,
+			shell.asBlasVoxelActor,
+			shell.asEntriesStatic,
+			shell.asEntriesDynamic,
+			shell.asEntriesVoxel,
+			shell.asSceneRecords);
+		Printf(
+			"PERF pt as reuse NRI: frame=%llu voxel_unique_geometry_keys=%u voxel_actor_instances=%u voxel_shared_blas_refs=%u static_unique_geometry_signatures=%u static_segment_blas=%u static_chunk_owned_blas=%u dynamic_unique_geometry_signatures=%u blas_cache_hits=%u blas_built_this_frame=%u monolithic_dynamic_blas_builds=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.asVoxelUniqueGeometryKeys,
+			shell.asVoxelActorInstances,
+			shell.asVoxelSharedBlasRefs,
+			shell.asStaticUniqueGeometrySignatures,
+			shell.asStaticSegmentBlas,
+			shell.asStaticChunkOwnedBlas,
+			shell.asDynamicUniqueGeometrySignatures,
+			shell.asBlasCacheHits,
+			shell.asBlasBuiltThisFrame,
+			shell.asMonolithicDynamicBlasBuilds);
+		Printf(
+			"PERF pt world tlas detail NRI: frame=%llu total=%.3f retire=%.3f instance_upload=%.3f create=%.3f memory=%.3f scratch=%.3f descriptor=%.3f build=%.3f barrier=%.3f calls=%u instances=%u creates=%u scratch_queries=%u scratch_grows=%u scratch_requested=%llu memory_bytes=%llu descriptor_creates=%u barriers=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.worldTlasMs,
+			shell.worldTlasRetireMs,
+			shell.worldTlasInstanceUploadMs,
+			shell.worldTlasCreateMs,
+			shell.worldTlasMemoryMs,
+			shell.worldTlasScratchMs,
+			shell.worldTlasDescriptorMs,
+			shell.worldTlasBuildMs,
+			shell.worldTlasBarrierMs,
+			shell.worldTlasBuildCalls,
+			shell.worldTlasInstanceCount,
+			shell.worldTlasCreateCalls,
+			shell.worldTlasScratchQueries,
+			shell.worldTlasScratchGrowCount,
+			(unsigned long long)shell.worldTlasScratchRequestedBytes,
+			(unsigned long long)shell.worldTlasMemoryBytes,
+			shell.worldTlasDescriptorCreateCalls,
+			shell.worldTlasBarrierCount);
 		if (shader.valid)
 		{
 			const auto& c = shader.counters;
