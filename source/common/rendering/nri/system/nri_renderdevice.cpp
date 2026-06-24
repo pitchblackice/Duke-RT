@@ -4802,7 +4802,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationStructuralInvalidChunks,
 			shell.runtimeMutationHardwareCanvasChunkCount);
 		Printf(
-			"PERF pt mutation outcomes NRI: frame=%llu invalid_force_topology=%u force_topology_proofs=%u force_topology_downgrades=%u force_topology_downgrade_noop=%u force_topology_downgrade_material=%u force_topology_proof_prepare_failed=%u force_topology_proof_no_replacement=%u force_topology_proof_geometry_changed=%u force_topology_proof_unsafe_reason=%u invalid_applied=%u resident_noop_skips=%u invalid_failed=%u invalid_sync_skip=%u resident_noop_candidates=%u resident_noop_mask=0x%x noop_block_not_authoritative=%u noop_block_resident_unavailable=%u noop_block_replacement_invalid=%u noop_block_exclude_static=%u noop_block_surface_count=%u noop_block_material_count=%u noop_block_primitive_count=%u valid_structural=%u valid_material=%u\n",
+			"PERF pt mutation outcomes NRI: frame=%llu invalid_force_topology=%u force_topology_proofs=%u force_topology_downgrades=%u force_topology_downgrade_noop=%u force_topology_downgrade_material=%u force_topology_proof_prepare_failed=%u force_topology_proof_no_replacement=%u force_topology_proof_geometry_changed=%u force_topology_proof_unsafe_reason=%u force_topology_proof_invisible=%u force_topology_proof_reason_mismatch=%u invalid_applied=%u resident_noop_skips=%u invalid_failed=%u invalid_sync_skip=%u resident_noop_candidates=%u resident_noop_mask=0x%x noop_block_not_authoritative=%u noop_block_resident_unavailable=%u noop_block_replacement_invalid=%u noop_block_exclude_static=%u noop_block_surface_count=%u noop_block_material_count=%u noop_block_primitive_count=%u valid_structural=%u valid_material=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.runtimeMutationInvalidForceTopologyCount,
 			shell.runtimeMutationForceTopologyProofChecks,
@@ -4813,6 +4813,8 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationForceTopologyDowngradeNoReplacementCount,
 			shell.runtimeMutationForceTopologyDowngradeGeometryChangedCount,
 			shell.runtimeMutationForceTopologyDowngradeUnsafeReasonCount,
+			shell.runtimeMutationForceTopologyDowngradeInvisibleCount,
+			shell.runtimeMutationForceTopologyDowngradeReasonMismatchCount,
 			shell.runtimeMutationInvalidAppliedCount,
 			shell.runtimeMutationResidentNoopSkipCount,
 			shell.runtimeMutationInvalidFailedCount,

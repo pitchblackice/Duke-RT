@@ -217,6 +217,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeNoReplacementCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeGeometryChangedCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeUnsafeReasonCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeInvisibleCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeReasonMismatchCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationInvalidAppliedCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentNoopSkipCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationInvalidFailedCount = 0;
@@ -2285,6 +2287,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			}
 
 			replacement.sceneView = liveChunkView;
+			replacement.exactGeometrySignature = 0;
 			replacement.geometry = std::move(liveGeometry);
 			replacement.materialBridge = std::move(liveMaterials);
 			replacement.replacementBaseline = std::move(liveBaseline);
@@ -2372,6 +2375,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				replacement.triangleCount = (uint32_t)replacement.geometry.primitives.size();
 			}
 			replacement.sceneView = liveChunkView;
+			replacement.exactGeometrySignature = 0;
 			replacement.materialBridge = std::move(liveMaterials);
 			replacement.replacementBaseline = std::move(liveBaseline);
 			replacement.surfaceCount = liveSurfaceCount;
@@ -2413,6 +2417,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			if (!chunkVisibleNow)
 			{
 				mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeUnsafeReasonCount++;
+				mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeInvisibleCount++;
 			}
 			else if (!replacement.valid)
 			{
@@ -2421,6 +2426,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			else if (!onlyDirtyStructuralReason)
 			{
 				mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeUnsafeReasonCount++;
+				mLastPerfShellTraceStats.runtimeMutationForceTopologyDowngradeReasonMismatchCount++;
 			}
 			else if (!prepareLiveChunkView())
 			{
@@ -2429,7 +2435,11 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			else
 			{
 				const uint64_t liveExactGeometrySignature = ComputeExactGeometrySignature(liveChunkView);
-				const uint64_t previousExactGeometrySignature = ComputeExactGeometrySignature(replacement.sceneView);
+				if (replacement.exactGeometrySignature == 0)
+				{
+					replacement.exactGeometrySignature = ComputeExactGeometrySignature(replacement.sceneView);
+				}
+				const uint64_t previousExactGeometrySignature = replacement.exactGeometrySignature;
 				if (liveExactGeometrySignature == previousExactGeometrySignature)
 				{
 					const uint64_t liveAnimatedMaterialSignature = ComputeAnimatedMaterialSignature(liveChunkView);
@@ -3015,13 +3025,22 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				residentEntry->active &&
 				residentEntry->mappedInStaticScene;
 			const bool residentNoopIgnoreExcludeStatic = effectiveForceTopologyInvalidation;
+			if (effectiveForceTopologyInvalidation &&
+				replacement.residentAuthoritative &&
+				residentEntry != nullptr &&
+				residentEntry->valid &&
+				replacement.valid &&
+				replacement.exactGeometrySignature == 0)
+			{
+				replacement.exactGeometrySignature = ComputeExactGeometrySignature(replacement.sceneView);
+			}
 			const bool residentNoopSignatureCandidate =
 				effectiveForceTopologyInvalidation &&
 				replacement.residentAuthoritative &&
 				residentEntry != nullptr &&
 				residentEntry->valid &&
 				replacement.valid &&
-				ComputeExactGeometrySignature(replacement.sceneView) == residentEntry->exactGeometrySignature &&
+				replacement.exactGeometrySignature == residentEntry->exactGeometrySignature &&
 				replacement.animatedMaterialSignature == residentEntry->animatedMaterialSignature;
 			const bool residentNoopExactMatch =
 				replacement.residentAuthoritative &&
@@ -3031,7 +3050,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				replacement.surfaceCount == residentEntry->materialCount &&
 				replacement.triangleCount == residentEntry->primitiveCount &&
 				(uint32_t)replacement.materialBridge.materials.size() == residentEntry->materialCount &&
-				ComputeExactGeometrySignature(replacement.sceneView) == residentEntry->exactGeometrySignature &&
+				replacement.exactGeometrySignature == residentEntry->exactGeometrySignature &&
 				replacement.animatedMaterialSignature == residentEntry->animatedMaterialSignature;
 			if (residentNoopSignatureCandidate && !residentNoopExactMatch)
 			{

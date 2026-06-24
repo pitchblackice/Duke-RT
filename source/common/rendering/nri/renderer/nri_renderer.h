@@ -916,6 +916,8 @@ public:
 		uint32_t runtimeMutationForceTopologyDowngradeNoReplacementCount = 0;
 		uint32_t runtimeMutationForceTopologyDowngradeGeometryChangedCount = 0;
 		uint32_t runtimeMutationForceTopologyDowngradeUnsafeReasonCount = 0;
+		uint32_t runtimeMutationForceTopologyDowngradeInvisibleCount = 0;
+		uint32_t runtimeMutationForceTopologyDowngradeReasonMismatchCount = 0;
 		uint32_t runtimeMutationInvalidAppliedCount = 0;
 		uint32_t runtimeMutationResidentNoopSkipCount = 0;
 		uint32_t runtimeMutationInvalidFailedCount = 0;

@@ -100,6 +100,7 @@ struct RuntimeMapMutationCache
 		nri_scene::PTMapChunkMutationBaseline replacementBaseline;
 		uint64_t baselineSignature = 0;
 		uint64_t liveSignature = 0;
+		uint64_t exactGeometrySignature = 0;
 		uint64_t animatedMaterialSignature = 0;
 		uint64_t lastTraceSignature = UINT64_MAX;
 		uint64_t lastTraceAnimatedMaterialSignature = UINT64_MAX;

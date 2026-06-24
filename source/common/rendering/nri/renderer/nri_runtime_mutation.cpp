@@ -674,6 +674,7 @@ void NRIRuntimeMutationSystem::ClearReplacementPayload(RuntimeMapMutationCache::
 	replacement.sceneView = {};
 	replacement.geometry = {};
 	replacement.materialBridge = {};
+	replacement.exactGeometrySignature = 0;
 	replacement.deferredMaterialRefresh = false;
 	replacement.deferredMaterialFrame = 0;
 	replacement.deferredStructuralRebuild = false;
