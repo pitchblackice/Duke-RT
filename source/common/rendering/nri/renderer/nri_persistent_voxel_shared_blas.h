@@ -32,6 +32,11 @@ struct NRIPersistentVoxelSharedBlasFrameStats
 	uint32_t routedLegacy = 0;
 	uint32_t routedShared = 0;
 	uint32_t fallbackLastValid = 0;
+	uint32_t routeEligibleActors = 0;
+	uint32_t routeRejectMissingResident = 0;
+	uint32_t routeRejectNonLocal = 0;
+	uint32_t routeRejectTransformKeyed = 0;
+	uint32_t routeRejectGeometryMismatch = 0;
 	uint32_t rejectMissingKey = 0;
 	uint32_t rejectDisabled = 0;
 	uint32_t rejectNonLocal = 0;
@@ -99,6 +104,59 @@ public:
 		else
 		{
 			mFrameStats.cacheMisses++;
+		}
+	}
+
+	void RecordSharedActor(uint64_t sharedBlasKey)
+	{
+		mFrameStats.activeActors++;
+		mFrameStats.actorRefs++;
+		mFrameStats.routedShared++;
+		if (sharedBlasKey == 0)
+		{
+			mFrameStats.rejectMissingKey++;
+			return;
+		}
+		mDesiredKeys.insert(sharedBlasKey);
+		auto entryIt = mEntries.find(sharedBlasKey);
+		if (entryIt != mEntries.end() && entryIt->second.state == NRIPersistentVoxelSharedBlasState::Resident)
+		{
+			entryIt->second.frameReferences++;
+			mFrameStats.cacheHits++;
+		}
+		else
+		{
+			mFrameStats.cacheMisses++;
+		}
+	}
+
+	void RecordRouteEligibleActor()
+	{
+		mFrameStats.routeEligibleActors++;
+	}
+
+	void RecordRouteFallback(uint64_t sharedBlasKey, const char* reason)
+	{
+		mFrameStats.fallbackLastValid++;
+		if (sharedBlasKey == 0 || reason == nullptr)
+		{
+			return;
+		}
+		if (std::strcmp(reason, "missing-resident") == 0)
+		{
+			mFrameStats.routeRejectMissingResident++;
+		}
+		else if (std::strcmp(reason, "non-local") == 0)
+		{
+			mFrameStats.routeRejectNonLocal++;
+		}
+		else if (std::strcmp(reason, "transform-keyed") == 0)
+		{
+			mFrameStats.routeRejectTransformKeyed++;
+		}
+		else if (std::strcmp(reason, "geometry-mismatch") == 0)
+		{
+			mFrameStats.routeRejectGeometryMismatch++;
 		}
 	}
 

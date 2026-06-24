@@ -1339,6 +1339,8 @@ CVAR(Bool, nri_ptvoxelsharedblasbuild, false, 0)
 
 CVAR(Int, nri_ptvoxelsharedblasbuilds, 1, 0)
 
+CVAR(Bool, nri_ptvoxelsharedblasroute, false, 0)
+
 CVAR(Int, nri_ptvoxelexcludeindex, -1, 0)
 
 CVAR(Int, nri_ptvoxelexcludeindex2, -1, 0)

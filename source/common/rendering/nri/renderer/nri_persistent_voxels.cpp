@@ -1273,7 +1273,51 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 		persistentVoxelInstance.mask = 0xFF;
 		persistentVoxelInstance.shaderBindingTableLocalOffset = 0;
 		persistentVoxelInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
-		persistentVoxelInstance.accelerationStructureHandle = services.GetAccelerationStructureHandle(meshResourceIt->second.accelerationStructure);
+		const NRIAccelerationStructureResource* selectedAccelerationStructure = &meshResourceIt->second.accelerationStructure;
+		bool routedThroughSharedBlas = false;
+		const char* sharedRouteFallbackReason = nullptr;
+		if (settings.sharedBlasRouteEnabled)
+		{
+			if (meshResourceIt->second.meshBakeSpace != nri_scene::VoxelMeshBakeSpace::LocalSpace)
+			{
+				sharedRouteFallbackReason = "non-local";
+			}
+			else if (settings.transformKeyed)
+			{
+				sharedRouteFallbackReason = "transform-keyed";
+			}
+			else
+			{
+				sharedBlasCache.RecordRouteEligibleActor();
+				const NRIPersistentVoxelSharedBlasEntry* sharedEntry = sharedBlasCache.Find(actor.meshResourceKey);
+				if (sharedEntry == nullptr ||
+					sharedEntry->state != NRIPersistentVoxelSharedBlasState::Resident ||
+					sharedEntry->accelerationStructure.accelerationStructure == nullptr)
+				{
+					sharedRouteFallbackReason = "missing-resident";
+				}
+				else if (sharedEntry->geometrySignature != actor.geometrySignature ||
+					sharedEntry->vertexCount != meshResourceIt->second.vertexCount ||
+					sharedEntry->indexCount != meshResourceIt->second.indexCount ||
+					sharedEntry->primitiveCount != meshResourceIt->second.primitiveCount)
+				{
+					sharedRouteFallbackReason = "geometry-mismatch";
+				}
+				else
+				{
+					selectedAccelerationStructure = &sharedEntry->accelerationStructure;
+					routedThroughSharedBlas = true;
+				}
+			}
+		}
+		persistentVoxelInstance.accelerationStructureHandle = services.GetAccelerationStructureHandle(*selectedAccelerationStructure);
+		if (persistentVoxelInstance.accelerationStructureHandle == 0 && routedThroughSharedBlas)
+		{
+			selectedAccelerationStructure = &meshResourceIt->second.accelerationStructure;
+			routedThroughSharedBlas = false;
+			sharedRouteFallbackReason = "missing-resident";
+			persistentVoxelInstance.accelerationStructureHandle = services.GetAccelerationStructureHandle(*selectedAccelerationStructure);
+		}
 		if (persistentVoxelInstance.accelerationStructureHandle == 0)
 		{
 			persistentVoxelTlasSkippedCount++;
@@ -1311,7 +1355,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 		meshResourceIt->second.tlasPublished = true;
 		if (voxelStatsEnabled)
 		{
-			Printf("PERF pt voxel tlas NRI: frame=%u action=publish reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx instance_id=%u primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u blas=1 tlas_ready=%u tlas_published=1 first_publish=%u new_this_frame=%u ready=1\n",
+			Printf("PERF pt voxel tlas NRI: frame=%u action=publish reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx instance_id=%u primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u blas=1 shared_route=%u tlas_ready=%u tlas_published=1 first_publish=%u new_this_frame=%u ready=1\n",
 				frameIndex,
 				(unsigned long long)actor.identityKey,
 				(unsigned long long)actor.meshResourceKey,
@@ -1322,12 +1366,24 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 				actor.primitiveCount,
 				actor.materialOffset,
 				actor.materialCount,
+				routedThroughSharedBlas ? 1u : 0u,
 				meshResourceIt->second.tlasReadyFrame,
 				meshResourceFirstPublish ? 1u : 0u,
 				meshResourceNewThisFrame ? 1u : 0u);
 		}
 		persistentVoxelTlasMeshResources.insert(actor.meshResourceKey);
-		sharedBlasCache.RecordLegacyActor(actor.meshResourceKey);
+		if (routedThroughSharedBlas)
+		{
+			sharedBlasCache.RecordSharedActor(actor.meshResourceKey);
+		}
+		else
+		{
+			if (settings.sharedBlasRouteEnabled && sharedRouteFallbackReason != nullptr)
+			{
+				sharedBlasCache.RecordRouteFallback(actor.meshResourceKey, sharedRouteFallbackReason);
+			}
+			sharedBlasCache.RecordLegacyActor(actor.meshResourceKey);
+		}
 		persistentVoxelTlasPublishedCount++;
 		persistentVoxelTlasInstancePrimitiveCount += actor.primitiveCount;
 		if (actor.capturedThisFrame)

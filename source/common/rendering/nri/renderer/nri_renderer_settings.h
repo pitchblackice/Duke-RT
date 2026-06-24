@@ -57,6 +57,7 @@ struct NRIPersistentVoxelSettings
 	uint32_t residentMaxColdMaps = 0;
 	bool sharedBlasBuildEnabled = false;
 	uint32_t sharedBlasBuildsPerFrame = 0;
+	bool sharedBlasRouteEnabled = false;
 	bool transformKeyed = false;
 	std::array<int32_t, 3> excludeIndices = { -1, -1, -1 };
 	uint32_t excludeMinPrimitives = 0;
