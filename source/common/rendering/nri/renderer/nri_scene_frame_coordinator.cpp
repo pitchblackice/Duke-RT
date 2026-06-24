@@ -852,6 +852,13 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 			mLastPerfShellTraceStats.asStaticSegmentCacheInvalidations = segmentCache.invalidations;
 			mLastPerfShellTraceStats.asStaticSegmentCacheResidentBytes = segmentCache.residentMemoryBytes;
 			mLastPerfShellTraceStats.asStaticSegmentCacheBlasBuildEnabled = segmentCache.blasBuildEnabled;
+			mLastPerfShellTraceStats.asStaticSegmentRouteRouted = segmentCache.routeStats.routedSegment;
+			mLastPerfShellTraceStats.asStaticSegmentRouteChunkFallback = segmentCache.routeStats.routedChunkFallback;
+			mLastPerfShellTraceStats.asStaticSegmentRouteRejectDisabled = segmentCache.routeStats.rejectDisabled;
+			mLastPerfShellTraceStats.asStaticSegmentRouteRejectMissingCache = segmentCache.routeStats.rejectMissingCache;
+			mLastPerfShellTraceStats.asStaticSegmentRouteRejectMissingBlas = segmentCache.routeStats.rejectMissingBlas;
+			mLastPerfShellTraceStats.asStaticSegmentRouteSegmentBlasRefs = segmentCache.routeStats.segmentBlasRefs;
+			mLastPerfShellTraceStats.asStaticSegmentRouteChunkBlasRefs = segmentCache.routeStats.chunkBlasRefs;
 			mLastPerfShellTraceStats.asStaticSegmentBlas = segmentCache.residentBlasCount;
 		}
 	}

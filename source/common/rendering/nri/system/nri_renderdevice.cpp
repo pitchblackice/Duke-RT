@@ -3771,6 +3771,16 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.asStaticSegmentCacheResidentBytes,
 			shell.asStaticSegmentCacheBlasBuildEnabled ? 1u : 0u);
 		Printf(
+			"PERF pt static segment route NRI: frame=%llu routed_segment=%u chunk_fallback=%u reject_disabled=%u reject_missing_cache=%u reject_missing_blas=%u segment_blas_refs=%u chunk_blas_refs=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.asStaticSegmentRouteRouted,
+			shell.asStaticSegmentRouteChunkFallback,
+			shell.asStaticSegmentRouteRejectDisabled,
+			shell.asStaticSegmentRouteRejectMissingCache,
+			shell.asStaticSegmentRouteRejectMissingBlas,
+			shell.asStaticSegmentRouteSegmentBlasRefs,
+			shell.asStaticSegmentRouteChunkBlasRefs);
+		Printf(
 			"PERF pt world tlas detail NRI: frame=%llu total=%.3f retire=%.3f instance_upload=%.3f create=%.3f memory=%.3f scratch=%.3f descriptor=%.3f build=%.3f barrier=%.3f calls=%u instances=%u creates=%u scratch_queries=%u scratch_grows=%u scratch_requested=%llu memory_bytes=%llu descriptor_creates=%u barriers=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.worldTlasMs,

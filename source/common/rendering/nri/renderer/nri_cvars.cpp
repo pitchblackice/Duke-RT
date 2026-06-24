@@ -1290,6 +1290,8 @@ CVAR(Bool, nri_ptshaderstats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, nri_ptstaticsegmentblasbuild, false, 0)
 
+CVAR(Bool, nri_ptstaticsegmentroute, false, 0)
+
 
 // Moved from source/common/rendering/nri/renderer/nri_renderer_settings.cpp
 

@@ -103,6 +103,96 @@ namespace
 		return nullptr;
 	}
 
+	static const StaticMapSegmentBlasCache::Entry* FindStaticSegmentCacheEntry(
+		const StaticMapSegmentBlasCache& cache,
+		const StaticGeometrySegmentKey& key)
+	{
+		for (const StaticMapSegmentBlasCache::Entry& entry : cache.entries)
+		{
+			if (StaticSegmentKeysEqual(entry.key, key))
+			{
+				return &entry;
+			}
+		}
+		return nullptr;
+	}
+
+	static const NRIAccelerationStructureResource& ResolveStaticSegmentOrChunkAccelerationStructure(
+		const StaticMapSceneCache& staticScene,
+		const StaticMapChunkAtlas* atlas,
+		uint32_t chunkListIndex,
+		StaticMapSegmentBlasCache::RouteStats* routeStats)
+	{
+		const StaticMapSceneCache::ChunkCache& chunk = staticScene.chunks[chunkListIndex];
+		const bool routeEnabled = nri_ptstaticsegmentroute;
+		const auto noteChunkFallback = [routeStats]()
+		{
+			if (routeStats != nullptr)
+			{
+				routeStats->routedChunkFallback++;
+				routeStats->chunkBlasRefs++;
+			}
+		};
+
+		if (!routeEnabled)
+		{
+			if (routeStats != nullptr)
+			{
+				routeStats->rejectDisabled++;
+			}
+			noteChunkFallback();
+			return chunk.accelerationStructure;
+		}
+
+		const StaticMapSegmentBlasCache& cache = staticScene.segmentBlasCache;
+		if (!cache.valid ||
+			cache.buildSerial != staticScene.buildSerial ||
+			!cache.blasBuildEnabled ||
+			atlas == nullptr ||
+			!atlas->valid ||
+			atlas->buildSerial != staticScene.buildSerial ||
+			chunkListIndex >= atlas->chunks.size())
+		{
+			if (routeStats != nullptr)
+			{
+				routeStats->rejectMissingCache++;
+			}
+			noteChunkFallback();
+			return chunk.accelerationStructure;
+		}
+
+		const StaticMapChunkAtlas::ChunkEntry& atlasChunk = atlas->chunks[chunkListIndex];
+		if (!atlasChunk.valid)
+		{
+			if (routeStats != nullptr)
+			{
+				routeStats->rejectMissingCache++;
+			}
+			noteChunkFallback();
+			return chunk.accelerationStructure;
+		}
+
+		const StaticGeometrySegmentKey key = BuildStaticSegmentKey(chunk, atlasChunk);
+		const StaticMapSegmentBlasCache::Entry* segmentEntry = FindStaticSegmentCacheEntry(cache, key);
+		if (segmentEntry == nullptr ||
+			segmentEntry->accelerationStructure.accelerationStructure == nullptr)
+		{
+			if (routeStats != nullptr)
+			{
+				routeStats->rejectMissingBlas++;
+			}
+			noteChunkFallback();
+			return chunk.accelerationStructure;
+		}
+
+		if (routeStats != nullptr)
+		{
+			routeStats->routedSegment++;
+			routeStats->segmentBlasRefs++;
+		}
+		return segmentEntry->accelerationStructure;
+	}
+
 	template<typename Services>
 	static void DestroyStaticSegmentBlasCacheResources(
 		StaticMapSegmentBlasCache& cache,
@@ -1008,6 +1098,7 @@ namespace
 		const StaticMapSceneCache& staticScene,
 		const StaticMapChunkAtlas* atlas,
 		const NRIStaticMapInstanceBuildServices& services,
+		StaticMapSegmentBlasCache::RouteStats* segmentRouteStats,
 		std::vector<nri::TopLevelInstance>& outTlasInstances,
 		std::vector<SceneInstanceData>& outSceneInstances)
 	{
@@ -1047,7 +1138,7 @@ namespace
 				primitiveOffset,
 				chunkIndex,
 				ResolveStaticMapChunkSectorIndex(mapWorld, chunkIndex),
-				chunk.accelerationStructure,
+				ResolveStaticSegmentOrChunkAccelerationStructure(staticScene, atlas, chunkListIndex, segmentRouteStats),
 				services,
 				outTlasInstances,
 				outSceneInstances);
@@ -1094,7 +1185,11 @@ void nri_static_scene::BuildStaticMapInstances(
 				entry.primitiveOffset,
 				entry.chunkIndex,
 				ResolveStaticMapChunkSectorIndex(input.mapWorld, entry.chunkIndex),
-				chunk.accelerationStructure,
+				ResolveStaticSegmentOrChunkAccelerationStructure(
+					staticScene,
+					input.atlas,
+					entry.staticSceneChunkListIndex,
+					input.segmentRouteStats),
 				services,
 				outTlasInstances,
 				outSceneInstances);
@@ -1107,11 +1202,11 @@ void nri_static_scene::BuildStaticMapInstances(
 		input.atlas->buildSerial == staticScene.buildSerial &&
 		input.atlas->chunks.size() == staticScene.chunks.size())
 	{
-		BuildStaticMapInstancesFromCache(input.mapWorld, staticScene, input.atlas, services, outTlasInstances, outSceneInstances);
+		BuildStaticMapInstancesFromCache(input.mapWorld, staticScene, input.atlas, services, input.segmentRouteStats, outTlasInstances, outSceneInstances);
 		return;
 	}
 
-	BuildStaticMapInstancesFromCache(input.mapWorld, staticScene, nullptr, services, outTlasInstances, outSceneInstances);
+	BuildStaticMapInstancesFromCache(input.mapWorld, staticScene, nullptr, services, input.segmentRouteStats, outTlasInstances, outSceneInstances);
 }
 
 bool nri_static_scene::BuildStaticMapBlasBuildInputs(
@@ -1297,12 +1392,15 @@ bool nri_static_scene::BuildStaticMapAccelerationStructures(
 	instanceInput.mapWorld = mapWorld;
 	instanceInput.staticScene = &staticScene;
 	instanceInput.atlas = &staticResources.chunkAtlas;
+	StaticMapSegmentBlasCache::RouteStats segmentRouteStats = {};
+	instanceInput.segmentRouteStats = &segmentRouteStats;
 	NRIStaticMapInstanceBuildServices instanceServices = {};
 	instanceServices.user = services.user;
 	instanceServices.getAccelerationStructureHandle = services.getAccelerationStructureHandle;
 	std::vector<nri::TopLevelInstance> instances;
 	std::vector<SceneInstanceData> sceneInstances;
 	BuildStaticMapInstances(instanceInput, instanceServices, instances, sceneInstances);
+	staticScene.segmentBlasCache.routeStats = segmentRouteStats;
 	staticResources.sceneInstances = sceneInstances;
 	staticResources.accelerationBuildSerial = staticScene.buildSerial;
 	return
@@ -1484,12 +1582,15 @@ bool nri_static_scene::BuildLiveStaticMapAccelerationStructures(
 	instanceInput.staticScene = &staticScene;
 	instanceInput.atlas = &atlas;
 	instanceInput.registry = input.registry;
+	StaticMapSegmentBlasCache::RouteStats segmentRouteStats = {};
+	instanceInput.segmentRouteStats = &segmentRouteStats;
 	NRIStaticMapInstanceBuildServices instanceServices = {};
 	instanceServices.user = services.user;
 	instanceServices.getAccelerationStructureHandle = services.getAccelerationStructureHandle;
 	std::vector<nri::TopLevelInstance> instances;
 	std::vector<SceneInstanceData> sceneInstances;
 	BuildStaticMapInstances(instanceInput, instanceServices, instances, sceneInstances);
+	staticScene.segmentBlasCache.routeStats = segmentRouteStats;
 	if (input.staticAccelerationBuildSerial != nullptr)
 	{
 		*input.staticAccelerationBuildSerial = staticScene.buildSerial;

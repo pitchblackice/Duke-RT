@@ -68,6 +68,17 @@ struct StaticGeometrySegmentKey
 
 struct StaticMapSegmentBlasCache
 {
+	struct RouteStats
+	{
+		uint32_t routedSegment = 0;
+		uint32_t routedChunkFallback = 0;
+		uint32_t rejectDisabled = 0;
+		uint32_t rejectMissingCache = 0;
+		uint32_t rejectMissingBlas = 0;
+		uint32_t segmentBlasRefs = 0;
+		uint32_t chunkBlasRefs = 0;
+	};
+
 	struct Entry
 	{
 		StaticGeometrySegmentKey key = {};
@@ -90,6 +101,7 @@ struct StaticMapSegmentBlasCache
 	uint32_t buildsThisFrame = 0;
 	uint32_t invalidations = 0;
 	uint64_t residentMemoryBytes = 0;
+	RouteStats routeStats = {};
 	std::vector<Entry> entries;
 };
 
@@ -289,6 +301,7 @@ struct NRIStaticMapInstanceBuildInput
 	const StaticMapSceneCache* staticScene = nullptr;
 	const StaticMapChunkAtlas* atlas = nullptr;
 	const ResidentMapChunkRegistry* registry = nullptr;
+	StaticMapSegmentBlasCache::RouteStats* segmentRouteStats = nullptr;
 };
 
 struct NRIStaticMapInstanceBuildServices

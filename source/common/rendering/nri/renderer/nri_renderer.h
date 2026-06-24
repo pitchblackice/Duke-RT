@@ -1289,6 +1289,13 @@ public:
 		uint32_t asStaticSegmentCacheInvalidations = 0;
 		uint64_t asStaticSegmentCacheResidentBytes = 0;
 		bool asStaticSegmentCacheBlasBuildEnabled = false;
+		uint32_t asStaticSegmentRouteRouted = 0;
+		uint32_t asStaticSegmentRouteChunkFallback = 0;
+		uint32_t asStaticSegmentRouteRejectDisabled = 0;
+		uint32_t asStaticSegmentRouteRejectMissingCache = 0;
+		uint32_t asStaticSegmentRouteRejectMissingBlas = 0;
+		uint32_t asStaticSegmentRouteSegmentBlasRefs = 0;
+		uint32_t asStaticSegmentRouteChunkBlasRefs = 0;
 		uint32_t asDynamicUniqueGeometrySignatures = 0;
 		uint32_t asBlasCacheHits = 0;
 		uint32_t asBlasBuiltThisFrame = 0;
