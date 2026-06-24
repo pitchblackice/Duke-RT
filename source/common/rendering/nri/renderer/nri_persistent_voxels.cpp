@@ -1,6 +1,7 @@
 #include "nri_persistent_voxels.h"
 
 #include "../scene/nri_hash.h"
+#include "nri_ray_scene_builder.h"
 #include "nri_upload_hash.h"
 #include "printf.h"
 #include "../../hwrenderer/data/hw_clock.h"
@@ -1081,6 +1082,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			}
 			return left->identityKey < right->identityKey;
 		});
+	NRIRaySceneBuilder raySceneBuilder(instances, sceneInstances);
 	for (PersistentVoxelBatch::ActorEntry* actorPtr : persistentVoxelTlasActors)
 	{
 		PersistentVoxelBatch::ActorEntry& actor = *actorPtr;
@@ -1268,7 +1270,6 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 				persistentVoxelInstance.transform[row][column] = actor.instanceTransform[row * 4u + column];
 			}
 		}
-		persistentVoxelInstance.instanceId = (uint32_t)sceneInstances.size();
 		persistentVoxelInstance.mask = 0xFF;
 		persistentVoxelInstance.shaderBindingTableLocalOffset = 0;
 		persistentVoxelInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
@@ -1280,7 +1281,6 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			persistentVoxelTlasMissingSkipPrimitiveCount += actor.primitiveCount;
 			continue;
 		}
-		instances.push_back(persistentVoxelInstance);
 		SceneInstanceData sceneInstance = {};
 		sceneInstance.primitiveOffset = actor.primitiveOffset;
 		sceneInstance.dataSource = PersistentVoxelSceneDataSource;
@@ -1292,7 +1292,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			sceneInstance.currentTransform[i] = actor.instanceTransform[i];
 			sceneInstance.previousTransform[i] = actor.previousInstanceTransform[i];
 		}
-		sceneInstances.push_back(sceneInstance);
+		persistentVoxelInstance.instanceId = raySceneBuilder.AddLegacyInstance(persistentVoxelInstance, sceneInstance);
 		actor.inWorldTlasThisFrame = true;
 		if (meshResourceFirstPublish)
 		{

@@ -8,6 +8,7 @@
 #include "nri_material_policy.h"
 #include "nri_pass_dispatch.h"
 #include "nri_persistent_voxel_services.h"
+#include "nri_ray_scene_builder.h"
 #include "nri_render_geometry_helpers.h"
 #include "nri_renderer_settings.h"
 #include "nri_scene_frame_builder.h"
@@ -1126,13 +1127,12 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						dynamicInstance.transform[0][0] = 1.0f;
 						dynamicInstance.transform[1][1] = 1.0f;
 						dynamicInstance.transform[2][2] = 1.0f;
-						dynamicInstance.instanceId = (uint32_t)sceneInstances.size();
 						dynamicInstance.mask = 0xFF;
 						dynamicInstance.shaderBindingTableLocalOffset = 0;
 						dynamicInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 						dynamicInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*dynamicBottomLevelAS.accelerationStructure);
-						instances.push_back(dynamicInstance);
-						sceneInstances.push_back({ 0u, nri_diag::SceneDataSourceDynamic, 0u, UINT32_MAX });
+						NRIRaySceneBuilder builder(instances, sceneInstances);
+						builder.AddLegacyInstance(dynamicInstance, { 0u, nri_diag::SceneDataSourceDynamic, 0u, UINT32_MAX });
 					}
 
 					selectedStaticSceneInstanceCount = 0;

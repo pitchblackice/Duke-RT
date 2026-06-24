@@ -5,6 +5,7 @@
 #include "nri_diagnostic_names.h"
 #include "nri_persistent_voxel_services.h"
 #include "nri_render_geometry_helpers.h"
+#include "nri_ray_scene_builder.h"
 #include "nri_scene_upload.h"
 #include "nri_sky_environment.h"
 #include "nri_static_scene_geometry.h"
@@ -770,13 +771,12 @@ namespace
 
 		nri::TopLevelInstance instance = {};
 		nri_scene::SetTopLevelInstanceTransform(instance, nri_scene::MakeIdentityPTTransform3x4());
-		instance.instanceId = (uint32_t)outSceneInstances.size();
 		instance.mask = 0xFF;
 		instance.shaderBindingTableLocalOffset = 0;
 		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 		instance.accelerationStructureHandle = services.getAccelerationStructureHandle(services.user, accelerationStructure);
-		outTlasInstances.push_back(instance);
-		outSceneInstances.push_back({ primitiveOffset, nri_diag::SceneDataSourceStatic, chunkIndex, sectorIndex });
+		NRIRaySceneBuilder builder(outTlasInstances, outSceneInstances);
+		builder.AddLegacyInstance(instance, { primitiveOffset, nri_diag::SceneDataSourceStatic, chunkIndex, sectorIndex });
 	}
 
 	void BuildStaticMapInstancesFromCache(
