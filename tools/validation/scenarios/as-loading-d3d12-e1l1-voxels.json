@@ -42,7 +42,8 @@
     "PERF pt as reuse NRI:",
     "PERF pt world tlas detail NRI:",
     "PERF pt scene record audit NRI:",
-    "PERF pt hit metadata NRI:"
+    "PERF pt hit metadata NRI:",
+    "PERF pt voxel shared blas NRI:"
   ],
   "prefixAssertions": [
     {
@@ -100,6 +101,19 @@
         "primitive_base_mismatches": { "exact": 0 },
         "material_base_mismatches": { "exact": 0 },
         "persistent_material_base_records": { "min": 1 }
+      }
+    },
+    {
+      "prefix": "PERF pt voxel shared blas NRI:",
+      "minCount": 1,
+      "applyTo": "all",
+      "fields": {
+        "active_actors": { "min": 1 },
+        "unique_desired_keys": { "min": 1 },
+        "build_attempts": { "exact": 0 },
+        "routed_legacy": { "min": 1 },
+        "routed_shared": { "exact": 0 },
+        "reject_missing_key": { "exact": 0 }
       }
     }
   ]

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nri_frame_resources.h"
+#include "nri_persistent_voxel_shared_blas.h"
 #include "nri_renderer_settings.h"
 #include "nri_resources.h"
 #include "nri_runtime_mutation.h"
@@ -743,6 +744,7 @@ public:
 	void DestroyArenaBuffers(const NRIPersistentVoxelDestroyServices& services);
 	NRIPersistentVoxelLightAppendStats AppendSceneLights(SceneLightSystem& sceneLights, uint32_t frameIndex, bool voxelStatsEnabled) const;
 	NRIPersistentVoxelMemoryUsage GetMemoryUsage() const;
+	const NRIPersistentVoxelSharedBlasFrameStats& GetSharedBlasFrameStats() const;
 	NRIPersistentVoxelStatusSnapshot BuildStatusSnapshot() const;
 	void FillResourceStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const;
 	void FillBatchStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const;
@@ -809,6 +811,7 @@ public:
 	std::unordered_map<uint64_t, PersistentVoxelAdmissionEntry> admissionQueue;
 	std::unordered_set<uint64_t> publishedMeshKeys;
 	std::unordered_set<uint64_t> publishedMaterialKeys;
+	NRIPersistentVoxelSharedBlasCache sharedBlasCache;
 	uint32_t arenaVertexCursor = 0;
 	uint32_t arenaIndexCursor = 0;
 	uint32_t arenaPrimitiveCursor = 0;

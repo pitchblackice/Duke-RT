@@ -27,7 +27,8 @@
                                               "PERF pt as reuse NRI:",
                                               "PERF pt world tlas detail NRI:",
                                               "PERF pt scene record audit NRI:",
-                                              "PERF pt hit metadata NRI:"
+                                              "PERF pt hit metadata NRI:",
+                                              "PERF pt voxel shared blas NRI:"
                                           ],
                      "prefixAssertions":  [
                                               {
@@ -116,12 +117,28 @@
                                                                                                   "exact":  0
                                                                                               }
                                                              }
+                                              },
+                                              {
+                                                  "prefix":  "PERF pt voxel shared blas NRI:",
+                                                  "minCount":  1,
+                                                  "applyTo":  "all",
+                                                  "fields":  {
+                                                                 "build_attempts":  {
+                                                                                        "exact":  0
+                                                                                    },
+                                                                 "routed_shared":  {
+                                                                                       "exact":  0
+                                                                                   },
+                                                                 "reject_missing_key":  {
+                                                                                            "exact":  0
+                                                                                        }
+                                                             }
                                               }
                                           ]
                  },
     "runs":  3,
     "compareFrameCount":  16,
-    "capturedUtc":  "2026-06-24T07:36:31.5710700Z",
+    "capturedUtc":  "2026-06-24T08:02:17.8899941Z",
     "exact":  {
                   "map":  "E3L6",
                   "api":  "d3d12",
@@ -360,6 +377,64 @@
                                                                                                     "min":  0,
                                                                                                     "max":  15
                                                                                                 }
-                                                       }
+                                                       },
+                         "PERF pt voxel shared blas NRI:":  {
+                                                                "active_actors":  {
+                                                                                      "min":  0,
+                                                                                      "max":  15
+                                                                                  },
+                                                                "unique_desired_keys":  {
+                                                                                            "min":  0,
+                                                                                            "max":  4
+                                                                                        },
+                                                                "resident_shared_assets":  {
+                                                                                               "min":  0,
+                                                                                               "max":  0
+                                                                                           },
+                                                                "queued_shared_assets":  {
+                                                                                             "min":  0,
+                                                                                             "max":  0
+                                                                                         },
+                                                                "build_attempts":  {
+                                                                                       "min":  0,
+                                                                                       "max":  0
+                                                                                   },
+                                                                "build_successes":  {
+                                                                                        "min":  0,
+                                                                                        "max":  0
+                                                                                    },
+                                                                "build_failures":  {
+                                                                                       "min":  0,
+                                                                                       "max":  0
+                                                                                   },
+                                                                "cache_hits":  {
+                                                                                   "min":  0,
+                                                                                   "max":  0
+                                                                               },
+                                                                "cache_misses":  {
+                                                                                     "min":  0,
+                                                                                     "max":  0
+                                                                                 },
+                                                                "actor_refs":  {
+                                                                                   "min":  0,
+                                                                                   "max":  15
+                                                                               },
+                                                                "routed_legacy":  {
+                                                                                      "min":  0,
+                                                                                      "max":  15
+                                                                                  },
+                                                                "routed_shared":  {
+                                                                                      "min":  0,
+                                                                                      "max":  0
+                                                                                  },
+                                                                "fallback_last_valid":  {
+                                                                                            "min":  0,
+                                                                                            "max":  0
+                                                                                        },
+                                                                "reject_missing_key":  {
+                                                                                           "min":  0,
+                                                                                           "max":  0
+                                                                                       }
+                                                            }
                      }
 }

@@ -1083,6 +1083,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			return left->identityKey < right->identityKey;
 		});
 	NRIRaySceneBuilder raySceneBuilder(instances, sceneInstances);
+	sharedBlasCache.BeginFrame();
 	for (PersistentVoxelBatch::ActorEntry* actorPtr : persistentVoxelTlasActors)
 	{
 		PersistentVoxelBatch::ActorEntry& actor = *actorPtr;
@@ -1327,6 +1328,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 				meshResourceNewThisFrame ? 1u : 0u);
 		}
 		persistentVoxelTlasMeshResources.insert(actor.meshResourceKey);
+		sharedBlasCache.RecordLegacyActor(actor.meshResourceKey);
 		persistentVoxelTlasPublishedCount++;
 		persistentVoxelTlasInstancePrimitiveCount += actor.primitiveCount;
 		if (actor.capturedThisFrame)
@@ -1379,6 +1381,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 		}
 	}
 	outStats.sharedMeshResourceCount = (uint32_t)persistentVoxelTlasMeshResources.size();
+	sharedBlasCache.EndFrame();
 	if (tracePersistentVoxelTlasSummary)
 	{
 		for (const auto& groupPair : persistentVoxelTlasGroups)
@@ -1608,6 +1611,11 @@ NRIPersistentVoxelMemoryUsage NRIPersistentVoxelResidency::GetMemoryUsage() cons
 		accumulateAs(pair.second.accelerationStructure, usage.accelerationStructureBytes);
 	}
 	return usage;
+}
+
+const NRIPersistentVoxelSharedBlasFrameStats& NRIPersistentVoxelResidency::GetSharedBlasFrameStats() const
+{
+	return sharedBlasCache.LastFrameStats();
 }
 
 NRIPersistentVoxelStatusSnapshot NRIPersistentVoxelResidency::BuildStatusSnapshot() const
@@ -4735,6 +4743,7 @@ void NRIPersistentVoxelResidency::Reset(
 	batch = {};
 	instances.clear();
 	actorRejectedSignatures.clear();
+	sharedBlasCache.Reset();
 	services.InvalidateSceneDataDescriptors();
 	if (!clearSharedResources)
 	{

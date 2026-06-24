@@ -3782,6 +3782,23 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.hitMetadataMaterialBaseMismatches,
 			shell.hitMetadataLegacyPrimitiveOffsetMatches,
 			shell.hitMetadataPersistentMaterialBaseRecords);
+		Printf(
+			"PERF pt voxel shared blas NRI: frame=%llu active_actors=%u unique_desired_keys=%u resident_shared_assets=%u queued_shared_assets=%u build_attempts=%u build_successes=%u build_failures=%u cache_hits=%u cache_misses=%u actor_refs=%u routed_legacy=%u routed_shared=%u fallback_last_valid=%u reject_missing_key=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.voxelSharedBlasActiveActors,
+			shell.voxelSharedBlasUniqueDesiredKeys,
+			shell.voxelSharedBlasResidentAssets,
+			shell.voxelSharedBlasQueuedAssets,
+			shell.voxelSharedBlasBuildAttempts,
+			shell.voxelSharedBlasBuildSuccesses,
+			shell.voxelSharedBlasBuildFailures,
+			shell.voxelSharedBlasCacheHits,
+			shell.voxelSharedBlasCacheMisses,
+			shell.voxelSharedBlasActorRefs,
+			shell.voxelSharedBlasRoutedLegacy,
+			shell.voxelSharedBlasRoutedShared,
+			shell.voxelSharedBlasFallbackLastValid,
+			shell.voxelSharedBlasRejectMissingKey);
 		if (shader.valid)
 		{
 			const auto& c = shader.counters;
