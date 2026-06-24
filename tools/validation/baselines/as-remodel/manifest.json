@@ -1,12 +1,12 @@
 ﻿{
-    "capturedUtc":  "2026-06-24T07:29:01.0567954Z",
-    "sourceCommit":  "37ffd8d3e0",
+    "capturedUtc":  "2026-06-24T07:37:43.9937919Z",
+    "sourceCommit":  "dfa71f984a",
     "runs":  3,
     "razePath":  "build/terminal-ninja/raze.exe",
     "gameGrp":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Duke Nukem 3D Twentieth Anniversary World Tour\\DUKE3D.GRP",
     "file":  "M:\\Raze\\full-voxel-overlay",
     "baselineDirectory":  "M:\\Raze\\tools\\validation\\baselines\\as-remodel",
-    "logDirectory":  "M:\\Raze\\tools\\logs\\as-remodel-baselines\\20260624-002714",
+    "logDirectory":  "M:\\Raze\\tools\\logs\\as-remodel-baselines\\20260624-003544",
     "baselines":  [
                       {
                           "name":  "as-opening-d3d12-beauty-e3l6",

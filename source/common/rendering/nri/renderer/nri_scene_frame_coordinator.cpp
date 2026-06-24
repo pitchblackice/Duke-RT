@@ -628,17 +628,37 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneInstanceStatsMs);
 		for (const SceneInstanceData& instance : mBoundSceneInstances)
 		{
+			mLastPerfShellTraceStats.sceneRecordAuditRecords++;
+			mLastPerfShellTraceStats.hitMetadataAuditRecords++;
+			mLastPerfShellTraceStats.hitMetadataLegacyPrimitiveOffsetMatches++;
+			mLastPerfShellTraceStats.sceneRecordAuditLegacyCompatible++;
+			if (instance.visibilityChunk != UINT32_MAX)
+			{
+				mLastPerfShellTraceStats.sceneRecordAuditVisibilityChunked++;
+			}
 			if (instance.dataSource == nri_diag::SceneDataSourceStatic)
 			{
 				mLastPerfShellTraceStats.sceneInstanceStaticCount++;
+				mLastPerfShellTraceStats.sceneRecordAuditStatic++;
 			}
 			else if (instance.dataSource == nri_diag::SceneDataSourceDynamic)
 			{
 				mLastPerfShellTraceStats.sceneInstanceDynamicCount++;
+				mLastPerfShellTraceStats.sceneRecordAuditDynamic++;
 			}
 			else if (instance.dataSource == nri_diag::SceneDataSourcePersistentVoxel)
 			{
 				mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount++;
+				mLastPerfShellTraceStats.sceneRecordAuditPersistentVoxel++;
+				if (instance.reserved1 != UINT32_MAX && instance.reserved1 > 0)
+				{
+					mLastPerfShellTraceStats.sceneRecordAuditMaterialIndirection++;
+					mLastPerfShellTraceStats.hitMetadataPersistentMaterialBaseRecords++;
+				}
+			}
+			else
+			{
+				mLastPerfShellTraceStats.sceneRecordAuditInvalidSource++;
 			}
 		}
 	}

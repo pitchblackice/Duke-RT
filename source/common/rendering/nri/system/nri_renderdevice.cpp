@@ -3763,6 +3763,25 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.worldTlasMemoryBytes,
 			shell.worldTlasDescriptorCreateCalls,
 			shell.worldTlasBarrierCount);
+		Printf(
+			"PERF pt scene record audit NRI: frame=%llu records=%u static=%u dynamic=%u persistent_voxel=%u invalid_source=%u visibility_chunked=%u legacy_compatible=%u material_indirection=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.sceneRecordAuditRecords,
+			shell.sceneRecordAuditStatic,
+			shell.sceneRecordAuditDynamic,
+			shell.sceneRecordAuditPersistentVoxel,
+			shell.sceneRecordAuditInvalidSource,
+			shell.sceneRecordAuditVisibilityChunked,
+			shell.sceneRecordAuditLegacyCompatible,
+			shell.sceneRecordAuditMaterialIndirection);
+		Printf(
+			"PERF pt hit metadata NRI: frame=%llu records=%u primitive_base_mismatches=%u material_base_mismatches=%u legacy_primitive_offset_matches=%u persistent_material_base_records=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.hitMetadataAuditRecords,
+			shell.hitMetadataPrimitiveBaseMismatches,
+			shell.hitMetadataMaterialBaseMismatches,
+			shell.hitMetadataLegacyPrimitiveOffsetMatches,
+			shell.hitMetadataPersistentMaterialBaseRecords);
 		if (shader.valid)
 		{
 			const auto& c = shader.counters;

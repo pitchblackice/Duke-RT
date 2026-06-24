@@ -23,7 +23,9 @@
   "baselinePrefixes": [
     "PERF pt as model NRI:",
     "PERF pt as reuse NRI:",
-    "PERF pt world tlas detail NRI:"
+    "PERF pt world tlas detail NRI:",
+    "PERF pt scene record audit NRI:",
+    "PERF pt hit metadata NRI:"
   ],
   "prefixAssertions": [
     {
@@ -59,6 +61,28 @@
         "calls": { "exact": 1 },
         "instances": { "min": 1 },
         "creates": { "exact": 1 }
+      }
+    },
+    {
+      "prefix": "PERF pt scene record audit NRI:",
+      "minCount": 1,
+      "applyTo": "all",
+      "fields": {
+        "records": { "min": 1 },
+        "invalid_source": { "exact": 0 },
+        "legacy_compatible": { "min": 1 },
+        "material_indirection": { "min": 1 }
+      }
+    },
+    {
+      "prefix": "PERF pt hit metadata NRI:",
+      "minCount": 1,
+      "applyTo": "all",
+      "fields": {
+        "records": { "min": 1 },
+        "primitive_base_mismatches": { "exact": 0 },
+        "material_base_mismatches": { "exact": 0 },
+        "persistent_material_base_records": { "min": 1 }
       }
     }
   ]

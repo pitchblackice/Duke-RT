@@ -25,7 +25,9 @@
                      "baselinePrefixes":  [
                                               "PERF pt as model NRI:",
                                               "PERF pt as reuse NRI:",
-                                              "PERF pt world tlas detail NRI:"
+                                              "PERF pt world tlas detail NRI:",
+                                              "PERF pt scene record audit NRI:",
+                                              "PERF pt hit metadata NRI:"
                                           ],
                      "prefixAssertions":  [
                                               {
@@ -82,12 +84,44 @@
                                                                                  "exact":  1
                                                                              }
                                                              }
+                                              },
+                                              {
+                                                  "prefix":  "PERF pt scene record audit NRI:",
+                                                  "minCount":  1,
+                                                  "applyTo":  "all",
+                                                  "fields":  {
+                                                                 "records":  {
+                                                                                 "min":  1
+                                                                             },
+                                                                 "invalid_source":  {
+                                                                                        "exact":  0
+                                                                                    },
+                                                                 "legacy_compatible":  {
+                                                                                           "min":  1
+                                                                                       }
+                                                             }
+                                              },
+                                              {
+                                                  "prefix":  "PERF pt hit metadata NRI:",
+                                                  "minCount":  1,
+                                                  "applyTo":  "all",
+                                                  "fields":  {
+                                                                 "records":  {
+                                                                                 "min":  1
+                                                                             },
+                                                                 "primitive_base_mismatches":  {
+                                                                                                   "exact":  0
+                                                                                               },
+                                                                 "material_base_mismatches":  {
+                                                                                                  "exact":  0
+                                                                                              }
+                                                             }
                                               }
                                           ]
                  },
     "runs":  3,
     "compareFrameCount":  16,
-    "capturedUtc":  "2026-06-24T07:27:56.5606551Z",
+    "capturedUtc":  "2026-06-24T07:36:31.5710700Z",
     "exact":  {
                   "map":  "E3L6",
                   "api":  "d3d12",
@@ -270,6 +304,62 @@
                                                                                  "min":  5,
                                                                                  "max":  5
                                                                              }
-                                                            }
+                                                            },
+                         "PERF pt scene record audit NRI:":  {
+                                                                 "records":  {
+                                                                                 "min":  191,
+                                                                                 "max":  206
+                                                                             },
+                                                                 "static":  {
+                                                                                "min":  190,
+                                                                                "max":  190
+                                                                            },
+                                                                 "dynamic":  {
+                                                                                 "min":  1,
+                                                                                 "max":  1
+                                                                             },
+                                                                 "persistent_voxel":  {
+                                                                                          "min":  0,
+                                                                                          "max":  15
+                                                                                      },
+                                                                 "invalid_source":  {
+                                                                                        "min":  0,
+                                                                                        "max":  0
+                                                                                    },
+                                                                 "visibility_chunked":  {
+                                                                                            "min":  0,
+                                                                                            "max":  0
+                                                                                        },
+                                                                 "legacy_compatible":  {
+                                                                                           "min":  191,
+                                                                                           "max":  206
+                                                                                       },
+                                                                 "material_indirection":  {
+                                                                                              "min":  0,
+                                                                                              "max":  15
+                                                                                          }
+                                                             },
+                         "PERF pt hit metadata NRI:":  {
+                                                           "records":  {
+                                                                           "min":  191,
+                                                                           "max":  206
+                                                                       },
+                                                           "primitive_base_mismatches":  {
+                                                                                             "min":  0,
+                                                                                             "max":  0
+                                                                                         },
+                                                           "material_base_mismatches":  {
+                                                                                            "min":  0,
+                                                                                            "max":  0
+                                                                                        },
+                                                           "legacy_primitive_offset_matches":  {
+                                                                                                   "min":  191,
+                                                                                                   "max":  206
+                                                                                               },
+                                                           "persistent_material_base_records":  {
+                                                                                                    "min":  0,
+                                                                                                    "max":  15
+                                                                                                }
+                                                       }
                      }
 }

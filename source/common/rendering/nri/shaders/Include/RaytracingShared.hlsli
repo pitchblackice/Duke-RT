@@ -746,9 +746,29 @@ bool IsReflectionOnlyPrimitive(PrimitiveData primitive)
 	return (primitive.flags & PRIMITIVE_FLAG_REFLECTION_ONLY) != 0u;
 }
 
+uint GetSceneRecordPrimitiveBase(SceneInstanceData instanceData)
+{
+	return instanceData.primitiveOffset;
+}
+
+uint ResolveSceneRecordPrimitiveIndex(SceneInstanceData instanceData, uint localPrimitiveIndex)
+{
+	return GetSceneRecordPrimitiveBase(instanceData) + localPrimitiveIndex;
+}
+
+uint GetSceneRecordMaterialBase(SceneInstanceData instanceData)
+{
+	return instanceData.dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL ? instanceData.reserved0 : 0u;
+}
+
+uint GetSceneRecordMaterialCount(SceneInstanceData instanceData)
+{
+	return instanceData.dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL ? instanceData.reserved1 : 0xffffffffu;
+}
+
 uint ResolvePrimitiveIndex(SceneInstanceData instanceData, uint localPrimitiveIndex)
 {
-	return instanceData.primitiveOffset + localPrimitiveIndex;
+	return ResolveSceneRecordPrimitiveIndex(instanceData, localPrimitiveIndex);
 }
 
 uint ResolvePrimitiveMaterialIndex(SceneInstanceData instanceData, PrimitiveData primitive)
@@ -756,11 +776,12 @@ uint ResolvePrimitiveMaterialIndex(SceneInstanceData instanceData, PrimitiveData
 	if (instanceData.dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
 	{
 		uint localMaterialIndex = primitive.materialIndex;
-		if (instanceData.reserved1 != 0xffffffffu && instanceData.reserved1 > 0u)
+		const uint materialCount = GetSceneRecordMaterialCount(instanceData);
+		if (materialCount != 0xffffffffu && materialCount > 0u)
 		{
-			localMaterialIndex = min(localMaterialIndex, instanceData.reserved1 - 1u);
+			localMaterialIndex = min(localMaterialIndex, materialCount - 1u);
 		}
-		return instanceData.reserved0 + localMaterialIndex;
+		return GetSceneRecordMaterialBase(instanceData) + localMaterialIndex;
 	}
 
 	return primitive.materialIndex;
