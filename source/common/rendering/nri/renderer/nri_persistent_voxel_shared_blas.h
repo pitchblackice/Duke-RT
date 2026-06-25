@@ -86,6 +86,16 @@ struct NRIPersistentVoxelSharedBlasFrameStats
 	uint32_t keyAuditBakeSpaceMismatchKeys = 0;
 	uint32_t keyAuditTransformBasisMismatchKeys = 0;
 	uint32_t keyAuditLocalShareableUnsafeKeys = 0;
+	uint32_t invariantLocalActors = 0;
+	uint32_t invariantLocalIdentityTransformActors = 0;
+	uint32_t invariantLocalNonIdentityTransformActors = 0;
+	uint32_t invariantSuspiciousWorldBoundsActors = 0;
+	uint32_t invariantMissingBoundsActors = 0;
+	uint32_t invariantInvalidTransformActors = 0;
+	uint32_t invariantBakedFallbackActors = 0;
+	uint32_t invariantUnknownSpaceActors = 0;
+	float invariantMaxBoundsCenterMagnitude = 0.0f;
+	float invariantMaxBoundsAbs = 0.0f;
 };
 
 struct NRIPersistentVoxelLocalShareProfileStats
@@ -130,6 +140,20 @@ struct NRIPersistentVoxelSharedKeyAuditStats
 	uint32_t bakeSpaceMismatchKeys = 0;
 	uint32_t transformBasisMismatchKeys = 0;
 	uint32_t localShareableUnsafeKeys = 0;
+};
+
+struct NRIPersistentVoxelLocalSpaceInvariantStats
+{
+	uint32_t localActors = 0;
+	uint32_t localIdentityTransformActors = 0;
+	uint32_t localNonIdentityTransformActors = 0;
+	uint32_t suspiciousWorldBoundsActors = 0;
+	uint32_t missingBoundsActors = 0;
+	uint32_t invalidTransformActors = 0;
+	uint32_t bakedFallbackActors = 0;
+	uint32_t unknownSpaceActors = 0;
+	float maxBoundsCenterMagnitude = 0.0f;
+	float maxBoundsAbs = 0.0f;
 };
 
 struct NRIPersistentVoxelSharedBlasEntry
@@ -262,6 +286,20 @@ public:
 		mFrameStats.keyAuditBakeSpaceMismatchKeys = audit.bakeSpaceMismatchKeys;
 		mFrameStats.keyAuditTransformBasisMismatchKeys = audit.transformBasisMismatchKeys;
 		mFrameStats.keyAuditLocalShareableUnsafeKeys = audit.localShareableUnsafeKeys;
+	}
+
+	void RecordLocalSpaceInvariantStats(const NRIPersistentVoxelLocalSpaceInvariantStats& invariants)
+	{
+		mFrameStats.invariantLocalActors = invariants.localActors;
+		mFrameStats.invariantLocalIdentityTransformActors = invariants.localIdentityTransformActors;
+		mFrameStats.invariantLocalNonIdentityTransformActors = invariants.localNonIdentityTransformActors;
+		mFrameStats.invariantSuspiciousWorldBoundsActors = invariants.suspiciousWorldBoundsActors;
+		mFrameStats.invariantMissingBoundsActors = invariants.missingBoundsActors;
+		mFrameStats.invariantInvalidTransformActors = invariants.invalidTransformActors;
+		mFrameStats.invariantBakedFallbackActors = invariants.bakedFallbackActors;
+		mFrameStats.invariantUnknownSpaceActors = invariants.unknownSpaceActors;
+		mFrameStats.invariantMaxBoundsCenterMagnitude = invariants.maxBoundsCenterMagnitude;
+		mFrameStats.invariantMaxBoundsAbs = invariants.maxBoundsAbs;
 	}
 
 	void RecordRouteFallback(uint64_t sharedBlasKey, const char* reason)

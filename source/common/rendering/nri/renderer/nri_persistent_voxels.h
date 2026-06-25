@@ -94,6 +94,11 @@ struct PersistentVoxelMeshVariantResource
 	float lightTemplateCenter[3] = {};
 	float lightTemplateBoundsRadius = 0.0f;
 	float lightTemplateSurfaceArea = 0.0f;
+	bool boundsValid = false;
+	float boundsMin[3] = {};
+	float boundsMax[3] = {};
+	float boundsCenterMagnitude = 0.0f;
+	float boundsMaxAbs = 0.0f;
 	float bakedTranslation[3] = {};
 	NRIBufferResource vertexBuffer;
 	NRIBufferResource indexBuffer;

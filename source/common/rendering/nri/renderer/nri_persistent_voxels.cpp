@@ -81,6 +81,50 @@ uint64_t EstimatePersistentVoxelActorUploadBytes(const nri_scene::PersistentVoxe
 	return vertexBytes + indexBytes + primitiveBytes + materialBytes;
 }
 
+void FillPersistentVoxelMeshBounds(const std::vector<nri_scene::SceneVertex>& vertices, PersistentVoxelMeshVariantResource& meshResource)
+{
+	meshResource.boundsValid = false;
+	meshResource.boundsMin[0] = meshResource.boundsMin[1] = meshResource.boundsMin[2] = 0.0f;
+	meshResource.boundsMax[0] = meshResource.boundsMax[1] = meshResource.boundsMax[2] = 0.0f;
+	meshResource.boundsCenterMagnitude = 0.0f;
+	meshResource.boundsMaxAbs = 0.0f;
+	if (vertices.empty())
+	{
+		return;
+	}
+	for (uint32_t axis = 0; axis < 3; ++axis)
+	{
+		const float value = vertices[0].position[axis];
+		if (!std::isfinite(value))
+		{
+			return;
+		}
+		meshResource.boundsMin[axis] = value;
+		meshResource.boundsMax[axis] = value;
+		meshResource.boundsMaxAbs = std::max(meshResource.boundsMaxAbs, std::abs(value));
+	}
+	for (size_t vertexIndex = 1; vertexIndex < vertices.size(); ++vertexIndex)
+	{
+		for (uint32_t axis = 0; axis < 3; ++axis)
+		{
+			const float value = vertices[vertexIndex].position[axis];
+			if (!std::isfinite(value))
+			{
+				meshResource.boundsValid = false;
+				return;
+			}
+			meshResource.boundsMin[axis] = std::min(meshResource.boundsMin[axis], value);
+			meshResource.boundsMax[axis] = std::max(meshResource.boundsMax[axis], value);
+			meshResource.boundsMaxAbs = std::max(meshResource.boundsMaxAbs, std::abs(value));
+		}
+	}
+	const float centerX = (meshResource.boundsMin[0] + meshResource.boundsMax[0]) * 0.5f;
+	const float centerY = (meshResource.boundsMin[1] + meshResource.boundsMax[1]) * 0.5f;
+	const float centerZ = (meshResource.boundsMin[2] + meshResource.boundsMax[2]) * 0.5f;
+	meshResource.boundsCenterMagnitude = std::sqrt(centerX * centerX + centerY * centerY + centerZ * centerZ);
+	meshResource.boundsValid = true;
+}
+
 bool IsPersistentVoxelMeshResourceTransformKeyed(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, const NRIPersistentVoxelSettings& settings)
 {
 	return settings.transformKeyed ||
@@ -1416,6 +1460,121 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			}
 		}
 		sharedBlasCache.RecordSharedKeyAudit(sharedKeyAudit);
+		NRIPersistentVoxelLocalSpaceInvariantStats localInvariants = {};
+		struct LocalSpaceInvariantSuspect
+		{
+			uint64_t actorKey = 0;
+			uint64_t meshResourceKey = 0;
+			uint64_t meshKeyHash = 0;
+			int32_t sourcePicnum = -1;
+			int32_t resolvedVoxelIndex = -1;
+			float boundsCenterMagnitude = 0.0f;
+			float boundsMaxAbs = 0.0f;
+			float boundsMin[3] = {};
+			float boundsMax[3] = {};
+			std::array<float, 12> transform = {};
+		};
+		std::vector<LocalSpaceInvariantSuspect> invariantSuspects;
+		constexpr float SuspiciousLocalBoundsCenterMagnitude = 4096.0f;
+		for (const PersistentVoxelBatch::ActorEntry* actorPtr : persistentVoxelTlasActors)
+		{
+			const PersistentVoxelBatch::ActorEntry& actor = *actorPtr;
+			auto meshResourceIt = meshVariantResources.find(actor.meshResourceKey);
+			if (meshResourceIt == meshVariantResources.end())
+			{
+				continue;
+			}
+			const PersistentVoxelMeshVariantResource& meshResource = meshResourceIt->second;
+			const bool transformValid =
+				persistentVoxelTransformFinite(actor.instanceTransform) &&
+				persistentVoxelTransformFinite(actor.previousInstanceTransform);
+			if (!transformValid)
+			{
+				localInvariants.invalidTransformActors++;
+			}
+			if (meshResource.meshBakeSpace == nri_scene::VoxelMeshBakeSpace::LocalSpace)
+			{
+				localInvariants.localActors++;
+				if (persistentVoxelTransformIdentity(actor.instanceTransform))
+				{
+					localInvariants.localIdentityTransformActors++;
+				}
+				else
+				{
+					localInvariants.localNonIdentityTransformActors++;
+				}
+				if (!meshResource.boundsValid)
+				{
+					localInvariants.missingBoundsActors++;
+					continue;
+				}
+				localInvariants.maxBoundsCenterMagnitude = std::max(localInvariants.maxBoundsCenterMagnitude, meshResource.boundsCenterMagnitude);
+				localInvariants.maxBoundsAbs = std::max(localInvariants.maxBoundsAbs, meshResource.boundsMaxAbs);
+				if (meshResource.boundsCenterMagnitude > SuspiciousLocalBoundsCenterMagnitude)
+				{
+					localInvariants.suspiciousWorldBoundsActors++;
+					LocalSpaceInvariantSuspect suspect = {};
+					suspect.actorKey = actor.identityKey;
+					suspect.meshResourceKey = actor.meshResourceKey;
+					suspect.meshKeyHash = actor.meshKeyHash;
+					suspect.sourcePicnum = actor.sourcePicnum;
+					suspect.resolvedVoxelIndex = actor.resolvedVoxelIndex;
+					suspect.boundsCenterMagnitude = meshResource.boundsCenterMagnitude;
+					suspect.boundsMaxAbs = meshResource.boundsMaxAbs;
+					for (uint32_t axis = 0; axis < 3; ++axis)
+					{
+						suspect.boundsMin[axis] = meshResource.boundsMin[axis];
+						suspect.boundsMax[axis] = meshResource.boundsMax[axis];
+					}
+					suspect.transform = actor.instanceTransform;
+					invariantSuspects.push_back(suspect);
+				}
+			}
+			else if (meshResource.meshBakeSpace == nri_scene::VoxelMeshBakeSpace::BakedTransform)
+			{
+				localInvariants.bakedFallbackActors++;
+			}
+			else
+			{
+				localInvariants.unknownSpaceActors++;
+			}
+		}
+		sharedBlasCache.RecordLocalSpaceInvariantStats(localInvariants);
+		if (!invariantSuspects.empty())
+		{
+			std::sort(invariantSuspects.begin(), invariantSuspects.end(), [](const LocalSpaceInvariantSuspect& left, const LocalSpaceInvariantSuspect& right)
+			{
+				if (left.boundsCenterMagnitude != right.boundsCenterMagnitude)
+				{
+					return left.boundsCenterMagnitude > right.boundsCenterMagnitude;
+				}
+				return left.actorKey < right.actorKey;
+			});
+			const uint32_t emitCount = std::min<uint32_t>(8u, (uint32_t)invariantSuspects.size());
+			for (uint32_t i = 0; i < emitCount; ++i)
+			{
+				const LocalSpaceInvariantSuspect& suspect = invariantSuspects[i];
+				Printf("PERF pt voxel local invariant suspect NRI: frame=%u rank=%u actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx pic=%d voxel=%d bounds_center=%.3f bounds_max_abs=%.3f bounds_min=(%.3f,%.3f,%.3f) bounds_max=(%.3f,%.3f,%.3f) transform_t=(%.3f,%.3f,%.3f)\n",
+					frameIndex,
+					i + 1u,
+					(unsigned long long)suspect.actorKey,
+					(unsigned long long)suspect.meshResourceKey,
+					(unsigned long long)suspect.meshKeyHash,
+					suspect.sourcePicnum,
+					suspect.resolvedVoxelIndex,
+					suspect.boundsCenterMagnitude,
+					suspect.boundsMaxAbs,
+					suspect.boundsMin[0],
+					suspect.boundsMin[1],
+					suspect.boundsMin[2],
+					suspect.boundsMax[0],
+					suspect.boundsMax[1],
+					suspect.boundsMax[2],
+					suspect.transform[3],
+					suspect.transform[7],
+					suspect.transform[11]);
+			}
+		}
 		if (sharedKeyAudit.unsafeKeys != 0)
 		{
 			uint32_t emitted = 0;
@@ -3093,6 +3252,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		meshResource.vertexCount = (uint32_t)entry.uploadGeometry.vertices.size();
 		meshResource.indexCount = (uint32_t)entry.uploadGeometry.indices.size();
 		meshResource.primitiveCount = (uint32_t)entry.uploadGeometry.primitives.size();
+		FillPersistentVoxelMeshBounds(entry.uploadGeometry.vertices, meshResource);
 		meshResource.bakedTranslation[0] = 0.0f;
 		meshResource.bakedTranslation[1] = 0.0f;
 		meshResource.bakedTranslation[2] = 0.0f;
@@ -4333,6 +4493,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				meshResource.vertexCount = (uint32_t)actorGeometry.vertices.size();
 				meshResource.indexCount = (uint32_t)actorGeometry.indices.size();
 				meshResource.primitiveCount = (uint32_t)actorGeometry.primitives.size();
+				FillPersistentVoxelMeshBounds(actorGeometry.vertices, meshResource);
 				meshResource.bakedTranslation[0] = cacheEntry.bakedTranslation[0];
 				meshResource.bakedTranslation[1] = cacheEntry.bakedTranslation[1];
 				meshResource.bakedTranslation[2] = cacheEntry.bakedTranslation[2];

@@ -3967,6 +3967,19 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.voxelSharedKeyAuditBakeSpaceMismatchKeys,
 			shell.voxelSharedKeyAuditTransformBasisMismatchKeys,
 			shell.voxelSharedKeyAuditLocalShareableUnsafeKeys);
+		Printf(
+			"PERF pt voxel local invariant NRI: frame=%llu local_actors=%u identity_transform=%u non_identity_transform=%u suspicious_world_bounds=%u missing_bounds=%u invalid_transform=%u baked_fallback=%u unknown_space=%u max_bounds_center=%.3f max_bounds_abs=%.3f\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.voxelLocalSpaceInvariantLocalActors,
+			shell.voxelLocalSpaceInvariantLocalIdentityTransformActors,
+			shell.voxelLocalSpaceInvariantLocalNonIdentityTransformActors,
+			shell.voxelLocalSpaceInvariantSuspiciousWorldBoundsActors,
+			shell.voxelLocalSpaceInvariantMissingBoundsActors,
+			shell.voxelLocalSpaceInvariantInvalidTransformActors,
+			shell.voxelLocalSpaceInvariantBakedFallbackActors,
+			shell.voxelLocalSpaceInvariantUnknownSpaceActors,
+			shell.voxelLocalSpaceInvariantMaxBoundsCenterMagnitude,
+			shell.voxelLocalSpaceInvariantMaxBoundsAbs);
 		if (shader.valid)
 		{
 			const auto& c = shader.counters;

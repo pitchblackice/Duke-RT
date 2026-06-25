@@ -1445,6 +1445,16 @@ public:
 		uint32_t voxelSharedKeyAuditBakeSpaceMismatchKeys = 0;
 		uint32_t voxelSharedKeyAuditTransformBasisMismatchKeys = 0;
 		uint32_t voxelSharedKeyAuditLocalShareableUnsafeKeys = 0;
+		uint32_t voxelLocalSpaceInvariantLocalActors = 0;
+		uint32_t voxelLocalSpaceInvariantLocalIdentityTransformActors = 0;
+		uint32_t voxelLocalSpaceInvariantLocalNonIdentityTransformActors = 0;
+		uint32_t voxelLocalSpaceInvariantSuspiciousWorldBoundsActors = 0;
+		uint32_t voxelLocalSpaceInvariantMissingBoundsActors = 0;
+		uint32_t voxelLocalSpaceInvariantInvalidTransformActors = 0;
+		uint32_t voxelLocalSpaceInvariantBakedFallbackActors = 0;
+		uint32_t voxelLocalSpaceInvariantUnknownSpaceActors = 0;
+		float voxelLocalSpaceInvariantMaxBoundsCenterMagnitude = 0.0f;
+		float voxelLocalSpaceInvariantMaxBoundsAbs = 0.0f;
 		uint32_t sceneDataSetCalls = 0;
 		uint32_t sceneTextureCacheCount = 0;
 		uint32_t sceneTextureCacheMisses = 0;
