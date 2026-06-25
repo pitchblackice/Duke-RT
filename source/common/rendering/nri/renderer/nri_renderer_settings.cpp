@@ -115,6 +115,11 @@ NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars()
 	settings.sharedBlasLoadingWarmupEnabled = (bool)nri_ptvoxelsharedblasloading;
 	settings.sharedBlasRouteEnabled = (bool)nri_ptvoxelsharedblasroute;
 	settings.transformKeyed = (bool)nri_ptvoxeltransformkeyed;
+	settings.diagnosticsEnabled =
+		(bool)nri_voxelstats ||
+		(int)nri_pttraceframes > 0 ||
+		(int)perf_looptraceframes > 0 ||
+		(bool)nri_ptslowdowntrace;
 	settings.excludeIndices = {
 		(int32_t)(int)nri_ptvoxelexcludeindex,
 		(int32_t)(int)nri_ptvoxelexcludeindex2,

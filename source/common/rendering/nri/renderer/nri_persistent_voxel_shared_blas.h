@@ -72,6 +72,20 @@ struct NRIPersistentVoxelSharedBlasFrameStats
 	uint32_t profileRejectInvalidMaterial = 0;
 	uint32_t profileRejectInvalidTransform = 0;
 	uint32_t profileRejectGeometryMismatch = 0;
+	uint32_t keyAuditActors = 0;
+	uint32_t keyAuditKeys = 0;
+	uint32_t keyAuditSafeKeys = 0;
+	uint32_t keyAuditUnsafeKeys = 0;
+	uint32_t keyAuditGeometryMismatchKeys = 0;
+	uint32_t keyAuditCountMismatchKeys = 0;
+	uint32_t keyAuditMaterialVariantKeys = 0;
+	uint32_t keyAuditMaterialCountMismatchKeys = 0;
+	uint32_t keyAuditSourcePicnumAliasKeys = 0;
+	uint32_t keyAuditVoxelIndexAliasKeys = 0;
+	uint32_t keyAuditSourceStateAliasActorRefs = 0;
+	uint32_t keyAuditBakeSpaceMismatchKeys = 0;
+	uint32_t keyAuditTransformBasisMismatchKeys = 0;
+	uint32_t keyAuditLocalShareableUnsafeKeys = 0;
 };
 
 struct NRIPersistentVoxelLocalShareProfileStats
@@ -98,6 +112,24 @@ struct NRIPersistentVoxelLocalShareProfileStats
 	uint32_t rejectInvalidMaterial = 0;
 	uint32_t rejectInvalidTransform = 0;
 	uint32_t rejectGeometryMismatch = 0;
+};
+
+struct NRIPersistentVoxelSharedKeyAuditStats
+{
+	uint32_t actors = 0;
+	uint32_t keys = 0;
+	uint32_t safeKeys = 0;
+	uint32_t unsafeKeys = 0;
+	uint32_t geometryMismatchKeys = 0;
+	uint32_t countMismatchKeys = 0;
+	uint32_t materialVariantKeys = 0;
+	uint32_t materialCountMismatchKeys = 0;
+	uint32_t sourcePicnumAliasKeys = 0;
+	uint32_t voxelIndexAliasKeys = 0;
+	uint32_t sourceStateAliasActorRefs = 0;
+	uint32_t bakeSpaceMismatchKeys = 0;
+	uint32_t transformBasisMismatchKeys = 0;
+	uint32_t localShareableUnsafeKeys = 0;
 };
 
 struct NRIPersistentVoxelSharedBlasEntry
@@ -212,6 +244,24 @@ public:
 		mFrameStats.profileRejectInvalidMaterial = profile.rejectInvalidMaterial;
 		mFrameStats.profileRejectInvalidTransform = profile.rejectInvalidTransform;
 		mFrameStats.profileRejectGeometryMismatch = profile.rejectGeometryMismatch;
+	}
+
+	void RecordSharedKeyAudit(const NRIPersistentVoxelSharedKeyAuditStats& audit)
+	{
+		mFrameStats.keyAuditActors = audit.actors;
+		mFrameStats.keyAuditKeys = audit.keys;
+		mFrameStats.keyAuditSafeKeys = audit.safeKeys;
+		mFrameStats.keyAuditUnsafeKeys = audit.unsafeKeys;
+		mFrameStats.keyAuditGeometryMismatchKeys = audit.geometryMismatchKeys;
+		mFrameStats.keyAuditCountMismatchKeys = audit.countMismatchKeys;
+		mFrameStats.keyAuditMaterialVariantKeys = audit.materialVariantKeys;
+		mFrameStats.keyAuditMaterialCountMismatchKeys = audit.materialCountMismatchKeys;
+		mFrameStats.keyAuditSourcePicnumAliasKeys = audit.sourcePicnumAliasKeys;
+		mFrameStats.keyAuditVoxelIndexAliasKeys = audit.voxelIndexAliasKeys;
+		mFrameStats.keyAuditSourceStateAliasActorRefs = audit.sourceStateAliasActorRefs;
+		mFrameStats.keyAuditBakeSpaceMismatchKeys = audit.bakeSpaceMismatchKeys;
+		mFrameStats.keyAuditTransformBasisMismatchKeys = audit.transformBasisMismatchKeys;
+		mFrameStats.keyAuditLocalShareableUnsafeKeys = audit.localShareableUnsafeKeys;
 	}
 
 	void RecordRouteFallback(uint64_t sharedBlasKey, const char* reason)

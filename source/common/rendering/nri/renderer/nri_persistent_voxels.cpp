@@ -1117,7 +1117,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 		}
 		return true;
 	};
-	if (voxelStatsEnabled)
+	if (settings.diagnosticsEnabled)
 	{
 		NRIPersistentVoxelLocalShareProfileStats localShareProfile = {};
 		std::unordered_map<uint64_t, uint32_t> localShareableKeyRefs;
@@ -1238,6 +1238,231 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			}
 		}
 		sharedBlasCache.RecordLocalShareProfile(localShareProfile);
+
+		struct SharedKeyAuditGroup
+		{
+			uint64_t key = 0;
+			uint64_t firstGeometrySignature = 0;
+			uint64_t lastGeometrySignature = 0;
+			uint64_t firstMaterialKeyHash = 0;
+			uint64_t lastMaterialKeyHash = 0;
+			uint64_t firstTransformBasisSignature = 0;
+			uint64_t lastTransformBasisSignature = 0;
+			uint32_t firstPrimitiveCount = 0;
+			uint32_t lastPrimitiveCount = 0;
+			uint32_t firstIndexCount = 0;
+			uint32_t lastIndexCount = 0;
+			uint32_t firstVertexCount = 0;
+			uint32_t lastVertexCount = 0;
+			uint32_t firstMaterialCount = 0;
+			uint32_t lastMaterialCount = 0;
+			uint32_t actorCount = 0;
+			int32_t firstSourcePicnum = -1;
+			int32_t lastSourcePicnum = -1;
+			int32_t firstResolvedVoxelIndex = -1;
+			int32_t lastResolvedVoxelIndex = -1;
+			nri_scene::VoxelMeshBakeSpace firstBakeSpace = nri_scene::VoxelMeshBakeSpace::Unknown;
+			nri_scene::VoxelMeshBakeSpace lastBakeSpace = nri_scene::VoxelMeshBakeSpace::Unknown;
+			bool localShareable = true;
+			bool geometryMismatch = false;
+			bool countMismatch = false;
+			bool materialVariant = false;
+			bool materialCountMismatch = false;
+			bool sourcePicnumAlias = false;
+			bool voxelIndexAlias = false;
+			bool bakeSpaceMismatch = false;
+			bool transformBasisMismatch = false;
+		};
+		std::unordered_map<uint64_t, SharedKeyAuditGroup> sharedKeyAuditGroups;
+		sharedKeyAuditGroups.reserve(persistentVoxelTlasActors.size());
+		for (const PersistentVoxelBatch::ActorEntry* actorPtr : persistentVoxelTlasActors)
+		{
+			const PersistentVoxelBatch::ActorEntry& actor = *actorPtr;
+			auto meshResourceIt = meshVariantResources.find(actor.meshResourceKey);
+			if (meshResourceIt == meshVariantResources.end())
+			{
+				continue;
+			}
+			const PersistentVoxelMeshVariantResource& meshResource = meshResourceIt->second;
+			SharedKeyAuditGroup& group = sharedKeyAuditGroups[actor.meshResourceKey];
+			const bool firstActorForKey = group.actorCount == 0;
+			if (firstActorForKey)
+			{
+				group.key = actor.meshResourceKey;
+				group.firstGeometrySignature = actor.geometrySignature;
+				group.firstMaterialKeyHash = actor.materialKeyHash;
+				group.firstTransformBasisSignature = meshResource.transformBasisSignature;
+				group.firstPrimitiveCount = actor.primitiveCount;
+				group.firstIndexCount = actor.indexCount;
+				group.firstVertexCount = meshResource.vertexCount;
+				group.firstMaterialCount = actor.materialCount;
+				group.firstSourcePicnum = actor.sourcePicnum;
+				group.firstResolvedVoxelIndex = actor.resolvedVoxelIndex;
+				group.firstBakeSpace = meshResource.meshBakeSpace;
+			}
+			group.actorCount++;
+			group.lastGeometrySignature = actor.geometrySignature;
+			group.lastMaterialKeyHash = actor.materialKeyHash;
+			group.lastTransformBasisSignature = meshResource.transformBasisSignature;
+			group.lastPrimitiveCount = actor.primitiveCount;
+			group.lastIndexCount = actor.indexCount;
+			group.lastVertexCount = meshResource.vertexCount;
+			group.lastMaterialCount = actor.materialCount;
+			group.lastSourcePicnum = actor.sourcePicnum;
+			group.lastResolvedVoxelIndex = actor.resolvedVoxelIndex;
+			group.lastBakeSpace = meshResource.meshBakeSpace;
+			group.geometryMismatch = group.geometryMismatch ||
+				actor.geometrySignature != group.firstGeometrySignature ||
+				meshResource.geometrySignature != group.firstGeometrySignature;
+			group.countMismatch = group.countMismatch ||
+				actor.primitiveCount != group.firstPrimitiveCount ||
+				actor.indexCount != group.firstIndexCount ||
+				meshResource.vertexCount != group.firstVertexCount ||
+				meshResource.indexCount != group.firstIndexCount ||
+				meshResource.primitiveCount != group.firstPrimitiveCount;
+			group.materialVariant = group.materialVariant || actor.materialKeyHash != group.firstMaterialKeyHash;
+			group.materialCountMismatch = group.materialCountMismatch || actor.materialCount != group.firstMaterialCount;
+			group.sourcePicnumAlias = group.sourcePicnumAlias || actor.sourcePicnum != group.firstSourcePicnum;
+			group.voxelIndexAlias = group.voxelIndexAlias || actor.resolvedVoxelIndex != group.firstResolvedVoxelIndex;
+			group.bakeSpaceMismatch = group.bakeSpaceMismatch || meshResource.meshBakeSpace != group.firstBakeSpace;
+			group.transformBasisMismatch = group.transformBasisMismatch ||
+				meshResource.transformBasisSignature != group.firstTransformBasisSignature;
+			const bool primitiveArenaRangeValid =
+				(uint64_t)actor.primitiveOffset + (uint64_t)actor.primitiveCount <= (uint64_t)arenaPrimitiveCursor;
+			const bool materialArenaRangeValid =
+				actor.materialCount != 0 &&
+				(uint64_t)actor.materialOffset + (uint64_t)actor.materialCount <= (uint64_t)arenaMaterialCursor;
+			const bool meshRangeMatches =
+				actor.primitiveOffset == meshResource.primitiveOffset &&
+				actor.primitiveCount == meshResource.primitiveCount &&
+				actor.indexOffset == meshResource.indexOffset &&
+				actor.indexCount == meshResource.indexCount &&
+				actor.geometrySignature == meshResource.geometrySignature;
+			group.localShareable = group.localShareable &&
+				meshResource.meshBakeSpace == nri_scene::VoxelMeshBakeSpace::LocalSpace &&
+				!settings.transformKeyed &&
+				meshResource.vertexBuffer.buffer != nullptr &&
+				meshResource.indexBuffer.buffer != nullptr &&
+				meshResource.vertexCount != 0 &&
+				meshResource.indexCount != 0 &&
+				meshResource.primitiveCount != 0 &&
+				actor.primitiveCount != 0 &&
+				actor.indexCount != 0 &&
+				primitiveArenaRangeValid &&
+				materialArenaRangeValid &&
+				meshRangeMatches &&
+				persistentVoxelTransformFinite(actor.instanceTransform) &&
+				persistentVoxelTransformFinite(actor.previousInstanceTransform);
+		}
+		NRIPersistentVoxelSharedKeyAuditStats sharedKeyAudit = {};
+		sharedKeyAudit.keys = (uint32_t)sharedKeyAuditGroups.size();
+		for (const auto& pair : sharedKeyAuditGroups)
+		{
+			const SharedKeyAuditGroup& group = pair.second;
+			sharedKeyAudit.actors += group.actorCount;
+			const bool unsafe =
+				group.geometryMismatch ||
+				group.countMismatch ||
+				group.bakeSpaceMismatch ||
+				group.transformBasisMismatch;
+			if (unsafe)
+			{
+				sharedKeyAudit.unsafeKeys++;
+				if (group.localShareable)
+				{
+					sharedKeyAudit.localShareableUnsafeKeys++;
+				}
+			}
+			else
+			{
+				sharedKeyAudit.safeKeys++;
+			}
+			if (group.geometryMismatch)
+			{
+				sharedKeyAudit.geometryMismatchKeys++;
+			}
+			if (group.countMismatch)
+			{
+				sharedKeyAudit.countMismatchKeys++;
+			}
+			if (group.materialVariant)
+			{
+				sharedKeyAudit.materialVariantKeys++;
+			}
+			if (group.materialCountMismatch)
+			{
+				sharedKeyAudit.materialCountMismatchKeys++;
+			}
+			if (group.sourcePicnumAlias)
+			{
+				sharedKeyAudit.sourcePicnumAliasKeys++;
+				sharedKeyAudit.sourceStateAliasActorRefs += group.actorCount > 1u ? group.actorCount - 1u : 0u;
+			}
+			if (group.voxelIndexAlias)
+			{
+				sharedKeyAudit.voxelIndexAliasKeys++;
+				if (!group.sourcePicnumAlias)
+				{
+					sharedKeyAudit.sourceStateAliasActorRefs += group.actorCount > 1u ? group.actorCount - 1u : 0u;
+				}
+			}
+			if (group.bakeSpaceMismatch)
+			{
+				sharedKeyAudit.bakeSpaceMismatchKeys++;
+			}
+			if (group.transformBasisMismatch)
+			{
+				sharedKeyAudit.transformBasisMismatchKeys++;
+			}
+		}
+		sharedBlasCache.RecordSharedKeyAudit(sharedKeyAudit);
+		if (sharedKeyAudit.unsafeKeys != 0)
+		{
+			uint32_t emitted = 0;
+			for (const auto& pair : sharedKeyAuditGroups)
+			{
+				const SharedKeyAuditGroup& group = pair.second;
+				const bool unsafe =
+					group.geometryMismatch ||
+					group.countMismatch ||
+					group.bakeSpaceMismatch ||
+					group.transformBasisMismatch;
+				if (!unsafe)
+				{
+					continue;
+				}
+				Printf("PERF pt voxel shared key collision NRI: frame=%u key=0x%llx actors=%u geometry_mismatch=%u count_mismatch=%u bake_space_mismatch=%u transform_basis_mismatch=%u local_shareable=%u first_geo=0x%llx last_geo=0x%llx first_prims=%u last_prims=%u first_indices=%u last_indices=%u first_vertices=%u last_vertices=%u first_pic=%d last_pic=%d first_voxel=%d last_voxel=%d first_space=%s last_space=%s first_basis=0x%llx last_basis=0x%llx\n",
+					frameIndex,
+					(unsigned long long)group.key,
+					group.actorCount,
+					group.geometryMismatch ? 1u : 0u,
+					group.countMismatch ? 1u : 0u,
+					group.bakeSpaceMismatch ? 1u : 0u,
+					group.transformBasisMismatch ? 1u : 0u,
+					group.localShareable ? 1u : 0u,
+					(unsigned long long)group.firstGeometrySignature,
+					(unsigned long long)group.lastGeometrySignature,
+					group.firstPrimitiveCount,
+					group.lastPrimitiveCount,
+					group.firstIndexCount,
+					group.lastIndexCount,
+					group.firstVertexCount,
+					group.lastVertexCount,
+					group.firstSourcePicnum,
+					group.lastSourcePicnum,
+					group.firstResolvedVoxelIndex,
+					group.lastResolvedVoxelIndex,
+					GetPersistentVoxelBakeSpaceName(group.firstBakeSpace),
+					GetPersistentVoxelBakeSpaceName(group.lastBakeSpace),
+					(unsigned long long)group.firstTransformBasisSignature,
+					(unsigned long long)group.lastTransformBasisSignature);
+				emitted++;
+				if (emitted >= 8u)
+				{
+					break;
+				}
+			}
+		}
 	}
 	NRIRaySceneBuilder raySceneBuilder(instances, sceneInstances);
 	for (PersistentVoxelBatch::ActorEntry* actorPtr : persistentVoxelTlasActors)

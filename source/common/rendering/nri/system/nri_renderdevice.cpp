@@ -3950,6 +3950,23 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.voxelSharedBlasResidentBytes,
 			(unsigned long long)shell.voxelSharedBlasActiveReferencedBytes,
 			(unsigned long long)shell.voxelSharedBlasUnreferencedResidentBytes);
+		Printf(
+			"PERF pt voxel shared key audit NRI: frame=%llu actors=%u keys=%u safe_keys=%u unsafe_keys=%u geometry_mismatch_keys=%u count_mismatch_keys=%u material_variant_keys=%u material_count_mismatch_keys=%u source_picnum_alias_keys=%u voxel_index_alias_keys=%u source_state_alias_actor_refs=%u bake_space_mismatch_keys=%u transform_basis_mismatch_keys=%u local_shareable_unsafe_keys=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.voxelSharedKeyAuditActors,
+			shell.voxelSharedKeyAuditKeys,
+			shell.voxelSharedKeyAuditSafeKeys,
+			shell.voxelSharedKeyAuditUnsafeKeys,
+			shell.voxelSharedKeyAuditGeometryMismatchKeys,
+			shell.voxelSharedKeyAuditCountMismatchKeys,
+			shell.voxelSharedKeyAuditMaterialVariantKeys,
+			shell.voxelSharedKeyAuditMaterialCountMismatchKeys,
+			shell.voxelSharedKeyAuditSourcePicnumAliasKeys,
+			shell.voxelSharedKeyAuditVoxelIndexAliasKeys,
+			shell.voxelSharedKeyAuditSourceStateAliasActorRefs,
+			shell.voxelSharedKeyAuditBakeSpaceMismatchKeys,
+			shell.voxelSharedKeyAuditTransformBasisMismatchKeys,
+			shell.voxelSharedKeyAuditLocalShareableUnsafeKeys);
 		if (shader.valid)
 		{
 			const auto& c = shader.counters;
