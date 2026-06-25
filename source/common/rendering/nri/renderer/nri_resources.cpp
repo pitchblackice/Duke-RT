@@ -202,6 +202,7 @@ void NRIRenderer::DestroySceneBuffers()
 	ResetResidentMapChunkRegistry();
 	ResetPersistentDynamicEmissiveCache();
 	mPersistentVoxels.Reset("destroy-scene-buffers", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildNRIPersistentVoxelResetServices(*this));
+	ResetDynamicOverlayBlasCache();
 	DestroyBufferResource(mStaticVertexBuffer);
 	DestroyBufferResource(mStaticIndexBuffer);
 	DestroyBufferResource(mStaticPrimitiveBuffer);

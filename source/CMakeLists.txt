@@ -930,6 +930,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_debug_reporters.cpp
 	common/rendering/nri/renderer/nri_descriptor_sets.cpp
 	common/rendering/nri/renderer/nri_dynamic_scene_status.cpp
+	common/rendering/nri/renderer/nri_dynamic_overlay_blas.cpp
 	common/rendering/nri/renderer/nri_emissive_sampling_upload.cpp
 	common/rendering/nri/renderer/nri_cvars.cpp
 	common/rendering/nri/renderer/nri_exposure.cpp

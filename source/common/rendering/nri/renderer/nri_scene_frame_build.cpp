@@ -108,7 +108,10 @@ namespace
 			case NRIRenderer::SceneBufferUploadDomain::Dynamic:
 				stats.dynamicOverlayBlasEligibleDomains++;
 				stats.dynamicOverlayBlasEligiblePrimitives += span.primitiveCount;
-				stats.dynamicOverlayBlasRejectMaterialBase += span.primitiveCount;
+				if ((stats.dynamicOverlayBlasBuildEnabled || stats.dynamicOverlayBlasRouteEnabled) && span.materialCount == 0)
+				{
+					stats.dynamicOverlayBlasRejectMaterialBase += span.primitiveCount;
+				}
 				break;
 			case NRIRenderer::SceneBufferUploadDomain::RuntimeSpaceLink:
 				stats.dynamicOverlayBlasRejectRuntimeSpaceLink += span.primitiveCount;
@@ -1101,11 +1104,15 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				const uint32_t liveOverlayIndexOffset = 0u;
 				const uint32_t liveOverlayIndexCount = (uint32_t)overlayGeometry.indices.size();
 				NRIAccelerationStructureResource& dynamicBottomLevelAS = GetCurrentDynamicBottomLevelAS();
+				DynamicOverlayBlasRoute dynamicOverlayBlasRoute = {};
+				bool useDynamicOverlayBlasRoute = false;
 				if (buffersReady)
 				{
 					RecordDynamicOverlayBlasModelStats(mLastPerfShellTraceStats, sceneUploadDomainSpans);
+					const bool dynamicOverlayBlasRouteReady =
+						BuildDynamicOverlayBlasRoute(overlayGeometry, sceneUploadDomainSpans, dynamicOverlayBlasRoute);
 					bool persistentVoxelAsReady = true;
-					bool dynamicAsReady = true;
+					bool dynamicAsReady = dynamicOverlayBlasRouteReady;
 					if (hasPersistentVoxelOverlay)
 					{
 						ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelAsMs);
@@ -1122,7 +1129,11 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						mLastPerfShellTraceStats.persistentVoxelAsUniqueMeshBuilds += persistentVoxelAsStats.uniqueMeshBuilds;
 						mLastPerfShellTraceStats.persistentVoxelAsInstances += persistentVoxelAsStats.instances;
 					}
-					if (liveOverlayPrimitiveCount > 0)
+					useDynamicOverlayBlasRoute =
+						dynamicOverlayBlasRoute.routeAllOverlay &&
+						dynamicOverlayBlasRoute.accelerationStructure != nullptr &&
+						dynamicOverlayBlasRoute.accelerationStructure->accelerationStructure != nullptr;
+					if (liveOverlayPrimitiveCount > 0 && !useDynamicOverlayBlasRoute)
 					{
 						mLastPerfShellTraceStats.dynamicAsRuntimeSpaceLinkPrimitives = mLastPerfShellTraceStats.overlayRuntimeSpaceLinkAppend.primitiveCount;
 						mLastPerfShellTraceStats.dynamicAsRuntimeMutationPrimitives = mLastPerfShellTraceStats.overlayRuntimeMutationAppend.primitiveCount;
@@ -1188,7 +1199,28 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						mLastPerfShellTraceStats.persistentVoxelBakedFallbackInstances += persistentVoxelTlasStats.bakedFallbackInstanceCount;
 					}
 
-					if (liveOverlayPrimitiveCount > 0 && dynamicBottomLevelAS.accelerationStructure != nullptr)
+					if (useDynamicOverlayBlasRoute)
+					{
+						ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectInstanceHandlesMs);
+						nri::TopLevelInstance dynamicInstance = {};
+						dynamicInstance.transform[0][0] = 1.0f;
+						dynamicInstance.transform[1][1] = 1.0f;
+						dynamicInstance.transform[2][2] = 1.0f;
+						dynamicInstance.mask = NRI_TLAS_MASK_ALL_WORKLOADS;
+						dynamicInstance.shaderBindingTableLocalOffset = 0;
+						dynamicInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+						dynamicInstance.accelerationStructureHandle =
+							mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*dynamicOverlayBlasRoute.accelerationStructure->accelerationStructure);
+						NRIRaySceneBuilder builder(instances, sceneInstances);
+						SceneInstanceData sceneRecord = {};
+						sceneRecord.primitiveBase = dynamicOverlayBlasRoute.span.primitiveOffset;
+						sceneRecord.dataSource = nri_diag::SceneDataSourceDynamic;
+						sceneRecord.materialBase = dynamicOverlayBlasRoute.span.materialOffset;
+						sceneRecord.materialCount = dynamicOverlayBlasRoute.span.materialCount;
+						sceneRecord.visibilityChunk = UINT32_MAX;
+						builder.AddInstance(dynamicInstance, sceneRecord);
+					}
+					else if (liveOverlayPrimitiveCount > 0 && dynamicBottomLevelAS.accelerationStructure != nullptr)
 					{
 						ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectInstanceHandlesMs);
 						nri::TopLevelInstance dynamicInstance = {};

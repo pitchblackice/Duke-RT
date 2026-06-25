@@ -1828,6 +1828,27 @@ private:
 		std::vector<nri_scene::PrimitiveData> primitives;
 	};
 
+	struct DynamicOverlayBlasAsset
+	{
+		uint64_t key = 0;
+		uint32_t vertexCount = 0;
+		uint32_t indexCount = 0;
+		uint32_t primitiveCount = 0;
+		uint64_t lastUsedFrame = 0;
+		NRIBufferResource vertexBuffer = {};
+		NRIBufferResource indexBuffer = {};
+		NRIAccelerationStructureResource accelerationStructure = {};
+		SceneBufferDebugStats vertexStats = { "DynamicOverlayBLASVertex" };
+		SceneBufferDebugStats indexStats = { "DynamicOverlayBLASIndex" };
+	};
+
+	struct DynamicOverlayBlasRoute
+	{
+		const NRIAccelerationStructureResource* accelerationStructure = nullptr;
+		SceneBufferUploadDomainSpan span = {};
+		bool routeAllOverlay = false;
+	};
+
 	using SceneUploadDirtyRange = ::SceneUploadDirtyRange;
 
 	using RuntimePointLightGpuData = NRIRuntimePointLightGpuData;
@@ -1978,6 +1999,11 @@ private:
 		uint32_t primitiveCount,
 		NRIAccelerationStructureResource& outAccelerationStructure,
 		bool updateDynamicPerfStats);
+	bool BuildDynamicOverlayBlasRoute(
+		const nri_scene::GeometryData& geometry,
+		const std::vector<SceneBufferUploadDomainSpan>& uploadSpans,
+		DynamicOverlayBlasRoute& outRoute);
+	void ResetDynamicOverlayBlasCache();
 	bool BuildBottomLevelAccelerationStructure(
 		const NRIBufferResource& vertexBuffer,
 		const NRIBufferResource& indexBuffer,
@@ -2240,6 +2266,9 @@ private:
 	std::vector<SceneUploadBufferRingSlot> mSceneUploadBufferRing;
 	std::vector<SceneUploadDirtyRange> mSceneUploadPrimitiveDirtyRangeScratch;
 	std::vector<SceneUploadDirtyRange> mSceneUploadMaterialDirtyRangeScratch;
+	std::vector<DynamicOverlayBlasAsset> mDynamicOverlayBlasAssets;
+	std::vector<nri_scene::SceneVertex> mDynamicOverlayBlasVertexScratch;
+	std::vector<uint32_t> mDynamicOverlayBlasIndexScratch;
 	std::array<ResidentUploadScratchFrame, 3> mResidentUploadScratchFrames = {};
 	std::vector<uint32_t> mResidentStaticBlasActiveChunkListIndices;
 	std::vector<nri::BufferBarrierDesc> mResidentStaticBlasBarriers;
