@@ -282,6 +282,10 @@ CVAR(Int, nri_ptportaldepth, 6, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, nri_voxelstats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+CVAR(Bool, nri_ptvoxelactorstatetrace, false, 0)
+
+CVAR(Int, nri_ptvoxelactorstatetracelimit, 12000, 0)
+
 CVAR(Int, nri_ptvoxeltrianglebudget, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptvoxelmaxtriangles, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

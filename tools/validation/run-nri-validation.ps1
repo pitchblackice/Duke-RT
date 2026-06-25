@@ -82,6 +82,13 @@ if ($GameGrp) {
     $args.Add("-gamegrp")
     $args.Add($GameGrp)
 }
+if ($scenario.PSObject.Properties.Name.Contains("save")) {
+    $save = $scenario.save
+    if ($save.PSObject.Properties.Name.Contains("dir")) {
+        $args.Add("-savedir")
+        $args.Add([string]$save.dir)
+    }
+}
 
 $args.Add("-nosound")
 $args.Add("-nologo")

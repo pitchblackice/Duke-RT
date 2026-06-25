@@ -386,6 +386,131 @@ function Test-NriRelationAssertion {
     }
 }
 
+function Get-NriDistinctFieldValues {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object[]]$Records,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Field,
+
+        [string[]]$Exclude = @()
+    )
+
+    $excluded = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($value in @($Exclude)) {
+        [void]$excluded.Add([string]$value)
+    }
+
+    $values = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($record in @($Records)) {
+        if (-not (Test-NriObjectHasProperty -Object $record -Name $Field)) {
+            continue
+        }
+        $value = [string](Get-NriObjectPropertyValue -Object $record -Name $Field)
+        if ($excluded.Contains($value)) {
+            continue
+        }
+        [void]$values.Add($value)
+    }
+    return ,$values
+}
+
+function Test-NriDistinctAssertion {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object[]]$Records,
+
+        [Parameter(Mandatory = $true)]
+        [object]$Distinct,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Prefix,
+
+        [Parameter(Mandatory = $true)]
+        [object]$Errors
+    )
+
+    if (-not (Test-NriObjectHasProperty -Object $Distinct -Name "field") -or
+        -not (Test-NriObjectHasProperty -Object $Distinct -Name "minDistinct")) {
+        $Errors.Add("prefix '$Prefix' distinct assertion is missing field/minDistinct")
+        return
+    }
+
+    $field = [string]$Distinct.field
+    $minDistinct = [int]$Distinct.minDistinct
+    $exclude = if (Test-NriObjectHasProperty -Object $Distinct -Name "exclude") { @($Distinct.exclude | ForEach-Object { [string]$_ }) } else { @() }
+    $values = Get-NriDistinctFieldValues -Records $Records -Field $field -Exclude $exclude
+    if ($values.Count -lt $minDistinct) {
+        $Errors.Add("prefix '$Prefix' field '$field' distinct count $($values.Count) < minDistinct $minDistinct")
+    }
+}
+
+function Test-NriGroupedDistinctAssertion {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object[]]$Records,
+
+        [Parameter(Mandatory = $true)]
+        [object]$GroupedDistinct,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Prefix,
+
+        [Parameter(Mandatory = $true)]
+        [object]$Errors
+    )
+
+    if (-not (Test-NriObjectHasProperty -Object $GroupedDistinct -Name "groupBy") -or
+        -not (Test-NriObjectHasProperty -Object $GroupedDistinct -Name "fields") -or
+        -not (Test-NriObjectHasProperty -Object $GroupedDistinct -Name "minGroups")) {
+        $Errors.Add("prefix '$Prefix' groupDistinct assertion is missing groupBy/fields/minGroups")
+        return
+    }
+
+    $groupField = [string]$GroupedDistinct.groupBy
+    $minGroups = [int]$GroupedDistinct.minGroups
+    $groups = [ordered]@{}
+    foreach ($record in @($Records)) {
+        if (-not (Test-NriObjectHasProperty -Object $record -Name $groupField)) {
+            continue
+        }
+        $groupKey = [string](Get-NriObjectPropertyValue -Object $record -Name $groupField)
+        if (-not $groups.Contains($groupKey)) {
+            $groups[$groupKey] = New-Object System.Collections.Generic.List[object]
+        }
+        $groups[$groupKey].Add($record)
+    }
+
+    $passingGroups = 0
+    foreach ($groupKey in $groups.Keys) {
+        $groupRecords = @($groups[$groupKey].ToArray())
+        $groupPasses = $true
+        foreach ($fieldRule in @($GroupedDistinct.fields)) {
+            if (-not (Test-NriObjectHasProperty -Object $fieldRule -Name "field") -or
+                -not (Test-NriObjectHasProperty -Object $fieldRule -Name "minDistinct")) {
+                $Errors.Add("prefix '$Prefix' groupDistinct field rule is missing field/minDistinct")
+                return
+            }
+            $field = [string]$fieldRule.field
+            $minDistinct = [int]$fieldRule.minDistinct
+            $exclude = if (Test-NriObjectHasProperty -Object $fieldRule -Name "exclude") { @($fieldRule.exclude | ForEach-Object { [string]$_ }) } else { @() }
+            $values = Get-NriDistinctFieldValues -Records $groupRecords -Field $field -Exclude $exclude
+            if ($values.Count -lt $minDistinct) {
+                $groupPasses = $false
+                break
+            }
+        }
+        if ($groupPasses) {
+            $passingGroups++
+        }
+    }
+
+    if ($passingGroups -lt $minGroups) {
+        $Errors.Add("prefix '$Prefix' groupDistinct '$groupField' passing groups $passingGroups < minGroups $minGroups")
+    }
+}
+
 function Test-NriPrefixAssertions {
     param(
         [Parameter(Mandatory = $true)]
@@ -457,6 +582,18 @@ function Test-NriPrefixAssertions {
                 foreach ($relation in @($assertion.relations)) {
                     Test-NriRelationAssertion -Record $record -Relation $relation -Prefix $prefix -Errors $errors
                 }
+            }
+        }
+
+        if (Test-NriObjectHasProperty -Object $assertion -Name "distinct") {
+            foreach ($distinct in @($assertion.distinct)) {
+                Test-NriDistinctAssertion -Records $selectedRecords -Distinct $distinct -Prefix $prefix -Errors $errors
+            }
+        }
+
+        if (Test-NriObjectHasProperty -Object $assertion -Name "groupDistinct") {
+            foreach ($groupedDistinct in @($assertion.groupDistinct)) {
+                Test-NriGroupedDistinctAssertion -Records $selectedRecords -GroupedDistinct $groupedDistinct -Prefix $prefix -Errors $errors
             }
         }
     }

@@ -2250,9 +2250,20 @@ namespace
 		const char* action,
 		VoxelActorPendingReason reason = VoxelActorPendingReason::None)
 	{
-		if (!nri_voxelstats)
+		const bool traceAllVoxelStats = !!nri_voxelstats;
+		if (!traceAllVoxelStats && !nri_ptvoxelactorstatetrace)
 		{
 			return;
+		}
+		if (!traceAllVoxelStats)
+		{
+			static int sTraceCount = 0;
+			const int traceLimit = (int)nri_ptvoxelactorstatetracelimit;
+			if (traceLimit >= 0 && sTraceCount >= traceLimit)
+			{
+				return;
+			}
+			sTraceCount++;
 		}
 
 		const int actorIndex =
