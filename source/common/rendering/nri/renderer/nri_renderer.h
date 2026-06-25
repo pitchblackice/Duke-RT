@@ -106,9 +106,12 @@ public:
 	enum class SceneBufferUploadDomain : uint32_t
 	{
 		StaticOverlay = 0,
+		RuntimeSpaceLink,
 		RuntimeMutation,
 		Dynamic,
 		LocalPlayerReflection,
+		RuntimeDebugSphere,
+		SurfaceLightOverlay,
 		PersistentVoxelMaterial,
 		Count,
 	};
@@ -1228,8 +1231,11 @@ public:
 		uint32_t dynamicOverlayBlasFallbackPrimitives = 0;
 		uint32_t dynamicOverlayBlasRejectDisabled = 0;
 		uint32_t dynamicOverlayBlasRejectStaticOverlay = 0;
+		uint32_t dynamicOverlayBlasRejectRuntimeSpaceLink = 0;
 		uint32_t dynamicOverlayBlasRejectRuntimeMutation = 0;
 		uint32_t dynamicOverlayBlasRejectLocalPlayerReflection = 0;
+		uint32_t dynamicOverlayBlasRejectRuntimeDebugSphere = 0;
+		uint32_t dynamicOverlayBlasRejectSurfaceLightOverlay = 0;
 		uint32_t dynamicOverlayBlasRejectMaterialBase = 0;
 		uint32_t dynamicOverlayBlasBuildAttempts = 0;
 		uint32_t dynamicOverlayBlasBuildSuccesses = 0;

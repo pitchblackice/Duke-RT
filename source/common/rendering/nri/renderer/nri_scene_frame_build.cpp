@@ -110,11 +110,20 @@ namespace
 				stats.dynamicOverlayBlasEligiblePrimitives += span.primitiveCount;
 				stats.dynamicOverlayBlasRejectMaterialBase += span.primitiveCount;
 				break;
+			case NRIRenderer::SceneBufferUploadDomain::RuntimeSpaceLink:
+				stats.dynamicOverlayBlasRejectRuntimeSpaceLink += span.primitiveCount;
+				break;
 			case NRIRenderer::SceneBufferUploadDomain::RuntimeMutation:
 				stats.dynamicOverlayBlasRejectRuntimeMutation += span.primitiveCount;
 				break;
 			case NRIRenderer::SceneBufferUploadDomain::LocalPlayerReflection:
 				stats.dynamicOverlayBlasRejectLocalPlayerReflection += span.primitiveCount;
+				break;
+			case NRIRenderer::SceneBufferUploadDomain::RuntimeDebugSphere:
+				stats.dynamicOverlayBlasRejectRuntimeDebugSphere += span.primitiveCount;
+				break;
+			case NRIRenderer::SceneBufferUploadDomain::SurfaceLightOverlay:
+				stats.dynamicOverlayBlasRejectSurfaceLightOverlay += span.primitiveCount;
 				break;
 			case NRIRenderer::SceneBufferUploadDomain::StaticOverlay:
 			case NRIRenderer::SceneBufferUploadDomain::PersistentVoxelMaterial:

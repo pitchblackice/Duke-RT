@@ -3808,7 +3808,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.emissiveSamplingOutputPersistentVoxelRecords,
 			shell.emissiveSamplingSkippedPersistentVoxelSurfaces);
 		Printf(
-			"PERF pt dynamic overlay blas NRI: frame=%llu build_enabled=%u route_enabled=%u build_budget=%u domains=%u vertices=%u indices=%u prims=%u mats=%u eligible_domains=%u eligible_prims=%u fallback_domains=%u fallback_prims=%u reject_disabled=%u reject_static_overlay=%u reject_runtime_mutation=%u reject_local_player_reflection=%u reject_material_base=%u build_attempts=%u build_successes=%u cache_hits=%u cache_misses=%u routed_instances=%u monolithic_refs=%u\n",
+			"PERF pt dynamic overlay blas NRI: frame=%llu build_enabled=%u route_enabled=%u build_budget=%u domains=%u vertices=%u indices=%u prims=%u mats=%u eligible_domains=%u eligible_prims=%u fallback_domains=%u fallback_prims=%u reject_disabled=%u reject_static_overlay=%u reject_runtime_space_link=%u reject_runtime_mutation=%u reject_local_player_reflection=%u reject_runtime_debug_sphere=%u reject_surface_light_overlay=%u reject_material_base=%u build_attempts=%u build_successes=%u cache_hits=%u cache_misses=%u routed_instances=%u monolithic_refs=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.dynamicOverlayBlasBuildEnabled ? 1u : 0u,
 			shell.dynamicOverlayBlasRouteEnabled ? 1u : 0u,
@@ -3824,8 +3824,11 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.dynamicOverlayBlasFallbackPrimitives,
 			shell.dynamicOverlayBlasRejectDisabled,
 			shell.dynamicOverlayBlasRejectStaticOverlay,
+			shell.dynamicOverlayBlasRejectRuntimeSpaceLink,
 			shell.dynamicOverlayBlasRejectRuntimeMutation,
 			shell.dynamicOverlayBlasRejectLocalPlayerReflection,
+			shell.dynamicOverlayBlasRejectRuntimeDebugSphere,
+			shell.dynamicOverlayBlasRejectSurfaceLightOverlay,
 			shell.dynamicOverlayBlasRejectMaterialBase,
 			shell.dynamicOverlayBlasBuildAttempts,
 			shell.dynamicOverlayBlasBuildSuccesses,
@@ -4484,9 +4487,12 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			switch (domain)
 			{
 			case NRIRenderer::SceneBufferUploadDomain::StaticOverlay: return "static_overlay";
+			case NRIRenderer::SceneBufferUploadDomain::RuntimeSpaceLink: return "runtime_space_link";
 			case NRIRenderer::SceneBufferUploadDomain::RuntimeMutation: return "runtime_mutation";
 			case NRIRenderer::SceneBufferUploadDomain::Dynamic: return "dynamic";
 			case NRIRenderer::SceneBufferUploadDomain::LocalPlayerReflection: return "local_player_reflection";
+			case NRIRenderer::SceneBufferUploadDomain::RuntimeDebugSphere: return "runtime_debug_sphere";
+			case NRIRenderer::SceneBufferUploadDomain::SurfaceLightOverlay: return "surface_light_overlay";
 			case NRIRenderer::SceneBufferUploadDomain::PersistentVoxelMaterial: return "persistent_voxel_material";
 			case NRIRenderer::SceneBufferUploadDomain::Count: break;
 			}

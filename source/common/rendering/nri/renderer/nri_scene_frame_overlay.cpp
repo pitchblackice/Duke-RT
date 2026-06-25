@@ -332,7 +332,7 @@ void BuildNRISceneFrameOverlay(
 				nullptr,
 				inputs.runtimeSpaceLinkMaterials,
 				inputs.runtimeSpaceLinkTelemetry,
-				NRIRenderer::SceneBufferUploadDomain::StaticOverlay,
+				NRIRenderer::SceneBufferUploadDomain::RuntimeSpaceLink,
 				overlayGeometry,
 				overlayMaterialBridge,
 				uploadSpans);
@@ -380,7 +380,7 @@ void BuildNRISceneFrameOverlay(
 				nullptr,
 				inputs.runtimeDebugSphereMaterials,
 				inputs.runtimeDebugSphereTelemetry,
-				NRIRenderer::SceneBufferUploadDomain::StaticOverlay,
+				NRIRenderer::SceneBufferUploadDomain::RuntimeDebugSphere,
 				overlayGeometry,
 				overlayMaterialBridge,
 				uploadSpans);
@@ -392,7 +392,7 @@ void BuildNRISceneFrameOverlay(
 				nullptr,
 				inputs.surfaceLightMaterials,
 				inputs.surfaceLightTelemetry,
-				NRIRenderer::SceneBufferUploadDomain::StaticOverlay,
+				NRIRenderer::SceneBufferUploadDomain::SurfaceLightOverlay,
 				overlayGeometry,
 				overlayMaterialBridge,
 				uploadSpans);
