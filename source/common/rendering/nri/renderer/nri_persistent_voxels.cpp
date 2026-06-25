@@ -1332,10 +1332,10 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			continue;
 		}
 		SceneInstanceData sceneInstance = {};
-		sceneInstance.primitiveOffset = actor.primitiveOffset;
+		sceneInstance.primitiveBase = actor.primitiveOffset;
 		sceneInstance.dataSource = PersistentVoxelSceneDataSource;
-		sceneInstance.reserved0 = actor.materialOffset;
-		sceneInstance.reserved1 = actor.materialCount;
+		sceneInstance.materialBase = actor.materialOffset;
+		sceneInstance.materialCount = actor.materialCount;
 		sceneInstance.visibilityChunk = actor.visibilityChunkIndex;
 		for (uint32_t i = 0; i < 12; ++i)
 		{

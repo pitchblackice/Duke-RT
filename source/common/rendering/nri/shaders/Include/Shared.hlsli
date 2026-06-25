@@ -92,12 +92,14 @@ struct MaterialData
 
 struct SceneInstanceData
 {
-	uint primitiveOffset;
+	uint primitiveBase;
 	uint dataSource;
-	uint reserved0;
-	uint reserved1;
+	uint materialBase;
+	uint materialCount;
 	uint visibilityChunk;
-	uint3 reserved2;
+	uint metadata0;
+	uint metadata1;
+	uint metadata2;
 	float4 currentTransformRow0;
 	float4 currentTransformRow1;
 	float4 currentTransformRow2;

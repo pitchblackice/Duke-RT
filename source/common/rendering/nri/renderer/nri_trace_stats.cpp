@@ -290,7 +290,7 @@ void NRITraceShaderStats::Readback(
 	{
 		if (instance.dataSource == nri_diag::SceneDataSourcePersistentVoxel && input.estimatePersistentVoxelPrimitiveCount != nullptr)
 		{
-			const uint32_t persistentVoxelPrimitiveCount = input.estimatePersistentVoxelPrimitiveCount(input.user, instance.primitiveOffset);
+			const uint32_t persistentVoxelPrimitiveCount = input.estimatePersistentVoxelPrimitiveCount(input.user, instance.primitiveBase);
 			if (persistentVoxelPrimitiveCount > 0)
 			{
 				return persistentVoxelPrimitiveCount;
@@ -298,7 +298,7 @@ void NRITraceShaderStats::Readback(
 		}
 
 		const uint32_t total = getDataSourcePrimitiveTotal(instance.dataSource);
-		if (instance.primitiveOffset >= total)
+		if (instance.primitiveBase >= total)
 		{
 			return 0;
 		}
@@ -307,13 +307,13 @@ void NRITraceShaderStats::Readback(
 		for (const SceneInstanceData& other : sceneInstances)
 		{
 			if (other.dataSource == instance.dataSource &&
-				other.primitiveOffset > instance.primitiveOffset &&
-				other.primitiveOffset < endOffset)
+				other.primitiveBase > instance.primitiveBase &&
+				other.primitiveBase < endOffset)
 			{
-				endOffset = other.primitiveOffset;
+				endOffset = other.primitiveBase;
 			}
 		}
-		return endOffset - instance.primitiveOffset;
+		return endOffset - instance.primitiveBase;
 	};
 
 	const uint32_t hotCount = std::min<uint32_t>((uint32_t)hotCandidates.size(), NRI_TRACE_SHADER_HOT_INSTANCE_COUNT);
@@ -325,10 +325,10 @@ void NRITraceShaderStats::Readback(
 		NRITraceShaderHotInstance& hot = outStats.hotInstances[hotIndex];
 		hot.instanceId = candidate.instanceId;
 		hot.dataSource = instance.dataSource;
-		hot.primitiveOffset = instance.primitiveOffset;
+		hot.primitiveOffset = instance.primitiveBase;
 		hot.primitiveCount = estimateInstancePrimitiveCount(instance);
-		hot.metadata0 = instance.reserved0;
-		hot.metadata1 = instance.reserved1;
+		hot.metadata0 = instance.metadata0;
+		hot.metadata1 = instance.metadata1;
 		hot.committed = candidate.committed;
 		hot.accepted = candidate.accepted;
 		hot.primaryCommitted = outStats.counters[NRI_TRACE_SHADER_INSTANCE_KIND_COMMITTED_BASE + 0u * NRI_TRACE_SHADER_INSTANCE_BUCKET_COUNT + candidate.instanceId];

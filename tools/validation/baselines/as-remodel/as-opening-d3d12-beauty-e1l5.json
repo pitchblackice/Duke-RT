@@ -136,9 +136,9 @@
                                               }
                                           ]
                  },
-    "runs":  1,
+    "runs":  2,
     "compareFrameCount":  16,
-    "capturedUtc":  "2026-06-24T08:21:08.2415785Z",
+    "capturedUtc":  "2026-06-25T02:12:32.4907031Z",
     "exact":  {
                   "map":  "E1L5",
                   "api":  "d3d12",
@@ -148,7 +148,7 @@
     "ranges":  {
                    "prims":  {
                                  "min":  8550,
-                                 "max":  8550
+                                 "max":  8552
                              },
                    "mats":  {
                                 "min":  3134,
@@ -222,8 +222,8 @@
                                                                                  "max":  2
                                                                              },
                                                        "blas_voxel_actor":  {
-                                                                                "min":  12,
-                                                                                "max":  14
+                                                                                "min":  29,
+                                                                                "max":  31
                                                                             },
                                                        "entries_static":  {
                                                                               "min":  481,
@@ -435,6 +435,26 @@
                                                                                             "min":  0,
                                                                                             "max":  0
                                                                                         },
+                                                                "route_eligible_actors":  {
+                                                                                              "min":  0,
+                                                                                              "max":  0
+                                                                                          },
+                                                                "route_reject_missing_resident":  {
+                                                                                                      "min":  0,
+                                                                                                      "max":  0
+                                                                                                  },
+                                                                "route_reject_non_local":  {
+                                                                                               "min":  0,
+                                                                                               "max":  0
+                                                                                           },
+                                                                "route_reject_transform_keyed":  {
+                                                                                                     "min":  0,
+                                                                                                     "max":  0
+                                                                                                 },
+                                                                "route_reject_geometry_mismatch":  {
+                                                                                                       "min":  0,
+                                                                                                       "max":  0
+                                                                                                   },
                                                                 "reject_missing_key":  {
                                                                                            "min":  0,
                                                                                            "max":  0

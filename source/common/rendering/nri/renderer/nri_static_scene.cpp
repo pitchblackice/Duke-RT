@@ -1091,7 +1091,15 @@ namespace
 		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 		instance.accelerationStructureHandle = services.getAccelerationStructureHandle(services.user, accelerationStructure);
 		NRIRaySceneBuilder builder(outTlasInstances, outSceneInstances);
-		builder.AddLegacyInstance(instance, { primitiveOffset, nri_diag::SceneDataSourceStatic, chunkIndex, sectorIndex });
+		SceneInstanceData sceneRecord = {};
+		sceneRecord.primitiveBase = primitiveOffset;
+		sceneRecord.dataSource = nri_diag::SceneDataSourceStatic;
+		sceneRecord.materialBase = 0;
+		sceneRecord.materialCount = UINT32_MAX;
+		sceneRecord.visibilityChunk = UINT32_MAX;
+		sceneRecord.metadata0 = chunkIndex;
+		sceneRecord.metadata1 = sectorIndex;
+		builder.AddLegacyInstance(instance, sceneRecord);
 	}
 
 	void BuildStaticMapInstancesFromCache(

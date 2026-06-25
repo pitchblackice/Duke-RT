@@ -652,7 +652,7 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 			{
 				mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount++;
 				mLastPerfShellTraceStats.sceneRecordAuditPersistentVoxel++;
-				if (instance.reserved1 != UINT32_MAX && instance.reserved1 > 0)
+				if (instance.materialCount != UINT32_MAX && instance.materialCount > 0)
 				{
 					mLastPerfShellTraceStats.sceneRecordAuditMaterialIndirection++;
 					mLastPerfShellTraceStats.hitMetadataPersistentMaterialBaseRecords++;

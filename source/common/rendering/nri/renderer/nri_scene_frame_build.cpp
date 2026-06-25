@@ -1191,7 +1191,13 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						dynamicInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 						dynamicInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*dynamicBottomLevelAS.accelerationStructure);
 						NRIRaySceneBuilder builder(instances, sceneInstances);
-						builder.AddLegacyInstance(dynamicInstance, { 0u, nri_diag::SceneDataSourceDynamic, 0u, UINT32_MAX });
+						SceneInstanceData sceneRecord = {};
+						sceneRecord.primitiveBase = 0u;
+						sceneRecord.dataSource = nri_diag::SceneDataSourceDynamic;
+						sceneRecord.materialBase = 0u;
+						sceneRecord.materialCount = activeGpuMaterials != nullptr ? (uint32_t)activeGpuMaterials->size() : UINT32_MAX;
+						sceneRecord.visibilityChunk = UINT32_MAX;
+						builder.AddLegacyInstance(dynamicInstance, sceneRecord);
 					}
 
 					selectedStaticSceneInstanceCount = 0;
@@ -1493,7 +1499,13 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		sceneInstances.clear();
 		if (buffersReady)
 		{
-			sceneInstances.push_back({ 0u, nri_diag::SceneDataSourceDynamic, 0u, UINT32_MAX });
+			SceneInstanceData sceneRecord = {};
+			sceneRecord.primitiveBase = 0u;
+			sceneRecord.dataSource = nri_diag::SceneDataSourceDynamic;
+			sceneRecord.materialBase = 0u;
+			sceneRecord.materialCount = (uint32_t)capturedGpuMaterials.size();
+			sceneRecord.visibilityChunk = UINT32_MAX;
+			sceneInstances.push_back(sceneRecord);
 			buffersReady = NRISceneUploadManager::UpdateSceneDataSet(*this,
 				GetCurrentDynamicVertexBuffer(),
 				GetCurrentDynamicIndexBuffer(),

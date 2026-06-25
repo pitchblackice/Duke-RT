@@ -136,9 +136,9 @@
                                               }
                                           ]
                  },
-    "runs":  1,
+    "runs":  2,
     "compareFrameCount":  16,
-    "capturedUtc":  "2026-06-24T08:21:21.9680046Z",
+    "capturedUtc":  "2026-06-25T02:13:15.4790899Z",
     "exact":  {
                   "map":  "E2L4",
                   "api":  "d3d12",
@@ -147,12 +147,12 @@
               },
     "ranges":  {
                    "prims":  {
-                                 "min":  7829,
-                                 "max":  7829
+                                 "min":  7811,
+                                 "max":  7895
                              },
                    "mats":  {
-                                "min":  2824,
-                                "max":  2956
+                                "min":  2823,
+                                "max":  2985
                             },
                    "scene_instances":  {
                                            "min":  420,
@@ -172,7 +172,7 @@
                                        },
                    "emissive_instances":  {
                                               "min":  529,
-                                              "max":  543
+                                              "max":  531
                                           },
                    "render_width":  {
                                         "min":  1920,
@@ -222,8 +222,8 @@
                                                                                  "max":  2
                                                                              },
                                                        "blas_voxel_actor":  {
-                                                                                "min":  12,
-                                                                                "max":  14
+                                                                                "min":  32,
+                                                                                "max":  34
                                                                             },
                                                        "entries_static":  {
                                                                               "min":  419,
@@ -244,7 +244,7 @@
                                                    },
                          "PERF pt as reuse NRI:":  {
                                                        "voxel_unique_geometry_keys":  {
-                                                                                          "min":  0,
+                                                                                          "min":  1,
                                                                                           "max":  2
                                                                                       },
                                                        "voxel_actor_instances":  {
@@ -272,11 +272,11 @@
                                                                                                   "max":  1
                                                                                               },
                                                        "blas_cache_hits":  {
-                                                                               "min":  0,
+                                                                               "min":  1,
                                                                                "max":  9
                                                                            },
                                                        "blas_built_this_frame":  {
-                                                                                     "min":  2,
+                                                                                     "min":  0,
                                                                                      "max":  5
                                                                                  },
                                                        "monolithic_dynamic_blas_builds":  {
@@ -435,6 +435,26 @@
                                                                                             "min":  0,
                                                                                             "max":  0
                                                                                         },
+                                                                "route_eligible_actors":  {
+                                                                                              "min":  0,
+                                                                                              "max":  0
+                                                                                          },
+                                                                "route_reject_missing_resident":  {
+                                                                                                      "min":  0,
+                                                                                                      "max":  0
+                                                                                                  },
+                                                                "route_reject_non_local":  {
+                                                                                               "min":  0,
+                                                                                               "max":  0
+                                                                                           },
+                                                                "route_reject_transform_keyed":  {
+                                                                                                     "min":  0,
+                                                                                                     "max":  0
+                                                                                                 },
+                                                                "route_reject_geometry_mismatch":  {
+                                                                                                       "min":  0,
+                                                                                                       "max":  0
+                                                                                                   },
                                                                 "reject_missing_key":  {
                                                                                            "min":  0,
                                                                                            "max":  0

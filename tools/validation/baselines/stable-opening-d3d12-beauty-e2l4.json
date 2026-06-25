@@ -22,7 +22,7 @@
                  },
     "runs":  2,
     "compareFrameCount":  16,
-    "capturedUtc":  "2026-06-23T05:24:57.6817427Z",
+    "capturedUtc":  "2026-06-25T02:08:09.6149340Z",
     "exact":  {
                   "map":  "E2L4",
                   "api":  "d3d12",
@@ -31,12 +31,12 @@
               },
     "ranges":  {
                    "prims":  {
-                                 "min":  7829,
-                                 "max":  7829
+                                 "min":  7811,
+                                 "max":  7895
                              },
                    "mats":  {
-                                "min":  2824,
-                                "max":  2956
+                                "min":  2823,
+                                "max":  2985
                             },
                    "scene_instances":  {
                                            "min":  420,
@@ -74,5 +74,8 @@
                                          "min":  1080,
                                          "max":  1080
                                      }
-               }
+               },
+    "prefixRanges":  {
+
+                     }
 }

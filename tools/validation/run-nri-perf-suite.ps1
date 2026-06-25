@@ -68,13 +68,17 @@ function Get-DefaultPerfScenarios {
 }
 
 function Resolve-PerfScenarioPath {
-    param([Parameter(Mandatory = $true)][string]$NameOrPath)
+	param([Parameter(Mandatory = $true)][string]$NameOrPath)
 
-    if (Test-Path -LiteralPath $NameOrPath) {
-        return (Resolve-Path -LiteralPath $NameOrPath).Path
-    }
+	if (Test-Path -LiteralPath $NameOrPath -PathType Leaf) {
+		$item = Get-Item -LiteralPath $NameOrPath
+		if ($item.Extension -ne ".json") {
+			throw "perf scenario path must be a .json file: $NameOrPath"
+		}
+		return $item.FullName
+	}
 
-    $candidate = Join-Path $PSScriptRoot "perf-scenarios/$NameOrPath.json"
+	$candidate = Join-Path $PSScriptRoot "perf-scenarios/$NameOrPath.json"
     if (Test-Path -LiteralPath $candidate) {
         return (Resolve-Path -LiteralPath $candidate).Path
     }

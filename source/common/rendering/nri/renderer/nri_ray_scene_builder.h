@@ -20,13 +20,18 @@ public:
 		return (uint32_t)mSceneRecords.size();
 	}
 
-	uint32_t AddLegacyInstance(nri::TopLevelInstance instance, const SceneInstanceData& sceneRecord)
+	uint32_t AddInstance(nri::TopLevelInstance instance, const SceneInstanceData& sceneRecord)
 	{
 		const uint32_t sceneRecordIndex = NextSceneRecordIndex();
 		instance.instanceId = sceneRecordIndex;
 		mTlasInstances.push_back(instance);
 		mSceneRecords.push_back(sceneRecord);
 		return sceneRecordIndex;
+	}
+
+	uint32_t AddLegacyInstance(nri::TopLevelInstance instance, const SceneInstanceData& sceneRecord)
+	{
+		return AddInstance(instance, sceneRecord);
 	}
 
 private:

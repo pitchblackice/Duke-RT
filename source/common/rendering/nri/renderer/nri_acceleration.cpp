@@ -333,7 +333,7 @@ bool NRIAccelerationStructureManager::BuildEmissiveTopLevel(NRIRenderer& rendere
 		const SceneInstanceData& sceneInstance = renderer.mBoundSceneInstances[sceneInstanceIndex];
 		if (sceneInstance.dataSource == nri_diag::SceneDataSourceStatic)
 		{
-			staticSceneInstanceByPrimitiveOffset.emplace(sceneInstance.primitiveOffset, sceneInstanceIndex);
+			staticSceneInstanceByPrimitiveOffset.emplace(sceneInstance.primitiveBase, sceneInstanceIndex);
 		}
 		else if (sceneInstance.dataSource == nri_diag::SceneDataSourceDynamic && dynamicSceneInstanceIndex == UINT32_MAX)
 		{
