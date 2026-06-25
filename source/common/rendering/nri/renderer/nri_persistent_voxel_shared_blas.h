@@ -50,6 +50,54 @@ struct NRIPersistentVoxelSharedBlasFrameStats
 	uint32_t rejectInvalidCounts = 0;
 	uint32_t rejectBuildBudget = 0;
 	uint32_t rejectGeometryMismatch = 0;
+	uint32_t profileActiveActors = 0;
+	uint32_t profileLocalSpaceActors = 0;
+	uint32_t profileBakedTransformActors = 0;
+	uint32_t profileUnknownSpaceActors = 0;
+	uint32_t profileTransformKeyedActors = 0;
+	uint32_t profileLocalIdentityTransformActors = 0;
+	uint32_t profileLocalNonIdentityTransformActors = 0;
+	uint32_t profileShareableLocalActors = 0;
+	uint32_t profileShareableUniqueKeys = 0;
+	uint32_t profileShareableDuplicateActorRefs = 0;
+	uint32_t profileShareableSingleActorKeys = 0;
+	uint32_t profileShareableMultiActorKeys = 0;
+	uint32_t profileResidentShareableKeys = 0;
+	uint32_t profileEligibleNotResidentActors = 0;
+	uint32_t profileRejectMissingMesh = 0;
+	uint32_t profileRejectNonLocal = 0;
+	uint32_t profileRejectTransformKeyed = 0;
+	uint32_t profileRejectMissingBuffers = 0;
+	uint32_t profileRejectInvalidCounts = 0;
+	uint32_t profileRejectInvalidMaterial = 0;
+	uint32_t profileRejectInvalidTransform = 0;
+	uint32_t profileRejectGeometryMismatch = 0;
+};
+
+struct NRIPersistentVoxelLocalShareProfileStats
+{
+	uint32_t activeActors = 0;
+	uint32_t localSpaceActors = 0;
+	uint32_t bakedTransformActors = 0;
+	uint32_t unknownSpaceActors = 0;
+	uint32_t transformKeyedActors = 0;
+	uint32_t localIdentityTransformActors = 0;
+	uint32_t localNonIdentityTransformActors = 0;
+	uint32_t shareableLocalActors = 0;
+	uint32_t shareableUniqueKeys = 0;
+	uint32_t shareableDuplicateActorRefs = 0;
+	uint32_t shareableSingleActorKeys = 0;
+	uint32_t shareableMultiActorKeys = 0;
+	uint32_t residentShareableKeys = 0;
+	uint32_t eligibleNotResidentActors = 0;
+	uint32_t rejectMissingMesh = 0;
+	uint32_t rejectNonLocal = 0;
+	uint32_t rejectTransformKeyed = 0;
+	uint32_t rejectMissingBuffers = 0;
+	uint32_t rejectInvalidCounts = 0;
+	uint32_t rejectInvalidMaterial = 0;
+	uint32_t rejectInvalidTransform = 0;
+	uint32_t rejectGeometryMismatch = 0;
 };
 
 struct NRIPersistentVoxelSharedBlasEntry
@@ -138,6 +186,32 @@ public:
 	void RecordRouteEligibleActor()
 	{
 		mFrameStats.routeEligibleActors++;
+	}
+
+	void RecordLocalShareProfile(const NRIPersistentVoxelLocalShareProfileStats& profile)
+	{
+		mFrameStats.profileActiveActors = profile.activeActors;
+		mFrameStats.profileLocalSpaceActors = profile.localSpaceActors;
+		mFrameStats.profileBakedTransformActors = profile.bakedTransformActors;
+		mFrameStats.profileUnknownSpaceActors = profile.unknownSpaceActors;
+		mFrameStats.profileTransformKeyedActors = profile.transformKeyedActors;
+		mFrameStats.profileLocalIdentityTransformActors = profile.localIdentityTransformActors;
+		mFrameStats.profileLocalNonIdentityTransformActors = profile.localNonIdentityTransformActors;
+		mFrameStats.profileShareableLocalActors = profile.shareableLocalActors;
+		mFrameStats.profileShareableUniqueKeys = profile.shareableUniqueKeys;
+		mFrameStats.profileShareableDuplicateActorRefs = profile.shareableDuplicateActorRefs;
+		mFrameStats.profileShareableSingleActorKeys = profile.shareableSingleActorKeys;
+		mFrameStats.profileShareableMultiActorKeys = profile.shareableMultiActorKeys;
+		mFrameStats.profileResidentShareableKeys = profile.residentShareableKeys;
+		mFrameStats.profileEligibleNotResidentActors = profile.eligibleNotResidentActors;
+		mFrameStats.profileRejectMissingMesh = profile.rejectMissingMesh;
+		mFrameStats.profileRejectNonLocal = profile.rejectNonLocal;
+		mFrameStats.profileRejectTransformKeyed = profile.rejectTransformKeyed;
+		mFrameStats.profileRejectMissingBuffers = profile.rejectMissingBuffers;
+		mFrameStats.profileRejectInvalidCounts = profile.rejectInvalidCounts;
+		mFrameStats.profileRejectInvalidMaterial = profile.rejectInvalidMaterial;
+		mFrameStats.profileRejectInvalidTransform = profile.rejectInvalidTransform;
+		mFrameStats.profileRejectGeometryMismatch = profile.rejectGeometryMismatch;
 	}
 
 	void RecordRouteFallback(uint64_t sharedBlasKey, const char* reason)

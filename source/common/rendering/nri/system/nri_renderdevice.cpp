@@ -3922,6 +3922,34 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.voxelSharedBlasRejectInvalidCounts,
 			shell.voxelSharedBlasRejectBuildBudget,
 			shell.voxelSharedBlasRejectGeometryMismatch);
+		Printf(
+			"PERF pt voxel local share profile NRI: frame=%llu active_actors=%u local_space=%u baked_transform=%u unknown_space=%u transform_keyed=%u local_identity_transform=%u local_non_identity_transform=%u shareable_local=%u shareable_unique_keys=%u shareable_duplicate_refs=%u shareable_single_actor_keys=%u shareable_multi_actor_keys=%u resident_shareable_keys=%u eligible_not_resident=%u reject_missing_mesh=%u reject_non_local=%u reject_transform_keyed=%u reject_missing_buffers=%u reject_invalid_counts=%u reject_invalid_material=%u reject_invalid_transform=%u reject_geometry_mismatch=%u resident_bytes=%llu active_referenced_bytes=%llu unreferenced_resident_bytes=%llu\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.voxelLocalShareProfileActiveActors,
+			shell.voxelLocalShareProfileLocalSpaceActors,
+			shell.voxelLocalShareProfileBakedTransformActors,
+			shell.voxelLocalShareProfileUnknownSpaceActors,
+			shell.voxelLocalShareProfileTransformKeyedActors,
+			shell.voxelLocalShareProfileLocalIdentityTransformActors,
+			shell.voxelLocalShareProfileLocalNonIdentityTransformActors,
+			shell.voxelLocalShareProfileShareableLocalActors,
+			shell.voxelLocalShareProfileShareableUniqueKeys,
+			shell.voxelLocalShareProfileShareableDuplicateActorRefs,
+			shell.voxelLocalShareProfileShareableSingleActorKeys,
+			shell.voxelLocalShareProfileShareableMultiActorKeys,
+			shell.voxelLocalShareProfileResidentShareableKeys,
+			shell.voxelLocalShareProfileEligibleNotResidentActors,
+			shell.voxelLocalShareProfileRejectMissingMesh,
+			shell.voxelLocalShareProfileRejectNonLocal,
+			shell.voxelLocalShareProfileRejectTransformKeyed,
+			shell.voxelLocalShareProfileRejectMissingBuffers,
+			shell.voxelLocalShareProfileRejectInvalidCounts,
+			shell.voxelLocalShareProfileRejectInvalidMaterial,
+			shell.voxelLocalShareProfileRejectInvalidTransform,
+			shell.voxelLocalShareProfileRejectGeometryMismatch,
+			(unsigned long long)shell.voxelSharedBlasResidentBytes,
+			(unsigned long long)shell.voxelSharedBlasActiveReferencedBytes,
+			(unsigned long long)shell.voxelSharedBlasUnreferencedResidentBytes);
 		if (shader.valid)
 		{
 			const auto& c = shader.counters;

@@ -1088,6 +1088,157 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			}
 			return left->identityKey < right->identityKey;
 		});
+	auto persistentVoxelTransformFinite = [](const std::array<float, 12>& transform) -> bool
+	{
+		for (float value : transform)
+		{
+			if (!std::isfinite(value))
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	auto persistentVoxelTransformIdentity = [](const std::array<float, 12>& transform) -> bool
+	{
+		constexpr float Epsilon = 0.0001f;
+		constexpr float Identity[12] =
+		{
+			1.0f, 0.0f, 0.0f, 0.0f,
+			0.0f, 1.0f, 0.0f, 0.0f,
+			0.0f, 0.0f, 1.0f, 0.0f
+		};
+		for (uint32_t i = 0; i < 12; ++i)
+		{
+			if (std::abs(transform[i] - Identity[i]) > Epsilon)
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	if (voxelStatsEnabled)
+	{
+		NRIPersistentVoxelLocalShareProfileStats localShareProfile = {};
+		std::unordered_map<uint64_t, uint32_t> localShareableKeyRefs;
+		localShareableKeyRefs.reserve(persistentVoxelTlasActors.size());
+		std::unordered_set<uint64_t> localShareableResidentKeys;
+		localShareableResidentKeys.reserve(persistentVoxelTlasActors.size());
+		for (const PersistentVoxelBatch::ActorEntry* actorPtr : persistentVoxelTlasActors)
+		{
+			const PersistentVoxelBatch::ActorEntry& actor = *actorPtr;
+			localShareProfile.activeActors++;
+			auto meshResourceIt = meshVariantResources.find(actor.meshResourceKey);
+			if (meshResourceIt == meshVariantResources.end())
+			{
+				localShareProfile.rejectMissingMesh++;
+				continue;
+			}
+			const PersistentVoxelMeshVariantResource& meshResource = meshResourceIt->second;
+			if (meshResource.meshBakeSpace == nri_scene::VoxelMeshBakeSpace::LocalSpace)
+			{
+				localShareProfile.localSpaceActors++;
+				if (persistentVoxelTransformIdentity(actor.instanceTransform))
+				{
+					localShareProfile.localIdentityTransformActors++;
+				}
+				else
+				{
+					localShareProfile.localNonIdentityTransformActors++;
+				}
+			}
+			else if (meshResource.meshBakeSpace == nri_scene::VoxelMeshBakeSpace::BakedTransform)
+			{
+				localShareProfile.bakedTransformActors++;
+				localShareProfile.rejectNonLocal++;
+				continue;
+			}
+			else
+			{
+				localShareProfile.unknownSpaceActors++;
+				localShareProfile.rejectNonLocal++;
+				continue;
+			}
+			if (settings.transformKeyed)
+			{
+				localShareProfile.transformKeyedActors++;
+				localShareProfile.rejectTransformKeyed++;
+				continue;
+			}
+			if (meshResource.vertexBuffer.buffer == nullptr || meshResource.indexBuffer.buffer == nullptr)
+			{
+				localShareProfile.rejectMissingBuffers++;
+				continue;
+			}
+			if (meshResource.vertexCount == 0 || meshResource.indexCount == 0 || meshResource.primitiveCount == 0 ||
+				actor.primitiveCount == 0 || actor.indexCount == 0)
+			{
+				localShareProfile.rejectInvalidCounts++;
+				continue;
+			}
+			const bool primitiveArenaRangeValid =
+				(uint64_t)actor.primitiveOffset + (uint64_t)actor.primitiveCount <= (uint64_t)arenaPrimitiveCursor;
+			const bool materialArenaRangeValid =
+				actor.materialCount != 0 &&
+				(uint64_t)actor.materialOffset + (uint64_t)actor.materialCount <= (uint64_t)arenaMaterialCursor;
+			if (!primitiveArenaRangeValid || !materialArenaRangeValid)
+			{
+				localShareProfile.rejectInvalidMaterial++;
+				continue;
+			}
+			const bool meshRangeMatches =
+				actor.primitiveOffset == meshResource.primitiveOffset &&
+				actor.primitiveCount == meshResource.primitiveCount &&
+				actor.indexOffset == meshResource.indexOffset &&
+				actor.indexCount == meshResource.indexCount &&
+				actor.geometrySignature == meshResource.geometrySignature;
+			if (!meshRangeMatches)
+			{
+				localShareProfile.rejectGeometryMismatch++;
+				continue;
+			}
+			if (!persistentVoxelTransformFinite(actor.instanceTransform) ||
+				!persistentVoxelTransformFinite(actor.previousInstanceTransform))
+			{
+				localShareProfile.rejectInvalidTransform++;
+				continue;
+			}
+			localShareProfile.shareableLocalActors++;
+			localShareableKeyRefs[actor.meshResourceKey]++;
+			const NRIPersistentVoxelSharedBlasEntry* sharedEntry = sharedBlasCache.Find(actor.meshResourceKey);
+			const bool residentSharedEntry =
+				sharedEntry != nullptr &&
+				sharedEntry->state == NRIPersistentVoxelSharedBlasState::Resident &&
+				sharedEntry->accelerationStructure.accelerationStructure != nullptr &&
+				sharedEntry->geometrySignature == actor.geometrySignature &&
+				sharedEntry->vertexCount == meshResource.vertexCount &&
+				sharedEntry->indexCount == meshResource.indexCount &&
+				sharedEntry->primitiveCount == meshResource.primitiveCount;
+			if (residentSharedEntry)
+			{
+				localShareableResidentKeys.insert(actor.meshResourceKey);
+			}
+			else
+			{
+				localShareProfile.eligibleNotResidentActors++;
+			}
+		}
+		localShareProfile.shareableUniqueKeys = (uint32_t)localShareableKeyRefs.size();
+		localShareProfile.residentShareableKeys = (uint32_t)localShareableResidentKeys.size();
+		for (const auto& pair : localShareableKeyRefs)
+		{
+			if (pair.second > 1u)
+			{
+				localShareProfile.shareableMultiActorKeys++;
+				localShareProfile.shareableDuplicateActorRefs += pair.second - 1u;
+			}
+			else
+			{
+				localShareProfile.shareableSingleActorKeys++;
+			}
+		}
+		sharedBlasCache.RecordLocalShareProfile(localShareProfile);
+	}
 	NRIRaySceneBuilder raySceneBuilder(instances, sceneInstances);
 	for (PersistentVoxelBatch::ActorEntry* actorPtr : persistentVoxelTlasActors)
 	{
@@ -1168,17 +1319,6 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			persistentVoxelTlasMissingSkipPrimitiveCount += actor.primitiveCount;
 			continue;
 		}
-		auto persistentVoxelTransformFinite = [](const std::array<float, 12>& transform) -> bool
-		{
-			for (float value : transform)
-			{
-				if (!std::isfinite(value))
-				{
-					return false;
-				}
-			}
-			return true;
-		};
 		const bool primitiveArenaRangeValid =
 			(uint64_t)actor.primitiveOffset + (uint64_t)actor.primitiveCount <= (uint64_t)arenaPrimitiveCursor;
 		const bool materialArenaRangeValid =
