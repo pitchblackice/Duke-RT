@@ -1671,6 +1671,8 @@ NRIPersistentVoxelMemoryUsage NRIPersistentVoxelResidency::GetMemoryUsage() cons
 		accumulateBuffer(pair.second.indexBuffer, usage.sceneBufferBytes);
 		accumulateAs(pair.second.accelerationStructure, usage.accelerationStructureBytes);
 	}
+	const NRIPersistentVoxelSharedBlasFrameStats& sharedStats = sharedBlasCache.LastFrameStats();
+	usage.accelerationStructureBytes += sharedStats.residentBytes;
 	return usage;
 }
 

@@ -32,6 +32,11 @@ struct NRIPersistentVoxelSharedBlasFrameStats
 	uint32_t routedLegacy = 0;
 	uint32_t routedShared = 0;
 	uint32_t fallbackLastValid = 0;
+	uint32_t activeReferencedAssets = 0;
+	uint32_t unreferencedResidentAssets = 0;
+	uint64_t residentBytes = 0;
+	uint64_t activeReferencedBytes = 0;
+	uint64_t unreferencedResidentBytes = 0;
 	uint32_t routeEligibleActors = 0;
 	uint32_t routeRejectMissingResident = 0;
 	uint32_t routeRejectNonLocal = 0;
@@ -256,6 +261,17 @@ public:
 			if (pair.second.state == NRIPersistentVoxelSharedBlasState::Resident)
 			{
 				mFrameStats.residentSharedAssets++;
+				mFrameStats.residentBytes += pair.second.memoryEstimateBytes;
+				if (pair.second.frameReferences != 0)
+				{
+					mFrameStats.activeReferencedAssets++;
+					mFrameStats.activeReferencedBytes += pair.second.memoryEstimateBytes;
+				}
+				else
+				{
+					mFrameStats.unreferencedResidentAssets++;
+					mFrameStats.unreferencedResidentBytes += pair.second.memoryEstimateBytes;
+				}
 			}
 			else if (pair.second.state == NRIPersistentVoxelSharedBlasState::Building)
 			{

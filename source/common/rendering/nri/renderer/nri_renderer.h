@@ -1389,6 +1389,11 @@ public:
 		uint32_t voxelSharedBlasRoutedLegacy = 0;
 		uint32_t voxelSharedBlasRoutedShared = 0;
 		uint32_t voxelSharedBlasFallbackLastValid = 0;
+		uint32_t voxelSharedBlasActiveReferencedAssets = 0;
+		uint32_t voxelSharedBlasUnreferencedResidentAssets = 0;
+		uint64_t voxelSharedBlasResidentBytes = 0;
+		uint64_t voxelSharedBlasActiveReferencedBytes = 0;
+		uint64_t voxelSharedBlasUnreferencedResidentBytes = 0;
 		uint32_t voxelSharedBlasRouteEligibleActors = 0;
 		uint32_t voxelSharedBlasRouteRejectMissingResident = 0;
 		uint32_t voxelSharedBlasRouteRejectNonLocal = 0;
