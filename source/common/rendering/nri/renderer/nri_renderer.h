@@ -1400,6 +1400,8 @@ public:
 		uint32_t voxelSharedBlasRouteRejectMissingResident = 0;
 		uint32_t voxelSharedBlasRouteRejectNonLocal = 0;
 		uint32_t voxelSharedBlasRouteRejectTransformKeyed = 0;
+		uint32_t voxelSharedBlasRouteRejectInvalidMaterial = 0;
+		uint32_t voxelSharedBlasRouteRejectInvalidTransform = 0;
 		uint32_t voxelSharedBlasRouteRejectGeometryMismatch = 0;
 		uint32_t voxelSharedBlasRejectMissingKey = 0;
 		uint32_t voxelSharedBlasRejectDisabled = 0;

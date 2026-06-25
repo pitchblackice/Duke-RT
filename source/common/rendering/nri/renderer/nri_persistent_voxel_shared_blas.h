@@ -41,6 +41,8 @@ struct NRIPersistentVoxelSharedBlasFrameStats
 	uint32_t routeRejectMissingResident = 0;
 	uint32_t routeRejectNonLocal = 0;
 	uint32_t routeRejectTransformKeyed = 0;
+	uint32_t routeRejectInvalidMaterial = 0;
+	uint32_t routeRejectInvalidTransform = 0;
 	uint32_t routeRejectGeometryMismatch = 0;
 	uint32_t rejectMissingKey = 0;
 	uint32_t rejectDisabled = 0;
@@ -320,6 +322,14 @@ public:
 		else if (std::strcmp(reason, "transform-keyed") == 0)
 		{
 			mFrameStats.routeRejectTransformKeyed++;
+		}
+		else if (std::strcmp(reason, "invalid-material") == 0)
+		{
+			mFrameStats.routeRejectInvalidMaterial++;
+		}
+		else if (std::strcmp(reason, "invalid-transform") == 0)
+		{
+			mFrameStats.routeRejectInvalidTransform++;
 		}
 		else if (std::strcmp(reason, "geometry-mismatch") == 0)
 		{

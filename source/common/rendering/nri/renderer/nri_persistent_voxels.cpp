@@ -277,6 +277,86 @@ namespace
 		return PersistentVoxelSharedBlasBuildResult::Built;
 	}
 
+	bool PersistentVoxelTransformFinite(const std::array<float, 12>& transform)
+	{
+		for (float value : transform)
+		{
+			if (!std::isfinite(value))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	struct PersistentVoxelSharedBlasRouteEvaluation
+	{
+		const NRIPersistentVoxelSharedBlasEntry* sharedEntry = nullptr;
+		const char* rejectReason = nullptr;
+		bool routeEligible = false;
+		bool canRoute = false;
+	};
+
+	PersistentVoxelSharedBlasRouteEvaluation EvaluatePersistentVoxelSharedBlasRoute(
+		const PersistentVoxelBatch::ActorEntry& actor,
+		const PersistentVoxelMeshVariantResource& meshResource,
+		const NRIPersistentVoxelSettings& settings,
+		uint32_t arenaPrimitiveCursor,
+		uint32_t arenaMaterialCursor,
+		const NRIPersistentVoxelSharedBlasCache& sharedBlasCache)
+	{
+		PersistentVoxelSharedBlasRouteEvaluation result = {};
+		if (meshResource.meshBakeSpace != nri_scene::VoxelMeshBakeSpace::LocalSpace)
+		{
+			result.rejectReason = "non-local";
+			return result;
+		}
+		if (settings.transformKeyed)
+		{
+			result.rejectReason = "transform-keyed";
+			return result;
+		}
+		result.routeEligible = true;
+
+		const bool primitiveArenaRangeValid =
+			actor.primitiveCount != 0 &&
+			(uint64_t)actor.primitiveOffset + (uint64_t)actor.primitiveCount <= (uint64_t)arenaPrimitiveCursor;
+		const bool materialArenaRangeValid =
+			actor.materialCount != 0 &&
+			(uint64_t)actor.materialOffset + (uint64_t)actor.materialCount <= (uint64_t)arenaMaterialCursor;
+		if (!primitiveArenaRangeValid || !materialArenaRangeValid)
+		{
+			result.rejectReason = "invalid-material";
+			return result;
+		}
+		if (!PersistentVoxelTransformFinite(actor.instanceTransform) ||
+			!PersistentVoxelTransformFinite(actor.previousInstanceTransform))
+		{
+			result.rejectReason = "invalid-transform";
+			return result;
+		}
+
+		const NRIPersistentVoxelSharedBlasEntry* sharedEntry = sharedBlasCache.Find(actor.meshResourceKey);
+		if (sharedEntry == nullptr ||
+			sharedEntry->state != NRIPersistentVoxelSharedBlasState::Resident ||
+			sharedEntry->accelerationStructure.accelerationStructure == nullptr)
+		{
+			result.rejectReason = "missing-resident";
+			return result;
+		}
+		if (sharedEntry->geometrySignature != actor.geometrySignature ||
+			sharedEntry->vertexCount != meshResource.vertexCount ||
+			sharedEntry->indexCount != meshResource.indexCount ||
+			sharedEntry->primitiveCount != meshResource.primitiveCount)
+		{
+			result.rejectReason = "geometry-mismatch";
+			return result;
+		}
+		result.sharedEntry = sharedEntry;
+		result.canRoute = true;
+		return result;
+	}
+
 	uint64_t HashPersistentVoxelMaterialPayloadData(const nri_scene::MaterialBridgeData& materialBridge)
 	{
 		const uint64_t materialSize = (uint64_t)materialBridge.materials.size() * sizeof(nri_scene::MaterialData);
@@ -1912,36 +1992,25 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 		const char* sharedRouteFallbackReason = nullptr;
 		if (settings.sharedBlasRouteEnabled)
 		{
-			if (meshResourceIt->second.meshBakeSpace != nri_scene::VoxelMeshBakeSpace::LocalSpace)
+			const PersistentVoxelSharedBlasRouteEvaluation sharedRoute = EvaluatePersistentVoxelSharedBlasRoute(
+				actor,
+				meshResourceIt->second,
+				settings,
+				arenaPrimitiveCursor,
+				arenaMaterialCursor,
+				sharedBlasCache);
+			if (sharedRoute.routeEligible)
 			{
-				sharedRouteFallbackReason = "non-local";
+				sharedBlasCache.RecordRouteEligibleActor();
 			}
-			else if (settings.transformKeyed)
+			if (sharedRoute.canRoute && sharedRoute.sharedEntry != nullptr)
 			{
-				sharedRouteFallbackReason = "transform-keyed";
+				selectedAccelerationStructure = &sharedRoute.sharedEntry->accelerationStructure;
+				routedThroughSharedBlas = true;
 			}
 			else
 			{
-				sharedBlasCache.RecordRouteEligibleActor();
-				const NRIPersistentVoxelSharedBlasEntry* sharedEntry = sharedBlasCache.Find(actor.meshResourceKey);
-				if (sharedEntry == nullptr ||
-					sharedEntry->state != NRIPersistentVoxelSharedBlasState::Resident ||
-					sharedEntry->accelerationStructure.accelerationStructure == nullptr)
-				{
-					sharedRouteFallbackReason = "missing-resident";
-				}
-				else if (sharedEntry->geometrySignature != actor.geometrySignature ||
-					sharedEntry->vertexCount != meshResourceIt->second.vertexCount ||
-					sharedEntry->indexCount != meshResourceIt->second.indexCount ||
-					sharedEntry->primitiveCount != meshResourceIt->second.primitiveCount)
-				{
-					sharedRouteFallbackReason = "geometry-mismatch";
-				}
-				else
-				{
-					selectedAccelerationStructure = &sharedEntry->accelerationStructure;
-					routedThroughSharedBlas = true;
-				}
+				sharedRouteFallbackReason = sharedRoute.rejectReason;
 			}
 		}
 		persistentVoxelInstance.accelerationStructureHandle = services.GetAccelerationStructureHandle(*selectedAccelerationStructure);

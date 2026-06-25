@@ -3888,7 +3888,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.hitMetadataLegacyPrimitiveOffsetMatches,
 			shell.hitMetadataPersistentMaterialBaseRecords);
 		Printf(
-			"PERF pt voxel shared blas NRI: frame=%llu active_actors=%u unique_desired_keys=%u resident_shared_assets=%u queued_shared_assets=%u eligible_build_keys=%u build_attempts=%u build_successes=%u build_failures=%u cache_hits=%u cache_misses=%u actor_refs=%u routed_legacy=%u routed_shared=%u fallback_last_valid=%u active_referenced_assets=%u unreferenced_resident_assets=%u resident_bytes=%llu active_referenced_bytes=%llu unreferenced_resident_bytes=%llu route_eligible_actors=%u route_reject_missing_resident=%u route_reject_non_local=%u route_reject_transform_keyed=%u route_reject_geometry_mismatch=%u reject_missing_key=%u reject_disabled=%u reject_non_local=%u reject_transform_keyed=%u reject_missing_buffers=%u reject_invalid_counts=%u reject_build_budget=%u reject_geometry_mismatch=%u\n",
+			"PERF pt voxel shared blas NRI: frame=%llu active_actors=%u unique_desired_keys=%u resident_shared_assets=%u queued_shared_assets=%u eligible_build_keys=%u build_attempts=%u build_successes=%u build_failures=%u cache_hits=%u cache_misses=%u actor_refs=%u routed_legacy=%u routed_shared=%u fallback_last_valid=%u active_referenced_assets=%u unreferenced_resident_assets=%u resident_bytes=%llu active_referenced_bytes=%llu unreferenced_resident_bytes=%llu route_eligible_actors=%u route_reject_missing_resident=%u route_reject_non_local=%u route_reject_transform_keyed=%u route_reject_invalid_material=%u route_reject_invalid_transform=%u route_reject_geometry_mismatch=%u reject_missing_key=%u reject_disabled=%u reject_non_local=%u reject_transform_keyed=%u reject_missing_buffers=%u reject_invalid_counts=%u reject_build_budget=%u reject_geometry_mismatch=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.voxelSharedBlasActiveActors,
 			shell.voxelSharedBlasUniqueDesiredKeys,
@@ -3913,6 +3913,8 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.voxelSharedBlasRouteRejectMissingResident,
 			shell.voxelSharedBlasRouteRejectNonLocal,
 			shell.voxelSharedBlasRouteRejectTransformKeyed,
+			shell.voxelSharedBlasRouteRejectInvalidMaterial,
+			shell.voxelSharedBlasRouteRejectInvalidTransform,
 			shell.voxelSharedBlasRouteRejectGeometryMismatch,
 			shell.voxelSharedBlasRejectMissingKey,
 			shell.voxelSharedBlasRejectDisabled,
