@@ -3715,10 +3715,12 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.persistentVoxelInstanceMinPrimitiveCount,
 			shell.persistentVoxelInstanceMaxPrimitiveCount);
 		Printf(
-			"PERF pt as model NRI: frame=%llu world_tlas_objects=%u world_tlas_entries=%u emissive_tlas_objects=%u emissive_tlas_entries=%u blas_static=%u blas_dynamic=%u blas_voxel_unique=%u blas_voxel_actor=%u entries_static=%u entries_dynamic=%u entries_voxel=%u scene_records=%u\n",
+			"PERF pt as model NRI: frame=%llu world_tlas_objects=%u world_tlas_entries=%u world_mask_all_workloads_refs=%u world_mask_other_refs=%u emissive_tlas_objects=%u emissive_tlas_entries=%u blas_static=%u blas_dynamic=%u blas_voxel_unique=%u blas_voxel_actor=%u entries_static=%u entries_dynamic=%u entries_voxel=%u scene_records=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.asWorldTlasObjects,
 			shell.asWorldTlasEntries,
+			shell.asWorldTlasMaskAllWorkloadsRefs,
+			shell.asWorldTlasMaskOtherRefs,
 			shell.asEmissiveTlasObjects,
 			shell.asEmissiveTlasEntries,
 			shell.asBlasStatic,

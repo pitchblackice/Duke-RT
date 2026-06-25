@@ -1282,6 +1282,8 @@ public:
 		uint64_t worldTlasMemoryBytes = 0;
 		uint32_t asWorldTlasObjects = 0;
 		uint32_t asWorldTlasEntries = 0;
+		uint32_t asWorldTlasMaskAllWorkloadsRefs = 0;
+		uint32_t asWorldTlasMaskOtherRefs = 0;
 		uint32_t asEmissiveTlasObjects = 0;
 		uint32_t asEmissiveTlasEntries = 0;
 		uint32_t asBlasStatic = 0;

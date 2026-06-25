@@ -724,6 +724,8 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 	mLastPerfShellTraceStats.voxelSharedBlasRejectGeometryMismatch = sharedBlasStats.rejectGeometryMismatch;
 	mLastPerfShellTraceStats.asWorldTlasObjects = mTopLevelAS.accelerationStructure != nullptr && mActiveTlasInstanceCount > 0 ? 1u : 0u;
 	mLastPerfShellTraceStats.asWorldTlasEntries = mActiveTlasInstanceCount;
+	mLastPerfShellTraceStats.asWorldTlasMaskAllWorkloadsRefs = mLastPerfShellTraceStats.asWorldTlasEntries;
+	mLastPerfShellTraceStats.asWorldTlasMaskOtherRefs = 0;
 	mLastPerfShellTraceStats.asEmissiveTlasObjects = mEmissiveTopLevelAS.accelerationStructure != nullptr && mEmissiveTlasInstanceCount > 0 ? 1u : 0u;
 	mLastPerfShellTraceStats.asEmissiveTlasEntries = mEmissiveTlasInstanceCount;
 	mLastPerfShellTraceStats.asEntriesStatic = mLastPerfShellTraceStats.sceneInstanceStaticCount;
