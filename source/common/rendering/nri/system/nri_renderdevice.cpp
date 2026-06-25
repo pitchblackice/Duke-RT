@@ -3743,7 +3743,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.asBlasBuiltThisFrame,
 			shell.asMonolithicDynamicBlasBuilds);
 		Printf(
-			"PERF pt static segment diagnostics NRI: frame=%llu candidate_chunks=%u unique_geometry_signatures=%u duplicate_keys=%u duplicate_refs=%u portal_chunks=%u local_space_chunks=%u animated_chunks=%u atlas_eligible_chunks=%u registry_mapped_chunks=%u chunk_owned_blas=%u segment_blas=%u\n",
+			"PERF pt static segment diagnostics NRI: frame=%llu candidate_chunks=%u unique_geometry_signatures=%u duplicate_keys=%u duplicate_refs=%u portal_chunks=%u local_space_chunks=%u animated_chunks=%u atlas_eligible_chunks=%u registry_mapped_chunks=%u candidate_surfaces=%u wall_candidates=%u floor_candidates=%u ceiling_candidates=%u portal_candidates=%u local_space_surfaces=%u animated_surfaces=%u material_risk_surfaces=%u contiguous_chunk_surfaces=%u chunk_owned_blas=%u segment_blas=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.asStaticSegmentCandidateChunks,
 			shell.asStaticSegmentUniqueGeometrySignatures,
@@ -3754,6 +3754,15 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.asStaticSegmentAnimatedChunks,
 			shell.asStaticSegmentAtlasEligibleChunks,
 			shell.asStaticSegmentRegistryMappedChunks,
+			shell.asStaticSegmentCandidateSurfaces,
+			shell.asStaticSegmentWallCandidates,
+			shell.asStaticSegmentFloorCandidates,
+			shell.asStaticSegmentCeilingCandidates,
+			shell.asStaticSegmentPortalCandidates,
+			shell.asStaticSegmentLocalSpaceSurfaces,
+			shell.asStaticSegmentAnimatedSurfaces,
+			shell.asStaticSegmentMaterialRiskSurfaces,
+			shell.asStaticSegmentContiguousChunkSurfaces,
 			shell.asStaticChunkOwnedBlas,
 			shell.asStaticSegmentBlas);
 		Printf(

@@ -816,6 +816,69 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 					mLastPerfShellTraceStats.asStaticSegmentAtlasEligibleChunks++;
 				}
 			}
+
+			const bool chunkInLocalSpace =
+				mMapWorld.valid &&
+				chunk.chunkIndex < mMapWorld.chunks.size() &&
+				mMapWorld.chunks[chunk.chunkIndex].localSpaceIndex != UINT32_MAX;
+			const bool chunkAnimated = chunk.hasAnimatedTextureCandidates || chunk.animatedRefreshSuppressed;
+			const bool chunkAtlasContiguous =
+				mStaticMapChunkAtlas.valid &&
+				chunkListIndex < mStaticMapChunkAtlas.chunks.size() &&
+				mStaticMapChunkAtlas.chunks[chunkListIndex].valid &&
+				mStaticMapChunkAtlas.chunks[chunkListIndex].primitiveCount == chunk.primitiveCount &&
+				mStaticMapChunkAtlas.chunks[chunkListIndex].indexCount == chunk.indexCount &&
+				mStaticMapChunkAtlas.chunks[chunkListIndex].vertexCount == chunk.vertexCount;
+			if (mMapWorld.valid && chunk.chunkIndex < mMapWorld.chunks.size())
+			{
+				const nri_scene::PTMapChunk& mapChunk = mMapWorld.chunks[chunk.chunkIndex];
+				const uint32_t surfaceEnd = std::min<uint32_t>(
+					mapChunk.firstSurface + mapChunk.surfaceCount,
+					(uint32_t)mMapWorld.surfaces.size());
+				for (uint32_t surfaceIndex = mapChunk.firstSurface; surfaceIndex < surfaceEnd; ++surfaceIndex)
+				{
+					const nri_scene::PTMapSurface& surface = mMapWorld.surfaces[surfaceIndex];
+					mLastPerfShellTraceStats.asStaticSegmentCandidateSurfaces++;
+					switch (surface.surface.provenance.sourceType)
+					{
+					case nri_scene::SurfaceSourceType::MapWallBand:
+						mLastPerfShellTraceStats.asStaticSegmentWallCandidates++;
+						break;
+					case nri_scene::SurfaceSourceType::MapFloorSection:
+						mLastPerfShellTraceStats.asStaticSegmentFloorCandidates++;
+						break;
+					case nri_scene::SurfaceSourceType::MapCeilingSection:
+						mLastPerfShellTraceStats.asStaticSegmentCeilingCandidates++;
+						break;
+					case nri_scene::SurfaceSourceType::MapPortalSurface:
+						mLastPerfShellTraceStats.asStaticSegmentPortalCandidates++;
+						break;
+					default:
+						break;
+					}
+					if (chunkInLocalSpace)
+					{
+						mLastPerfShellTraceStats.asStaticSegmentLocalSpaceSurfaces++;
+					}
+					if (chunkAnimated)
+					{
+						mLastPerfShellTraceStats.asStaticSegmentAnimatedSurfaces++;
+					}
+					if ((surface.surface.provenance.materialFlags &
+						(nri_scene::MaterialFlag_Portal |
+							nri_scene::MaterialFlag_Mirror |
+							nri_scene::MaterialFlag_Sky |
+							nri_scene::MaterialFlag_PlainMirror |
+							nri_scene::MaterialFlag_TintEmission)) != 0)
+					{
+						mLastPerfShellTraceStats.asStaticSegmentMaterialRiskSurfaces++;
+					}
+					if (chunkAtlasContiguous)
+					{
+						mLastPerfShellTraceStats.asStaticSegmentContiguousChunkSurfaces++;
+					}
+				}
+			}
 		}
 		for (const auto& pair : staticSegmentSignatureRefs)
 		{

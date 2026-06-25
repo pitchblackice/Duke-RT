@@ -1307,6 +1307,15 @@ public:
 		uint32_t asStaticSegmentAnimatedChunks = 0;
 		uint32_t asStaticSegmentAtlasEligibleChunks = 0;
 		uint32_t asStaticSegmentRegistryMappedChunks = 0;
+		uint32_t asStaticSegmentCandidateSurfaces = 0;
+		uint32_t asStaticSegmentWallCandidates = 0;
+		uint32_t asStaticSegmentFloorCandidates = 0;
+		uint32_t asStaticSegmentCeilingCandidates = 0;
+		uint32_t asStaticSegmentPortalCandidates = 0;
+		uint32_t asStaticSegmentLocalSpaceSurfaces = 0;
+		uint32_t asStaticSegmentAnimatedSurfaces = 0;
+		uint32_t asStaticSegmentMaterialRiskSurfaces = 0;
+		uint32_t asStaticSegmentContiguousChunkSurfaces = 0;
 		uint32_t asStaticSegmentCacheCandidates = 0;
 		uint32_t asStaticSegmentCacheEntries = 0;
 		uint32_t asStaticSegmentCacheHits = 0;
