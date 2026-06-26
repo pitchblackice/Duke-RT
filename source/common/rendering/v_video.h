@@ -379,6 +379,8 @@ public:
 	virtual bool TickPathTracingLevelPreload() { return true; }
 	virtual bool IsPathTracingLevelPreloadPending() const { return false; }
 	virtual void CancelPathTracingLevelPreload() {}
+	virtual void NotifyPathTracingLevelFirstFrameRelease() {}
+	virtual void NotifyPathTracingLevelPreloadFinalCheckRelease() {}
 	virtual void NotifyLevelUnloadBegin(const LevelTransitionInfo& info) {}
 	virtual void NotifyLevelUnloadComplete(const LevelTransitionInfo& info) {}
 	virtual void NotifyLevelLoadBegin(const LevelTransitionInfo& info) {}

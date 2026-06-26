@@ -1,6 +1,7 @@
 #include "nri_persistent_voxels.h"
 
 #include "../scene/nri_hash.h"
+#include "nri_cvars.h"
 #include "nri_ray_scene_builder.h"
 #include "nri_shader_contracts.h"
 #include "nri_upload_hash.h"
@@ -2393,6 +2394,32 @@ void NRIPersistentVoxelResidency::FillResourceStatusSnapshot(NRIPersistentVoxelS
 	snapshot.batchActorCount = (uint32_t)batch.actors.size();
 	snapshot.instanceRecordCount = (uint32_t)instances.size();
 	snapshot.admissionQueueCount = (uint32_t)admissionQueue.size();
+	CountAdmissionWork(
+		snapshot.requiredAdmissionPendingCount,
+		snapshot.requiredAdmissionReadyCount,
+		snapshot.optionalAdmissionPendingCount,
+		snapshot.failedAdmissionCount);
+	snapshot.residencyGeneration = residencyMapGeneration;
+	snapshot.residencyBuildSerial = residencyLastBuildSerial;
+	snapshot.lastDesiredResidencyCount = lastDesiredResidencyCount;
+	snapshot.lastDesiredPreloadCount = lastDesiredPreloadCount;
+	snapshot.lastDesiredActorCount = lastDesiredActorCount;
+	snapshot.lastCpuReadyCount = lastCpuReadyCount;
+	snapshot.lastGpuReadyCount = lastGpuReadyCount;
+	snapshot.lastRetainedCount = lastRetainedCount;
+	snapshot.lastQueuedCount = lastQueuedCount;
+	snapshot.lastQueuedUploadBytes = lastQueuedUploadBytes;
+	snapshot.lastMeshReadyCount = lastMeshReadyCount;
+	snapshot.lastMaterialReadyCount = lastMaterialReadyCount;
+	snapshot.lastBlasReadyCount = lastBlasReadyCount;
+	snapshot.lastMeshMissingCount = lastMeshMissingCount;
+	snapshot.lastMaterialOnlyCount = lastMaterialOnlyCount;
+	snapshot.lastBlasOnlyCount = lastBlasOnlyCount;
+	snapshot.lastColdMeshCount = lastColdMeshCount;
+	snapshot.lastColdMaterialCount = lastColdMaterialCount;
+	snapshot.lastColdPrimitiveCount = lastColdPrimitiveCount;
+	snapshot.lastForcedCount = lastForcedCount;
+	snapshot.lastPreferredCount = lastPreferredCount;
 
 	for (const auto& meshPair : meshVariantResources)
 	{
@@ -5690,6 +5717,25 @@ void NRIPersistentVoxelResidency::Reset(
 	batch = {};
 	instances.clear();
 	actorRejectedSignatures.clear();
+	lastDesiredResidencyCount = 0;
+	lastDesiredPreloadCount = 0;
+	lastDesiredActorCount = 0;
+	lastCpuReadyCount = 0;
+	lastGpuReadyCount = 0;
+	lastRetainedCount = 0;
+	lastQueuedCount = 0;
+	lastQueuedUploadBytes = 0;
+	lastMeshReadyCount = 0;
+	lastMaterialReadyCount = 0;
+	lastBlasReadyCount = 0;
+	lastMeshMissingCount = 0;
+	lastMaterialOnlyCount = 0;
+	lastBlasOnlyCount = 0;
+	lastColdMeshCount = 0;
+	lastColdMaterialCount = 0;
+	lastColdPrimitiveCount = 0;
+	lastForcedCount = 0;
+	lastPreferredCount = 0;
 	services.InvalidateSceneDataDescriptors();
 	if (!clearSharedResources)
 	{
@@ -6110,6 +6156,26 @@ void NRIPersistentVoxelResidency::ReconcileResidency(
 		}
 	}
 
+	lastDesiredResidencyCount = (uint32_t)desired.size();
+	lastDesiredPreloadCount = desiredPreload;
+	lastDesiredActorCount = desiredActors;
+	lastCpuReadyCount = cpuReady;
+	lastGpuReadyCount = gpuReady;
+	lastRetainedCount = retained;
+	lastQueuedCount = queued;
+	lastQueuedUploadBytes = queuedUploadBytes;
+	lastMeshReadyCount = meshReadyCount;
+	lastMaterialReadyCount = materialReadyCount;
+	lastBlasReadyCount = blasReadyCount;
+	lastMeshMissingCount = meshMissingCount;
+	lastMaterialOnlyCount = materialOnlyCount;
+	lastBlasOnlyCount = blasOnlyCount;
+	lastColdMeshCount = coldMeshes;
+	lastColdMaterialCount = coldMaterials;
+	lastColdPrimitiveCount = coldPrimitiveCount;
+	lastForcedCount = forceCount;
+	lastPreferredCount = preferCount;
+
 	if (loadingTraceLevel >= 1)
 	{
 		Printf("NRI PT voxel residency reconcile: level=%s build_serial=%llu generation=%u desired=%u desired_preload=%u desired_actor=%u cpu_ready=%u gpu_ready=%u retained=%u queued=%u queue_bytes=%llu mesh_ready=%u material_ready=%u blas_ready=%u mesh_missing=%u material_only=%u blas_only=%u cold_mesh=%u cold_material=%u cold_prims=%llu evicted=0 forced=%u preferred=%u mesh_resources=%u material_resources=%u actors=%u active=%u prims=%u\n",
@@ -6382,12 +6448,28 @@ bool NRIPersistentVoxelResidency::PreloadVariantResources(
 			resetServices);
 	}
 
-	auto hasRequiredUploadInProgress = [&]() -> bool
+	const bool blockOptionalPreloadAdmissions = (bool)nri_ptloadingvoxelblockoptional;
+	auto isBlockingAdmission = [&](const PersistentVoxelAdmissionEntry& entry) -> bool
+	{
+		return
+			entry.mapGeneration == residencyMapGeneration &&
+			!entry.runtimeRequested &&
+			(IsRequiredAdmission(entry) || blockOptionalPreloadAdmissions);
+	};
+	auto blockingPendingCount = [&](uint32_t requiredPending, uint32_t optionalPending) -> uint32_t
+	{
+		return requiredPending + (blockOptionalPreloadAdmissions ? optionalPending : 0u);
+	};
+	auto readyReason = [&]() -> const char*
+	{
+		return blockOptionalPreloadAdmissions ? "optional-drained" : "required-drained";
+	};
+	auto hasBlockingUploadInProgress = [&]() -> bool
 	{
 		for (const auto& pair : admissionQueue)
 		{
 			const PersistentVoxelAdmissionEntry& entry = pair.second;
-			if (!IsRequiredAdmission(entry))
+			if (!isBlockingAdmission(entry))
 			{
 				continue;
 			}
@@ -6422,16 +6504,19 @@ bool NRIPersistentVoxelResidency::PreloadVariantResources(
 				requiredReadyBefore,
 				optionalPendingBefore,
 				failedBefore,
-				requiredPendingBefore == 0 ? "required-drained" : "none");
+				blockingPendingCount(requiredPendingBefore, optionalPendingBefore) == 0 ? readyReason() : "none");
 		}
-		if (requiredPendingBefore == 0)
+		if (blockingPendingCount(requiredPendingBefore, optionalPendingBefore) == 0)
 		{
 			if (loadingTraceLevel >= 1)
 			{
-				Printf("NRI PT loading gate: event=voxel-admission result=ready reason=required-drained required_pending=0 required_ready=%u optional_pending=%u failed=%u\n",
+				Printf("NRI PT loading gate: event=voxel-admission result=ready reason=%s required_pending=%u required_ready=%u optional_pending=%u failed=%u block_optional=%u\n",
+					readyReason(),
+					requiredPendingBefore,
 					requiredReadyBefore,
 					optionalPendingBefore,
-					failedBefore);
+					failedBefore,
+					blockOptionalPreloadAdmissions ? 1u : 0u);
 			}
 			break;
 		}
@@ -6455,14 +6540,17 @@ bool NRIPersistentVoxelResidency::PreloadVariantResources(
 			}
 			break;
 		}
-		if (requiredPendingAfter == 0)
+		if (blockingPendingCount(requiredPendingAfter, optionalPendingAfter) == 0)
 		{
 			if (loadingTraceLevel >= 1)
 			{
-				Printf("NRI PT loading gate: event=voxel-admission result=ready reason=required-drained required_pending=0 required_ready=%u optional_pending=%u failed=%u\n",
+				Printf("NRI PT loading gate: event=voxel-admission result=ready reason=%s required_pending=%u required_ready=%u optional_pending=%u failed=%u block_optional=%u\n",
+					readyReason(),
+					requiredPendingAfter,
 					requiredReadyAfter,
 					optionalPendingAfter,
-					failedAfter);
+					failedAfter,
+					blockOptionalPreloadAdmissions ? 1u : 0u);
 			}
 			break;
 		}
@@ -6483,7 +6571,9 @@ bool NRIPersistentVoxelResidency::PreloadVariantResources(
 			}
 			return false;
 		}
-		if (requiredPendingAfter >= requiredPendingBefore && requiredReadyAfter <= requiredReadyBefore && !hasRequiredUploadInProgress())
+		if (blockingPendingCount(requiredPendingAfter, optionalPendingAfter) >= blockingPendingCount(requiredPendingBefore, optionalPendingBefore) &&
+			requiredReadyAfter <= requiredReadyBefore &&
+			!hasBlockingUploadInProgress())
 		{
 			if (loadingTraceLevel >= 1)
 			{

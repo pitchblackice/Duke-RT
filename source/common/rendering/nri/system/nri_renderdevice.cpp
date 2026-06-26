@@ -5838,6 +5838,7 @@ bool NRIRenderDevice::TickPathTracingLevelPreload()
 	if (ready)
 	{
 		mPathTracingLevelPreloadPending = false;
+		LogLevelTransitionSnapshot("preload-ready", mCurrentLevelTransition, mPathTracingLevelPreloadPending, 0);
 	}
 	if ((int)nri_ptloadingtrace >= 1)
 	{
@@ -5870,9 +5871,19 @@ void NRIRenderDevice::CancelPathTracingLevelPreload()
 	mPathTracingLevelPreloadPending = false;
 }
 
+void NRIRenderDevice::NotifyPathTracingLevelFirstFrameRelease()
+{
+	LogLevelTransitionSnapshot("first-frame-release", mCurrentLevelTransition, mPathTracingLevelPreloadPending, 0);
+}
+
+void NRIRenderDevice::NotifyPathTracingLevelPreloadFinalCheckRelease()
+{
+	LogLevelTransitionSnapshot("final-check-release", mCurrentLevelTransition, mPathTracingLevelPreloadPending, 0);
+}
+
 void NRIRenderDevice::LogLevelTransitionSnapshot(const char* phase, const LevelTransitionInfo& info, bool preloadPending, uint32_t clearedWeaponLightEvents) const
 {
-	if (!nri_ptscenestats)
+	if (!nri_ptscenestats && (int)nri_ptloadingtrace < 1)
 	{
 		return;
 	}
@@ -5891,7 +5902,7 @@ void NRIRenderDevice::LogLevelTransitionSnapshot(const char* phase, const LevelT
 	const uint32_t portalCleanupAnomalies = HWDrawInfo::ConsumePortalCleanupAnomalyCount();
 
 	Printf(
-		"NRI PT level transition: phase=%s serial=%llu reason=%s old=%s new=%s dev_init=%s dev_transition=%s preload_pending=%s pending_weapon_events=%u cleared_weapon_events=%u weapon_events_enqueued=%u frame_begun=%s active_target=%s map_valid=%s map_build_serial=%llu map_chunks=%u map_surfaces=%u static_valid=%s static_build_serial=%llu static_chunks=%u static_materials=%u static_tex=%s static_buf=%s static_as=%s texture_cache=%u sky_texture_cache=%u mutation_chunks=%u mutation_active=%u mutation_valid=%u registry_valid=%s registry_entries=%u registry_chunks=%u registry_active=%u registry_mapped=%u registry_as=%u lighting_invalidation=%s probe_valid=%s probe_hit=%s probe_wall=%d probe_chunk=%d muzzle_slots=%u muzzle_active=%u lights_analytic=%u lights_manual=%u lights_emissive=%u lights_sector=%u debug_spheres=%u test_lights=%u portal_cleanup_anomalies=%u\n",
+		"NRI PT level transition: phase=%s serial=%llu reason=%s old=%s new=%s dev_init=%s dev_transition=%s preload_pending=%s pending_weapon_events=%u cleared_weapon_events=%u weapon_events_enqueued=%u frame_begun=%s active_target=%s map_valid=%s map_build_serial=%llu map_chunks=%u map_surfaces=%u static_valid=%s static_build_serial=%llu static_chunks=%u static_materials=%u static_tex=%s static_buf=%s static_as=%s texture_cache=%u sky_texture_cache=%u mutation_chunks=%u mutation_active=%u mutation_valid=%u registry_valid=%s registry_entries=%u registry_chunks=%u registry_active=%u registry_mapped=%u registry_as=%u lighting_invalidation=%s probe_valid=%s probe_hit=%s probe_wall=%d probe_chunk=%d muzzle_slots=%u muzzle_active=%u lights_analytic=%u lights_manual=%u lights_emissive=%u lights_sector=%u debug_spheres=%u test_lights=%u pv_mesh=%u pv_material=%u pv_batch=%u pv_active=%u pv_records=%u pv_admit=%u pv_req_pending=%u pv_req_ready=%u pv_opt_pending=%u pv_failed=%u pv_resident_bytes=%llu pv_zero_ref_bytes=%llu pv_cold_mesh=%u pv_cold_material=%u pv_cold_prims=%llu pv_generation=%u pv_build_serial=%llu pv_desired=%u pv_desired_preload=%u pv_desired_actor=%u pv_gpu_ready=%u pv_retained=%u pv_queued=%u pv_queue_bytes=%llu pv_mesh_missing=%u pv_material_only=%u pv_blas_only=%u pv_forced=%u pv_preferred=%u scene_instance_bytes=%llu visible_chunk_bytes=%llu visible_flat_bytes=%llu reprojection_bytes=%llu dynamic_scratch_bytes=%llu world_tlas_scratch_bytes=%llu portal_cleanup_anomalies=%u\n",
 		phase != nullptr ? phase : "unknown",
 		(unsigned long long)info.serial,
 		GetLevelTransitionReasonName(info.reason),
@@ -5940,6 +5951,41 @@ void NRIRenderDevice::LogLevelTransitionSnapshot(const char* phase, const LevelT
 		rendererSnapshot.activeSectorLightCount,
 		rendererSnapshot.runtimeDebugSphereCount,
 		rendererSnapshot.runtimeTestLightCount,
+		rendererSnapshot.persistentVoxelMeshResources,
+		rendererSnapshot.persistentVoxelMaterialResources,
+		rendererSnapshot.persistentVoxelBatchActors,
+		rendererSnapshot.persistentVoxelActiveInstances,
+		rendererSnapshot.persistentVoxelInstanceRecords,
+		rendererSnapshot.persistentVoxelAdmissionQueue,
+		rendererSnapshot.persistentVoxelRequiredAdmissionPending,
+		rendererSnapshot.persistentVoxelRequiredAdmissionReady,
+		rendererSnapshot.persistentVoxelOptionalAdmissionPending,
+		rendererSnapshot.persistentVoxelFailedAdmission,
+		(unsigned long long)rendererSnapshot.persistentVoxelResidentBytes,
+		(unsigned long long)rendererSnapshot.persistentVoxelZeroRefBytes,
+		rendererSnapshot.persistentVoxelColdMeshes,
+		rendererSnapshot.persistentVoxelColdMaterials,
+		(unsigned long long)rendererSnapshot.persistentVoxelColdPrimitives,
+		rendererSnapshot.persistentVoxelResidencyGeneration,
+		(unsigned long long)rendererSnapshot.persistentVoxelResidencyBuildSerial,
+		rendererSnapshot.persistentVoxelLastDesired,
+		rendererSnapshot.persistentVoxelLastDesiredPreload,
+		rendererSnapshot.persistentVoxelLastDesiredActor,
+		rendererSnapshot.persistentVoxelLastGpuReady,
+		rendererSnapshot.persistentVoxelLastRetained,
+		rendererSnapshot.persistentVoxelLastQueued,
+		(unsigned long long)rendererSnapshot.persistentVoxelLastQueuedBytes,
+		rendererSnapshot.persistentVoxelLastMeshMissing,
+		rendererSnapshot.persistentVoxelLastMaterialOnly,
+		rendererSnapshot.persistentVoxelLastBlasOnly,
+		rendererSnapshot.persistentVoxelLastForced,
+		rendererSnapshot.persistentVoxelLastPreferred,
+		(unsigned long long)rendererSnapshot.sceneInstanceBufferBytes,
+		(unsigned long long)rendererSnapshot.visibleChunkBufferBytes,
+		(unsigned long long)rendererSnapshot.visibleFlatBufferBytes,
+		(unsigned long long)rendererSnapshot.reprojectionBufferBytes,
+		(unsigned long long)rendererSnapshot.dynamicScratchBufferBytes,
+		(unsigned long long)rendererSnapshot.worldTlasScratchBufferBytes,
 		portalCleanupAnomalies);
 }
 

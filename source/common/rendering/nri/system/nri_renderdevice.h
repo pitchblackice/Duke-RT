@@ -90,6 +90,8 @@ public:
 	bool TickPathTracingLevelPreload() override;
 	bool IsPathTracingLevelPreloadPending() const override;
 	void CancelPathTracingLevelPreload() override;
+	void NotifyPathTracingLevelFirstFrameRelease() override;
+	void NotifyPathTracingLevelPreloadFinalCheckRelease() override;
 	void NotifyLevelUnloadBegin(const LevelTransitionInfo& info) override;
 	void NotifyLevelUnloadComplete(const LevelTransitionInfo& info) override;
 	void NotifyLevelLoadBegin(const LevelTransitionInfo& info) override;

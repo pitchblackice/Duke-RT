@@ -483,6 +483,7 @@ static bool RunPathTracingLevelPreloadFinalCheck()
 	{
 		const auto drainStart = std::chrono::steady_clock::now();
 		screen->WaitForCommands(true);
+		screen->NotifyPathTracingLevelPreloadFinalCheckRelease();
 		if ((int)nri_ptloadingtrace >= 1)
 		{
 			const auto drainEnd = std::chrono::steady_clock::now();
@@ -943,6 +944,10 @@ void Display()
 					GetGameStateName(gamestate),
 					(int)gameaction,
 					gametic);
+			}
+			if (screen != nullptr)
+			{
+				screen->NotifyPathTracingLevelFirstFrameRelease();
 			}
 			EndScreenJob();
 			gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
