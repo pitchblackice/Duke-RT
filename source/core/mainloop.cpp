@@ -629,7 +629,14 @@ static void GameTicker()
 				}
 				gPathTracingLevelPreloadNeeded = false;
 			}
-			CancelPendingPathTracingLevelPreload();
+			if (!gPathTracingLevelPreloadFinalCheckNeeded)
+			{
+				CancelPendingPathTracingLevelPreload();
+			}
+			else
+			{
+				gPendingPathTracingLevelPreload = false;
+			}
 			Net_ClearFifo();
 			inputState.ClearAllInput();
 			gameInput.Clear();

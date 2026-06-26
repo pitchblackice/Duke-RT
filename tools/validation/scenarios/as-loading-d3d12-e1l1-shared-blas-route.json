@@ -54,7 +54,7 @@
     {
       "prefix": "NRI PT loading voxel shared blas:",
       "minCount": 1,
-      "applyTo": "last",
+      "applyTo": "first",
       "fields": {
         "unique_keys": { "min": 1 },
         "resident_after": { "min": 1 },
