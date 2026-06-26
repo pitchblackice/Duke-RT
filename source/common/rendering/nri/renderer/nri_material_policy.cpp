@@ -3,6 +3,7 @@
 
 #include "nri_renderer.h"
 #include "nri_runtime_mutation_trace.h"
+#include "../system/nri_renderdevice.h"
 #include "../scene/nri_hash.h"
 
 #include "c_cvars.h"
@@ -569,37 +570,76 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 	auto& materialTraceEntry = mLastPerfShellTraceStats.materialBuildByLabel[GetMaterialBuildTraceSlotIndex(materialTraceSlot)];
 	materialTraceEntry.calls++;
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
+	const bool useActorRuleFrameCaches = mFrameBuffer == nullptr || !mFrameBuffer->IsPathTracingLevelPreloadPending();
 	const bool hasActorMaterialRules = nri_material_policy::HasActorMaterialOverrideRules(resolvedLightOverlays);
 	const nri_material_policy::ActorMaterialOverrideMap* actorOverridesForBuild = nullptr;
+	nri_material_policy::ActorMaterialOverrideMap transientActorOverrides;
 	nri_material_policy::ActorMaterialOverrideMap mergedActorOverridesForBuild;
 	if (hasActorMaterialRules)
 	{
-		const auto& actorOverrides = GetActorMaterialOverrideMapForFrame(materialTraceSlot);
-		if (!actorOverrides.empty())
+		const auto actorOverrideStart = std::chrono::steady_clock::now();
+		const nri_material_policy::ActorMaterialOverrideMap* actorOverrides = nullptr;
+		bool transientActorOverridesBuilt = false;
+		if (useActorRuleFrameCaches)
 		{
-			actorOverridesForBuild = &actorOverrides;
+			actorOverrides = &GetActorMaterialOverrideMapForFrame(materialTraceSlot);
+		}
+		else
+		{
+			nri_material_policy::BuildActorMaterialOverrideMap(resolvedLightOverlays, transientActorOverrides);
+			actorOverrides = &transientActorOverrides;
+			transientActorOverridesBuilt = true;
+		}
+		if (tracePerf && transientActorOverridesBuilt)
+		{
+			const double elapsedMs = DurationMs(actorOverrideStart, std::chrono::steady_clock::now());
+			mLastPerfShellTraceStats.actorOverrideMapBuildCalls++;
+			mLastPerfShellTraceStats.actorOverrideMapBuildMs += elapsedMs;
+			materialTraceEntry.overrideBuildCalls++;
+			materialTraceEntry.overrideBuildMs += elapsedMs;
+		}
+		if (actorOverrides != nullptr && !actorOverrides->empty())
+		{
+			actorOverridesForBuild = actorOverrides;
 		}
 	}
 
 	const nri_material_policy::ActorOverlayMaterialRuleMap* actorOverlayRules = nullptr;
+	nri_material_policy::ActorOverlayMaterialRuleMap transientActorOverlayRules;
 	if (resolvedLightOverlays.actorRules.Size() > 0)
 	{
 		const auto actorOverlayRuleBuildStart = std::chrono::steady_clock::now();
 		bool actorOverlayRulesBuilt = false;
 		bool actorOverlayRuleCacheHit = false;
-		const auto& cachedActorOverlayRules = GetActorOverlayMaterialRulesForFrame(
-			resolvedLightOverlays,
-			mFrameIndex,
-			mActorOverlayMaterialRuleCache,
-			actorOverlayRulesBuilt,
-			actorOverlayRuleCacheHit);
+		uint32_t actorOverlayRuleCount = 0;
+		if (useActorRuleFrameCaches)
+		{
+			const auto& cachedActorOverlayRules = GetActorOverlayMaterialRulesForFrame(
+				resolvedLightOverlays,
+				mFrameIndex,
+				mActorOverlayMaterialRuleCache,
+				actorOverlayRulesBuilt,
+				actorOverlayRuleCacheHit);
+			actorOverlayRuleCount = mActorOverlayMaterialRuleCache.totalRuleCount;
+			actorOverlayRules = &cachedActorOverlayRules;
+		}
+		else
+		{
+			BuildActorOverlayMaterialRules(resolvedLightOverlays, transientActorOverlayRules);
+			for (const auto& entry : transientActorOverlayRules)
+			{
+				actorOverlayRuleCount += (uint32_t)entry.second.size();
+			}
+			actorOverlayRulesBuilt = true;
+			actorOverlayRules = &transientActorOverlayRules;
+		}
 		if (tracePerf)
 		{
 			if (actorOverlayRuleCacheHit)
 			{
 				materialTraceEntry.actorOverlayRuleMapCacheHits++;
 			}
-			else
+			else if (useActorRuleFrameCaches)
 			{
 				materialTraceEntry.actorOverlayRuleMapCacheMisses++;
 			}
@@ -608,9 +648,8 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 				materialTraceEntry.actorOverlayRuleMapBuilds++;
 				materialTraceEntry.actorOverlayRuleBuildMs += DurationMs(actorOverlayRuleBuildStart, std::chrono::steady_clock::now());
 			}
-			materialTraceEntry.actorOverlayRuleCount += mActorOverlayMaterialRuleCache.totalRuleCount;
+			materialTraceEntry.actorOverlayRuleCount += actorOverlayRuleCount;
 		}
-		actorOverlayRules = &cachedActorOverlayRules;
 		if (!actorOverlayRules->empty())
 		{
 			const auto stampStart = std::chrono::steady_clock::now();
