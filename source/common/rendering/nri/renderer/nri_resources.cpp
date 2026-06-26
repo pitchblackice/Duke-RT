@@ -225,6 +225,16 @@ void NRIRenderer::DestroySceneBuffers()
 		DestroyBufferResource(slot.indexBuffer);
 		DestroyBufferResource(slot.primitiveBuffer);
 		DestroyBufferResource(slot.materialBuffer);
+		DestroyBufferResource(slot.sceneInstanceBuffer);
+		DestroyBufferResource(slot.portalBuffer);
+		DestroyBufferResource(slot.runtimeLightBuffer);
+		DestroyBufferResource(slot.runtimeLightTileHeaderBuffer);
+		DestroyBufferResource(slot.runtimeLightTileIndexBuffer);
+		DestroyBufferResource(slot.sectorLightHeaderBuffer);
+		DestroyBufferResource(slot.sectorLightBuffer);
+		DestroyBufferResource(slot.reprojectionBuffer);
+		DestroyBufferResource(slot.visibleChunkBuffer);
+		DestroyBufferResource(slot.visibleFlatPlaneBuffer);
 	}
 	mSceneUploadBufferRing.clear();
 	DestroyBufferResource(mTlasInstanceBuffer);
