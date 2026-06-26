@@ -80,16 +80,6 @@ struct SceneUploadBufferRingSlot
 	NRIBufferResource indexBuffer;
 	NRIBufferResource primitiveBuffer;
 	NRIBufferResource materialBuffer;
-	NRIBufferResource sceneInstanceBuffer;
-	NRIBufferResource portalBuffer;
-	NRIBufferResource runtimeLightBuffer;
-	NRIBufferResource runtimeLightTileHeaderBuffer;
-	NRIBufferResource runtimeLightTileIndexBuffer;
-	NRIBufferResource sectorLightHeaderBuffer;
-	NRIBufferResource sectorLightBuffer;
-	NRIBufferResource reprojectionBuffer;
-	NRIBufferResource visibleChunkBuffer;
-	NRIBufferResource visibleFlatPlaneBuffer;
 	NRIAccelerationStructureResource dynamicBottomLevelAS;
 	std::vector<uint8_t> vertexMirror;
 	std::vector<uint8_t> indexMirror;

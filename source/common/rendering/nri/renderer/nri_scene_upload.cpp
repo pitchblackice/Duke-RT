@@ -299,12 +299,6 @@ NRIAccelerationStructureResource& NRIRenderer::GetCurrentDynamicBottomLevelAS()
 	return GetCurrentSceneUploadBufferRingSlot().dynamicBottomLevelAS;
 }
 
-const NRIBufferResource& NRIRenderer::GetCurrentSceneInstanceBuffer() const
-{
-	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
-	return slot != nullptr ? slot->sceneInstanceBuffer : mSceneInstanceBuffer;
-}
-
 NRIBufferResource& NRIRenderer::GetCurrentTlasInstanceBuffer()
 {
 	const uint32_t queuedFrameCount =
@@ -488,16 +482,15 @@ bool NRISceneUploadManager::WaitIfStructuredUpdateNeedsIt(
 
 bool NRISceneUploadManager::UpdateReprojectionBuffer(NRIRenderer& renderer, bool* ioWaitedForWrites)
 {
-	NRIRenderer::SceneUploadBufferRingSlot& slot = renderer.GetCurrentSceneUploadBufferRingSlot();
 	NRIReprojectionData data = {};
 	std::memcpy(data.currentViewToClip, renderer.mCurrentViewToClip, sizeof(data.currentViewToClip));
 	std::memcpy(data.previousViewToClip, renderer.mPreviousViewToClip, sizeof(data.previousViewToClip));
 	std::memcpy(data.currentWorldToView, renderer.mCurrentWorldToView, sizeof(data.currentWorldToView));
 	std::memcpy(data.previousWorldToView, renderer.mPreviousWorldToView, sizeof(data.previousWorldToView));
 
-	WaitIfStructuredUpdateNeedsIt(renderer, slot.reprojectionBuffer, &data, sizeof(data), sizeof(data), ioWaitedForWrites);
+	WaitIfStructuredUpdateNeedsIt(renderer, renderer.mReprojectionBuffer, &data, sizeof(data), sizeof(data), ioWaitedForWrites);
 	if (!renderer.EnsureStructuredBuffer(
-		slot.reprojectionBuffer,
+		renderer.mReprojectionBuffer,
 		renderer.mReprojectionBufferStats,
 		&data,
 		sizeof(data),
@@ -510,19 +503,18 @@ bool NRISceneUploadManager::UpdateReprojectionBuffer(NRIRenderer& renderer, bool
 		return false;
 	}
 
-	return UpdateSceneDataDescriptorSlot(renderer, 18, slot.reprojectionBuffer.shaderView, "reprojection_refresh");
+	return UpdateSceneDataDescriptorSlot(renderer, 18, renderer.mReprojectionBuffer.shaderView, "reprojection_refresh");
 }
 
 bool NRISceneUploadManager::UpdateVisibleChunkBuffer(NRIRenderer& renderer, bool* ioWaitedForWrites)
 {
-	NRIRenderer::SceneUploadBufferRingSlot& slot = renderer.GetCurrentSceneUploadBufferRingSlot();
 	const uint32_t defaultVisibleChunkWord = 0u;
 	const void* visibleChunkData = renderer.mCurrentVisibleChunkWords.empty() ? (const void*)&defaultVisibleChunkWord : renderer.mCurrentVisibleChunkWords.data();
 	const size_t visibleChunkSize = renderer.mCurrentVisibleChunkWords.empty() ? sizeof(uint32_t) : renderer.mCurrentVisibleChunkWords.size() * sizeof(uint32_t);
 
-	WaitIfStructuredUpdateNeedsIt(renderer, slot.visibleChunkBuffer, visibleChunkData, visibleChunkSize, sizeof(uint32_t), ioWaitedForWrites);
+	WaitIfStructuredUpdateNeedsIt(renderer, renderer.mVisibleChunkBuffer, visibleChunkData, visibleChunkSize, sizeof(uint32_t), ioWaitedForWrites);
 	if (!renderer.EnsureStructuredBuffer(
-		slot.visibleChunkBuffer,
+		renderer.mVisibleChunkBuffer,
 		renderer.mVisibleChunkBufferStats,
 		visibleChunkData,
 		visibleChunkSize,
@@ -535,19 +527,18 @@ bool NRISceneUploadManager::UpdateVisibleChunkBuffer(NRIRenderer& renderer, bool
 		return false;
 	}
 
-	return UpdateSceneDataDescriptorSlot(renderer, 19, slot.visibleChunkBuffer.shaderView, "visible_chunk_refresh");
+	return UpdateSceneDataDescriptorSlot(renderer, 19, renderer.mVisibleChunkBuffer.shaderView, "visible_chunk_refresh");
 }
 
 bool NRISceneUploadManager::UpdateVisibleFlatPlaneBuffer(NRIRenderer& renderer, bool* ioWaitedForWrites)
 {
-	NRIRenderer::SceneUploadBufferRingSlot& slot = renderer.GetCurrentSceneUploadBufferRingSlot();
 	const uint32_t defaultVisibleFlatPlaneWord = 0u;
 	const void* visibleFlatPlaneData = renderer.mCurrentVisibleFlatPlaneWords.empty() ? (const void*)&defaultVisibleFlatPlaneWord : renderer.mCurrentVisibleFlatPlaneWords.data();
 	const size_t visibleFlatPlaneSize = renderer.mCurrentVisibleFlatPlaneWords.empty() ? sizeof(uint32_t) : renderer.mCurrentVisibleFlatPlaneWords.size() * sizeof(uint32_t);
 
-	WaitIfStructuredUpdateNeedsIt(renderer, slot.visibleFlatPlaneBuffer, visibleFlatPlaneData, visibleFlatPlaneSize, sizeof(uint32_t), ioWaitedForWrites);
+	WaitIfStructuredUpdateNeedsIt(renderer, renderer.mVisibleFlatPlaneBuffer, visibleFlatPlaneData, visibleFlatPlaneSize, sizeof(uint32_t), ioWaitedForWrites);
 	if (!renderer.EnsureStructuredBuffer(
-		slot.visibleFlatPlaneBuffer,
+		renderer.mVisibleFlatPlaneBuffer,
 		renderer.mVisibleFlatPlaneBufferStats,
 		visibleFlatPlaneData,
 		visibleFlatPlaneSize,
@@ -560,7 +551,7 @@ bool NRISceneUploadManager::UpdateVisibleFlatPlaneBuffer(NRIRenderer& renderer, 
 		return false;
 	}
 
-	return UpdateSceneDataDescriptorSlot(renderer, 20, slot.visibleFlatPlaneBuffer.shaderView, "visible_flat_refresh");
+	return UpdateSceneDataDescriptorSlot(renderer, 20, renderer.mVisibleFlatPlaneBuffer.shaderView, "visible_flat_refresh");
 }
 
 bool NRIRenderer::UploadSceneBuffers(
@@ -2032,7 +2023,6 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 	ScopedPtPerfTimer perfTimer(renderer.mLastPerfShellTraceStats.sceneDataSetMs);
 	renderer.mLastPerfShellTraceStats.sceneDataSetCalls++;
 	renderer.SetCurrentSceneDataDescriptorsInitialized(false);
-	NRIRenderer::SceneUploadBufferRingSlot& sceneDataSlot = renderer.GetCurrentSceneUploadBufferRingSlot();
 	bool waitedForWrites = false;
 	const auto noteDataSetUpload = [&](const SceneBufferDebugStats& stats, uint64_t size, uint64_t& requestedBytes, uint64_t& uploadedBytes)
 	{
@@ -2102,7 +2092,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 	renderer.mBoundRuntimeLightCount = 0;
 
 	if (!ensureStructuredBufferBatched(
-		sceneDataSlot.sceneInstanceBuffer,
+		renderer.mSceneInstanceBuffer,
 		renderer.mSceneInstanceBufferStats,
 		sceneInstances.data(),
 		sceneInstances.size() * sizeof(SceneInstanceData),
@@ -2123,7 +2113,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		scenePortals = BuildScenePortalData(renderer.mMapWorld);
 	}
 	if (!ensureStructuredBufferBatched(
-		sceneDataSlot.portalBuffer,
+		renderer.mPortalBuffer,
 		renderer.mPortalBufferStats,
 		scenePortals.data(),
 		scenePortals.size() * sizeof(ScenePortalData),
@@ -2145,7 +2135,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 	const uint32_t activeRuntimeLightCount = (uint32_t)renderer.mSceneLights.GetAnalyticLights().activeLights.size();
 	if (!renderer.mRuntimeLightPayloadCacheValid ||
 		renderer.mRuntimeLightPayloadHash != runtimeLightPayloadHash ||
-		sceneDataSlot.runtimeLightBuffer.shaderView == nullptr)
+		renderer.mRuntimeLightBuffer.shaderView == nullptr)
 	{
 		renderer.mLastPerfShellTraceStats.sceneDataSetRuntimeLightUploads++;
 		std::vector<NRIRuntimePointLightGpuData> runtimeLights;
@@ -2154,7 +2144,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 			renderer.mSceneLights.BuildRuntimePointLightUpload(runtimeLights);
 		}
 		if (!ensureStructuredBufferBatched(
-			sceneDataSlot.runtimeLightBuffer,
+			renderer.mRuntimeLightBuffer,
 			renderer.mRuntimeLightBufferStats,
 			runtimeLights.empty() ? nullptr : runtimeLights.data(),
 			runtimeLights.size() * sizeof(NRIRuntimePointLightGpuData),
@@ -2189,8 +2179,8 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		nri_scene::HashCombine64(runtimeLightPayloadHash, runtimeLightClusterCameraHash);
 	if (!renderer.mRuntimeLightClusterCacheValid ||
 		renderer.mRuntimeLightClusterPayloadHash != runtimeLightClusterPayloadHash ||
-		sceneDataSlot.runtimeLightTileHeaderBuffer.shaderView == nullptr ||
-		sceneDataSlot.runtimeLightTileIndexBuffer.shaderView == nullptr)
+		renderer.mRuntimeLightTileHeaderBuffer.shaderView == nullptr ||
+		renderer.mRuntimeLightTileIndexBuffer.shaderView == nullptr)
 	{
 		renderer.mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterUploads++;
 		std::vector<NRIRuntimeLightTileHeaderGpuData> runtimeLightTileHeaders;
@@ -2207,7 +2197,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 				runtimeLightMaxTileOccupancy);
 		}
 		if (!ensureStructuredBufferBatched(
-			sceneDataSlot.runtimeLightTileHeaderBuffer,
+			renderer.mRuntimeLightTileHeaderBuffer,
 			renderer.mRuntimeLightTileHeaderBufferStats,
 			runtimeLightTileHeaders.data(),
 			runtimeLightTileHeaders.size() * sizeof(NRIRuntimeLightTileHeaderGpuData),
@@ -2222,7 +2212,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		}
 
 		if (!ensureStructuredBufferBatched(
-			sceneDataSlot.runtimeLightTileIndexBuffer,
+			renderer.mRuntimeLightTileIndexBuffer,
 			renderer.mRuntimeLightTileIndexBufferStats,
 			runtimeLightTileIndices.data(),
 			runtimeLightTileIndices.size() * sizeof(uint32_t),
@@ -2338,8 +2328,8 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 	}
 	if (!renderer.mSectorLightingPayloadCacheValid ||
 		renderer.mSectorLightingPayloadHash != sectorLightingPayloadHash ||
-		sceneDataSlot.sectorLightHeaderBuffer.shaderView == nullptr ||
-		sceneDataSlot.sectorLightBuffer.shaderView == nullptr)
+		renderer.mSectorLightHeaderBuffer.shaderView == nullptr ||
+		renderer.mSectorLightBuffer.shaderView == nullptr)
 	{
 		renderer.mLastPerfShellTraceStats.sceneDataSetSectorLightUploads++;
 		NRISectorLightHeaderGpuData sectorLightHeader = {};
@@ -2350,7 +2340,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 			renderer.mSceneLights.BuildSectorLightingUpload(NRIGetSectorLightMultiplier(), nri_ptsectorlighting, sectorLightHeader, sectorLights);
 		}
 		if (!ensureStructuredBufferBatched(
-			sceneDataSlot.sectorLightHeaderBuffer,
+			renderer.mSectorLightHeaderBuffer,
 			renderer.mSectorLightHeaderBufferStats,
 			&sectorLightHeader,
 			sizeof(sectorLightHeader),
@@ -2365,7 +2355,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		}
 
 		if (!ensureStructuredBufferBatched(
-			sceneDataSlot.sectorLightBuffer,
+			renderer.mSectorLightBuffer,
 			renderer.mSectorLightBufferStats,
 			sectorLights.empty() ? nullptr : sectorLights.data(),
 			sectorLights.empty() ? 0u : sectorLights.size() * sizeof(NRISectorLightGpuData),
@@ -2403,19 +2393,19 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		renderer.mSceneDataDescriptors[5] = selectView(dynamicIndexBuffer, staticIndexBuffer);
 		renderer.mSceneDataDescriptors[6] = selectView(dynamicPrimitiveBuffer, staticPrimitiveBuffer);
 		renderer.mSceneDataDescriptors[7] = selectView(dynamicMaterialBuffer, staticMaterialBuffer);
-		renderer.mSceneDataDescriptors[8] = sceneDataSlot.sceneInstanceBuffer.shaderView;
-		renderer.mSceneDataDescriptors[9] = sceneDataSlot.portalBuffer.shaderView;
-		renderer.mSceneDataDescriptors[10] = sceneDataSlot.runtimeLightBuffer.shaderView;
-		renderer.mSceneDataDescriptors[11] = sceneDataSlot.runtimeLightTileHeaderBuffer.shaderView;
-		renderer.mSceneDataDescriptors[12] = sceneDataSlot.runtimeLightTileIndexBuffer.shaderView;
+		renderer.mSceneDataDescriptors[8] = renderer.mSceneInstanceBuffer.shaderView;
+		renderer.mSceneDataDescriptors[9] = renderer.mPortalBuffer.shaderView;
+		renderer.mSceneDataDescriptors[10] = renderer.mRuntimeLightBuffer.shaderView;
+		renderer.mSceneDataDescriptors[11] = renderer.mRuntimeLightTileHeaderBuffer.shaderView;
+		renderer.mSceneDataDescriptors[12] = renderer.mRuntimeLightTileIndexBuffer.shaderView;
 		renderer.mSceneDataDescriptors[13] = renderer.mEmissivePrimitiveHeaderBuffer.shaderView;
 		renderer.mSceneDataDescriptors[14] = renderer.mEmissivePrimitiveBuffer.shaderView;
 		renderer.mSceneDataDescriptors[15] = renderer.mEmissivePrimitiveCdfBuffer.shaderView;
-		renderer.mSceneDataDescriptors[16] = sceneDataSlot.sectorLightHeaderBuffer.shaderView;
-		renderer.mSceneDataDescriptors[17] = sceneDataSlot.sectorLightBuffer.shaderView;
-		renderer.mSceneDataDescriptors[18] = sceneDataSlot.reprojectionBuffer.shaderView;
-		renderer.mSceneDataDescriptors[19] = sceneDataSlot.visibleChunkBuffer.shaderView;
-		renderer.mSceneDataDescriptors[20] = sceneDataSlot.visibleFlatPlaneBuffer.shaderView;
+		renderer.mSceneDataDescriptors[16] = renderer.mSectorLightHeaderBuffer.shaderView;
+		renderer.mSceneDataDescriptors[17] = renderer.mSectorLightBuffer.shaderView;
+		renderer.mSceneDataDescriptors[18] = renderer.mReprojectionBuffer.shaderView;
+		renderer.mSceneDataDescriptors[19] = renderer.mVisibleChunkBuffer.shaderView;
+		renderer.mSceneDataDescriptors[20] = renderer.mVisibleFlatPlaneBuffer.shaderView;
 		const NRIPersistentVoxelDescriptorSnapshot persistentVoxelDescriptors =
 			renderer.mPersistentVoxels.BuildDescriptorSnapshot(dynamicVertexBuffer, dynamicIndexBuffer, dynamicPrimitiveBuffer, dynamicMaterialBuffer);
 		renderer.mSceneDataDescriptors[21] = persistentVoxelDescriptors.vertex;

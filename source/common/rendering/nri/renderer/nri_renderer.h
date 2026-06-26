@@ -2109,7 +2109,6 @@ private:
 	NRIBufferResource& GetCurrentDynamicMaterialBuffer();
 	NRIAccelerationStructureResource& GetCurrentDynamicBottomLevelAS();
 	NRIBufferResource& GetCurrentTlasInstanceBuffer();
-	const NRIBufferResource& GetCurrentSceneInstanceBuffer() const;
 	const NRIBufferResource& GetCurrentDynamicVertexBuffer() const;
 	const NRIBufferResource& GetCurrentDynamicIndexBuffer() const;
 	const NRIBufferResource& GetCurrentDynamicPrimitiveBuffer() const;

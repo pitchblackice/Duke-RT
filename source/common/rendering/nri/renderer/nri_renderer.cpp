@@ -2685,14 +2685,13 @@ void NRIRenderer::EmitSelfTestSummary(uint32_t traceFrameIndex, int drawmode, bo
 	const bool finalTextureValid = final.texture != nullptr && final.shaderView != nullptr;
 	const bool worldActive = gamestate == GS_LEVEL && currentLevel != nullptr;
 	const bool gameplayFrame = worldActive && drawmode == DM_MAINVIEW && !portal;
-	const NRIBufferResource& sceneInstanceBuffer = GetCurrentSceneInstanceBuffer();
 	const uint64_t sceneSignature = nri_scene::HashCombine64(
 		nri_scene::HashCombine64(
 			nri_scene::HashCombine64(mVertexBuffer.payloadHash, mIndexBuffer.payloadHash),
 			mPrimitiveBuffer.payloadHash),
-		sceneInstanceBuffer.payloadHash);
+		mSceneInstanceBuffer.payloadHash);
 	const uint64_t materialSignature = mMaterialBuffer.payloadHash;
-	const uint64_t instanceSignature = sceneInstanceBuffer.payloadHash;
+	const uint64_t instanceSignature = mSceneInstanceBuffer.payloadHash;
 	const uint64_t skySignature = nri_scene::HashCombine64(mSkyEnvironment.ActiveKey(), (uint64_t)mSkyEnvironment.ActiveState().faceMask);
 	const NRIBufferResource& vertexBuffer = mVertexBuffer;
 	const NRIBufferResource& indexBuffer = mIndexBuffer;
@@ -2740,7 +2739,7 @@ void NRIRenderer::EmitSelfTestSummary(uint32_t traceFrameIndex, int drawmode, bo
 	summary.indexBytes = indexBytes;
 	summary.primitiveBytes = primitiveBytes;
 	summary.materialBytes = materialBytes;
-	summary.instanceBytes = sceneInstanceBuffer.payloadSize != 0 ? sceneInstanceBuffer.payloadSize : sceneInstanceBuffer.usedSize;
+	summary.instanceBytes = mSceneInstanceBuffer.payloadSize != 0 ? mSceneInstanceBuffer.payloadSize : mSceneInstanceBuffer.usedSize;
 	summary.sceneSignature = sceneSignature;
 	summary.materialSignature = materialSignature;
 	summary.instanceSignature = instanceSignature;
