@@ -480,6 +480,16 @@ static bool RunPathTracingLevelPreloadFinalCheck()
 
 	gPendingPathTracingLevelPreload = false;
 	gPathTracingLevelPreloadFinalCheckNeeded = false;
+	{
+		const auto drainStart = std::chrono::steady_clock::now();
+		screen->WaitForCommands(true);
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			const auto drainEnd = std::chrono::steady_clock::now();
+			const double drainMs = std::chrono::duration<double, std::milli>(drainEnd - drainStart).count();
+			Printf("NRI PT loading gate: event=final-check-drain ms=%.3f\n", drainMs);
+		}
+	}
 	if ((int)nri_ptloadingtrace >= 1)
 	{
 		Printf("NRI PT loading gate: event=final-check result=ready gamestate=%s gameaction=%d\n",
