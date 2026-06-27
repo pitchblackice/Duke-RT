@@ -1767,6 +1767,7 @@ public:
 	void RequestAutoExposureReset(const char* reason);
 	LevelTransitionSnapshot BuildLevelTransitionSnapshot() const;
 	void TraceStartupMutationProbe(const char* event) const;
+	void OnLevelFirstFrameRelease();
 	void OnLevelUnloadBegin(const LevelTransitionInfo& info);
 	void OnLevelUnloadComplete(const LevelTransitionInfo& info);
 	void OnLevelLoadBegin(const LevelTransitionInfo& info);

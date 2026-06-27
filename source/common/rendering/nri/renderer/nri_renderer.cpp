@@ -2129,6 +2129,14 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 	}
 }
 
+void NRIRenderer::OnLevelFirstFrameRelease()
+{
+	mPersistentVoxels.ArmPostLoadAdmissionGrace(
+		mFrameIndex,
+		BuildNRIPersistentVoxelSettingsFromCVars(),
+		(int)nri_ptloadingtrace);
+}
+
 NRIRenderer::LevelTransitionSnapshot NRIRenderer::BuildLevelTransitionSnapshot() const
 {
 	LevelTransitionSnapshot snapshot = {};

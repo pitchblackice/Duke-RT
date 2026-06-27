@@ -729,6 +729,7 @@ public:
 		uint64_t adapterLocalBudget,
 		bool traceEnabled,
 		const NRIPersistentVoxelResetServices& services);
+	void ArmPostLoadAdmissionGrace(uint32_t frameIndex, const NRIPersistentVoxelSettings& settings, int loadingTraceLevel);
 	bool PumpAdmissionQueue(
 		const char* phase,
 		uint64_t buildSerial,
@@ -843,6 +844,8 @@ public:
 		const PersistentVoxelReadinessStatus& status,
 		bool traceEnabled) const;
 
+	bool IsPostLoadAdmissionGraceActive(uint32_t frameIndex) const;
+
 	NRIBufferResource vertexBuffer;
 	NRIBufferResource indexBuffer;
 	NRIBufferResource primitiveBuffer;
@@ -883,6 +886,8 @@ public:
 	uint32_t lastPreferredCount = 0;
 	bool loadingWarmupActive = false;
 	bool preloadPending = false;
+	uint32_t postLoadAdmissionGraceEndFrame = 0;
+	uint32_t postLoadAdmissionGraceMapGeneration = 0;
 	NRIPersistentVoxelPreloadStatus lastPreloadStatus = {};
 };
 

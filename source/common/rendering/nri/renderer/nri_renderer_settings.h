@@ -44,6 +44,8 @@ struct NRIPersistentVoxelSettings
 	uint64_t admissionLoadBytes = 0;
 	uint32_t admissionRuntimeVariants = 0;
 	uint64_t admissionRuntimeBytes = 0;
+	uint32_t admissionGraceFrames = 0;
+	uint32_t admissionGraceVariants = 0;
 	uint64_t admitMaxBytesLoading = 0;
 	uint64_t admitMaxBytesRuntime = 0;
 	uint32_t admitMaxMsLoading = 0;

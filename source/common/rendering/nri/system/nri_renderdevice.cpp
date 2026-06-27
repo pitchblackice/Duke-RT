@@ -5876,6 +5876,7 @@ void NRIRenderDevice::NotifyPathTracingLevelFirstFrameRelease()
 	if (mRenderer != nullptr)
 	{
 		mRenderer->TraceStartupMutationProbe("first-frame-release");
+		mRenderer->OnLevelFirstFrameRelease();
 	}
 	LogLevelTransitionSnapshot("first-frame-release", mCurrentLevelTransition, mPathTracingLevelPreloadPending, 0);
 }

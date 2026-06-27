@@ -99,6 +99,8 @@ NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars()
 	settings.admissionLoadBytes = (int)nri_ptvoxeladmissionloadbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmissionloadbytes;
 	settings.admissionRuntimeVariants = (int)nri_ptvoxeladmissionruntimevariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmissionruntimevariants;
 	settings.admissionRuntimeBytes = (int)nri_ptvoxeladmissionruntimebytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmissionruntimebytes;
+	settings.admissionGraceFrames = (uint32_t)std::max(0, (int)nri_ptvoxeladmissiongraceframes);
+	settings.admissionGraceVariants = (int)nri_ptvoxeladmissiongracevariants <= 0 ? 0u : (uint32_t)(int)nri_ptvoxeladmissiongracevariants;
 	settings.admitMaxBytesLoading = (int)nri_ptvoxeladmitmaxbytesloading <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmitmaxbytesloading;
 	settings.admitMaxBytesRuntime = (int)nri_ptvoxeladmitmaxbytesruntime <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmitmaxbytesruntime;
 	settings.admitMaxMsLoading = (uint32_t)std::max(0, (int)nri_ptvoxeladmitmaxmsloading);

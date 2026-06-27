@@ -2826,6 +2826,7 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 	uint32_t failedAtStart = 0;
 	CountAdmissionWork(requiredPendingAtStart, requiredReadyAtStart, optionalPendingAtStart, failedAtStart);
 	const bool requiredOnlyPump = loadingPhase && requiredPendingAtStart != 0;
+	const bool postLoadGraceActive = !loadingPhase && IsPostLoadAdmissionGraceActive(frameIndex);
 
 	PersistentVoxelAdmissionStats stats = {};
 	std::vector<PersistentVoxelAdmissionEntry*> candidates;
@@ -2927,6 +2928,9 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 
 	uint32_t admitted = 0;
 	uint32_t blasUsed = 0;
+	uint32_t requiredAdmitted = 0;
+	uint32_t optionalAdmitted = 0;
+	uint32_t optionalSkippedGrace = 0;
 	const char* stopReason = "queue-drained";
 	for (PersistentVoxelAdmissionEntry* entry : candidates)
 	{
@@ -2956,12 +2960,22 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		{
 			continue;
 		}
+		const bool requiredAdmission = IsRequiredAdmission(*entry);
+		const bool uploadState = isUploadState(entry->state);
+		if (postLoadGraceActive && !requiredAdmission && !uploadState && optionalAdmitted >= settings.admissionGraceVariants)
+		{
+			stats.skippedBudget++;
+			optionalSkippedGrace++;
+			entry->state = PersistentVoxelAdmissionState::Deferred;
+			entry->lastReason = "post-load-grace";
+			stopReason = "post-load-grace";
+			continue;
+		}
 		if (msBudget > 0.0 && elapsedMs() >= msBudget)
 		{
 			stopReason = "ms-budget";
 			break;
 		}
-		const bool uploadState = isUploadState(entry->state);
 		if (admitted >= variantBudget && !uploadState)
 		{
 			stats.skippedBudget++;
@@ -3053,6 +3067,14 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		entry->lastReason = reusedMesh && reusedMaterial ? "already-resident" : "admitted";
 		stats.uploaded++;
 		admitted++;
+		if (requiredAdmission)
+		{
+			requiredAdmitted++;
+		}
+		else
+		{
+			optionalAdmitted++;
+		}
 		if (traceLevel2)
 		{
 			Printf("NRI PT voxel admission queue: event=ready phase=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu upload_bytes=%llu reused_mesh=%u reused_material=%u\n",
@@ -3098,7 +3120,7 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		uint32_t optionalPending = 0;
 		uint32_t failed = 0;
 		CountAdmissionWork(requiredPending, requiredReady, optionalPending, failed);
-		Printf("NRI PT voxel admission summary: phase=%s queued=%u ready=%u deferred=%u failed=%u uploaded=%u skipped_budget=%u bytes_pending=%llu bytes_uploaded=%llu force=%u prefer=%u runtime=%u required_pending=%u required_ready=%u optional_pending=%u variants_budget=%u bytes_budget=%llu ms_budget=%.3f ms_used=%.3f blas_budget=%u blas_used=%u stop=%s\n",
+		Printf("NRI PT voxel admission summary: phase=%s queued=%u ready=%u deferred=%u failed=%u uploaded=%u skipped_budget=%u bytes_pending=%llu bytes_uploaded=%llu force=%u prefer=%u runtime=%u required_pending=%u required_ready=%u optional_pending=%u grace_active=%u grace_end=%u grace_variants=%u grace_skipped_optional=%u required_admitted=%u optional_admitted=%u variants_budget=%u bytes_budget=%llu ms_budget=%.3f ms_used=%.3f blas_budget=%u blas_used=%u stop=%s\n",
 			phase != nullptr ? phase : "unknown",
 			stats.queued,
 			stats.ready,
@@ -3114,6 +3136,12 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 			requiredPending,
 			requiredReady,
 			optionalPending,
+			postLoadGraceActive ? 1u : 0u,
+			postLoadGraceActive ? postLoadAdmissionGraceEndFrame : 0u,
+			settings.admissionGraceVariants,
+			optionalSkippedGrace,
+			requiredAdmitted,
+			optionalAdmitted,
 			variantBudget,
 			(unsigned long long)byteBudget,
 			msBudget,
@@ -3123,6 +3151,36 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 			stopReason);
 	}
 	return stats.failedThisPump == 0;
+}
+
+void NRIPersistentVoxelResidency::ArmPostLoadAdmissionGrace(uint32_t frameIndex, const NRIPersistentVoxelSettings& settings, int loadingTraceLevel)
+{
+	if (settings.admissionGraceFrames == 0)
+	{
+		postLoadAdmissionGraceEndFrame = 0;
+		postLoadAdmissionGraceMapGeneration = 0;
+		return;
+	}
+
+	postLoadAdmissionGraceEndFrame = frameIndex + settings.admissionGraceFrames;
+	postLoadAdmissionGraceMapGeneration = residencyMapGeneration;
+	if (loadingTraceLevel >= 1)
+	{
+		Printf("NRI PT voxel admission grace: event=arm frame=%u end_frame=%u frames=%u variants=%u generation=%u\n",
+			frameIndex,
+			postLoadAdmissionGraceEndFrame,
+			settings.admissionGraceFrames,
+			settings.admissionGraceVariants,
+			residencyMapGeneration);
+	}
+}
+
+bool NRIPersistentVoxelResidency::IsPostLoadAdmissionGraceActive(uint32_t frameIndex) const
+{
+	return
+		postLoadAdmissionGraceEndFrame != 0 &&
+		postLoadAdmissionGraceMapGeneration == residencyMapGeneration &&
+		frameIndex < postLoadAdmissionGraceEndFrame;
 }
 
 bool NRIPersistentVoxelResidency::AdmitVariantResource(
@@ -5741,6 +5799,8 @@ void NRIPersistentVoxelResidency::Reset(
 	lastColdPrimitiveCount = 0;
 	lastForcedCount = 0;
 	lastPreferredCount = 0;
+	postLoadAdmissionGraceEndFrame = 0;
+	postLoadAdmissionGraceMapGeneration = 0;
 	services.InvalidateSceneDataDescriptors();
 	if (!clearSharedResources)
 	{
@@ -5809,6 +5869,8 @@ void NRIPersistentVoxelResidency::ResetLevelSchedulingState(
 	actorRejectedSignatures.clear();
 	preloadPending = false;
 	lastPreloadStatus = {};
+	postLoadAdmissionGraceEndFrame = 0;
+	postLoadAdmissionGraceMapGeneration = 0;
 	lastDesiredResidencyCount = 0;
 	lastDesiredPreloadCount = 0;
 	lastDesiredActorCount = 0;
@@ -5844,6 +5906,8 @@ bool NRIPersistentVoxelResidency::SyncMapGeneration(
 
 	residencyLastBuildSerial = buildSerial;
 	residencyMapGeneration++;
+	postLoadAdmissionGraceEndFrame = 0;
+	postLoadAdmissionGraceMapGeneration = 0;
 
 	if (!admissionQueue.empty())
 	{
