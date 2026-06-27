@@ -48,6 +48,7 @@
 #include "gamestate.h"
 #include "printf.h"
 #include "c_dispatch.h"
+#include "keydef.h"
 #include "s_music.h"
 #include "m_argv.h"
 #include "i_interface.h"
@@ -413,4 +414,18 @@ CCMD(testcutscene)
 	}
 }
 
+CCMD(validation_screenjob_key)
+{
+	if (cutscene.runner == nullptr)
+	{
+		Printf("validation_screenjob_key: no active screen job.\n");
+		return;
+	}
 
+	event_t ev = {};
+	ev.type = EV_KeyDown;
+	ev.data1 = KEY_ENTER;
+	ev.data2 = '\r';
+	const bool handled = ScreenJobResponder(&ev);
+	Printf("validation_screenjob_key: sent key=%d handled=%u.\n", KEY_ENTER, handled ? 1u : 0u);
+}
