@@ -3618,6 +3618,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mRuntimeMutation.GetStartupMaterialOnlyDirtyChunkCount(),
 			mRuntimeMutation.GetDirtyChunkCount());
 		TraceStartupMutationProbe("queue");
+		RebuildStartupMutationBaseline();
+		TraceStartupMutationProbe("queue-consume-after");
 	}
 	if (mAllowStartupMutationRebaseline && mFrameIndex > mStartupMutationRebaselineDeadlineFrame)
 	{
