@@ -681,6 +681,7 @@ class NRIPersistentVoxelResidency
 {
 public:
 	void Reset(const char* reason, bool clearSharedResources, bool traceReset, const NRIPersistentVoxelResetServices& services);
+	void ResetLevelSchedulingState(const char* reason, bool traceReset, const NRIPersistentVoxelResetServices& services);
 	bool SyncMapGeneration(uint64_t buildSerial, const char* reason, bool traceEnabled, const NRIPersistentVoxelResetServices& services);
 	void ReconcileResidency(
 		const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,

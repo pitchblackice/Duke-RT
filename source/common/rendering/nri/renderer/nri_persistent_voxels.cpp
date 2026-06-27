@@ -5767,6 +5767,65 @@ void NRIPersistentVoxelResidency::Reset(
 	publishedMaterialKeys.clear();
 }
 
+void NRIPersistentVoxelResidency::ResetLevelSchedulingState(
+	const char* reason,
+	bool traceReset,
+	const NRIPersistentVoxelResetServices& services)
+{
+	const uint32_t actorCount = (uint32_t)batch.actors.size();
+	const uint32_t instanceCount = (uint32_t)instances.size();
+	const uint32_t rejectedActorCount = (uint32_t)actorRejectedSignatures.size();
+	const uint32_t admissionCount = (uint32_t)admissionQueue.size();
+	if (traceReset && (actorCount != 0 || instanceCount != 0 || rejectedActorCount != 0 || admissionCount != 0 || preloadPending))
+	{
+		const NRIPersistentVoxelMemoryUsage memoryUsage = GetMemoryUsage();
+		Printf("NRI PT voxel level scheduling reset: reason=%s actors=%u active=%u instances=%u rejected=%u admissions=%u preload_pending=%u mesh_resources=%u material_resources=%u scene_buffer_bytes=%llu as_bytes=%llu\n",
+			reason != nullptr ? reason : "unknown",
+			actorCount,
+			batch.activeActorCount,
+			instanceCount,
+			rejectedActorCount,
+			admissionCount,
+			preloadPending ? 1u : 0u,
+			(uint32_t)meshVariantResources.size(),
+			(uint32_t)materialVariantResources.size(),
+			(unsigned long long)memoryUsage.sceneBufferBytes,
+			(unsigned long long)memoryUsage.accelerationStructureBytes);
+	}
+
+	for (auto& pair : admissionQueue)
+	{
+		DiscardAdmissionEntry(pair.second, services);
+	}
+	admissionQueue.clear();
+
+	batch = {};
+	instances.clear();
+	actorRejectedSignatures.clear();
+	preloadPending = false;
+	lastPreloadStatus = {};
+	lastDesiredResidencyCount = 0;
+	lastDesiredPreloadCount = 0;
+	lastDesiredActorCount = 0;
+	lastCpuReadyCount = 0;
+	lastGpuReadyCount = 0;
+	lastRetainedCount = 0;
+	lastQueuedCount = 0;
+	lastQueuedUploadBytes = 0;
+	lastMeshReadyCount = 0;
+	lastMaterialReadyCount = 0;
+	lastBlasReadyCount = 0;
+	lastMeshMissingCount = 0;
+	lastMaterialOnlyCount = 0;
+	lastBlasOnlyCount = 0;
+	lastColdMeshCount = 0;
+	lastColdMaterialCount = 0;
+	lastColdPrimitiveCount = 0;
+	lastForcedCount = 0;
+	lastPreferredCount = 0;
+	services.InvalidateSceneDataDescriptors();
+}
+
 bool NRIPersistentVoxelResidency::SyncMapGeneration(
 	uint64_t buildSerial,
 	const char* reason,

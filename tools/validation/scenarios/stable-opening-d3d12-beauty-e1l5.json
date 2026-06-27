@@ -6,6 +6,14 @@
   "traceFrames": 96,
   "captureWhenPassed": true,
   "minSelfTestFrames": 16,
+  "extraArgs": [
+    "+set",
+    "nri_ptloadingvoxelvariants",
+    "128",
+    "+set",
+    "nri_ptloadingvoxelblockoptional",
+    "false"
+  ],
   "commands": "+wait 45; map e1l5; wait 1; closemenu",
   "requiredPrefixes": [
     "NRI PT selftest:",

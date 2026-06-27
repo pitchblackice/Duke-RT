@@ -9,6 +9,7 @@
 #include "nri_material_policy.h"
 #include "nri_pipeline_state.h"
 #include "nri_preload_coordinator.h"
+#include "nri_persistent_voxel_services.h"
 #include "nri_renderstate.h"
 #include "nri_render_geometry_helpers.h"
 #include "nri_renderer_settings.h"
@@ -1950,6 +1951,14 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	WaitForCommandsTracked("level-unload");
 	RequestHistoryReset("level-unload", true, true);
 
+	if (info.oldLevel != info.newLevel)
+	{
+		mPersistentVoxels.ResetLevelSchedulingState(
+			"level-unload",
+			(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats,
+			BuildNRIPersistentVoxelResetServices(*this));
+	}
+
 	DestroyStaticMapSceneCache("level-unload");
 	mStaticMapScene = {};
 	mStaticAccelerationBuildSerial = 0;
@@ -2078,6 +2087,14 @@ void NRIRenderer::OnLevelUnloadComplete(const LevelTransitionInfo& info)
 
 void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 {
+	if (info.oldLevel != info.newLevel)
+	{
+		mPersistentVoxels.ResetLevelSchedulingState(
+			"level-load",
+			(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats,
+			BuildNRIPersistentVoxelResetServices(*this));
+	}
+
 	mMapWorld = {};
 	mObservedMapWorldBuildSerial = 0;
 	mAllowStartupMapWorldCorrection = false;
