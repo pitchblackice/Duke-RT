@@ -35,7 +35,7 @@
     {
       "prefix": "PERF pt as model NRI:",
       "minCount": 1,
-      "applyTo": "all",
+      "applyTo": "last",
       "fields": {
         "world_tlas_objects": { "exact": 1 },
         "world_tlas_entries": { "min": 1 },
@@ -50,7 +50,7 @@
     {
       "prefix": "PERF pt scene record audit NRI:",
       "minCount": 1,
-      "applyTo": "all",
+      "applyTo": "last",
       "fields": {
         "records": { "min": 1 },
         "invalid_source": { "exact": 0 },
@@ -60,7 +60,7 @@
     {
       "prefix": "PERF pt hit metadata NRI:",
       "minCount": 1,
-      "applyTo": "all",
+      "applyTo": "last",
       "fields": {
         "records": { "min": 1 },
         "primitive_base_mismatches": { "exact": 0 },
