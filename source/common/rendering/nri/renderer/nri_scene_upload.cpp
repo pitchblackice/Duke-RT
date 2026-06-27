@@ -2446,3 +2446,122 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 	renderer.mRuntimeLightSceneDataDirty = false;
 	return true;
 }
+
+bool NRIRenderer::PreGrowLevelSceneResourcesForLoading()
+{
+	ScopedPtPerfTimer preGrowTimer(mLastPerfShellTraceStats.sceneDataPreGrowMs);
+	mLastPerfShellTraceStats.sceneDataPreGrowCalls++;
+
+	auto& instances = mSelectTopLevelInstanceScratch;
+	auto& sceneInstances = mSelectSceneInstanceScratch;
+	instances.clear();
+	sceneInstances.clear();
+	BuildStaticMapInstances(instances, sceneInstances);
+
+	const NRIPersistentVoxelOverlayStats persistentVoxelStats = mPersistentVoxels.BuildOverlayStats();
+	const uint32_t estimatedPersistentVoxelInstances = mPersistentVoxels.HasRenderableOverlay() ? persistentVoxelStats.actorCount : 0u;
+	const uint32_t dynamicOverlayHeadroomInstances = 1u;
+	const uint32_t estimatedInstanceCount =
+		(uint32_t)instances.size() +
+		estimatedPersistentVoxelInstances +
+		dynamicOverlayHeadroomInstances;
+
+	if (!EnsureTopLevelAccelerationStructureCapacity(estimatedInstanceCount))
+	{
+		return false;
+	}
+
+	auto ensureCapacity = [&](NRIBufferResource& resource, SceneBufferDebugStats& stats, uint64_t bytes, uint32_t stride) -> bool
+	{
+		if (!NRISceneUploadManager::EnsureStructuredBufferCapacity(
+			*this,
+			resource,
+			stats,
+			bytes,
+			stride,
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			"scene_data_upload"))
+		{
+			return false;
+		}
+		if (stats.growEventsLastFrame != 0)
+		{
+			mLastPerfShellTraceStats.sceneDataPreGrowResourceGrowEvents++;
+			mLastPerfShellTraceStats.sceneDataPreGrowRequestedBytes += stats.growthRequestedBytesLastFrame;
+			mLastPerfShellTraceStats.sceneDataPreGrowAllocatedBytes += stats.growthAllocatedBytesLastFrame;
+		}
+		return true;
+	};
+
+	const std::vector<ScenePortalData> scenePortals = BuildScenePortalData(mMapWorld);
+	std::vector<NRIRuntimePointLightGpuData> runtimeLights;
+	mSceneLights.BuildRuntimePointLightUpload(runtimeLights);
+
+	uint32_t runtimeLightTileCountX = 0;
+	uint32_t runtimeLightTileCountY = 0;
+	uint32_t runtimeLightTileIndexCount = 0;
+	uint32_t runtimeLightMaxTileOccupancy = 0;
+	std::vector<NRIRuntimeLightTileHeaderGpuData> runtimeLightTileHeaders;
+	std::vector<uint32_t> runtimeLightTileIndices;
+	mSceneLights.BuildRuntimeLightClusterUpload(
+		BuildRuntimeLightClusterInput(),
+		runtimeLightTileHeaders,
+		runtimeLightTileIndices,
+		runtimeLightTileCountX,
+		runtimeLightTileCountY,
+		runtimeLightTileIndexCount,
+		runtimeLightMaxTileOccupancy);
+
+	NRIEmissivePrimitiveHeaderGpuData emissiveHeader = {};
+	std::vector<NRIEmissivePrimitiveGpuData> emissivePrimitives;
+	std::vector<float> emissiveCdf;
+	std::vector<NRIEmissiveMaterialResponseGpuData> emissiveMaterialResponses;
+	std::vector<NRIEmissivePrimitiveDebugRecord> ignoredEmissiveDebugRecords;
+	mSceneLights.BuildEmissiveSamplingUpload({}, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveMaterialResponses, ignoredEmissiveDebugRecords);
+
+	UpdateBoundSectorLightingState();
+	NRISectorLightHeaderGpuData sectorLightHeader = {};
+	std::vector<NRISectorLightGpuData> sectorLights;
+	mSceneLights.BuildSectorLightingUpload(NRIGetSectorLightMultiplier(), nri_ptsectorlighting, sectorLightHeader, sectorLights);
+
+	const uint64_t estimatedVisibleChunkBytes =
+		std::max<uint64_t>(((uint64_t)mMapWorld.chunks.size() + 31u) / 32u, 1u) * sizeof(uint32_t);
+	const uint64_t estimatedVisibleFlatPlaneBytes =
+		std::max<uint64_t>((((uint64_t)mMapWorld.chunks.size() * 2u) + 31u) / 32u, 1u) * sizeof(uint32_t);
+
+	const bool ready =
+		ensureCapacity(mSceneInstanceBuffer, mSceneInstanceBufferStats, (uint64_t)estimatedInstanceCount * sizeof(SceneInstanceData), sizeof(SceneInstanceData)) &&
+		ensureCapacity(mPortalBuffer, mPortalBufferStats, scenePortals.size() * sizeof(ScenePortalData), sizeof(ScenePortalData)) &&
+		ensureCapacity(mRuntimeLightBuffer, mRuntimeLightBufferStats, runtimeLights.size() * sizeof(NRIRuntimePointLightGpuData), sizeof(NRIRuntimePointLightGpuData)) &&
+		ensureCapacity(mRuntimeLightTileHeaderBuffer, mRuntimeLightTileHeaderBufferStats, runtimeLightTileHeaders.size() * sizeof(NRIRuntimeLightTileHeaderGpuData), sizeof(NRIRuntimeLightTileHeaderGpuData)) &&
+		ensureCapacity(mRuntimeLightTileIndexBuffer, mRuntimeLightTileIndexBufferStats, runtimeLightTileIndices.size() * sizeof(uint32_t), sizeof(uint32_t)) &&
+		ensureCapacity(mEmissivePrimitiveHeaderBuffer, mEmissivePrimitiveHeaderBufferStats, sizeof(emissiveHeader), sizeof(NRIEmissivePrimitiveHeaderGpuData)) &&
+		ensureCapacity(mEmissivePrimitiveBuffer, mEmissivePrimitiveBufferStats, emissivePrimitives.size() * sizeof(NRIEmissivePrimitiveGpuData), sizeof(NRIEmissivePrimitiveGpuData)) &&
+		ensureCapacity(mEmissivePrimitiveCdfBuffer, mEmissivePrimitiveCdfBufferStats, emissiveCdf.size() * sizeof(float), sizeof(float)) &&
+		ensureCapacity(mEmissiveMaterialResponseBuffer, mEmissiveMaterialResponseBufferStats, emissiveMaterialResponses.size() * sizeof(NRIEmissiveMaterialResponseGpuData), sizeof(NRIEmissiveMaterialResponseGpuData)) &&
+		ensureCapacity(mSectorLightHeaderBuffer, mSectorLightHeaderBufferStats, sizeof(sectorLightHeader), sizeof(NRISectorLightHeaderGpuData)) &&
+		ensureCapacity(mSectorLightBuffer, mSectorLightBufferStats, sectorLights.size() * sizeof(NRISectorLightGpuData), sizeof(NRISectorLightGpuData)) &&
+		ensureCapacity(mReprojectionBuffer, mReprojectionBufferStats, sizeof(NRIReprojectionData), sizeof(NRIReprojectionData)) &&
+		ensureCapacity(mVisibleChunkBuffer, mVisibleChunkBufferStats, estimatedVisibleChunkBytes, sizeof(uint32_t)) &&
+		ensureCapacity(mVisibleFlatPlaneBuffer, mVisibleFlatPlaneBufferStats, estimatedVisibleFlatPlaneBytes, sizeof(uint32_t));
+
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT loading gate: event=pre_grow result=%s instances=%u static_instances=%u persistent_instances=%u tlas_instance_grows=%u tlas_scratch_grows=%u scene_resource_grows=%u tlas_instance_requested=%llu tlas_instance_allocated=%llu tlas_scratch_requested=%llu tlas_scratch_allocated=%llu scene_requested=%llu scene_allocated=%llu wait_ms=%.3f\n",
+			ready ? "ready" : "failed",
+			estimatedInstanceCount,
+			(uint32_t)instances.size(),
+			estimatedPersistentVoxelInstances,
+			mLastPerfShellTraceStats.worldTlasPreGrowInstanceGrowCount,
+			mLastPerfShellTraceStats.worldTlasPreGrowScratchGrowCount,
+			mLastPerfShellTraceStats.sceneDataPreGrowResourceGrowEvents,
+			(unsigned long long)mLastPerfShellTraceStats.worldTlasPreGrowInstanceRequestedBytes,
+			(unsigned long long)mLastPerfShellTraceStats.worldTlasPreGrowInstanceAllocatedBytes,
+			(unsigned long long)mLastPerfShellTraceStats.worldTlasPreGrowScratchRequestedBytes,
+			(unsigned long long)mLastPerfShellTraceStats.worldTlasPreGrowScratchAllocatedBytes,
+			(unsigned long long)mLastPerfShellTraceStats.sceneDataPreGrowRequestedBytes,
+			(unsigned long long)mLastPerfShellTraceStats.sceneDataPreGrowAllocatedBytes,
+			mLastPerfShellTraceStats.worldTlasPreGrowWaitMs + mLastPerfShellTraceStats.sceneDataPreGrowWaitMs);
+	}
+	return ready;
+}

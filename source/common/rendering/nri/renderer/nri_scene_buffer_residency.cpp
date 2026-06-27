@@ -4,7 +4,17 @@
 #include "nri_resources.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
+
+namespace
+{
+	double DurationMs(std::chrono::steady_clock::time_point start, std::chrono::steady_clock::time_point end)
+	{
+		return std::chrono::duration<double, std::milli>(end - start).count();
+	}
+}
+
 bool NRISceneUploadManager::CreateStructuredBuffer(
 	NRIRenderer& renderer,
 	NRIBufferResource& resource,
@@ -209,6 +219,86 @@ bool NRISceneUploadManager::EnsureStructuredBuffer(
 		resourceContext.core->CmdBarrier(*resourceContext.commandBuffer, barrierDesc);
 	}
 
+	return true;
+}
+
+bool NRISceneUploadManager::EnsureStructuredBufferCapacity(
+	NRIRenderer& renderer,
+	NRIBufferResource& resource,
+	SceneBufferDebugStats& stats,
+	uint64_t size,
+	uint32_t stride,
+	nri::BufferUsageBits usage,
+	const char* waitReason)
+{
+	const uint64_t requiredSize = std::max<uint64_t>(size, stride);
+	stats.bytesUploadedLastFrame = 0;
+	stats.growEventsLastFrame = 0;
+	stats.overwriteEventsLastFrame = 0;
+	stats.growthOldBytesLastFrame = 0;
+	stats.growthRequestedBytesLastFrame = 0;
+	stats.growthAllocatedBytesLastFrame = 0;
+	stats.peakUsedBytes = std::max(stats.peakUsedBytes, size);
+
+	if (resource.buffer != nullptr &&
+		resource.shaderView != nullptr &&
+		resource.stride == stride &&
+		resource.size >= requiredSize)
+	{
+		return true;
+	}
+
+	const NRIResourceServices resourceServices = renderer.BuildResourceServices();
+	const NRIResourceContext& resourceContext = resourceServices.context;
+	if (resourceContext.device == nullptr || resourceContext.core == nullptr)
+	{
+		return false;
+	}
+
+	const uint64_t oldSize = resource.size;
+	const uint64_t grownSize = GetNRIGrownBufferSize(resource.size, requiredSize, stride);
+	if (resource.buffer != nullptr || resource.shaderView != nullptr)
+	{
+		const auto waitStart = std::chrono::steady_clock::now();
+		resourceServices.WaitForCommands(waitReason);
+		renderer.mLastPerfShellTraceStats.sceneDataPreGrowWaitMs += DurationMs(waitStart, std::chrono::steady_clock::now());
+	}
+	resourceServices.DestroyBufferResource(resource);
+
+	nri::BufferDesc desc = {};
+	desc.size = std::max<uint64_t>(grownSize, stride);
+	desc.structureStride = stride;
+	desc.usage = usage;
+	if (resourceContext.core->CreateCommittedBuffer(*resourceContext.device, nri::MemoryLocation::DEVICE_UPLOAD, 0.0f, desc, resource.buffer) != nri::Result::SUCCESS)
+	{
+		return false;
+	}
+
+	nri::MemoryDesc memoryDesc = {};
+	resourceContext.core->GetBufferMemoryDesc(*resource.buffer, nri::MemoryLocation::DEVICE_UPLOAD, memoryDesc);
+	resource.size = desc.size;
+	resource.memorySize = memoryDesc.size;
+	resource.memoryLocation = nri::MemoryLocation::DEVICE_UPLOAD;
+	resource.usedSize = 0;
+	resource.stride = stride;
+
+	nri::BufferViewDesc viewDesc = {};
+	viewDesc.buffer = resource.buffer;
+	viewDesc.type = nri::BufferView::STRUCTURED_BUFFER;
+	viewDesc.offset = 0;
+	viewDesc.size = nri::WHOLE_SIZE;
+	viewDesc.structureStride = stride;
+	if (resourceContext.core->CreateBufferView(viewDesc, resource.shaderView) != nri::Result::SUCCESS)
+	{
+		resourceServices.DestroyBufferResource(resource);
+		return false;
+	}
+
+	stats.growthCount++;
+	stats.growEventsLastFrame = 1;
+	stats.growthOldBytesLastFrame = oldSize;
+	stats.growthRequestedBytesLastFrame = requiredSize;
+	stats.growthAllocatedBytesLastFrame = desc.size;
 	return true;
 }
 

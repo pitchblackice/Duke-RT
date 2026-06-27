@@ -4,6 +4,7 @@
 #include "nri_renderer.h"
 #include "nri_diagnostic_names.h"
 #include "nri_persistent_voxel_services.h"
+#include "nri_scene_upload.h"
 #include "nri_shader_contracts.h"
 #include "../scene/nri_hash.h"
 #include "../system/nri_renderdevice.h"
@@ -747,6 +748,87 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 	return true;
 }
 
+bool NRIAccelerationStructureManager::EnsureTopLevelCapacity(NRIRenderer& renderer, uint32_t instanceCount)
+{
+	if (instanceCount == 0 || renderer.mFrameBuffer == nullptr)
+	{
+		return true;
+	}
+
+	ScopedPtPerfTimer perfTimer(renderer.mLastPerfShellTraceStats.worldTlasPreGrowMs);
+	renderer.mLastPerfShellTraceStats.worldTlasPreGrowCalls++;
+	renderer.mLastPerfShellTraceStats.worldTlasPreGrowInstanceCount = std::max(
+		renderer.mLastPerfShellTraceStats.worldTlasPreGrowInstanceCount,
+		instanceCount);
+
+	const uint64_t instanceBytes = (uint64_t)instanceCount * sizeof(nri::TopLevelInstance);
+	static NRIRenderer::SceneBufferDebugStats sTlasInstancePreGrowStats = { "TLASInstancePreGrow" };
+	(void)renderer.GetCurrentTlasInstanceBuffer();
+	for (NRIBufferResource& tlasInstanceBuffer : renderer.mTlasInstanceBufferRing)
+	{
+		if (!NRISceneUploadManager::EnsureStructuredBufferCapacity(
+			renderer,
+			tlasInstanceBuffer,
+			sTlasInstancePreGrowStats,
+			instanceBytes,
+			sizeof(nri::TopLevelInstance),
+			nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT,
+			"world_tlas_instance_upload"))
+		{
+			return false;
+		}
+		if (sTlasInstancePreGrowStats.growEventsLastFrame != 0)
+		{
+			renderer.mLastPerfShellTraceStats.worldTlasPreGrowInstanceGrowCount++;
+			renderer.mLastPerfShellTraceStats.worldTlasPreGrowInstanceRequestedBytes +=
+				sTlasInstancePreGrowStats.growthRequestedBytesLastFrame;
+			renderer.mLastPerfShellTraceStats.worldTlasPreGrowInstanceAllocatedBytes +=
+				sTlasInstancePreGrowStats.growthAllocatedBytesLastFrame;
+		}
+	}
+
+	nri::AccelerationStructureDesc tlasDesc = {};
+	tlasDesc.type = nri::AccelerationStructureType::TOP_LEVEL;
+	tlasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
+	tlasDesc.geometryOrInstanceNum = instanceCount;
+
+	NRIAccelerationStructureResource probe = {};
+	if (renderer.mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(
+		*renderer.mFrameBuffer->mDevice,
+		nri::MemoryLocation::DEVICE,
+		0.0f,
+		tlasDesc,
+		probe.accelerationStructure) != nri::Result::SUCCESS)
+	{
+		return false;
+	}
+	const uint64_t requiredScratchSize =
+		renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*probe.accelerationStructure);
+	renderer.DestroyAccelerationStructureResource(probe);
+	renderer.mLastPerfShellTraceStats.worldTlasPreGrowScratchRequestedBytes =
+		std::max(renderer.mLastPerfShellTraceStats.worldTlasPreGrowScratchRequestedBytes, requiredScratchSize);
+
+	if (renderer.mTopLevelScratchBuffer.buffer == nullptr || renderer.mTopLevelScratchBuffer.size < requiredScratchSize)
+	{
+		renderer.mLastPerfShellTraceStats.worldTlasPreGrowScratchGrowCount++;
+		if (renderer.mTopLevelScratchBuffer.buffer != nullptr)
+		{
+			const auto waitStart = std::chrono::steady_clock::now();
+			renderer.WaitForCommandsTracked("world_tlas_scratch_resize");
+			renderer.mLastPerfShellTraceStats.worldTlasPreGrowWaitMs += DurationMs(waitStart, std::chrono::steady_clock::now());
+		}
+		renderer.DestroyBufferResource(renderer.mTopLevelScratchBuffer);
+		if (!renderer.CreateBufferWithoutView(renderer.mTopLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+		{
+			return false;
+		}
+		renderer.mLastPerfShellTraceStats.worldTlasPreGrowScratchAllocatedBytes =
+			std::max(renderer.mLastPerfShellTraceStats.worldTlasPreGrowScratchAllocatedBytes, renderer.mTopLevelScratchBuffer.size);
+	}
+
+	return true;
+}
+
 void NRIRenderer::ReleaseWorldAccelerationBuildScratch(const char* reason)
 {
 	const uint64_t scratchBytes = mScratchBuffer.memorySize + mTopLevelScratchBuffer.memorySize;
@@ -841,6 +923,11 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 		outTlasInstanceCount,
 		updateLiveState,
 		tlasInstanceWritesQuiesced);
+}
+
+bool NRIRenderer::EnsureTopLevelAccelerationStructureCapacity(uint32_t instanceCount)
+{
+	return NRIAccelerationStructureManager::EnsureTopLevelCapacity(*this, instanceCount);
 }
 
 void NRIRenderer::DestroyDynamicBottomLevelAccelerationStructures()

@@ -287,6 +287,16 @@ NRIPreloadCoordinator::StepResult NRIPreloadCoordinator::PreloadResidentSceneRes
 		}
 		return StepResult::Ready;
 	}
+	if (!renderer.PreGrowLevelSceneResourcesForLoading())
+	{
+		renderer.LogFallback("PT preload scene resource pre-grow failed.");
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=pre-grow-failed ms=%.3f\n",
+				DurationMs(context.start, std::chrono::steady_clock::now()));
+		}
+		return StepResult::Ready;
+	}
 	return StepResult::Continue;
 }
 

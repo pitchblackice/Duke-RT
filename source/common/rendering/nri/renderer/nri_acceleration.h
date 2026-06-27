@@ -44,4 +44,5 @@ public:
 		uint32_t* outTlasInstanceCount,
 		bool updateLiveState,
 		bool tlasInstanceWritesQuiesced);
+	static bool EnsureTopLevelCapacity(NRIRenderer& renderer, uint32_t instanceCount);
 };

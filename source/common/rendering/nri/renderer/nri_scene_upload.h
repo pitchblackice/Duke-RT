@@ -30,6 +30,15 @@ public:
 		bool writesQuiesced,
 		const char* waitReason);
 
+	static bool EnsureStructuredBufferCapacity(
+		NRIRenderer& renderer,
+		NRIBufferResource& resource,
+		SceneBufferDebugStats& stats,
+		uint64_t size,
+		uint32_t stride,
+		nri::BufferUsageBits usage,
+		const char* waitReason);
+
 	static bool UpdateStructuredBufferRange(
 		NRIRenderer& renderer,
 		NRIBufferResource& resource,

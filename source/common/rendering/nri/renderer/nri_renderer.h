@@ -791,6 +791,12 @@ public:
 		uint32_t sceneDataSetSectorLightCacheHits = 0;
 		uint32_t sceneDataSetResourceGrowEvents = 0;
 		uint32_t sceneDataSetResourceOverwriteEvents = 0;
+		double sceneDataPreGrowMs = 0.0;
+		double sceneDataPreGrowWaitMs = 0.0;
+		uint32_t sceneDataPreGrowCalls = 0;
+		uint32_t sceneDataPreGrowResourceGrowEvents = 0;
+		uint64_t sceneDataPreGrowRequestedBytes = 0;
+		uint64_t sceneDataPreGrowAllocatedBytes = 0;
 		uint64_t sceneDataSetSceneInstanceRequestedBytes = 0;
 		uint64_t sceneDataSetSceneInstanceUploadedBytes = 0;
 		uint64_t sceneDataSetPortalRequestedBytes = 0;
@@ -1278,6 +1284,16 @@ public:
 		uint32_t worldTlasScratchGrowCount = 0;
 		uint32_t worldTlasDescriptorCreateCalls = 0;
 		uint32_t worldTlasBarrierCount = 0;
+		double worldTlasPreGrowMs = 0.0;
+		double worldTlasPreGrowWaitMs = 0.0;
+		uint32_t worldTlasPreGrowCalls = 0;
+		uint32_t worldTlasPreGrowInstanceCount = 0;
+		uint32_t worldTlasPreGrowInstanceGrowCount = 0;
+		uint32_t worldTlasPreGrowScratchGrowCount = 0;
+		uint64_t worldTlasPreGrowInstanceRequestedBytes = 0;
+		uint64_t worldTlasPreGrowInstanceAllocatedBytes = 0;
+		uint64_t worldTlasPreGrowScratchRequestedBytes = 0;
+		uint64_t worldTlasPreGrowScratchAllocatedBytes = 0;
 		uint64_t worldTlasScratchRequestedBytes = 0;
 		uint64_t worldTlasMemoryBytes = 0;
 		uint32_t asWorldTlasObjects = 0;
@@ -2089,6 +2105,7 @@ private:
 		uint32_t* outTlasInstanceCount,
 		bool updateLiveState,
 		bool tlasInstanceWritesQuiesced);
+	bool EnsureTopLevelAccelerationStructureCapacity(uint32_t instanceCount);
 	bool BuildEmissiveTopLevelAccelerationStructure();
 	bool BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry);
 	bool BuildDynamicAccelerationStructure(
@@ -2115,6 +2132,7 @@ private:
 	bool PreloadStaticMapResources();
 	bool PreloadPersistentVoxelResources();
 	bool PreloadMaterialResources();
+	bool PreGrowLevelSceneResourcesForLoading();
 	bool EnsurePersistentVoxelBatch();
 	bool UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials);
 	void InvalidateRuntimeLightSceneData();
