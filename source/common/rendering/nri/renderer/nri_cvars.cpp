@@ -1329,7 +1329,7 @@ CVAR(Int, nri_ptvoxeladmissionruntimevariants, 1, CVAR_ARCHIVE | CVAR_GLOBALCONF
 
 CVAR(Int, nri_ptvoxeladmissionruntimebytes, 16 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_ptvoxeladmissiongraceframes, 64, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmissiongraceframes, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptvoxeladmissiongracevariants, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
