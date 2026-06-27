@@ -203,6 +203,22 @@ function Normalize-CandidatePath {
     return [System.IO.Path]::GetFullPath($expanded)
 }
 
+function Test-ExistingDirectoryCandidate {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $false
+    }
+
+    try {
+        $full = Normalize-CandidatePath -Path $Path
+        return [System.IO.Directory]::Exists($full)
+    }
+    catch {
+        return $false
+    }
+}
+
 function Test-DukeInstallRoot {
     param([string]$CandidateRoot)
 
@@ -210,9 +226,15 @@ function Test-DukeInstallRoot {
         return $null
     }
 
-    $full = Normalize-CandidatePath -Path $CandidateRoot
+    try {
+        $full = Normalize-CandidatePath -Path $CandidateRoot
+    }
+    catch {
+        return $null
+    }
+
     $isFile = $false
-    if (Test-Path -LiteralPath $full -PathType Leaf) {
+    if ([System.IO.File]::Exists($full)) {
         $name = [System.IO.Path]::GetFileName($full)
         if ($name.Equals("DUKE3D.GRP", [System.StringComparison]::OrdinalIgnoreCase)) {
             $isFile = $true
@@ -220,12 +242,12 @@ function Test-DukeInstallRoot {
     }
 
     $root = $full
-    $grp = if ($isFile) { $full } else { Join-Path $full "DUKE3D.GRP" }
+    $grp = if ($isFile) { $full } else { [System.IO.Path]::Combine($full, "DUKE3D.GRP") }
     if ($isFile) {
         $root = Split-Path -Parent $full
     }
 
-    if (Test-Path -LiteralPath $grp -PathType Leaf) {
+    if ([System.IO.File]::Exists($grp)) {
         return @{
             install_root = [System.IO.Path]::GetFullPath($root)
             grp_path = [System.IO.Path]::GetFullPath($grp)
@@ -304,22 +326,28 @@ function Get-SteamLibraryRoots {
     $libraries = New-Object System.Collections.Generic.List[string]
 
     foreach ($steamRoot in Get-SteamRoots) {
-        if (-not (Test-Path -LiteralPath $steamRoot -PathType Container)) {
+        if (-not (Test-ExistingDirectoryCandidate -Path $steamRoot)) {
             continue
         }
 
         Add-Candidate -Candidates $libraries -Path $steamRoot
-        $libraryFile = Join-Path $steamRoot "steamapps\libraryfolders.vdf"
-        if (-not (Test-Path -LiteralPath $libraryFile -PathType Leaf)) {
+        $libraryFile = [System.IO.Path]::Combine($steamRoot, "steamapps", "libraryfolders.vdf")
+        if (-not [System.IO.File]::Exists($libraryFile)) {
             continue
         }
 
         $raw = Get-Content -LiteralPath $libraryFile -Raw
         foreach ($match in [regex]::Matches($raw, '"path"\s+"([^"]+)"')) {
-            Add-Candidate -Candidates $libraries -Path (Convert-SteamVdfPath -Path $match.Groups[1].Value)
+            $libraryPath = Convert-SteamVdfPath -Path $match.Groups[1].Value
+            if (Test-ExistingDirectoryCandidate -Path $libraryPath) {
+                Add-Candidate -Candidates $libraries -Path $libraryPath
+            }
         }
         foreach ($match in [regex]::Matches($raw, '"\d+"\s+"([^"]+)"')) {
-            Add-Candidate -Candidates $libraries -Path (Convert-SteamVdfPath -Path $match.Groups[1].Value)
+            $libraryPath = Convert-SteamVdfPath -Path $match.Groups[1].Value
+            if (Test-ExistingDirectoryCandidate -Path $libraryPath) {
+                Add-Candidate -Candidates $libraries -Path $libraryPath
+            }
         }
     }
 
@@ -375,8 +403,12 @@ function Get-AutoInstallCandidates {
     }
 
     foreach ($library in Get-SteamLibraryRoots) {
-        $commonRoot = Join-Path $library "steamapps\common"
-        Add-Candidate -Candidates $candidates -Path (Join-Path $commonRoot $worldTourDir)
+        if (-not (Test-ExistingDirectoryCandidate -Path $library)) {
+            continue
+        }
+
+        $commonRoot = [System.IO.Path]::Combine($library, "steamapps", "common")
+        Add-Candidate -Candidates $candidates -Path ([System.IO.Path]::Combine($commonRoot, $worldTourDir))
         Add-DukeNamedChildCandidates -Candidates $candidates -Root $commonRoot
     }
 
