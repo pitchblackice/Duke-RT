@@ -349,6 +349,7 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 	mRuntimeMutation.PrepareStartupBaseline(mMapWorld.buildSerial, (uint32_t)mMapWorld.chunks.size());
 	mAllowStartupMutationRebaseline = false;
 	mPendingStartupMutationRebaseline = false;
+	mStartupMutationProbe = {};
 	mStartupMutationRebaselineDeadlineFrame = 0;
 	for (uint32_t chunkIndex : diffDetails.lateVisibleValidationChunks)
 	{

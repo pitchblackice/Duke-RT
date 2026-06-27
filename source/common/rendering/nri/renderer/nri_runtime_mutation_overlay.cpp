@@ -1173,6 +1173,60 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	{
 		return chunkIndex < runtimeMutationCandidateSourceMasks.size() ? runtimeMutationCandidateSourceMasks[chunkIndex] : 0u;
 	};
+	const bool traceStartupMutationPass =
+		(bool)nri_ptloadingmutationbaseline &&
+		((int)nri_ptloadingtrace >= 2 ||
+			((int)nri_ptloadingtrace >= 1 && (mAllowStartupMutationRebaseline || mPendingStartupMutationRebaseline)));
+	if (traceStartupMutationPass)
+	{
+		auto countSource = [&](uint32_t sourceBit) -> uint32_t
+		{
+			uint32_t count = 0;
+			for (uint32_t sourceMask : runtimeMutationCandidateSourceMasks)
+			{
+				if ((sourceMask & sourceBit) != 0)
+				{
+					count++;
+				}
+			}
+			return count;
+		};
+		auto countVisibleChunks = [&]() -> uint32_t
+		{
+			uint32_t count = 0;
+			for (uint32_t word : mCurrentVisibleChunkWords)
+			{
+				while (word != 0)
+				{
+					count += word & 1u;
+					word >>= 1u;
+				}
+			}
+			return count;
+		};
+
+		mStartupMutationProbe.valid = true;
+		mStartupMutationProbe.detectedMaterialOnly = false;
+		mStartupMutationProbe.frameIndex = mFrameIndex;
+		mStartupMutationProbe.chunkCount = (uint32_t)mMapWorld.chunks.size();
+		mStartupMutationProbe.visibleChunkCount = countVisibleChunks();
+		mStartupMutationProbe.candidateCount = runtimeMutationCandidateCount;
+		mStartupMutationProbe.candidateActiveReplacementCount = countSource(RuntimeMutationWorklistCandidateSource_ActiveReplacement);
+		mStartupMutationProbe.candidateVisibleResidentValidationCount = countSource(RuntimeMutationWorklistCandidateSource_VisibleResidentValidation);
+		mStartupMutationProbe.candidateStartupVisibleValidationCount = countSource(RuntimeMutationWorklistCandidateSource_StartupVisibleValidation);
+		mStartupMutationProbe.candidateUnresolvedAuthoredTextureCount = countSource(RuntimeMutationWorklistCandidateSource_UnresolvedAuthoredTextures);
+		mStartupMutationProbe.candidateStaticAnimatedSuppressedCount = countSource(RuntimeMutationWorklistCandidateSource_StaticAnimatedSuppressed);
+		mStartupMutationProbe.candidateSectorDirtyCount = countSource(RuntimeMutationWorklistCandidateSource_SectorDirty);
+		mStartupMutationProbe.candidateSectionDirtyCount = countSource(RuntimeMutationWorklistCandidateSource_SectionDirty);
+		mStartupMutationProbe.candidateDraggedCount = countSource(RuntimeMutationWorklistCandidateSource_Dragged);
+		mStartupMutationProbe.candidateSignatureWatchlistCount = countSource(RuntimeMutationWorklistCandidateSource_SignatureWatchlist);
+		mStartupMutationProbe.candidateBackgroundSweepCount = countSource(RuntimeMutationWorklistCandidateSource_BackgroundSweep);
+		mStartupMutationProbe.candidateDeferredMaterialRefreshCount = countSource(RuntimeMutationWorklistCandidateSource_DeferredMaterialRefresh);
+		mStartupMutationProbe.candidateDeferredStructuralRebuildCount = countSource(RuntimeMutationWorklistCandidateSource_DeferredStructuralRebuild);
+		mStartupMutationProbe.dirtyChunkCount = 0;
+		mStartupMutationProbe.startupMaterialOnlyDirtyChunkCount = 0;
+		TraceStartupMutationProbe("worklist-built");
+	}
 	const auto recordRuntimeMutationDirtyTier = [&](bool chunkVisibleNow, RuntimeMutationDistanceTier distanceTier, uint32_t sourceMask)
 	{
 		if (chunkVisibleNow)
@@ -3546,6 +3600,15 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	}
 
 	mRuntimeMutation.FinalizeFrameActive();
+	if (traceStartupMutationPass)
+	{
+		mStartupMutationProbe.valid = true;
+		mStartupMutationProbe.detectedMaterialOnly = startupMaterialOnlyMutationDetected;
+		mStartupMutationProbe.frameIndex = mFrameIndex;
+		mStartupMutationProbe.dirtyChunkCount = mRuntimeMutation.GetDirtyChunkCount();
+		mStartupMutationProbe.startupMaterialOnlyDirtyChunkCount = mRuntimeMutation.GetStartupMaterialOnlyDirtyChunkCount();
+		TraceStartupMutationProbe("mutation-pass-finalize");
+	}
 	if (startupMaterialOnlyMutationDetected && !mPendingStartupMutationRebaseline)
 	{
 		mPendingStartupMutationRebaseline = true;
@@ -3554,9 +3617,11 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mFrameIndex,
 			mRuntimeMutation.GetStartupMaterialOnlyDirtyChunkCount(),
 			mRuntimeMutation.GetDirtyChunkCount());
+		TraceStartupMutationProbe("queue");
 	}
 	if (mAllowStartupMutationRebaseline && mFrameIndex > mStartupMutationRebaselineDeadlineFrame)
 	{
+		TraceStartupMutationProbe("deadline-expire");
 		mAllowStartupMutationRebaseline = false;
 		mPendingStartupMutationRebaseline = false;
 	}

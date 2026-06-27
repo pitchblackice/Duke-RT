@@ -372,12 +372,24 @@ bool NRIPreloadCoordinator::Run(NRIRenderer& renderer, const NRIPreloadLevelScen
 		return staticSceneResult != StepResult::Wait;
 	}
 
-	if ((bool)nri_ptloadingmutationbaseline && !renderer.mPendingStartupMutationRebaseline)
+	if ((bool)nri_ptloadingmutationbaseline &&
+		!renderer.mAllowStartupMutationRebaseline &&
+		!renderer.mPendingStartupMutationRebaseline)
 	{
 		renderer.mAllowStartupMutationRebaseline = true;
 		renderer.mStartupMutationRebaselineDeadlineFrame = renderer.mFrameIndex + 64u;
+		renderer.TraceStartupMutationProbe("arm");
+	}
+	const bool traceStartupMutationConsume = renderer.mPendingStartupMutationRebaseline || (int)nri_ptloadingtrace >= 2;
+	if (traceStartupMutationConsume)
+	{
+		renderer.TraceStartupMutationProbe("consume-before");
 	}
 	renderer.RebuildStartupMutationBaseline();
+	if (traceStartupMutationConsume)
+	{
+		renderer.TraceStartupMutationProbe("consume-after");
+	}
 	RefreshStaticLighting(renderer, context);
 	const StepResult resourcesResult = PreloadResidentSceneResources(renderer, context);
 	if (resourcesResult != StepResult::Continue)

@@ -1766,6 +1766,7 @@ public:
 	void ResetHistory();
 	void RequestAutoExposureReset(const char* reason);
 	LevelTransitionSnapshot BuildLevelTransitionSnapshot() const;
+	void TraceStartupMutationProbe(const char* event) const;
 	void OnLevelUnloadBegin(const LevelTransitionInfo& info);
 	void OnLevelUnloadComplete(const LevelTransitionInfo& info);
 	void OnLevelLoadBegin(const LevelTransitionInfo& info);
@@ -2029,6 +2030,30 @@ private:
 
 	using RuntimeMapMutationCache = ::RuntimeMapMutationCache;
 	using RuntimeMutationResidentApplyMode = ::RuntimeMutationResidentApplyMode;
+
+	struct StartupMutationProbeState
+	{
+		bool valid = false;
+		bool detectedMaterialOnly = false;
+		uint64_t frameIndex = 0;
+		uint32_t chunkCount = 0;
+		uint32_t visibleChunkCount = 0;
+		uint32_t candidateCount = 0;
+		uint32_t candidateActiveReplacementCount = 0;
+		uint32_t candidateVisibleResidentValidationCount = 0;
+		uint32_t candidateStartupVisibleValidationCount = 0;
+		uint32_t candidateUnresolvedAuthoredTextureCount = 0;
+		uint32_t candidateStaticAnimatedSuppressedCount = 0;
+		uint32_t candidateSectorDirtyCount = 0;
+		uint32_t candidateSectionDirtyCount = 0;
+		uint32_t candidateDraggedCount = 0;
+		uint32_t candidateSignatureWatchlistCount = 0;
+		uint32_t candidateBackgroundSweepCount = 0;
+		uint32_t candidateDeferredMaterialRefreshCount = 0;
+		uint32_t candidateDeferredStructuralRebuildCount = 0;
+		uint32_t dirtyChunkCount = 0;
+		uint32_t startupMaterialOnlyDirtyChunkCount = 0;
+	};
 
 	struct ResidentBufferUploadScratch
 	{
@@ -2537,6 +2562,7 @@ private:
 	bool mAllowStartupMapWorldCorrection = false;
 	bool mAllowStartupMutationRebaseline = false;
 	bool mPendingStartupMutationRebaseline = false;
+	StartupMutationProbeState mStartupMutationProbe = {};
 	std::vector<uint8_t> mPendingStartupVisibleChunkValidation;
 	uint64_t mObservedMapWorldBuildSerial = 0;
 	uint64_t mStaticAccelerationBuildSerial = 0;

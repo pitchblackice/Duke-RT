@@ -1981,6 +1981,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mAllowStartupMapWorldCorrection = false;
 	mAllowStartupMutationRebaseline = false;
 	mPendingStartupMutationRebaseline = false;
+	mStartupMutationProbe = {};
 	mPendingStartupVisibleChunkValidation.clear();
 	mRuntimeMutation.ResetLevelLifecycleState();
 	mStartupMapWorldCorrectionDeadlineFrame = 0;
@@ -2102,6 +2103,7 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 	mAllowStartupMapWorldCorrection = false;
 	mAllowStartupMutationRebaseline = false;
 	mPendingStartupMutationRebaseline = false;
+	mStartupMutationProbe = {};
 	mPendingStartupVisibleChunkValidation.clear();
 	mRuntimeMutation.ResetLevelLifecycleState();
 	mStartupMapWorldCorrectionDeadlineFrame = 0;
@@ -2204,6 +2206,50 @@ NRIRenderer::LevelTransitionSnapshot NRIRenderer::BuildLevelTransitionSnapshot()
 	snapshot.dynamicScratchBufferBytes = mScratchBuffer.memorySize;
 	snapshot.worldTlasScratchBufferBytes = mTopLevelScratchBuffer.memorySize;
 	return snapshot;
+}
+
+void NRIRenderer::TraceStartupMutationProbe(const char* event) const
+{
+	if ((int)nri_ptloadingtrace < 1 || !(bool)nri_ptloadingmutationbaseline)
+	{
+		return;
+	}
+
+	const StartupMutationProbeState& probe = mStartupMutationProbe;
+	const uint32_t deadlineRemaining =
+		mAllowStartupMutationRebaseline && mFrameIndex <= mStartupMutationRebaselineDeadlineFrame ?
+		mStartupMutationRebaselineDeadlineFrame - mFrameIndex :
+		0u;
+	Printf(
+		"NRI PT startup mutation probe: event=%s level=%s frame=%u allow=%u pending=%u deadline=%u deadline_remaining=%u probe_valid=%u probe_frame=%llu chunks=%u visible_chunks=%u candidates=%u active=%u visible_resident=%u startup_visible=%u unresolved_textures=%u static_animated=%u sector_dirty=%u section_dirty=%u dragged=%u signature_watch=%u background=%u deferred_material=%u deferred_structural=%u detected_material_only=%u dirty_chunks=%u startup_material_only_dirty=%u mutation_cache_chunks=%u\n",
+		event != nullptr ? event : "unknown",
+		currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
+		mFrameIndex,
+		mAllowStartupMutationRebaseline ? 1u : 0u,
+		mPendingStartupMutationRebaseline ? 1u : 0u,
+		mStartupMutationRebaselineDeadlineFrame,
+		deadlineRemaining,
+		probe.valid ? 1u : 0u,
+		(unsigned long long)probe.frameIndex,
+		probe.chunkCount,
+		probe.visibleChunkCount,
+		probe.candidateCount,
+		probe.candidateActiveReplacementCount,
+		probe.candidateVisibleResidentValidationCount,
+		probe.candidateStartupVisibleValidationCount,
+		probe.candidateUnresolvedAuthoredTextureCount,
+		probe.candidateStaticAnimatedSuppressedCount,
+		probe.candidateSectorDirtyCount,
+		probe.candidateSectionDirtyCount,
+		probe.candidateDraggedCount,
+		probe.candidateSignatureWatchlistCount,
+		probe.candidateBackgroundSweepCount,
+		probe.candidateDeferredMaterialRefreshCount,
+		probe.candidateDeferredStructuralRebuildCount,
+		probe.detectedMaterialOnly ? 1u : 0u,
+		probe.dirtyChunkCount,
+		probe.startupMaterialOnlyDirtyChunkCount,
+		mRuntimeMutation.GetCacheChunkCount());
 }
 
 void NRIRenderer::ResetMuzzleFlashOverlayState(const char* reason)
@@ -3234,6 +3280,7 @@ void NRIRenderer::RefreshMapWorld()
 	mStartupMapWorldCorrectionDeadlineFrame = mFrameIndex + 8u;
 	mAllowStartupMutationRebaseline = false;
 	mPendingStartupMutationRebaseline = false;
+	mStartupMutationProbe = {};
 	mStartupMutationRebaselineDeadlineFrame = 0;
 
 	nri_scene::PTMapWorld world;
@@ -3254,6 +3301,7 @@ void NRIRenderer::RefreshMapWorld()
 		mStartupMapWorldCorrectionDeadlineFrame = 0;
 		mAllowStartupMutationRebaseline = false;
 		mPendingStartupMutationRebaseline = false;
+		mStartupMutationProbe = {};
 		mStartupMutationRebaselineDeadlineFrame = 0;
 		return;
 	}
@@ -3265,6 +3313,7 @@ void NRIRenderer::RefreshMapWorld()
 	mRuntimeMutation.PrepareStartupBaseline(mMapWorld.buildSerial, (uint32_t)mMapWorld.chunks.size());
 	mAllowStartupMutationRebaseline = false;
 	mPendingStartupMutationRebaseline = false;
+	mStartupMutationProbe = {};
 	mStartupMutationRebaselineDeadlineFrame = 0;
 	const auto& stats = mMapWorld.stats;
 	Printf("NRI PT map world built: level=%s build_serial=%llu chunks=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",

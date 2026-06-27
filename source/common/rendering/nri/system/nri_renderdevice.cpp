@@ -5873,11 +5873,19 @@ void NRIRenderDevice::CancelPathTracingLevelPreload()
 
 void NRIRenderDevice::NotifyPathTracingLevelFirstFrameRelease()
 {
+	if (mRenderer != nullptr)
+	{
+		mRenderer->TraceStartupMutationProbe("first-frame-release");
+	}
 	LogLevelTransitionSnapshot("first-frame-release", mCurrentLevelTransition, mPathTracingLevelPreloadPending, 0);
 }
 
 void NRIRenderDevice::NotifyPathTracingLevelPreloadFinalCheckRelease()
 {
+	if (mRenderer != nullptr)
+	{
+		mRenderer->TraceStartupMutationProbe("final-check-release");
+	}
 	LogLevelTransitionSnapshot("final-check-release", mCurrentLevelTransition, mPathTracingLevelPreloadPending, 0);
 }
 
