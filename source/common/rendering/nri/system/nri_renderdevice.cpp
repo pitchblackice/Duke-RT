@@ -46,6 +46,7 @@
 #include <string>
 #include <utility>
 
+extern int gametic;
 
 
 
@@ -8905,14 +8906,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 			NoteSwapChainPresent(mCurrentSwapChainImage);
 		}
 		mHasPresentedSwapChainFrame = true;
-		if (mRecoveryPresentSuccessCount < 3)
-		{
-			++mRecoveryPresentSuccessCount;
-			if (mRecoveryPresentSuccessCount == 3)
-			{
-				StartupRecovery_MarkNriHealthy();
-			}
-		}
+		StartupRecovery_NoteNriGameplayPresent(gametic, gamestate == GS_LEVEL);
 		if (nri_ptdebug > 0 && sLoggedPresentCount < 4)
 		{
 			Printf("NRI present: frame_index=%llu image=%u queued_frame=%u\n",

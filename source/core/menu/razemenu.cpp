@@ -59,6 +59,7 @@
 #include "raze_sound.h"
 #include "gamestruct.h"
 #include "razemenu.h"
+#include "startup_recovery.h"
 #include "mapinfo.h"
 #include "statistics.h"
 #include "i_net.h"
@@ -542,6 +543,53 @@ static void InitCrosshairsList()
 	}
 }
 
+static void InitStartupRecoveryMenu()
+{
+	if (!StartupRecovery_HasRestorableSettings())
+	{
+		return;
+	}
+
+	DMenuDescriptor** menu = MenuDescriptors.CheckKey("VideoOptions");
+	if (menu == nullptr || *menu == nullptr || !(*menu)->IsKindOf(RUNTIME_CLASS(DOptionMenuDescriptor)))
+	{
+		return;
+	}
+
+	DOptionMenuDescriptor* options = static_cast<DOptionMenuDescriptor*>(*menu);
+	const FName restoreAction("startup_recovery_restore_last_settings");
+	if (options->GetItem(restoreAction) != nullptr)
+	{
+		return;
+	}
+
+	DMenuItemBase* item = CreateOptionMenuItemSafeCommand(
+		"Recover Last Display Settings",
+		restoreAction,
+		"Restore the display settings from before Safe Mode? Restart the game after restoring to apply startup-only renderer changes.");
+	GC::WriteBarrier(options, item);
+
+	const FName profileAction("nri_settingsprofile");
+	int insertIndex = -1;
+	for (unsigned int i = 0; i < options->mItems.Size(); ++i)
+	{
+		if (options->mItems[i]->mAction == profileAction)
+		{
+			insertIndex = (int)i + 1;
+			break;
+		}
+	}
+
+	if (insertIndex >= 0 && insertIndex <= (int)options->mItems.Size())
+	{
+		options->mItems.Insert((unsigned int)insertIndex, item);
+	}
+	else
+	{
+		options->mItems.Push(item);
+	}
+}
+
 //==========================================================================
 //
 // Defines how graphics substitution is handled.
@@ -639,6 +687,7 @@ void BuildGameMenus()
 {
 	BuildEpisodeMenu();
 	InitCrosshairsList();
+	InitStartupRecoveryMenu();
 	UpdateJoystickMenu(nullptr);
 }
 
@@ -751,4 +800,3 @@ DEFINE_ACTION_FUNCTION(_PlayerMenu, DrawPlayerSprite)
 	gi->DrawPlayerSprite(DVector2(0.,0.), selected);
 	return 0;
 }
-

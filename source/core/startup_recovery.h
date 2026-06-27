@@ -7,4 +7,6 @@ void StartupRecovery_MarkNriCreateResult(const char* api, bool success, const ch
 void StartupRecovery_MarkNriStartupFailure(const char* stage, const char* reason);
 void StartupRecovery_MarkNriHealthy();
 void StartupRecovery_MarkNriDeviceLost(const char* stage);
+void StartupRecovery_NoteNriGameplayPresent(int gameplayTic, bool gameplayRendered);
 void StartupRecovery_MarkCleanExit();
+bool StartupRecovery_HasRestorableSettings();

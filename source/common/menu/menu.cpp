@@ -1140,6 +1140,18 @@ DMenuItemBase * CreateOptionMenuItemCommand(const char *label, FName cmd, bool c
 	return (DMenuItemBase*)p;
 }
 
+DMenuItemBase * CreateOptionMenuItemSafeCommand(const char *label, FName cmd, const char *prompt)
+{
+	auto c = PClass::FindClass("OptionMenuItemSafeCommand");
+	auto p = c->CreateNew();
+	FString namestr = label;
+	FString promptstr = prompt != nullptr ? prompt : "";
+	VMValue params[] = { p, &namestr, cmd.GetIndex(), &promptstr };
+	auto f = dyn_cast<PFunction>(c->FindSymbol("Init", false));
+	VMCall(f->Variants[0].Implementation, params, countof(params), nullptr, 0);
+	return (DMenuItemBase*)p;
+}
+
 DMenuItemBase * CreateListMenuItemPatch(double x, double y, int height, int hotkey, FTextureID tex, FName command, int param)
 {
 	auto c = PClass::FindClass("ListMenuItemPatchItem");
