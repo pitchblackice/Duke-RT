@@ -2466,6 +2466,17 @@ namespace
 		entry.hasLastActorScenePosition = true;
 	}
 
+	bool UpdateVoxelActorCacheEntryInstanceTransform(VoxelActorCacheEntry& entry, const VoxelActorCacheLookup& lookup)
+	{
+		const bool transformChanged = !SameVoxelTransform(entry.currentTransform, lookup.currentTransform);
+		entry.currentTranslation[0] = lookup.currentTranslation[0];
+		entry.currentTranslation[1] = lookup.currentTranslation[1];
+		entry.currentTranslation[2] = lookup.currentTranslation[2];
+		std::copy(std::begin(lookup.currentTransform), std::end(lookup.currentTransform), std::begin(entry.currentTransform));
+		UpdateVoxelActorCacheEntryScenePosition(entry, lookup);
+		return transformChanged;
+	}
+
 	bool HasLastValidResidentVoxelSurface(const VoxelActorCacheLookup& lookup)
 	{
 		return lookup.entry != nullptr && lookup.entry->hasSurface && lookup.entry->persistentReady;
@@ -2597,11 +2608,7 @@ namespace
 			lookup.entry->surfaceSignature = surfaceSignature;
 			lookup.entry->transformBasisSignature = transformBasisSignature;
 			lookup.entry->meshBakeSpace = lookup.meshBakeSpace;
-			lookup.entry->currentTranslation[0] = lookup.currentTranslation[0];
-			lookup.entry->currentTranslation[1] = lookup.currentTranslation[1];
-			lookup.entry->currentTranslation[2] = lookup.currentTranslation[2];
-			std::copy(std::begin(lookup.currentTransform), std::end(lookup.currentTransform), std::begin(lookup.entry->currentTransform));
-			UpdateVoxelActorCacheEntryScenePosition(*lookup.entry, lookup);
+			UpdateVoxelActorCacheEntryInstanceTransform(*lookup.entry, lookup);
 			lookup.entry->lastSeenFrame = gVoxelActorCacheFrame;
 			lookup.entry->pendingReason = (uint8_t)VoxelActorPendingReason::None;
 			lookup.entry->pendingFrame = 0;
@@ -2619,11 +2626,14 @@ namespace
 			if (!lookup.entry->persistentReady && CanPromoteVoxelActorCacheEntry(*lookup.entry))
 			{
 				lookup.entry->persistentReady = true;
+			}
+			const bool transformChanged = UpdateVoxelActorCacheEntryInstanceTransform(*lookup.entry, lookup);
+			if ((promoted && lookup.entry->persistentReady) || transformChanged)
+			{
 				++gVoxelActorCacheSerial;
 			}
 			lookup.entry->pendingReason = (uint8_t)VoxelActorPendingReason::None;
 			lookup.entry->pendingFrame = 0;
-			UpdateVoxelActorCacheEntryScenePosition(*lookup.entry, lookup);
 			stats.voxelStableSignatureHits++;
 			stats.voxelStableSplitStable++;
 			stats.voxelCacheSurfaceHits++;
@@ -2650,10 +2660,10 @@ namespace
 			{
 				lookup.entry->persistentReady = true;
 			}
+			const bool transformChanged = UpdateVoxelActorCacheEntryInstanceTransform(*lookup.entry, lookup);
 			lookup.entry->pendingReason = (uint8_t)VoxelActorPendingReason::None;
 			lookup.entry->pendingFrame = 0;
-			UpdateVoxelActorCacheEntryScenePosition(*lookup.entry, lookup);
-			if (!promoted || lookup.entry->persistentReady)
+			if (!promoted || lookup.entry->persistentReady || transformChanged)
 			{
 				++gVoxelActorCacheSerial;
 			}
