@@ -180,8 +180,115 @@ namespace
 
 void NRIRenderer::RebuildStartupMutationBaseline()
 {
+	if (!mPendingStartupMutationRebaseline)
+	{
+		return;
+	}
+
+	const bool traceLoading = (int)nri_ptloadingtrace >= 1;
+	uint32_t scannedChunks = 0;
+	uint32_t unchangedChunks = 0;
+	uint32_t materialOnlyChunks = 0;
+	uint32_t refreshedChunks = 0;
+	uint32_t skippedActiveChunks = 0;
+	uint32_t skippedStructuralChunks = 0;
+	uint32_t skippedNonResidentChunks = 0;
+	uint32_t captureFailedChunks = 0;
+	const char* result = "refresh";
+	if (!mMapWorld.valid || !mRuntimeMutation.HasCacheChunkCount((uint32_t)mMapWorld.chunks.size()))
+	{
+		result = "skip-invalid";
+	}
+	else
+	{
+		for (uint32_t chunkListIndex = 0; chunkListIndex < (uint32_t)mMapWorld.chunks.size(); ++chunkListIndex)
+		{
+			const auto& mapChunk = mMapWorld.chunks[chunkListIndex];
+			auto* replacement = mRuntimeMutation.FindReplacement(chunkListIndex);
+			if (replacement == nullptr)
+			{
+				continue;
+			}
+
+			nri_scene::PTMapChunkMutationAnalysis analysis = {};
+			if (!nri_scene::AnalyzeMapChunkMutation(mapChunk, replacement->baseline, analysis) ||
+				!analysis.signatureChanged)
+			{
+				unchangedChunks++;
+				continue;
+			}
+
+			scannedChunks++;
+			if (!IsRuntimeMutationMaterialOnlyReasonMask(analysis.reasonMask))
+			{
+				skippedStructuralChunks++;
+				continue;
+			}
+
+			materialOnlyChunks++;
+			if (replacement->active || replacement->valid)
+			{
+				skippedActiveChunks++;
+				continue;
+			}
+			if (!replacement->residentAuthoritative)
+			{
+				skippedNonResidentChunks++;
+				continue;
+			}
+
+			nri_scene::PTMapChunkMutationBaseline baseline = {};
+			if (!nri_scene::CaptureMapChunkMutationBaseline(mapChunk, baseline))
+			{
+				captureFailedChunks++;
+				continue;
+			}
+
+			replacement->baseline = baseline;
+			replacement->replacementBaseline = baseline;
+			replacement->baselineSignature = baseline.signature;
+			replacement->liveSignature = baseline.signature;
+			replacement->reasonMask = nri_scene::PTMapChunkMutationReason_None;
+			replacement->sectionDirtyCount = 0;
+			replacement->stableMutationFrameCount = 0;
+			replacement->sectorDirty = false;
+			replacement->dragged = false;
+			replacement->blindSpot = false;
+
+			auto& registry = mStaticSceneResidency.Registry();
+			if (mapChunk.chunkIndex < registry.entries.size())
+			{
+				auto& residentEntry = registry.entries[mapChunk.chunkIndex];
+				if (residentEntry.valid)
+				{
+					residentEntry.appliedBaseline = baseline;
+					residentEntry.baselineSignature = baseline.signature;
+					residentEntry.liveSignature = baseline.signature;
+					residentEntry.visibleValidationFramesRemaining = 0;
+				}
+			}
+			refreshedChunks++;
+		}
+	}
+
 	mPendingStartupMutationRebaseline = false;
 	mAllowStartupMutationRebaseline = false;
+	mStartupMutationRebaselineDeadlineFrame = 0;
+	if (traceLoading)
+	{
+		Printf("NRI PT startup mutation baseline: result=%s level=%s frame=%u scanned=%u unchanged=%u material_only=%u refreshed=%u skipped_active=%u skipped_structural=%u skipped_nonresident=%u capture_failed=%u\n",
+			result,
+			currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
+			mFrameIndex,
+			scannedChunks,
+			unchangedChunks,
+			materialOnlyChunks,
+			refreshedChunks,
+			skippedActiveChunks,
+			skippedStructuralChunks,
+			skippedNonResidentChunks,
+			captureFailedChunks);
+	}
 }
 
 bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
@@ -240,6 +347,9 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 		mPendingStartupVisibleChunkValidation.resize(mMapWorld.chunks.size(), 0u);
 	}
 	mRuntimeMutation.PrepareStartupBaseline(mMapWorld.buildSerial, (uint32_t)mMapWorld.chunks.size());
+	mAllowStartupMutationRebaseline = false;
+	mPendingStartupMutationRebaseline = false;
+	mStartupMutationRebaselineDeadlineFrame = 0;
 	for (uint32_t chunkIndex : diffDetails.lateVisibleValidationChunks)
 	{
 		if (chunkIndex < mPendingStartupVisibleChunkValidation.size())

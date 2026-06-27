@@ -372,6 +372,12 @@ bool NRIPreloadCoordinator::Run(NRIRenderer& renderer, const NRIPreloadLevelScen
 		return staticSceneResult != StepResult::Wait;
 	}
 
+	if ((bool)nri_ptloadingmutationbaseline && !renderer.mPendingStartupMutationRebaseline)
+	{
+		renderer.mAllowStartupMutationRebaseline = true;
+		renderer.mStartupMutationRebaselineDeadlineFrame = renderer.mFrameIndex + 64u;
+	}
+	renderer.RebuildStartupMutationBaseline();
 	RefreshStaticLighting(renderer, context);
 	const StepResult resourcesResult = PreloadResidentSceneResources(renderer, context);
 	if (resourcesResult != StepResult::Continue)

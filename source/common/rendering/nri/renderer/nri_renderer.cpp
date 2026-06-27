@@ -3263,6 +3263,9 @@ void NRIRenderer::RefreshMapWorld()
 	mPendingStartupVisibleChunkValidation.clear();
 	mPendingStartupVisibleChunkValidation.resize(mMapWorld.chunks.size(), 0u);
 	mRuntimeMutation.PrepareStartupBaseline(mMapWorld.buildSerial, (uint32_t)mMapWorld.chunks.size());
+	mAllowStartupMutationRebaseline = false;
+	mPendingStartupMutationRebaseline = false;
+	mStartupMutationRebaselineDeadlineFrame = 0;
 	const auto& stats = mMapWorld.stats;
 	Printf("NRI PT map world built: level=%s build_serial=%llu chunks=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
 		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",

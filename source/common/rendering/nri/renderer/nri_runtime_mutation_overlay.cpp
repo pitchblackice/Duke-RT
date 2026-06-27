@@ -3558,6 +3558,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	if (mAllowStartupMutationRebaseline && mFrameIndex > mStartupMutationRebaselineDeadlineFrame)
 	{
 		mAllowStartupMutationRebaseline = false;
+		mPendingStartupMutationRebaseline = false;
 	}
 	if (collectRuntimeMutationCacheStats)
 	{
