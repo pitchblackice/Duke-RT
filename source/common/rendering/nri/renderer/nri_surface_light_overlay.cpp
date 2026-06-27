@@ -88,18 +88,20 @@ namespace
 	}
 }
 
-bool NRIRenderer::BuildSurfaceLightOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials)
+bool NRIRenderer::BuildSurfaceLightOverlay(nri_scene::SceneView& outSceneView, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials)
 {
-	return nri_surface_light_overlay::BuildSurfaceLightOverlay(GetResolvedLightOverlaySet(), outGeometry, outMaterials);
+	return nri_surface_light_overlay::BuildSurfaceLightOverlay(GetResolvedLightOverlaySet(), outSceneView, outGeometry, outMaterials);
 }
 
 namespace nri_surface_light_overlay
 {
 bool BuildSurfaceLightOverlay(
 	const ResolvedLightOverlaySet& resolved,
+	nri_scene::SceneView& outSceneView,
 	nri_scene::GeometryData& outGeometry,
 	nri_scene::MaterialBridgeData& outMaterials)
 {
+	outSceneView = {};
 	outGeometry = {};
 	outMaterials = {};
 
@@ -148,8 +150,8 @@ bool BuildSurfaceLightOverlay(
 		out[2] = a[0] * b[1] - a[1] * b[0];
 	};
 
-	nri_scene::SceneView surfaceLightView = {};
 	std::vector<std::array<float, 3>> surfaceLightColors;
+	std::vector<float> surfaceLightIntensities;
 	for (const auto& rule : resolved.surfaceLightRules)
 	{
 		if (!rule.hasPosition || !rule.hasNormal)
@@ -216,6 +218,7 @@ bool BuildSurfaceLightOverlay(
 			rule.hasColor ? std::max(rule.color[1], 0.0f) : 1.0f,
 			rule.hasColor ? std::max(rule.color[2], 0.0f) : 1.0f,
 		};
+		const float lightIntensity = std::max(rule.intensity, 0.0f);
 		const float center[3] =
 		{
 			rule.position[0] + normal[0] * offset,
@@ -260,18 +263,19 @@ bool BuildSurfaceLightOverlay(
 		surface.provenance.wallIndex = rule.hasWall ? rule.wall : -1;
 		surface.provenance.mapChunkIndex = -1;
 		surface.provenance.cstat = BuildSurfaceLightRuleId(rule);
-		surfaceLightView.opaqueFlats.push_back(std::move(surface));
+		outSceneView.opaqueFlats.push_back(std::move(surface));
 		surfaceLightColors.push_back({ lightColor[0], lightColor[1], lightColor[2] });
+		surfaceLightIntensities.push_back(lightIntensity);
 	}
 
-	if (surfaceLightView.opaqueFlats.empty())
+	if (outSceneView.opaqueFlats.empty())
 	{
 		return false;
 	}
 
-	RebuildSurfaceLightSceneViewStats(surfaceLightView);
-	nri_scene::BuildGeometry(surfaceLightView, outGeometry);
-	nri_scene::BuildMaterials(surfaceLightView, outMaterials);
+	RebuildSurfaceLightSceneViewStats(outSceneView);
+	nri_scene::BuildGeometry(outSceneView, outGeometry);
+	nri_scene::BuildMaterials(outSceneView, outMaterials);
 	for (size_t i = 0; i < outMaterials.materials.size(); ++i)
 	{
 		nri_scene::MaterialData& material = outMaterials.materials[i];
@@ -283,7 +287,8 @@ bool BuildSurfaceLightOverlay(
 		material.lightLevel = 1.0f;
 		material.emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
 		material.emissiveTextureIndex = material.textureIndex;
-		material.emissiveIntensity = 1.0f;
+		material.emissiveIntensity = i < surfaceLightIntensities.size() ? surfaceLightIntensities[i] : 1.0f;
+		material.emissiveMaskScale = 1.0f;
 		const std::array<float, 3> lightColor = i < surfaceLightColors.size() ? surfaceLightColors[i] : std::array<float, 3>{ 1.0f, 1.0f, 1.0f };
 		material.emissiveColor[0] = lightColor[0];
 		material.emissiveColor[1] = lightColor[1];
@@ -297,9 +302,10 @@ bool BuildSurfaceLightOverlay(
 				nri_scene::MaterialLightingFlag_NoShadowReceive |
 				nri_scene::MaterialLightingFlag_NoShadowCast;
 			metadata.lightLevel = 1.0f;
-			metadata.emissiveMode = nri_scene::MaterialEmissiveMode_None;
-			metadata.emissiveTextureIndex = UINT32_MAX;
-			metadata.emissiveIntensity = 0.0f;
+			metadata.emissiveMode = material.emissiveMode;
+			metadata.emissiveTextureIndex = material.emissiveTextureIndex;
+			metadata.emissiveIntensity = material.emissiveIntensity;
+			metadata.emissiveMaskScale = material.emissiveMaskScale;
 			metadata.emissiveColor[0] = material.emissiveColor[0];
 			metadata.emissiveColor[1] = material.emissiveColor[1];
 			metadata.emissiveColor[2] = material.emissiveColor[2];

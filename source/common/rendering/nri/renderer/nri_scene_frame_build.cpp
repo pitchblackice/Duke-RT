@@ -142,6 +142,20 @@ namespace
 		stats.dynamicOverlayBlasMonolithicRefs = stats.dynamicOverlayBlasPrimitiveCount != 0 ? 1u : 0u;
 	}
 
+	static const NRIRenderer::SceneBufferUploadDomainSpan* FindUploadDomainSpan(
+		const std::vector<NRIRenderer::SceneBufferUploadDomainSpan>& uploadSpans,
+		NRIRenderer::SceneBufferUploadDomain domain)
+	{
+		for (const NRIRenderer::SceneBufferUploadDomainSpan& span : uploadSpans)
+		{
+			if (span.domain == domain)
+			{
+				return &span;
+			}
+		}
+		return nullptr;
+	}
+
 	static bool TryComputeCapturedSurfaceNormal(const nri_scene::SurfaceRef& surface, float outNormal[3])
 	{
 		if (surface.vertices.size() < 3)
@@ -500,6 +514,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	const nri_scene::SceneView* sceneLightDynamicView = nullptr;
 	const nri_scene::MaterialBridgeData* sceneLightDynamicMaterials = nullptr;
 	nri_scene::SceneView& localPlayerReflectionSceneView = frame.localPlayerReflectionSceneView;
+	nri_scene::SceneView& surfaceLightSceneView = frame.surfaceLightSceneView;
 	nri_scene::SceneView& sceneLightMergedDynamicSceneView = frame.sceneLightMergedDynamicSceneView;
 	nri_scene::SceneView& mergedDynamicSceneView = frame.mergedDynamicSceneView;
 	const nri_scene::SceneView*& activeDynamicSceneView = frame.activeDynamicSceneView;
@@ -512,6 +527,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	uint32_t activeStaticProbePrimitiveCount = 0;
 	EmissiveSamplingBuildContext emissiveSamplingContext = {};
 	bool sceneLightUsesStaticMapScene = false;
+	bool hasSurfaceLightOverlayForFrame = false;
 	nri_scene::SceneDebugStats& activeStats = frame.activeStats;
 	bool& paletteReady = frame.paletteReady;
 	bool& texturesReady = frame.texturesReady;
@@ -888,7 +904,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			return built;
 		}();
 		const bool surfaceLightBuilt = !deferOverlayThisFrame &&
-			BuildSurfaceLightOverlay(surfaceLightGeometry, surfaceLightMaterialBridge);
+			BuildSurfaceLightOverlay(surfaceLightSceneView, surfaceLightGeometry, surfaceLightMaterialBridge);
 		NRISceneFrameOverlayEligibilityInputs overlayEligibilityInputs = {};
 		overlayEligibilityInputs.deferOverlayThisFrame = deferOverlayThisFrame;
 		overlayEligibilityInputs.runtimeSpaceLinkBuilt = hasRuntimeSpaceLinkOverlay;
@@ -911,6 +927,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		const bool hasLocalPlayerReflectionOverlay = overlayEligibility.hasLocalPlayerReflectionOverlay;
 		const bool hasRuntimeDebugSphereOverlay = overlayEligibility.hasRuntimeDebugSphereOverlay;
 		const bool hasSurfaceLightOverlay = overlayEligibility.hasSurfaceLightOverlay;
+		hasSurfaceLightOverlayForFrame = hasSurfaceLightOverlay;
 
 		if (overlayEligibility.hasAnyOverlay)
 		{
@@ -1167,6 +1184,16 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				emissiveSamplingContext.runtimeMutationPrimitiveBaseOffset = (uint32_t)runtimeSpaceLinkGeometry.primitives.size();
 				emissiveSamplingContext.dynamicGeometry = hasActiveDynamicOverlay ? activeDynamicGeometry : nullptr;
 				emissiveSamplingContext.dynamicPrimitiveBaseOffset = (uint32_t)(runtimeSpaceLinkGeometry.primitives.size() + runtimeMutationFrame.geometry.primitives.size());
+				if (hasSurfaceLightOverlay)
+				{
+					const SceneBufferUploadDomainSpan* surfaceLightSpan =
+						FindUploadDomainSpan(sceneUploadDomainSpans, SceneBufferUploadDomain::SurfaceLightOverlay);
+					if (surfaceLightSpan != nullptr)
+					{
+						emissiveSamplingContext.surfaceLightOverlayGeometry = &surfaceLightGeometry;
+						emissiveSamplingContext.surfaceLightOverlayPrimitiveBaseOffset = surfaceLightSpan->primitiveOffset;
+					}
+				}
 				if (accelerationReady)
 				{
 					if (hasPersistentVoxelOverlay)
@@ -1621,6 +1648,8 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		sceneLightCapturedMaterials,
 		sceneLightDynamicView,
 		sceneLightDynamicMaterials,
+		hasSurfaceLightOverlayForFrame ? &surfaceLightSceneView : nullptr,
+		hasSurfaceLightOverlayForFrame ? &surfaceLightMaterialBridge : nullptr,
 		appendPersistentVoxelSceneLights);
 
 	bool refreshedSceneDataAfterLightRebuild = false;

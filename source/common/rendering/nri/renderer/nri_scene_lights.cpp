@@ -569,6 +569,7 @@ namespace
 		case SceneLightRecordSource::StaticMapScene: return "static_map_scene";
 		case SceneLightRecordSource::RuntimeMutationScene: return "runtime_mutation_scene";
 		case SceneLightRecordSource::DynamicScene: return "dynamic_scene";
+		case SceneLightRecordSource::SurfaceLightOverlayScene: return "surface_light_overlay_scene";
 		case SceneLightRecordSource::PersistentVoxelScene: return "persistent_voxel_scene";
 		default: return "none";
 		}
@@ -1611,6 +1612,15 @@ namespace
 		return rule.hasSectorFilter || rule.hasWallFilter || rule.hasTileFilter;
 	}
 
+	bool SurfaceLightFixtureRuleMatchesSurface(
+		const SceneLightSystem::EmissiveOverrideRule& rule,
+		const SceneLightSystem::SurfaceRecord& record)
+	{
+		return
+			record.source == SceneLightRecordSource::SurfaceLightOverlayScene &&
+			record.provenance.cstat == rule.ruleId;
+	}
+
 	std::string NormalizeMaterialTextureName(const FGameTexture* texture)
 	{
 		std::string normalized = texture != nullptr ? texture->GetName().GetChars() : "";
@@ -2364,6 +2374,45 @@ namespace
 		}
 	}
 
+	void BuildSurfaceLightFixtureResponseRules(
+		const ResolvedLightOverlaySet& resolved,
+		std::vector<SceneLightSystem::EmissiveOverrideRule>& outRules)
+	{
+		outRules.clear();
+		outRules.reserve((size_t)resolved.surfaceLightRules.Size());
+		for (const auto& resolvedRule : resolved.surfaceLightRules)
+		{
+			if (!resolvedRule.hasPosition || !resolvedRule.hasNormal)
+			{
+				continue;
+			}
+
+			SceneLightSystem::EmissiveOverrideRule rule = {};
+			rule.ruleId = BuildSurfaceLightRuleId(resolvedRule);
+			rule.hasSectorResponse = resolvedRule.hasSectorResponse;
+			rule.sectorResponse = resolvedRule.sectorResponse;
+			rule.hasSignalSector = resolvedRule.hasSignalSector && resolvedRule.signalSector >= 0;
+			rule.signalSector = rule.hasSignalSector ? resolvedRule.signalSector : -1;
+			rule.hasResponseIntensity = resolvedRule.hasResponseIntensity;
+			rule.responseIntensity = resolvedRule.responseIntensity;
+			rule.hasResponseMin = resolvedRule.hasResponseMin;
+			rule.responseMin = resolvedRule.responseMin;
+			rule.hasResponseMax = resolvedRule.hasResponseMax;
+			rule.responseMax = resolvedRule.responseMax;
+			rule.hasResponseInputMin = resolvedRule.hasResponseInputMin;
+			rule.responseInputMin = resolvedRule.responseInputMin;
+			rule.hasResponseInputMax = resolvedRule.hasResponseInputMax;
+			rule.responseInputMax = resolvedRule.responseInputMax;
+			rule.hasMaterialResponse = true;
+			rule.materialResponse = resolvedRule.fixtureMaterialResponse;
+			rule.hasMaterialResponseMin = resolvedRule.hasMaterialResponseMin;
+			rule.materialResponseMin = resolvedRule.materialResponseMin;
+			rule.hasMaterialResponseMax = resolvedRule.hasMaterialResponseMax;
+			rule.materialResponseMax = resolvedRule.materialResponseMax;
+			outRules.push_back(rule);
+		}
+	}
+
 	void BuildEmissiveMaterialResponseRules(
 		const ResolvedLightOverlaySet& resolved,
 		std::vector<SceneLightSystem::EmissiveMaterialResponseRule>& outRules)
@@ -2556,6 +2605,8 @@ void NRIRenderer::RefreshSceneLightSystem(
 	const nri_scene::MaterialBridgeData* capturedMaterials,
 	const nri_scene::SceneView* dynamicSceneView,
 	const nri_scene::MaterialBridgeData* dynamicMaterials,
+	const nri_scene::SceneView* surfaceLightSceneView,
+	const nri_scene::MaterialBridgeData* surfaceLightMaterials,
 	bool appendPersistentVoxelSceneLights)
 {
 	nri_runtime_mutation::ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneLightsMs);
@@ -2569,6 +2620,8 @@ void NRIRenderer::RefreshSceneLightSystem(
 	assemblyInput.capturedMaterials = capturedMaterials;
 	assemblyInput.dynamicSceneView = dynamicSceneView;
 	assemblyInput.dynamicMaterials = dynamicMaterials;
+	assemblyInput.surfaceLightSceneView = surfaceLightSceneView;
+	assemblyInput.surfaceLightMaterials = surfaceLightMaterials;
 	assemblyInput.appendPersistentVoxelSceneLights = appendPersistentVoxelSceneLights;
 
 	SceneLightSystem::FrameAssemblyServices assemblyServices = {};
@@ -2593,6 +2646,7 @@ void NRIRenderer::RefreshSceneLightSystem(
 	mLastPerfShellTraceStats.sceneLightRuntimeMutationAppendMs += assemblyTimings.runtimeMutationAppendMs;
 	mLastPerfShellTraceStats.sceneLightCapturedAppendMs += assemblyTimings.capturedAppendMs;
 	mLastPerfShellTraceStats.sceneLightDynamicAppendMs += assemblyTimings.dynamicAppendMs;
+	mLastPerfShellTraceStats.sceneLightDynamicAppendMs += assemblyTimings.surfaceLightOverlayAppendMs;
 	mLastPerfShellTraceStats.sceneLightPersistentVoxelAppendMs += assemblyTimings.persistentVoxelAppendMs;
 
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
@@ -2637,10 +2691,12 @@ void NRIRenderer::RefreshSceneLightSystem(
 	std::unordered_map<uint32_t, SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule> actorOverlayRulesById;
 	std::vector<SceneLightSystem::AnalyticLightRegistry::MapOverlayRule> mapOverlayRules;
 	std::vector<SceneLightSystem::EmissiveOverrideRule> emissiveOverrideRules;
+	std::vector<SceneLightSystem::EmissiveOverrideRule> surfaceLightFixtureRules;
 	std::vector<SceneLightSystem::EmissiveMaterialResponseRule> emissiveMaterialResponseRules;
 	BuildActorAnalyticOverlayRules(resolvedLightOverlays, actorOverlayRules);
 	BuildActorAnalyticOverlayRuleLookup(resolvedLightOverlays, actorOverlayRulesById);
 	BuildEmissiveOverrideRules(resolvedLightOverlays, emissiveOverrideRules);
+	BuildSurfaceLightFixtureResponseRules(resolvedLightOverlays, surfaceLightFixtureRules);
 	BuildEmissiveMaterialResponseRules(resolvedLightOverlays, emissiveMaterialResponseRules);
 	if (mMapWorld.valid)
 	{
@@ -2671,6 +2727,7 @@ void NRIRenderer::RefreshSceneLightSystem(
 		mSceneLights.RebuildEmissiveSurfaces(
 			NRI_MAX_EMISSIVE_SURFACES_FOR_REFRESH,
 			emissiveOverrideRules.empty() ? nullptr : &emissiveOverrideRules,
+			surfaceLightFixtureRules.empty() ? nullptr : &surfaceLightFixtureRules,
 			emissiveMaterialResponseRules.empty() ? nullptr : &emissiveMaterialResponseRules);
 	}
 	{
@@ -2683,6 +2740,7 @@ void NRIRenderer::RefreshSceneLightSystem(
 	mLastPerfShellTraceStats.sceneLightStaticRecordCount = frameAppendStats.staticRecordCount;
 	mLastPerfShellTraceStats.sceneLightRuntimeMutationRecordCount = frameAppendStats.runtimeMutationRecordCount;
 	mLastPerfShellTraceStats.sceneLightDynamicRecordCount = frameAppendStats.dynamicRecordCount;
+	mLastPerfShellTraceStats.sceneLightDynamicRecordCount += frameAppendStats.surfaceLightOverlayRecordCount;
 	mLastPerfShellTraceStats.sceneLightCapturedRecordCount = frameAppendStats.capturedRecordCount;
 	mLastPerfShellTraceStats.sceneLightPersistentVoxelRecordCount = frameAppendStats.persistentVoxelRecordCount;
 	const auto& analyticStats = mSceneLights.GetAnalyticLights();
@@ -3515,6 +3573,14 @@ SceneLightSystem::FrameAssemblyTimingStats SceneLightSystem::AssembleFrameSurfac
 		});
 	}
 
+	if (input.surfaceLightSceneView != nullptr && input.surfaceLightMaterials != nullptr)
+	{
+		measure(timings.surfaceLightOverlayAppendMs, [&]()
+		{
+			AppendSceneView(*input.surfaceLightSceneView, *input.surfaceLightMaterials, SceneLightRecordSource::SurfaceLightOverlayScene);
+		});
+	}
+
 	if (input.appendPersistentVoxelSceneLights)
 	{
 		measure(timings.persistentVoxelAppendMs, [&]()
@@ -4207,6 +4273,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 void SceneLightSystem::RebuildEmissiveSurfaces(
 	uint32_t maxActiveSurfaces,
 	const std::vector<EmissiveOverrideRule>* overrideRules,
+	const std::vector<EmissiveOverrideRule>* surfaceLightFixtureRules,
 	const std::vector<EmissiveMaterialResponseRule>* materialResponseRules)
 {
 	const NRILightingSettings settings = CaptureSettings();
@@ -4280,6 +4347,18 @@ void SceneLightSystem::RebuildEmissiveSurfaces(
 			}
 		}
 		bool matchedOverride = false;
+		if (surfaceLightFixtureRules != nullptr)
+		{
+			for (const EmissiveOverrideRule& rule : *surfaceLightFixtureRules)
+			{
+				if (SurfaceLightFixtureRuleMatchesSurface(rule, record))
+				{
+					ApplyEmissiveOverrideRule(rule, emissive, settings);
+					matchedOverride = true;
+					break;
+				}
+			}
+		}
 		if (overrideRules != nullptr)
 		{
 			for (const EmissiveOverrideRule& rule : *overrideRules)
@@ -4855,10 +4934,12 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 	std::vector<MaterialPrimitiveRange> capturedRanges;
 	std::vector<MaterialPrimitiveRange> runtimeMutationRanges;
 	std::vector<MaterialPrimitiveRange> dynamicRanges;
+	std::vector<MaterialPrimitiveRange> surfaceLightOverlayRanges;
 	buildRanges(context.staticGeometry, staticRanges);
 	buildRanges(context.capturedGeometry, capturedRanges);
 	buildRanges(context.runtimeMutationGeometry, runtimeMutationRanges);
 	buildRanges(context.dynamicGeometry, dynamicRanges);
+	buildRanges(context.surfaceLightOverlayGeometry, surfaceLightOverlayRanges);
 
 	const NRILightingSettings settings = CaptureSettings();
 	std::vector<BuiltCandidate> candidates;
@@ -4980,6 +5061,10 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 			localStats.surfaceDynamic++;
 			appendSurfacePrimitives(surface, context.dynamicGeometry, dynamicRanges, nri_diag::SceneDataSourceDynamic, context.dynamicPrimitiveBaseOffset);
 			break;
+		case SceneLightRecordSource::SurfaceLightOverlayScene:
+			localStats.surfaceLightOverlay++;
+			appendSurfacePrimitives(surface, context.surfaceLightOverlayGeometry, surfaceLightOverlayRanges, nri_diag::SceneDataSourceDynamic, context.surfaceLightOverlayPrimitiveBaseOffset);
+			break;
 		case SceneLightRecordSource::PersistentVoxelScene:
 			localStats.surfacePersistentVoxel++;
 			localStats.skippedPersistentVoxelSurfaces++;
@@ -5079,6 +5164,8 @@ uint64_t SceneLightSystem::BuildEmissiveSamplingPayloadHash(const EmissiveSampli
 	hash = nri_scene::HashCombine64(hash, (uint64_t)context.runtimeMutationPrimitiveBaseOffset);
 	hash = nri_scene::HashCombine64(hash, HashGeometryForEmissiveSampling(context.dynamicGeometry));
 	hash = nri_scene::HashCombine64(hash, (uint64_t)context.dynamicPrimitiveBaseOffset);
+	hash = nri_scene::HashCombine64(hash, HashGeometryForEmissiveSampling(context.surfaceLightOverlayGeometry));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)context.surfaceLightOverlayPrimitiveBaseOffset);
 
 	hash = nri_scene::HashCombine64(hash, (uint64_t)mEmissiveSurfaces.activeSurfaces.size());
 	for (const auto& surface : mEmissiveSurfaces.activeSurfaces)
@@ -6525,6 +6612,9 @@ void SceneLightSystem::AppendSurfaceRecord(SurfaceRecord record, uint32_t materi
 		break;
 	case SceneLightRecordSource::DynamicScene:
 		mFrameAppendStats.dynamicRecordCount++;
+		break;
+	case SceneLightRecordSource::SurfaceLightOverlayScene:
+		mFrameAppendStats.surfaceLightOverlayRecordCount++;
 		break;
 	case SceneLightRecordSource::CapturedScene:
 		mFrameAppendStats.capturedRecordCount++;

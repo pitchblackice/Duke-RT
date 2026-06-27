@@ -2235,13 +2235,15 @@ private:
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging);
 	NRISurfaceProbeEmissiveDiagnostics BuildSurfaceProbeEmissiveDiagnostics(const NRISurfaceProbeResult& probe) const;
-	bool BuildSurfaceLightOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
+	bool BuildSurfaceLightOverlay(nri_scene::SceneView& outSceneView, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	void RefreshSceneLightSystem(
 		bool usedStaticMapScene,
 		const nri_scene::SceneView* capturedSceneView,
 		const nri_scene::MaterialBridgeData* capturedMaterials,
 		const nri_scene::SceneView* dynamicSceneView,
 		const nri_scene::MaterialBridgeData* dynamicMaterials,
+		const nri_scene::SceneView* surfaceLightSceneView,
+		const nri_scene::MaterialBridgeData* surfaceLightMaterials,
 		bool appendPersistentVoxelSceneLights);
 	void ResetMuzzleFlashOverlayState(const char* reason);
 	void ResetPersistentDynamicEmissiveCache();

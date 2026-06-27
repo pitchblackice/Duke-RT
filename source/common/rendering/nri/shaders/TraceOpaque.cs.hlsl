@@ -1092,7 +1092,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			{
 				diffuse = 0.0;
 				specular = 0.0;
-				directEmission = albedo.rgb * max(material.emissiveReserved, 1.0);
+				if (emissiveMaterial && (material.flags & MATERIAL_FLAG_TINT_EMISSION) != 0u)
+				{
+					directEmission = EvaluateVisibleMaterialEmission(hit.materialIndex, hit.dataSource, hit.primitiveIndex, material, albedo.rgb, hit.uv);
+				}
+				else
+				{
+					directEmission = albedo.rgb * max(material.emissiveReserved, 1.0);
+				}
 			}
 			else
 			{

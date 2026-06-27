@@ -21,6 +21,7 @@ enum class SceneLightRecordSource : uint32_t
 	StaticMapScene,
 	RuntimeMutationScene,
 	DynamicScene,
+	SurfaceLightOverlayScene,
 	PersistentVoxelScene,
 };
 
@@ -260,6 +261,8 @@ public:
 		uint32_t runtimeMutationPrimitiveBaseOffset = 0;
 		const nri_scene::GeometryData* dynamicGeometry = nullptr;
 		uint32_t dynamicPrimitiveBaseOffset = 0;
+		const nri_scene::GeometryData* surfaceLightOverlayGeometry = nullptr;
+		uint32_t surfaceLightOverlayPrimitiveBaseOffset = 0;
 	};
 
 	struct AnalyticLightHeuristicRule
@@ -577,6 +580,7 @@ public:
 		uint32_t staticRecordCount = 0;
 		uint32_t runtimeMutationRecordCount = 0;
 		uint32_t dynamicRecordCount = 0;
+		uint32_t surfaceLightOverlayRecordCount = 0;
 		uint32_t capturedRecordCount = 0;
 		uint32_t persistentVoxelRecordCount = 0;
 	};
@@ -606,6 +610,8 @@ public:
 		const nri_scene::MaterialBridgeData* capturedMaterials = nullptr;
 		const nri_scene::SceneView* dynamicSceneView = nullptr;
 		const nri_scene::MaterialBridgeData* dynamicMaterials = nullptr;
+		const nri_scene::SceneView* surfaceLightSceneView = nullptr;
+		const nri_scene::MaterialBridgeData* surfaceLightMaterials = nullptr;
 		bool appendPersistentVoxelSceneLights = false;
 	};
 
@@ -624,6 +630,7 @@ public:
 		double runtimeMutationAppendMs = 0.0;
 		double capturedAppendMs = 0.0;
 		double dynamicAppendMs = 0.0;
+		double surfaceLightOverlayAppendMs = 0.0;
 		double persistentVoxelAppendMs = 0.0;
 	};
 
@@ -746,6 +753,7 @@ public:
 	void RebuildEmissiveSurfaces(
 		uint32_t maxActiveSurfaces,
 		const std::vector<EmissiveOverrideRule>* overrideRules = nullptr,
+		const std::vector<EmissiveOverrideRule>* surfaceLightFixtureRules = nullptr,
 		const std::vector<EmissiveMaterialResponseRule>* materialResponseRules = nullptr);
 	void RebuildSectorLighting(uint32_t frameIndex, uint32_t sectorCount);
 	void BuildRuntimePointLightUpload(std::vector<NRIRuntimePointLightGpuData>& outLights) const;
@@ -766,6 +774,7 @@ public:
 		uint32_t surfaceCaptured = 0;
 		uint32_t surfaceRuntimeMutation = 0;
 		uint32_t surfaceDynamic = 0;
+		uint32_t surfaceLightOverlay = 0;
 		uint32_t surfacePersistentVoxel = 0;
 		uint32_t outputStaticRecords = 0;
 		uint32_t outputDynamicRecords = 0;

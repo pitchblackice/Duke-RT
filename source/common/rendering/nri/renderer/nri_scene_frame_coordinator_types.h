@@ -77,6 +77,7 @@ struct RenderSceneFrameBuildResult
 	nri_scene::SceneView capturedSceneView;
 	nri_scene::SceneView dynamicSceneView;
 	nri_scene::SceneView localPlayerReflectionSceneView;
+	nri_scene::SceneView surfaceLightSceneView;
 	nri_scene::SceneView sceneLightMergedDynamicSceneView;
 	nri_scene::SceneView mergedDynamicSceneView;
 	nri_scene::GeometryData capturedGeometry;

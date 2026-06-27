@@ -1803,6 +1803,7 @@ namespace
 		case SceneLightRecordSource::StaticMapScene: return "static_map_scene";
 		case SceneLightRecordSource::RuntimeMutationScene: return "runtime_mutation_scene";
 		case SceneLightRecordSource::DynamicScene: return "dynamic_scene";
+		case SceneLightRecordSource::SurfaceLightOverlayScene: return "surface_light_overlay_scene";
 		case SceneLightRecordSource::PersistentVoxelScene: return "persistent_voxel_scene";
 		default: return "none";
 	}

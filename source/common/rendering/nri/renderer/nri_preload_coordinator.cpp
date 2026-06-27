@@ -197,7 +197,7 @@ NRIPreloadCoordinator::StepResult NRIPreloadCoordinator::PreloadStaticSceneAndSt
 
 void NRIPreloadCoordinator::RefreshStaticLighting(NRIRenderer& renderer, Context& context)
 {
-	renderer.RefreshSceneLightSystem(true, nullptr, nullptr, nullptr, nullptr, false);
+	renderer.RefreshSceneLightSystem(true, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, false);
 	if (renderer.mGpuSceneHasDynamicOverlay)
 	{
 		return;

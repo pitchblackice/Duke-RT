@@ -92,7 +92,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 	mLastPerfShellTraceStats.emissiveSamplingSurfaceStatic = emissiveStats.surfaceStatic;
 	mLastPerfShellTraceStats.emissiveSamplingSurfaceCaptured = emissiveStats.surfaceCaptured;
 	mLastPerfShellTraceStats.emissiveSamplingSurfaceRuntimeMutation = emissiveStats.surfaceRuntimeMutation;
-	mLastPerfShellTraceStats.emissiveSamplingSurfaceDynamic = emissiveStats.surfaceDynamic;
+	mLastPerfShellTraceStats.emissiveSamplingSurfaceDynamic = emissiveStats.surfaceDynamic + emissiveStats.surfaceLightOverlay;
 	mLastPerfShellTraceStats.emissiveSamplingSurfacePersistentVoxel = emissiveStats.surfacePersistentVoxel;
 	mLastPerfShellTraceStats.emissiveSamplingOutputStaticRecords = emissiveStats.outputStaticRecords;
 	mLastPerfShellTraceStats.emissiveSamplingOutputDynamicRecords = emissiveStats.outputDynamicRecords;
