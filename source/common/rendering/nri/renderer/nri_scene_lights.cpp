@@ -2387,10 +2387,11 @@ namespace
 				continue;
 			}
 
+			const bool sectorResponseEnabled = resolvedRule.hasSectorResponse && resolvedRule.sectorResponse;
 			SceneLightSystem::EmissiveOverrideRule rule = {};
 			rule.ruleId = BuildSurfaceLightRuleId(resolvedRule);
-			rule.hasSectorResponse = resolvedRule.hasSectorResponse;
-			rule.sectorResponse = resolvedRule.sectorResponse;
+			rule.hasSectorResponse = true;
+			rule.sectorResponse = sectorResponseEnabled;
 			rule.hasSignalSector = resolvedRule.hasSignalSector && resolvedRule.signalSector >= 0;
 			rule.signalSector = rule.hasSignalSector ? resolvedRule.signalSector : -1;
 			rule.hasResponseIntensity = resolvedRule.hasResponseIntensity;
@@ -2403,12 +2404,15 @@ namespace
 			rule.responseInputMin = resolvedRule.responseInputMin;
 			rule.hasResponseInputMax = resolvedRule.hasResponseInputMax;
 			rule.responseInputMax = resolvedRule.responseInputMax;
-			rule.hasMaterialResponse = true;
-			rule.materialResponse = resolvedRule.fixtureMaterialResponse;
-			rule.hasMaterialResponseMin = resolvedRule.hasMaterialResponseMin;
-			rule.materialResponseMin = resolvedRule.materialResponseMin;
-			rule.hasMaterialResponseMax = resolvedRule.hasMaterialResponseMax;
-			rule.materialResponseMax = resolvedRule.materialResponseMax;
+			if (resolvedRule.fixtureMaterialResponse && sectorResponseEnabled)
+			{
+				rule.hasMaterialResponse = true;
+				rule.materialResponse = true;
+				rule.hasMaterialResponseMin = resolvedRule.hasMaterialResponseMin;
+				rule.materialResponseMin = resolvedRule.materialResponseMin;
+				rule.hasMaterialResponseMax = resolvedRule.hasMaterialResponseMax;
+				rule.materialResponseMax = resolvedRule.materialResponseMax;
+			}
 			outRules.push_back(rule);
 		}
 	}

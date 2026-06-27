@@ -1,5 +1,6 @@
 #include "nri_surface_light_overlay.h"
 
+#include "nri_cvars.h"
 #include "nri_renderer.h"
 #include "../scene/nri_scene_bridge.h"
 #include "lightoverlay.h"
@@ -152,6 +153,7 @@ bool BuildSurfaceLightOverlay(
 
 	std::vector<std::array<float, 3>> surfaceLightColors;
 	std::vector<float> surfaceLightIntensities;
+	std::vector<bool> surfaceLightTintEmission;
 	for (const auto& rule : resolved.surfaceLightRules)
 	{
 		if (!rule.hasPosition || !rule.hasNormal)
@@ -218,7 +220,7 @@ bool BuildSurfaceLightOverlay(
 			rule.hasColor ? std::max(rule.color[1], 0.0f) : 1.0f,
 			rule.hasColor ? std::max(rule.color[2], 0.0f) : 1.0f,
 		};
-		const float lightIntensity = std::max(rule.intensity, 0.0f);
+		const float lightIntensity = std::max(std::max(rule.intensity, 0.0f), (float)nri_ptsurfacelightminbrightness);
 		const float center[3] =
 		{
 			rule.position[0] + normal[0] * offset,
@@ -257,7 +259,11 @@ bool BuildSurfaceLightOverlay(
 		surface.material.palette = 0;
 		surface.material.shade = 0;
 		surface.material.alpha = 1.0f;
-		surface.material.flags = nri_scene::MaterialFlag_Fullbright | nri_scene::MaterialFlag_Flat | nri_scene::MaterialFlag_TintEmission;
+		surface.material.flags = nri_scene::MaterialFlag_Fullbright | nri_scene::MaterialFlag_Flat;
+		if (rule.fixtureMaterialResponse)
+		{
+			surface.material.flags |= nri_scene::MaterialFlag_TintEmission;
+		}
 		surface.provenance.sourceType = nri_scene::SurfaceSourceType::SurfaceLightOverlay;
 		surface.provenance.sectorIndex = rule.hasSector ? rule.sector : -1;
 		surface.provenance.wallIndex = rule.hasWall ? rule.wall : -1;
@@ -266,6 +272,7 @@ bool BuildSurfaceLightOverlay(
 		outSceneView.opaqueFlats.push_back(std::move(surface));
 		surfaceLightColors.push_back({ lightColor[0], lightColor[1], lightColor[2] });
 		surfaceLightIntensities.push_back(lightIntensity);
+		surfaceLightTintEmission.push_back(rule.fixtureMaterialResponse);
 	}
 
 	if (outSceneView.opaqueFlats.empty())
@@ -279,7 +286,16 @@ bool BuildSurfaceLightOverlay(
 	for (size_t i = 0; i < outMaterials.materials.size(); ++i)
 	{
 		nri_scene::MaterialData& material = outMaterials.materials[i];
-		material.flags |= nri_scene::MaterialFlag_Fullbright | nri_scene::MaterialFlag_Flat | nri_scene::MaterialFlag_TintEmission;
+		const bool tintEmission = i < surfaceLightTintEmission.size() ? surfaceLightTintEmission[i] : false;
+		material.flags |= nri_scene::MaterialFlag_Fullbright | nri_scene::MaterialFlag_Flat;
+		if (tintEmission)
+		{
+			material.flags |= nri_scene::MaterialFlag_TintEmission;
+		}
+		else
+		{
+			material.flags &= ~nri_scene::MaterialFlag_TintEmission;
+		}
 		material.lightingFlags |=
 			nri_scene::MaterialLightingFlag_MaterialFullbright |
 			nri_scene::MaterialLightingFlag_NoShadowReceive |

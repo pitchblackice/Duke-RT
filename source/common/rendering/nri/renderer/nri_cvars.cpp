@@ -1184,6 +1184,18 @@ CUSTOM_CVAR(Float, nri_ptskybrightness, 0.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 }
 
+CUSTOM_CVAR(Float, nri_ptsurfacelightminbrightness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	else if (self > 4.0f)
+	{
+		self = 4.0f;
+	}
+}
+
 CVAR(Bool, nri_ptemissivetlas, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, nri_ptemissivefastshadow, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
