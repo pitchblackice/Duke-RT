@@ -80,6 +80,14 @@ namespace
 		}
 	}
 
+	void NotifyActiveAnalyticLightSettingsChange()
+	{
+		if (NRIRenderDevice* frameBuffer = GetActiveNriRenderDeviceForCVar())
+		{
+			frameBuffer->NotifyPathTracingAnalyticLightSettingsChange();
+		}
+	}
+
 	void NotifyActiveDebugSphereTessellationChange()
 	{
 		if (NRIRenderDevice* frameBuffer = GetActiveNriRenderDeviceForCVar())
@@ -1075,6 +1083,19 @@ CVAR(Bool, nri_ptdirectionallight, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptbaseambient, 0.021875f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Float, nri_ptmetalambient, 0.03125f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CUSTOM_CVAR(Float, nri_ptanalyticsoftshadowradius, 0.0f, 0)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	else if (self > 1024.0f)
+	{
+		self = 1024.0f;
+	}
+	NotifyActiveAnalyticLightSettingsChange();
+}
 
 CVAR(Int, nri_ptlightbounces, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 

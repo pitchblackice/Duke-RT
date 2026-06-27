@@ -50,6 +50,27 @@ float3 SampleCosineHemisphere(float3 normal, inout uint rngState)
 	return normalize(tangent * x + bitangent * y + normal * z);
 }
 
+float2 SampleUniformDisk(inout uint rngState)
+{
+	const float radius = sqrt(RandomFloat01(rngState));
+	const float phi = 6.28318530718 * RandomFloat01(rngState);
+	return float2(cos(phi), sin(phi)) * radius;
+}
+
+float3 SampleRuntimePointEmitter(RuntimePointLightData light, float3 centerDir, inout uint rngState)
+{
+	const float emitterRadius = max(light.emitterRadius, 0.0);
+	if (emitterRadius <= 0.0)
+	{
+		return light.position;
+	}
+
+	const float2 disk = SampleUniformDisk(rngState) * emitterRadius;
+	const float3 tangent = BuildOrthonormalTangent(centerDir);
+	const float3 bitangent = normalize(cross(centerDir, tangent));
+	return light.position + tangent * disk.x + bitangent * disk.y;
+}
+
 float3 SampleSpecularLobe(float3 reflectionDir, float roughness, inout uint rngState)
 {
 	if (roughness <= 0.02)
@@ -1045,6 +1066,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float3 sunTransportSpecular = 0.0;
 		float3 sampledEmissiveTransportDiffuse = 0.0;
 		float3 sampledEmissiveTransportSpecular = 0.0;
+		float3 sampledAnalyticTransportDiffuse = 0.0;
+		float3 sampledAnalyticTransportSpecular = 0.0;
 		float3 indirectTransportDiffuse = 0.0;
 		float3 indirectTransportSpecular = 0.0;
 		float3 analyticDirectLighting = 0.0;
@@ -1152,21 +1175,38 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					}
 
 					const RuntimePointLightData runtimeLight = gRuntimePointLights[runtimeLightIndex];
-					const float3 toLight = runtimeLight.position - hit.position;
-					const float lightDistanceSq = dot(toLight, toLight);
+					const float3 toLightCenter = runtimeLight.position - hit.position;
+					const float centerLightDistanceSq = dot(toLightCenter, toLightCenter);
+					if (centerLightDistanceSq <= 0.0001)
+					{
+						continue;
+					}
+
+					const float centerLightDistance = sqrt(centerLightDistanceSq);
+					if (centerLightDistance >= runtimeLight.radius)
+					{
+						continue;
+					}
+					TraceShaderStatAdd(TRACE_STAT_RUNTIME_DISTANCE, 1u);
+
+					const float3 centerLightDir = toLightCenter / centerLightDistance;
+					const bool runtimeLightCastsShadow = (runtimeLight.flags & RUNTIME_POINT_LIGHT_FLAG_CASTS_SHADOW) != 0u;
+					const bool useSoftRuntimeShadow = !directSceneTrace && receivesShadow && runtimeLightCastsShadow && runtimeLight.emitterRadius > 0.0;
+					uint runtimeLightRng = pixelPos.x * 1973u ^ pixelPos.y * 9277u ^ (gTraceConstants.FrameIndex + 1u) * 26699u ^ runtimeLightIndex * 911u;
+					float3 sampledLightPosition = runtimeLight.position;
+					if (useSoftRuntimeShadow)
+					{
+						sampledLightPosition = SampleRuntimePointEmitter(runtimeLight, centerLightDir, runtimeLightRng);
+					}
+					const float3 toSampledLight = sampledLightPosition - hit.position;
+					const float lightDistanceSq = dot(toSampledLight, toSampledLight);
 					if (lightDistanceSq <= 0.0001)
 					{
 						continue;
 					}
 
 					const float lightDistance = sqrt(lightDistanceSq);
-					if (lightDistance >= runtimeLight.radius)
-					{
-						continue;
-					}
-					TraceShaderStatAdd(TRACE_STAT_RUNTIME_DISTANCE, 1u);
-
-					const float3 runtimeLightDir = toLight / lightDistance;
+					const float3 runtimeLightDir = toSampledLight / lightDistance;
 					const float3 runtimeShadingNormal = ResolveLightFacingShadingNormal(material, shadingNormal, runtimeLightDir);
 					const float lambert = max(dot(runtimeShadingNormal, runtimeLightDir), 0.0);
 					if (lambert <= 0.0)
@@ -1175,7 +1215,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					}
 					TraceShaderStatAdd(TRACE_STAT_RUNTIME_LAMBERT, 1u);
 
-					const bool runtimeLightCastsShadow = (runtimeLight.flags & RUNTIME_POINT_LIGHT_FLAG_CASTS_SHADOW) != 0u;
 					if (!directSceneTrace && receivesShadow && runtimeLightCastsShadow)
 					{
 						TraceShaderStatAdd(TRACE_STAT_RUNTIME_SHADOW_RAYS, 1u);
@@ -1187,8 +1226,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 						continue;
 					}
 					TraceShaderStatAdd(TRACE_STAT_RUNTIME_SHADOW_VISIBLE, 1u);
+					if (useSoftRuntimeShadow)
+					{
+						TraceShaderStatAdd(TRACE_STAT_RUNTIME_SOFT_SHADOW_SAMPLES, 1u);
+					}
 
-					const float attenuation = EvaluatePointLightAttenuation(lightDistance, runtimeLight.radius, runtimeLight.intensity);
+					const float attenuation = EvaluatePointLightAttenuation(centerLightDistance, runtimeLight.radius, runtimeLight.intensity);
 					if (attenuation <= 0.0)
 					{
 						continue;
@@ -1198,7 +1241,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					const float3 analyticDiffuse = diffuseAlbedo * (lambert * 0.80) * lightColor * runtimeShadow;
 					const float3 analyticSpecular = EvaluateSunSpecular(albedo.rgb, metalness, runtimeShadingNormal, viewDir, runtimeLightDir, 1.0) * lightColor * runtimeShadow;
 					analyticDirectLighting += analyticDiffuse + analyticSpecular;
-					runtimePointDirectLighting += analyticDiffuse + analyticSpecular;
+					if (useSoftRuntimeShadow)
+					{
+						sampledAnalyticTransportDiffuse += analyticDiffuse / nrdDiffuseFactor;
+						sampledAnalyticTransportSpecular += analyticSpecular / nrdSpecularFactor;
+						TraceShaderStatAdd(TRACE_STAT_RUNTIME_SOFT_TRANSPORT, 1u);
+					}
+					else
+					{
+						runtimePointDirectLighting += analyticDiffuse + analyticSpecular;
+					}
 				}
 
 				float3 emissiveSampleDiffuse = 0.0;
@@ -1263,8 +1315,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					indirectTransportSpecular = TraceIndirectSpecular(hit, albedo, viewDir, pixelPos, gTraceConstants.FrameIndex, roughness, metalness, lightBounceCount, specularHitDistance) / nrdSpecularFactor;
 				}
 
-				diffuse += sampledEmissiveTransportDiffuse + indirectTransportDiffuse;
-				specular += sampledEmissiveTransportSpecular + indirectTransportSpecular;
+				diffuse += sampledEmissiveTransportDiffuse + sampledAnalyticTransportDiffuse + indirectTransportDiffuse;
+				specular += sampledEmissiveTransportSpecular + sampledAnalyticTransportSpecular + indirectTransportSpecular;
 				// Keep the placeholder sun out of the primary-hit demodulated NRD bucket so its
 				// hard shadow structure does not get spatially mixed back into REBLUR/RELAX history.
 				directLighting += ambientDirectLighting + sunTransportDiffuse + sunTransportSpecular + runtimePointDirectLighting;

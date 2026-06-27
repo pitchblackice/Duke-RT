@@ -1797,6 +1797,7 @@ public:
 	void PrintTextureEmissiveHeuristics() const;
 	void NotifyGlowControlChange();
 	void NotifyMaterialLightingCalibrationChange();
+	void NotifyAnalyticLightSettingsChange();
 	void NotifyDebugSphereTessellationChange();
 	void PrintEmissiveSurfaceDump(float radius, uint32_t limit) const;
 	void PrintSectorLightDump(float radius, uint32_t limit) const;

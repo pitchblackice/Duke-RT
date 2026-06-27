@@ -125,7 +125,9 @@ struct RuntimePointLightData
 	float3 color;
 	float intensity;
 	uint flags;
-	uint3 reserved;
+	float emitterRadius;
+	uint softShadowFlags;
+	uint reserved;
 };
 
 #define RUNTIME_POINT_LIGHT_FLAG_CASTS_SHADOW 0x1u

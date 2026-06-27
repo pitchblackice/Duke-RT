@@ -40,6 +40,14 @@ namespace
 	{
 		return std::chrono::duration<double, std::milli>(end - start).count();
 	}
+
+	float ResolveAnalyticEmitterRadius(const SceneLightSystem::SceneAnalyticLight& light)
+	{
+		const float authoredRadius = std::max(light.emitterRadius, 0.0f);
+		const float fallbackRadius = std::max((float)nri_ptanalyticsoftshadowradius, 0.0f);
+		const float resolvedRadius = authoredRadius > 0.0f ? authoredRadius : fallbackRadius;
+		return std::min(resolvedRadius, std::max(light.radius, 0.0f));
+	}
 }
 
 bool NRIRenderer::AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t& outId)
@@ -168,6 +176,12 @@ void NRIRenderer::NotifyMaterialLightingCalibrationChange()
 	QueueStaticMapSceneLightingInvalidation();
 	ResetPersistentDynamicEmissiveCache();
 	NoteLightHistoryChange("material-lighting-calibration-change");
+}
+
+void NRIRenderer::NotifyAnalyticLightSettingsChange()
+{
+	InvalidateRuntimeLightSceneData();
+	NoteLightHistoryChange("analytic-light-settings-change");
 }
 
 void NRIRenderer::ResetPersistentDynamicEmissiveCache()
@@ -4708,6 +4722,7 @@ void SceneLightSystem::BuildRuntimePointLightUpload(std::vector<NRIRuntimePointL
 		Copy3f(light.color, gpuLight.color);
 		gpuLight.intensity = light.intensity;
 		gpuLight.flags = light.flags;
+		gpuLight.emitterRadius = ResolveAnalyticEmitterRadius(light);
 		outLights.push_back(gpuLight);
 	}
 }
@@ -4727,6 +4742,7 @@ uint64_t SceneLightSystem::BuildRuntimeLightPayloadHash() const
 		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(light.color[2]));
 		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(light.intensity));
 		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(light.radius));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(ResolveAnalyticEmitterRadius(light)));
 		hash = nri_scene::HashCombine64(hash, (uint64_t)light.flags);
 	}
 
@@ -5399,7 +5415,7 @@ void SceneLightSystem::PrintRuntimePointLights(uint32_t maxLights) const
 			"";
 		const auto diagnosticIt = analyticLights.activeDiagnosticFlags.find(light.stableKey);
 		const uint32_t diagnosticFlags = diagnosticIt != analyticLights.activeDiagnosticFlags.end() ? diagnosticIt->second : SceneLightDiagnosticFlag_None;
-		Printf("NRI PT analytic light %u: id=%u topology=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s shadow=%s source=%s%s rule=%u actor=%d tile=%u render_pos=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f\n",
+		Printf("NRI PT analytic light %u: id=%u topology=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s shadow=%s source=%s%s rule=%u actor=%d tile=%u render_pos=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f emitter_radius=%.3f\n",
 			light.id,
 			light.id,
 			(unsigned long long)light.stableKey,
@@ -5420,7 +5436,8 @@ void SceneLightSystem::PrintRuntimePointLights(uint32_t maxLights) const
 			light.color[1],
 			light.color[2],
 			light.intensity,
-			light.radius);
+			light.radius,
+			ResolveAnalyticEmitterRadius(light));
 	}
 }
 

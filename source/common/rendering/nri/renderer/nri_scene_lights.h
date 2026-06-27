@@ -77,7 +77,9 @@ struct NRIRuntimePointLightGpuData
 	float color[3] = { 1.0f, 1.0f, 1.0f };
 	float intensity = 1.0f;
 	uint32_t flags = 0;
-	uint32_t reserved[3] = {};
+	float emitterRadius = 0.0f;
+	uint32_t softShadowFlags = 0;
+	uint32_t reserved = 0;
 };
 
 struct NRISectorLightHeaderGpuData
@@ -237,6 +239,7 @@ public:
 		float color[3] = { 1.0f, 1.0f, 1.0f };
 		float intensity = 1.0f;
 		float radius = 0.0f;
+		float emitterRadius = 0.0f;
 	};
 
 	struct RuntimeLightClusterBuildInput

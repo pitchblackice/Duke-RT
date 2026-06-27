@@ -141,6 +141,7 @@ public:
 	void PrintPathTracingEmissiveHeuristics() const;
 	void NotifyPathTracingGlowControlChange();
 	void NotifyPathTracingMaterialLightingCalibrationChange();
+	void NotifyPathTracingAnalyticLightSettingsChange();
 	void NotifyPathTracingDebugSphereTessellationChange();
 	void PrintPathTracingEmissiveSurfaces(float radius, uint32_t limit) const;
 	void PrintPathTracingSectorLights(float radius, uint32_t limit) const;
