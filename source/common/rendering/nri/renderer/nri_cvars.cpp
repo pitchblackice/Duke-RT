@@ -1357,13 +1357,13 @@ CVAR(Int, nri_ptvoxelresidentmaxcoldmaps, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, nri_ptvoxeltransformkeyed, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Bool, nri_ptvoxelsharedblasbuild, false, 0)
+CVAR(Bool, nri_ptvoxelsharedblasbuild, true, 0)
 
-CVAR(Int, nri_ptvoxelsharedblasbuilds, 1, 0)
+CVAR(Int, nri_ptvoxelsharedblasbuilds, 128, 0)
 
-CVAR(Bool, nri_ptvoxelsharedblasloading, false, 0)
+CVAR(Bool, nri_ptvoxelsharedblasloading, true, 0)
 
-CVAR(Bool, nri_ptvoxelsharedblasroute, false, 0)
+CVAR(Bool, nri_ptvoxelsharedblasroute, true, 0)
 
 CVAR(Int, nri_ptvoxelexcludeindex, -1, 0)
 

@@ -32,11 +32,11 @@
     "ranges":  {
                    "prims":  {
                                  "min":  5950,
-                                 "max":  5950
+                                 "max":  8738
                              },
                    "mats":  {
                                 "min":  1841,
-                                "max":  1915
+                                "max":  1957
                             },
                    "scene_instances":  {
                                            "min":  191,
