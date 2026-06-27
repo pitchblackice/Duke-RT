@@ -1953,6 +1953,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 
 	if (info.oldLevel != info.newLevel)
 	{
+		nri_scene::ResetPersistentVoxelActorCache("level-unload");
 		mPersistentVoxels.ResetLevelSchedulingState(
 			"level-unload",
 			(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats,
@@ -2089,6 +2090,7 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 {
 	if (info.oldLevel != info.newLevel)
 	{
+		nri_scene::ResetPersistentVoxelActorCache("level-load");
 		mPersistentVoxels.ResetLevelSchedulingState(
 			"level-load",
 			(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats,

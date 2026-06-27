@@ -342,6 +342,7 @@ bool BuildPersistentVoxelCacheSceneView(SceneView& outView);
 bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>& outEntries);
 bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& outEntries);
 uint64_t GetPersistentVoxelCacheSerial();
+void ResetPersistentVoxelActorCache(const char* reason);
 bool PrecacheVoxelModelCpuMesh(FVoxelModel* model, VoxelMeshPrecacheStats* stats = nullptr);
 bool PrecacheVoxelTextureCpuMesh(FTextureID texid, VoxelMeshPrecacheStats* stats = nullptr);
 void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats = nullptr);

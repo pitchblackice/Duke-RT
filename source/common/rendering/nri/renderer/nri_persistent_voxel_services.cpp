@@ -238,6 +238,28 @@ public:
 		preloadServices.warmSharedBlas = [](void* user, const std::vector<nri_scene::PrecachedVoxelVariantView>& variants, uint32_t frameIndex) -> bool
 		{
 			NRIRenderer& renderer = *static_cast<NRIRenderer*>(user);
+			if (renderer.mPersistentVoxels.HasRenderableOverlay())
+			{
+				NRIPersistentVoxelAccelerationBuildStats batchAccelerationStats = {};
+				if (!renderer.mPersistentVoxels.BuildAccelerationStructures(
+						frameIndex,
+						BuildNRIPersistentVoxelSettingsFromCVars(),
+						(bool)nri_voxelstats,
+						BuildResetServices(renderer),
+						BuildAccelerationServices(renderer),
+						batchAccelerationStats))
+				{
+					return false;
+				}
+				if ((int)nri_ptloadingtrace >= 1)
+				{
+					Printf("NRI PT loading voxel acceleration: event=warmup active_actors=%u calls=%u builds=%u unique_mesh_builds=%u\n",
+						batchAccelerationStats.instances,
+						batchAccelerationStats.calls,
+						batchAccelerationStats.builds,
+						batchAccelerationStats.uniqueMeshBuilds);
+				}
+			}
 			return renderer.mPersistentVoxels.WarmSharedBlasForLoading(
 				variants,
 				frameIndex,

@@ -5503,7 +5503,7 @@ bool NRIPersistentVoxelResidency::BuildAccelerationStructures(
 
 		if (!meshResource.tlasPublished && meshResource.tlasReadyFrame == 0)
 		{
-			meshResource.tlasReadyFrame = frameIndex + 1u;
+			meshResource.tlasReadyFrame = loadingWarmupActive ? frameIndex : frameIndex + 1u;
 		}
 		if (voxelStatsEnabled)
 		{

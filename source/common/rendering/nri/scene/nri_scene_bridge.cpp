@@ -5675,6 +5675,25 @@ uint64_t GetPersistentVoxelCacheSerial()
 	return gVoxelActorCacheSerial;
 }
 
+void ResetPersistentVoxelActorCache(const char* reason)
+{
+	const uint32_t entries = (uint32_t)gVoxelActorCache.size();
+	if (!gVoxelActorCache.empty())
+	{
+		gVoxelActorCache.clear();
+		++gVoxelActorCacheSerial;
+	}
+	gVoxelActorCacheCaptureDepth = 0;
+	if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
+	{
+		Printf("NRI PT voxel actor cache reset: reason=%s entries=%u serial=%llu frame=%llu\n",
+			reason != nullptr && *reason != '\0' ? reason : "unspecified",
+			entries,
+			(unsigned long long)gVoxelActorCacheSerial,
+			(unsigned long long)gVoxelActorCacheFrame);
+	}
+}
+
 bool BuildPersistentVoxelCacheSceneView(SceneView& outView)
 {
 	outView = {};
