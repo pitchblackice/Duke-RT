@@ -131,6 +131,7 @@ namespace
 	uint64_t gVoxelActorCacheFrame = 0;
 	uint32_t gVoxelActorCacheCaptureDepth = 0;
 	uint64_t gVoxelActorCacheSerial = 1;
+	bool gVoxelActorStartupTransientMode = false;
 
 	struct VoxelMeshVariantKey
 	{
@@ -197,6 +198,7 @@ namespace
 		float lastActorScenePosition[3] = {};
 		bool persistentReady = false;
 		bool hasSurface = false;
+		bool startupPending = false;
 		bool sharedVariantSurface = false;
 		bool hasLastActorScenePosition = false;
 		SurfaceRef lightSurface;
@@ -2622,13 +2624,18 @@ namespace
 		}
 		if (lookup.entry->signature == signature && lookup.entry->surfaceSignature == surfaceSignature && lookup.entry->hasSurface)
 		{
+			const bool confirmedStartupSurface = lookup.entry->startupPending && !gVoxelActorStartupTransientMode;
+			if (confirmedStartupSurface)
+			{
+				lookup.entry->startupPending = false;
+			}
 			const bool promoted = !lookup.entry->persistentReady;
-			if (!lookup.entry->persistentReady && CanPromoteVoxelActorCacheEntry(*lookup.entry))
+			if (!lookup.entry->persistentReady && !lookup.entry->startupPending && CanPromoteVoxelActorCacheEntry(*lookup.entry))
 			{
 				lookup.entry->persistentReady = true;
 			}
 			const bool transformChanged = UpdateVoxelActorCacheEntryInstanceTransform(*lookup.entry, lookup);
-			if ((promoted && lookup.entry->persistentReady) || transformChanged)
+			if (confirmedStartupSurface || (promoted && lookup.entry->persistentReady) || transformChanged)
 			{
 				++gVoxelActorCacheSerial;
 			}
@@ -2644,6 +2651,11 @@ namespace
 
 		if (lookup.entry->geometrySignature == geometrySignature && lookup.entry->surfaceSignature == surfaceSignature && lookup.entry->hasSurface)
 		{
+			const bool confirmedStartupSurface = lookup.entry->startupPending && !gVoxelActorStartupTransientMode;
+			if (confirmedStartupSurface)
+			{
+				lookup.entry->startupPending = false;
+			}
 			lookup.entry->signature = signature;
 			lookup.entry->materialSignature = materialSignature;
 			lookup.entry->materialKeyHash = lookup.materialKeyHash;
@@ -2656,14 +2668,14 @@ namespace
 			lookup.entry->lightSurface.material = material;
 			lookup.entry->lastSeenFrame = gVoxelActorCacheFrame;
 			const bool promoted = !lookup.entry->persistentReady;
-			if (!lookup.entry->persistentReady && CanPromoteVoxelActorCacheEntry(*lookup.entry))
+			if (!lookup.entry->persistentReady && !lookup.entry->startupPending && CanPromoteVoxelActorCacheEntry(*lookup.entry))
 			{
 				lookup.entry->persistentReady = true;
 			}
 			const bool transformChanged = UpdateVoxelActorCacheEntryInstanceTransform(*lookup.entry, lookup);
 			lookup.entry->pendingReason = (uint8_t)VoxelActorPendingReason::None;
 			lookup.entry->pendingFrame = 0;
-			if (!promoted || lookup.entry->persistentReady || transformChanged)
+			if (confirmedStartupSurface || !promoted || lookup.entry->persistentReady || transformChanged)
 			{
 				++gVoxelActorCacheSerial;
 			}
@@ -2859,11 +2871,13 @@ namespace
 		// wait for the normal stable-frame promotion path unless the shared canonical
 		// variant is ready, in which case actor promotion latency must not force a
 		// large voxel through the dynamic overlay.
+		entry.startupPending = gVoxelActorStartupTransientMode;
 		entry.persistentReady =
-			sharedVariantReady ||
-			(wasPersistentReady &&
-				(lookup.stability == VoxelActorStability::TransformRebake ||
-				 lookup.stability == VoxelActorStability::Changed));
+			!entry.startupPending &&
+			(sharedVariantReady ||
+				(wasPersistentReady &&
+					(lookup.stability == VoxelActorStability::TransformRebake ||
+					 lookup.stability == VoxelActorStability::Changed)));
 		entry.hasSurface = true;
 		++gVoxelActorCacheSerial;
 		if (sharedVariantReady && !wasPersistentReady)
@@ -5704,6 +5718,26 @@ void ResetPersistentVoxelActorCache(const char* reason)
 	}
 }
 
+void SetPersistentVoxelActorStartupTransientMode(bool active, const char* reason)
+{
+	if (gVoxelActorStartupTransientMode == active)
+	{
+		return;
+	}
+
+	gVoxelActorStartupTransientMode = active;
+	++gVoxelActorCacheSerial;
+	if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
+	{
+		Printf("NRI PT voxel actor startup transient: active=%u reason=%s serial=%llu frame=%llu entries=%u\n",
+			active ? 1u : 0u,
+			reason != nullptr && *reason != '\0' ? reason : "unspecified",
+			(unsigned long long)gVoxelActorCacheSerial,
+			(unsigned long long)gVoxelActorCacheFrame,
+			(uint32_t)gVoxelActorCache.size());
+	}
+}
+
 bool BuildPersistentVoxelCacheSceneView(SceneView& outView)
 {
 	outView = {};
@@ -5738,6 +5772,10 @@ bool BuildPersistentVoxelCacheSceneView(SceneView& outView)
 bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>& outEntries)
 {
 	outEntries.clear();
+	if (gVoxelActorStartupTransientMode)
+	{
+		return false;
+	}
 	if (gVoxelActorCache.empty())
 	{
 		return false;
@@ -5747,7 +5785,7 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 	sortedEntries.reserve(gVoxelActorCache.size());
 	for (const auto& pair : gVoxelActorCache)
 	{
-		if (pair.second.hasSurface && pair.second.persistentReady)
+		if (pair.second.hasSurface && pair.second.persistentReady && !pair.second.startupPending)
 		{
 			sortedEntries.emplace_back(pair.first, &pair.second);
 		}

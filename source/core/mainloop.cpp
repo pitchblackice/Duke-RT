@@ -319,6 +319,7 @@ static void CancelPendingPathTracingLevelPreload()
 	gPathTracingLevelPreloadSimulationHoldActive = false;
 	gPathTracingLevelPreloadNeeded = false;
 	gPathTracingLevelPreloadFinalCheckNeeded = false;
+	nri_scene::SetPersistentVoxelActorStartupTransientMode(false, "cancel-level-preload");
 	if (screen != nullptr)
 	{
 		screen->CancelPathTracingLevelPreload();
@@ -410,6 +411,7 @@ static bool BeginPathTracingLevelPreloadGate()
 	gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
 	gPathTracingLevelPreloadFirstLevelFrameCaptured = false;
 	gPathTracingLevelPreloadSimulationHoldActive = false;
+	nri_scene::SetPersistentVoxelActorStartupTransientMode(true, "begin-level-preload");
 	if (cl_loadingscreens && globalCutscenes.LoadingScreen.isdefined())
 	{
 		StartCutscene(globalCutscenes.LoadingScreen, SJ_BLOCKUI, [](bool) {});
@@ -448,6 +450,7 @@ static bool TickPendingPathTracingLevelPreloadGate()
 	}
 
 	FinalizePendingLevelStart();
+	nri_scene::SetPersistentVoxelActorStartupTransientMode(true, "await-first-level-frame");
 	gPathTracingLevelPreloadFinalCheckNeeded = true;
 	gPathTracingLevelPreloadFirstLevelFrameCaptured = false;
 	gPathTracingLevelPreloadSimulationHoldActive = false;
@@ -1057,6 +1060,7 @@ void Display()
 				{
 					screen->NotifyPathTracingLevelFirstFrameRelease();
 				}
+				nri_scene::SetPersistentVoxelActorStartupTransientMode(false, "first-level-frame-release");
 				if (cutscene.runner != nullptr)
 				{
 					EndScreenJob();
