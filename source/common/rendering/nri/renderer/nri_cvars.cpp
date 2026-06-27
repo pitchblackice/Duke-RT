@@ -1084,7 +1084,7 @@ CVAR(Float, nri_ptbaseambient, 0.021875f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Float, nri_ptmetalambient, 0.03125f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CUSTOM_CVAR(Float, nri_ptanalyticsoftshadowradius, 0.0f, 0)
+CUSTOM_CVAR(Float, nri_ptanalyticsoftshadowradius, 4.0f, 0)
 {
 	if (self < 0.0f)
 	{
