@@ -3829,7 +3829,8 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 		{
 			activeInstanceKeys.insert(cacheEntry.identityKey);
 			PersistentVoxelInstanceRecord& instance = instances[cacheEntry.identityKey];
-			if (instance.identityKey == 0)
+			const bool newInstance = instance.identityKey == 0;
+			if (newInstance)
 			{
 				instance.currentTransform = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 			}
@@ -3849,6 +3850,10 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			instance.active = true;
 			instance.pending = false;
 			CopyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, instance.currentTransform);
+			if (newInstance)
+			{
+				instance.previousTransform = instance.currentTransform;
+			}
 		}
 		for (auto it = instances.begin(); it != instances.end(); )
 		{
