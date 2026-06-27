@@ -648,6 +648,21 @@ function Find-RecentVoxelArchives {
         Sort-Object LastWriteTimeUtc -Descending)
 }
 
+function Find-LaunchRootVoxelArchive {
+    param([string]$LaunchRoot)
+
+    if ([string]::IsNullOrWhiteSpace($LaunchRoot)) {
+        return ""
+    }
+
+    $candidate = [System.IO.Path]::Combine($LaunchRoot, "voxel_duke3d.zip")
+    if ([System.IO.File]::Exists($candidate)) {
+        return [System.IO.Path]::GetFullPath($candidate)
+    }
+
+    return ""
+}
+
 function Prompt-ForVoxelZip {
     param([string]$SuggestedPath)
 
@@ -815,7 +830,16 @@ function Invoke-VoxelPackImport {
         return
     }
 
-    if (-not $VoxelAsk -and -not $VoxelYes -and -not $ForceVoxels -and $providerState["prompt"] -eq "skip" -and -not $ExplicitVoxelZip) {
+    $localVoxelZip = ""
+    if (-not $ExplicitVoxelZip) {
+        $localVoxelZip = Find-LaunchRootVoxelArchive -LaunchRoot $LaunchRoot
+        if ($localVoxelZip -and -not $Quiet) {
+            Write-Info "Found voxel_duke3d.zip beside the launcher; using it for voxel setup."
+            Write-Info "  $localVoxelZip"
+        }
+    }
+
+    if (-not $VoxelAsk -and -not $VoxelYes -and -not $ForceVoxels -and $providerState["prompt"] -eq "skip" -and -not $ExplicitVoxelZip -and -not $localVoxelZip) {
         if (-not $Quiet) {
             Write-Info "Voxel pack install is disabled in local content preferences; skipping."
         }
@@ -823,7 +847,11 @@ function Invoke-VoxelPackImport {
     }
 
     $consent = $true
-    if (-not $VoxelYes -and -not $ForceVoxels -and -not $ExplicitVoxelZip) {
+    if (-not $VoxelYes -and -not $ForceVoxels -and -not $ExplicitVoxelZip -and -not $localVoxelZip) {
+        if ($Quiet) {
+            return
+        }
+
         Write-Host ""
         Write-Info "This final setup step lets you play Duke-RT with voxel replacements by downloading Cheello's excellent Voxel Duke 3D work."
         Write-Info "We can open Cheello's ModDB page in your default browser. On that page, click Download Now to download the voxel archive."
@@ -847,13 +875,13 @@ function Invoke-VoxelPackImport {
         return
     }
 
-    if (-not $ExplicitVoxelZip) {
+    if (-not $ExplicitVoxelZip -and -not $localVoxelZip) {
         Start-Process $downloadPage
         Write-Host ""
         [void](Read-Host "When the voxel archive download has finished, return here and press Enter")
     }
 
-    $zipPath = Prompt-ForVoxelZip -SuggestedPath $ExplicitVoxelZip
+    $zipPath = if ($localVoxelZip) { $localVoxelZip } else { Prompt-ForVoxelZip -SuggestedPath $ExplicitVoxelZip }
     if (-not $zipPath) {
         if (-not $Quiet) {
             Write-Info "No voxel archive was selected; launch will continue without installing voxels."

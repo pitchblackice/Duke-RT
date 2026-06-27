@@ -20,7 +20,7 @@ The renderer supports both Direct3D 12 and Vulkan, although feature support is m
 - If auto-detection picks the wrong install, launch with `launch-duke-rt.cmd -GameRoot "D:\path\to\Duke Nukem 3D"`.
 - When the launcher detects World Tour normals, let it copy them into the packaged `release-overlay`. That is the intended setup for the current visual baseline.
 - Duke-RT can still run without those copied normals. The launcher warns and continues when the selected Duke Nukem 3D install does not include World Tour normal-map data.
-- The launcher can also guide you through installing Cheello's Voxel Duke 3D pack into the local `release-overlay`. It opens the ModDB page in your browser, asks you to click `Download Now`, then returns to the console to unpack the downloaded archive.
+- The launcher can also guide you through installing Cheello's Voxel Duke 3D pack into the local `release-overlay`. If `voxel_duke3d.zip` is beside `launch-duke-rt.cmd`, it is used automatically; otherwise the launcher can open the ModDB page and then unpack the downloaded archive.
 - Other Build-engine games may possibly launch because the underlying Raze game support is still present, but that path is not tested here and is not supported yet.
 
 ## Current Status
