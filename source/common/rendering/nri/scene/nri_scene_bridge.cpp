@@ -5806,6 +5806,29 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 	return true;
 }
 
+PersistentVoxelActorCacheStats GetPersistentVoxelActorCacheStats()
+{
+	PersistentVoxelActorCacheStats stats = {};
+	stats.entries = (uint32_t)gVoxelActorCache.size();
+	stats.serial = gVoxelActorCacheSerial;
+	stats.frame = gVoxelActorCacheFrame;
+	for (const auto& pair : gVoxelActorCache)
+	{
+		const VoxelActorCacheEntry& entry = pair.second;
+		if (!entry.hasSurface || !entry.persistentReady)
+		{
+			continue;
+		}
+		++stats.readyEntries;
+		stats.primitiveCount += entry.primitiveCount;
+		if (entry.lastSeenFrame == gVoxelActorCacheFrame)
+		{
+			++stats.capturedThisFrame;
+		}
+	}
+	return stats;
+}
+
 bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& outEntries)
 {
 	outEntries.clear();

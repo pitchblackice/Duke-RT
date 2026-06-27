@@ -88,6 +88,7 @@
 #include "savegamehelp.h"
 #include "v_draw.h"
 #include "gamehud.h"
+#include "common/rendering/nri/scene/nri_scene_bridge.h"
 #include "wipe.h"
 #include "i_interface.h"
 #include "texinfo.h"
@@ -275,9 +276,31 @@ bool newGameStarted;
 static bool gPendingPathTracingLevelPreload = false;
 static bool gPathTracingLevelPreloadHeldScreenJobCompletion = false;
 static bool gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
+static bool gPathTracingLevelPreloadFirstLevelFrameCaptured = false;
+static bool gPathTracingLevelPreloadSimulationHoldActive = false;
 static bool gPathTracingLevelPreloadNeeded = false;
 static bool gPathTracingLevelPreloadFinalCheckNeeded = false;
 static uint64_t gLevelTransitionSerial = 0;
+
+static void PrintPathTracingLevelPreloadActorCacheStats(const char* event)
+{
+	if ((int)nri_ptloadingtrace < 1)
+	{
+		return;
+	}
+	const nri_scene::PersistentVoxelActorCacheStats stats = nri_scene::GetPersistentVoxelActorCacheStats();
+	Printf("NRI PT loading gate: event=%s actor_cache_entries=%u actor_cache_ready=%u actor_cache_captured=%u actor_cache_prims=%u actor_cache_serial=%llu actor_cache_frame=%llu gamestate=%s gameaction=%d gametic=%d\n",
+		event != nullptr && *event != '\0' ? event : "actor-cache-stats",
+		stats.entries,
+		stats.readyEntries,
+		stats.capturedThisFrame,
+		stats.primitiveCount,
+		(unsigned long long)stats.serial,
+		(unsigned long long)stats.frame,
+		GetGameStateName(gamestate),
+		(int)gameaction,
+		gametic);
+}
 
 static void CancelPendingPathTracingLevelPreload()
 {
@@ -291,6 +314,9 @@ static void CancelPendingPathTracingLevelPreload()
 	}
 	gPendingPathTracingLevelPreload = false;
 	gPathTracingLevelPreloadHeldScreenJobCompletion = false;
+	gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
+	gPathTracingLevelPreloadFirstLevelFrameCaptured = false;
+	gPathTracingLevelPreloadSimulationHoldActive = false;
 	gPathTracingLevelPreloadNeeded = false;
 	gPathTracingLevelPreloadFinalCheckNeeded = false;
 	if (screen != nullptr)
@@ -382,6 +408,8 @@ static bool BeginPathTracingLevelPreloadGate()
 	gPathTracingLevelPreloadNeeded = false;
 	gPathTracingLevelPreloadHeldScreenJobCompletion = false;
 	gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
+	gPathTracingLevelPreloadFirstLevelFrameCaptured = false;
+	gPathTracingLevelPreloadSimulationHoldActive = false;
 	if (cl_loadingscreens && globalCutscenes.LoadingScreen.isdefined())
 	{
 		StartCutscene(globalCutscenes.LoadingScreen, SJ_BLOCKUI, [](bool) {});
@@ -422,6 +450,8 @@ static bool TickPendingPathTracingLevelPreloadGate()
 	const bool keepLoadingScreenUntilLevelFrame = cutscene.runner != nullptr;
 	FinalizePendingLevelStart();
 	gPathTracingLevelPreloadFinalCheckNeeded = true;
+	gPathTracingLevelPreloadFirstLevelFrameCaptured = false;
+	gPathTracingLevelPreloadSimulationHoldActive = false;
 	if (keepLoadingScreenUntilLevelFrame)
 	{
 		gPathTracingLevelPreloadAwaitingFirstLevelFrame = true;
@@ -457,6 +487,17 @@ static bool RunPathTracingLevelPreloadFinalCheck()
 			return true;
 		}
 		gPendingPathTracingLevelPreload = true;
+	}
+
+	if ((int)nri_ptloadingtrace >= 1 && gPathTracingLevelPreloadFirstLevelFrameCaptured)
+	{
+		Printf("NRI PT loading gate: event=first-level-capture-final-drain gamestate=%s gameaction=%d gametic=%d hold=%u screen_pending=%u\n",
+			GetGameStateName(gamestate),
+			(int)gameaction,
+			gametic,
+			gPathTracingLevelPreloadSimulationHoldActive ? 1u : 0u,
+			screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
+		PrintPathTracingLevelPreloadActorCacheStats("first-level-capture-final-drain-cache");
 	}
 
 	for (uint32_t pass = 0; pass < 8u && screen->IsPathTracingLevelPreloadPending(); ++pass)
@@ -652,9 +693,28 @@ static void GameTicker()
 			inputState.ClearAllInput();
 			gameInput.Clear();
 			gamestate = GS_LEVEL;
+			if (gPathTracingLevelPreloadFinalCheckNeeded &&
+				gPathTracingLevelPreloadAwaitingFirstLevelFrame &&
+				!gPathTracingLevelPreloadFirstLevelFrameCaptured)
+			{
+				gameaction = ga_level;
+				if ((int)nri_ptloadingtrace >= 1)
+				{
+					Printf("NRI PT loading gate: event=first-level-capture-begin gamestate=%s gameaction=%d gametic=%d\n",
+						GetGameStateName(gamestate),
+						(int)gameaction,
+						gametic);
+				}
+				return;
+			}
 			if (!RunPathTracingLevelPreloadFinalCheck())
 			{
 				return;
+			}
+			if (gPathTracingLevelPreloadAwaitingFirstLevelFrame &&
+				gPathTracingLevelPreloadFirstLevelFrameCaptured)
+			{
+				gameaction = ga_level;
 			}
 			return;
 
@@ -938,19 +998,51 @@ void Display()
 		ScreenJobDraw();
 		if (levelRenderedThisFrame)
 		{
-			if ((int)nri_ptloadingtrace >= 1)
+			if (!gPathTracingLevelPreloadFirstLevelFrameCaptured)
 			{
-				Printf("NRI PT loading gate: event=first-level-frame-release gamestate=%s gameaction=%d gametic=%d\n",
-					GetGameStateName(gamestate),
-					(int)gameaction,
-					gametic);
+				gPathTracingLevelPreloadFirstLevelFrameCaptured = true;
+				gPathTracingLevelPreloadSimulationHoldActive = true;
+				if ((int)nri_ptloadingtrace >= 1)
+				{
+					Printf("NRI PT loading gate: event=first-level-capture-complete gamestate=%s gameaction=%d gametic=%d final_check=%u\n",
+						GetGameStateName(gamestate),
+						(int)gameaction,
+						gametic,
+						gPathTracingLevelPreloadFinalCheckNeeded ? 1u : 0u);
+					Printf("NRI PT loading gate: event=simulation-hold-begin gamestate=%s gameaction=%d gametic=%d\n",
+						GetGameStateName(gamestate),
+						(int)gameaction,
+						gametic);
+					PrintPathTracingLevelPreloadActorCacheStats("first-level-capture-complete-cache");
+				}
 			}
-			if (screen != nullptr)
+			else if (!gPathTracingLevelPreloadFinalCheckNeeded)
 			{
-				screen->NotifyPathTracingLevelFirstFrameRelease();
+				if ((int)nri_ptloadingtrace >= 1)
+				{
+					PrintPathTracingLevelPreloadActorCacheStats("first-level-frame-release-cache");
+					Printf("NRI PT loading gate: event=simulation-hold-end gamestate=%s gameaction=%d gametic=%d\n",
+						GetGameStateName(gamestate),
+						(int)gameaction,
+						gametic);
+					Printf("NRI PT loading gate: event=first-level-frame-release gamestate=%s gameaction=%d gametic=%d\n",
+						GetGameStateName(gamestate),
+						(int)gameaction,
+						gametic);
+				}
+				if (screen != nullptr)
+				{
+					screen->NotifyPathTracingLevelFirstFrameRelease();
+				}
+				EndScreenJob();
+				gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
+				gPathTracingLevelPreloadFirstLevelFrameCaptured = false;
+				gPathTracingLevelPreloadSimulationHoldActive = false;
+				if (gameaction == ga_level)
+				{
+					gameaction = ga_nothing;
+				}
 			}
-			EndScreenJob();
-			gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
 		}
 	}
 	

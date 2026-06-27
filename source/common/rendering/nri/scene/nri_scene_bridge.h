@@ -300,6 +300,16 @@ struct PersistentVoxelCacheEntryView
 	bool sharedVariantSurface = false;
 };
 
+struct PersistentVoxelActorCacheStats
+{
+	uint32_t entries = 0;
+	uint32_t readyEntries = 0;
+	uint32_t capturedThisFrame = 0;
+	uint32_t primitiveCount = 0;
+	uint64_t serial = 0;
+	uint64_t frame = 0;
+};
+
 struct PrecachedVoxelVariantView
 {
 	uint64_t meshKeyHash = 0;
@@ -340,6 +350,7 @@ bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outV
 bool CaptureScene(HWDrawInfo& di, SceneView& outView);
 bool BuildPersistentVoxelCacheSceneView(SceneView& outView);
 bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>& outEntries);
+PersistentVoxelActorCacheStats GetPersistentVoxelActorCacheStats();
 bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& outEntries);
 uint64_t GetPersistentVoxelCacheSerial();
 void ResetPersistentVoxelActorCache(const char* reason);
