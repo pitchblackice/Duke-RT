@@ -447,21 +447,18 @@ static bool TickPendingPathTracingLevelPreloadGate()
 		return false;
 	}
 
-	const bool keepLoadingScreenUntilLevelFrame = cutscene.runner != nullptr;
 	FinalizePendingLevelStart();
 	gPathTracingLevelPreloadFinalCheckNeeded = true;
 	gPathTracingLevelPreloadFirstLevelFrameCaptured = false;
 	gPathTracingLevelPreloadSimulationHoldActive = false;
-	if (keepLoadingScreenUntilLevelFrame)
+	gPathTracingLevelPreloadAwaitingFirstLevelFrame = true;
+	if ((int)nri_ptloadingtrace >= 1)
 	{
-		gPathTracingLevelPreloadAwaitingFirstLevelFrame = true;
-		if ((int)nri_ptloadingtrace >= 1)
-		{
-			Printf("NRI PT loading gate: event=preload-ready-await-level-frame gamestate=%s gameaction=%d gametic=%d\n",
-				GetGameStateName(gamestate),
-				(int)gameaction,
-				gametic);
-		}
+		Printf("NRI PT loading gate: event=preload-ready-await-level-frame gamestate=%s gameaction=%d gametic=%d loading_runner=%u\n",
+			GetGameStateName(gamestate),
+			(int)gameaction,
+			gametic,
+			cutscene.runner != nullptr ? 1u : 0u);
 	}
 	return true;
 }
@@ -681,6 +678,13 @@ static void GameTicker()
 				}
 				gPathTracingLevelPreloadNeeded = false;
 			}
+			if (gPathTracingLevelPreloadAwaitingFirstLevelFrame &&
+				gPathTracingLevelPreloadFirstLevelFrameCaptured &&
+				!gPathTracingLevelPreloadFinalCheckNeeded)
+			{
+				gameaction = ga_level;
+				return;
+			}
 			if (!gPathTracingLevelPreloadFinalCheckNeeded)
 			{
 				CancelPendingPathTracingLevelPreload();
@@ -697,6 +701,22 @@ static void GameTicker()
 				gPathTracingLevelPreloadAwaitingFirstLevelFrame &&
 				!gPathTracingLevelPreloadFirstLevelFrameCaptured)
 			{
+				if (gametic == 0)
+				{
+					gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
+					if ((int)nri_ptloadingtrace >= 1)
+					{
+						Printf("NRI PT loading gate: event=first-level-capture-skip reason=gametic-zero gamestate=%s gameaction=%d gametic=%d\n",
+							GetGameStateName(gamestate),
+							(int)gameaction,
+							gametic);
+					}
+					if (!RunPathTracingLevelPreloadFinalCheck())
+					{
+						return;
+					}
+					return;
+				}
 				gameaction = ga_level;
 				if ((int)nri_ptloadingtrace >= 1)
 				{
@@ -993,9 +1013,12 @@ void Display()
 		break;
 	}
 
-	if (gPathTracingLevelPreloadAwaitingFirstLevelFrame && gamestate == GS_LEVEL && cutscene.runner != nullptr)
+	if (gPathTracingLevelPreloadAwaitingFirstLevelFrame && gamestate == GS_LEVEL)
 	{
-		ScreenJobDraw();
+		if (cutscene.runner != nullptr)
+		{
+			ScreenJobDraw();
+		}
 		if (levelRenderedThisFrame)
 		{
 			if (!gPathTracingLevelPreloadFirstLevelFrameCaptured)
@@ -1034,10 +1057,14 @@ void Display()
 				{
 					screen->NotifyPathTracingLevelFirstFrameRelease();
 				}
-				EndScreenJob();
+				if (cutscene.runner != nullptr)
+				{
+					EndScreenJob();
+				}
 				gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
 				gPathTracingLevelPreloadFirstLevelFrameCaptured = false;
 				gPathTracingLevelPreloadSimulationHoldActive = false;
+				gPathTracingLevelPreloadHeldScreenJobCompletion = false;
 				if (gameaction == ga_level)
 				{
 					gameaction = ga_nothing;
