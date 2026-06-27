@@ -1635,6 +1635,22 @@ namespace
 			record.provenance.cstat == rule.ruleId;
 	}
 
+	float ResolveSurfaceLightOverlayMinimumBrightnessScale(const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface)
+	{
+		if (surface.source != SceneLightRecordSource::SurfaceLightOverlayScene)
+		{
+			return 0.0f;
+		}
+
+		const float minimumBrightness = std::max(0.0f, (float)nri_ptsurfacelightminbrightness);
+		if (minimumBrightness <= 0.0f || surface.emissiveIntensity <= 0.0f)
+		{
+			return 0.0f;
+		}
+
+		return minimumBrightness / surface.emissiveIntensity;
+	}
+
 	std::string NormalizeMaterialTextureName(const FGameTexture* texture)
 	{
 		std::string normalized = texture != nullptr ? texture->GetName().GetChars() : "";
@@ -5748,9 +5764,12 @@ float SceneLightSystem::ResolveSectorEmissionScale(const EmissiveSurfaceRegistry
 
 float SceneLightSystem::ResolveSectorEmissionIntensityScale(const EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface, float scale) const
 {
-	const float minScale = surface.hasSectorResponseIntensityMin ?
-		std::max(0.0f, surface.sectorResponseIntensityMin) :
-		std::max(0.0f, (float)nri_ptsectoremissionlightmin);
+	const float authoredMinScale = ResolveSurfaceLightOverlayMinimumBrightnessScale(surface);
+	const float minScale = std::max(
+		surface.hasSectorResponseIntensityMin ?
+			std::max(0.0f, surface.sectorResponseIntensityMin) :
+			std::max(0.0f, (float)nri_ptsectoremissionlightmin),
+		authoredMinScale);
 	const float maxScale = surface.hasSectorResponseIntensityMax ?
 		std::max(minScale, surface.sectorResponseIntensityMax) :
 		std::max(minScale, (float)nri_ptsectoremissionlightmax);
@@ -5785,8 +5804,11 @@ float SceneLightSystem::ResolveEmissiveMaterialResponseScale(const EmissiveSurfa
 	const auto& sector = mSectorLighting.sectors[sectorIndex];
 	const float globalMinScale = std::max(0.0f, (float)nri_ptsectoremissionmaterialmin);
 	const float globalMaxScale = std::max(globalMinScale, (float)nri_ptsectoremissionmaterialmax);
-	const float minScale = surface.hasMaterialResponseMin ? std::max(0.0f, surface.materialResponseMin) : globalMinScale;
-	const float maxScale = surface.hasMaterialResponseMax ? std::max(minScale, surface.materialResponseMax) : globalMaxScale;
+	const float authoredMinScale = ResolveSurfaceLightOverlayMinimumBrightnessScale(surface);
+	const float minScale = std::max(
+		surface.hasMaterialResponseMin ? std::max(0.0f, surface.materialResponseMin) : globalMinScale,
+		authoredMinScale);
+	const float maxScale = surface.hasMaterialResponseMax ? std::max(minScale, surface.materialResponseMax) : std::max(minScale, globalMaxScale);
 	const float scale = surface.hasSectorResponseInputRange ?
 		ComputeSectorEmitterRangeResponseScale(
 			sector.rawResponseSignal,
