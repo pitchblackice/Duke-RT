@@ -54,7 +54,7 @@ picrange 2400-2403 priority=high gpu=prefer reason=projectile-shrapnel-b
 map E1L1
 
 # Start area static props and high-visibility environment voxels.
-pic 1696 priority=force gpu=prefer reason=e1l1-air-car
+pic 1696 priority=force gpu=force reason=e1l1-air-car
 pic 913 priority=force gpu=prefer reason=e1l1-fence
 pic 908 priority=force gpu=prefer reason=e1l1-palm-tree
 pic 909 priority=force gpu=prefer reason=e1l1-big-tree
@@ -63,7 +63,33 @@ pic 1247 priority=force gpu=prefer reason=gas-tank
 pic 1248 priority=force gpu=prefer reason=gas-tank-explosion-1
 pic 1249 priority=force gpu=prefer reason=gas-tank-explosion-2
 
+# First open-area billboard/sign cluster observed in listactors on 2026-06-27.
+# Direct tile requests are used here because listactors prints spr.type rather
+# than spr.picnum; these are the overlay's small E1 sign voxel families.
+picrange 592-594 priority=force gpu=force reason=e1l1-first-open-billboard-signs-a
+picrange 597-601 priority=force gpu=force reason=e1l1-first-open-billboard-signs
+picrange 612-614 priority=force gpu=force reason=e1l1-first-open-billboard-signs-b
+
 # Long-lived visible fire loops near the first-level complex voxel area.
+
+# Non-enemy voxel actors observed in the 2026-06-27 E1L1 listactors capture.
+picrange 40-42 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-ammo
+picrange 49-60 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-pickups
+picrange 100-115 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-atomic-health
+picrange 130-131 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-card-reader
+picrange 170-171 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-access-slot
+pic 568 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-femmag
+picrange 569-615 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-small-props
+pic 621 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-camera
+pic 632 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-scanner
+picrange 639-668 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-signs
+pic 916 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-fireext
+picrange 950-951 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-street-props
+pic 977 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-pole
+picrange 1060-1067 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-clocks-trash-signs
+pic 1115 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-viewscreen
+pic 1221 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-pole-alt
+picrange 1348-1351 priority=high gpu=prefer reason=e1l1-listactors-nonenemy-holoduke
 
 # Monster actors verified with listactors on 2026-06-20.
 actor DukeLizTrooper allpicnums priority=high gpu=prefer reason=e1l1-verified-monster-liztrooper
@@ -81,25 +107,78 @@ actor DukePodFemale allpicnums priority=high gpu=prefer reason=e1l1-verified-fem
 map E1L2
 
 # Large repeated admissions observed while traversing E1L2.
-pic 1696 priority=high gpu=prefer reason=e1l2-air-car
+pic 1696 priority=force gpu=force reason=e1l2-air-car
 
-# Monster actors verified with listactors on 2026-06-20.
-actor DukeLizTrooper allpicnums priority=high gpu=prefer reason=e1l2-verified-monster-liztrooper
-actor DukeLizTrooperDucking allpicnums priority=high gpu=prefer reason=e1l2-verified-monster-liztrooper-ducking
-actor DukeLizTrooperJetpack allpicnums priority=high gpu=prefer reason=e1l2-verified-monster-liztrooper-jetpack
-actor DukeLizTrooperShoot allpicnums priority=high gpu=prefer reason=e1l2-verified-monster-liztrooper-shoot
-actor DukeLizTrooperStayput allpicnums priority=high gpu=prefer reason=e1l2-verified-monster-liztrooper-stayput
-actor DukeOctabrain allpicnums priority=high gpu=prefer reason=e1l2-verified-monster-octabrain
-actor DukePigCop allpicnums priority=high gpu=prefer reason=e1l2-verified-monster-pigcop
-actor DukePigCopDive allpicnums priority=high gpu=prefer reason=e1l2-verified-monster-pigcop-dive
-actor DukePigCopStayput allpicnums priority=high gpu=prefer reason=e1l2-verified-monster-pigcop-stayput
-actor DukeRecon allpicnums priority=high gpu=prefer reason=e1l2-verified-monster-recon
-
-# Female actors verified with listactors on 2026-06-20.
-actor DukeFemale1 allpicnums priority=high gpu=prefer reason=e1l2-verified-female-1
-actor DukeFemale2 allpicnums priority=high gpu=prefer reason=e1l2-verified-female-2
-actor DukeFemale3 allpicnums priority=high gpu=prefer reason=e1l2-verified-female-3
-actor DukePodFemale allpicnums priority=high gpu=prefer reason=e1l2-verified-female-pod
+# Experimental all-actor preload captured with listactors on 2026-06-26.
+# Capture: matched=935 printed=935 unique_classes=67. Entries use observed
+# actor type values rather than allpicnums to avoid speculative class expansion.
+actor DukeAccessCard picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-3
+actor DukeActivator picnums=247,251,267,298,310,311,315,316,320 priority=force gpu=force reason=e1l2-listactors-current-types-count-20
+actor DukeActivatorLocked picnums=243,255,262,282 priority=force gpu=force reason=e1l2-listactors-current-types-count-4
+actor DukeActor picnums=0,243,255,262,267,278,298,299,310,311,313,315,316,317 priority=force gpu=force reason=e1l2-listactors-current-types-count-80
+actor DukeAmmo picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-9
+actor DukeAtomicHealth picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-4
+actor DukeBatteryAmmo picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-4
+actor DukeBottle10 picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-1
+actor DukeCamera picnums=224,287 priority=force gpu=force reason=e1l2-listactors-current-types-count-8
+actor DukeCanWithSomething picnums=40,49,52,55 priority=force gpu=force reason=e1l2-listactors-current-types-count-5
+actor DukeChaingunSprite picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-2
+actor DukeCola picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-1
+actor DukeCrack picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-1
+actor DukeFemale1 picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-3
+actor DukeFemale2 picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-2
+actor DukeFemale3 picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-1
+actor DukeFemMag picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-4
+actor DukeFire picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-1
+actor DukeFireBarrel picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-1
+actor DukeFirstAid picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-2
+actor DukeFirstgunSprite picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-2
+actor DukeGenericDestructible picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-30
+actor DukeGenericPole picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-4
+actor DukeHBombammo picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-4
+actor DukeHeatSensor picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-3
+actor DukeHoloDuke picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-2
+actor DukeHydrant picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-1
+actor DukeJetpack picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-2
+actor DukeLizTrooper picnums=0,1,2,3 priority=force gpu=force reason=e1l2-listactors-current-types-count-18
+actor DukeLizTrooperDucking picnums=0,1,2,3 priority=force gpu=force reason=e1l2-listactors-current-types-count-14
+actor DukeLizTrooperJetpack picnums=2 priority=force gpu=force reason=e1l2-listactors-current-types-count-1
+actor DukeLizTrooperShoot picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-1
+actor DukeLizTrooperStayput picnums=0,3 priority=force gpu=force reason=e1l2-listactors-current-types-count-2
+actor DukeLocator picnums=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 priority=force gpu=force reason=e1l2-listactors-current-types-count-16
+actor DukeMaskWall picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-6
+actor DukeMasterSwitch picnums=264,275,315,316,317,325 priority=force gpu=force reason=e1l2-listactors-current-types-count-10
+actor DukeNeon picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-5
+# DukeNukeButton appeared with actor type -1 in listactors; negative type is not a preloadable picnum.
+actor DukeOctabrain picnums=2 priority=force gpu=force reason=e1l2-listactors-current-types-count-1
+actor DukePigCop picnums=0,1,2,3 priority=force gpu=force reason=e1l2-listactors-current-types-count-25
+actor DukePigCopDive picnums=0,1,2,3 priority=force gpu=force reason=e1l2-listactors-current-types-count-12
+actor DukePigCopStayput picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-2
+actor DukePlayerPawn picnums=0,1 priority=force gpu=force reason=e1l2-listactors-current-types-count-15
+actor DukePodFemale picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-1
+actor DukePoolPocket picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-6
+actor DukeQueball picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-9
+actor DukeRat picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-61
+actor DukeRecon picnums=0,2,3 priority=force gpu=force reason=e1l2-listactors-current-types-count-4
+actor DukeRespawnController picnums=246,289,290,291,292,293,294,300,302,321,325 priority=force gpu=force reason=e1l2-listactors-current-types-count-23
+actor DukeRPGammo picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-3
+actor DukeRPGSprite picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-2
+actor DukeSectorEffector picnums=0,1,3,4,7,8,10,11,12,13,15,20,27,31,32,33,49 priority=force gpu=force reason=e1l2-listactors-current-types-count-242
+actor DukeSeenine picnums=0,10,20,30,40,60,80,90,100,110,120,140,160,180,200,220,240,260,280,300,320,340,360,380,400,420,440,460,480,500,520,540,560,580,600,620 priority=force gpu=force reason=e1l2-listactors-current-types-count-143
+actor DukeShield picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-2
+actor DukeShotgunammo picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-5
+actor DukeShotgunSprite picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-2
+actor DukeSixpak picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-9
+actor DukeSoundController picnums=71,73,81,91,95,165,166,167,170,173,186,194,231,1128 priority=force gpu=force reason=e1l2-listactors-current-types-count-53
+actor DukeStall picnums=1 priority=force gpu=force reason=e1l2-listactors-current-types-count-2
+actor DukeSteroids picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-2
+actor DukeStripeBall picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-7
+actor DukeTire picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-2
+actor DukeToilet picnums=1 priority=force gpu=force reason=e1l2-listactors-current-types-count-2
+actor DukeTouchPlate picnums=246,251,264,275,282,302,311,320,321,325 priority=force gpu=force reason=e1l2-listactors-current-types-count-12
+actor DukeTree1 picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-1
+actor DukeViewscreen picnums=1 priority=force gpu=force reason=e1l2-listactors-current-types-count-3
+actor DukeWaterDrip picnums=0 priority=force gpu=force reason=e1l2-listactors-current-types-count-5
 
 map E1L3
 
