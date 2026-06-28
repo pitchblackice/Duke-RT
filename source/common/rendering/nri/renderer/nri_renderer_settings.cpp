@@ -57,28 +57,34 @@ namespace
 
 	void MigratePreloadSettingsCVars()
 	{
-		constexpr int CurrentLoadingSettingsVersion = 1;
-		if ((int)nri_ptloadingsettingsversion >= CurrentLoadingSettingsVersion)
+		constexpr int CurrentLoadingSettingsVersion = 2;
+		const int loadingSettingsVersion = (int)nri_ptloadingsettingsversion;
+		if (loadingSettingsVersion >= CurrentLoadingSettingsVersion)
 		{
 			return;
 		}
 
 		bool migrated = false;
-		if ((int)nri_ptloadingvoxelvariants == 128)
+		if (loadingSettingsVersion < 1 && (int)nri_ptloadingvoxelvariants == 128)
 		{
 			nri_ptloadingvoxelvariants = 256;
 			migrated = true;
 		}
-		if ((int)nri_ptloadingvoxelcpumaxvariants == 64)
+		if (loadingSettingsVersion < 1 && (int)nri_ptloadingvoxelcpumaxvariants == 64)
 		{
 			nri_ptloadingvoxelcpumaxvariants = 256;
+			migrated = true;
+		}
+		if (loadingSettingsVersion < 2 && (int)nri_ptpreloadmaxsubmitspertick == 8)
+		{
+			nri_ptpreloadmaxsubmitspertick = 2;
 			migrated = true;
 		}
 
 		nri_ptloadingsettingsversion = CurrentLoadingSettingsVersion;
 		if (migrated)
 		{
-			Printf("NRI preload config: migrated voxel preload variant defaults to nri_ptloadingvoxelvariants=256 and nri_ptloadingvoxelcpumaxvariants=256\n");
+			Printf("NRI preload config: migrated archived preload defaults to nri_ptpreloadmaxsubmitspertick=2, nri_ptloadingvoxelvariants=256, and nri_ptloadingvoxelcpumaxvariants=256\n");
 		}
 	}
 }
