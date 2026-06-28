@@ -320,7 +320,7 @@ CVAR(Bool, nri_ptloadingvoxelcpu, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, nri_ptloadingvoxelgpu, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Bool, nri_ptloadingvoxelblockoptional, false, 0)
+CVAR(Bool, nri_ptloadingvoxelblockoptional, true, 0)
 
 CVAR(Bool, nri_ptloadingvoxelgpuwhitelistonly, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -334,7 +334,7 @@ CVAR(Int, nri_ptloadingvoxelgpumaxvariants, 256, CVAR_ARCHIVE | CVAR_GLOBALCONFI
 
 CVAR(Int, nri_ptloadingvoxelactors, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_ptloadingvoxelvariants, 128, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelvariants, 256, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptloadingvoxelvariantprims, 2000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -342,7 +342,7 @@ CVAR(Int, nri_ptloadingvoxelpicrange, 64, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptloadingvoxelcpubudget, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_ptloadingvoxelcpumaxvariants, 64, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelcpumaxvariants, 256, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptloadingvoxelcpumaxprims, 9000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
