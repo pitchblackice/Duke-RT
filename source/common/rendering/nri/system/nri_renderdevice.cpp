@@ -2626,6 +2626,10 @@ void NRIRenderDevice::BeginFrame()
 			}
 			Printf(TEXTCOLOR_RED "NRI failed to acquire swapchain image.\n");
 			LogD3D12FailureDiagnostics("AcquireNextTexture");
+			if (acquireResult == nri::Result::DEVICE_LOST)
+			{
+				FatalTerminalDeviceLoss("AcquireNextTexture");
+			}
 			return;
 		}
 
@@ -3268,9 +3272,16 @@ bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 
 	const nri::CommandBuffer* commandBuffers[] = { mCommandBuffer };
 	nri::Fence* submitFence = nullptr;
-	if (mCore.CreateFence(*mDevice, 0, submitFence) != nri::Result::SUCCESS)
+	const nri::Result fenceResult = mCore.CreateFence(*mDevice, 0, submitFence);
+	if (fenceResult != nri::Result::SUCCESS)
 	{
-		mLastSubmitAndWaitResult = nri::Result::FAILURE;
+		mLastSubmitAndWaitResult = fenceResult;
+		if (mCreatedDeviceApi == nri::GraphicsAPI::D3D12 &&
+			mNativeD3D12Device != nullptr &&
+			mNativeD3D12Device->GetDeviceRemovedReason() != S_OK)
+		{
+			mLastSubmitAndWaitResult = nri::Result::DEVICE_LOST;
+		}
 		return false;
 	}
 
@@ -3332,6 +3343,25 @@ void NRIRenderDevice::MarkTerminalDeviceLoss(const char* context)
 	StartupRecovery_MarkNriDeviceLost(context != nullptr ? context : "NRI");
 }
 
+[[noreturn]] void NRIRenderDevice::FatalTerminalDeviceLoss(const char* context)
+{
+	const char* failureContext = context != nullptr ? context : "NRI";
+	MarkTerminalDeviceLoss(failureContext);
+
+	FString reason = "device_lost";
+	if (mCreatedDeviceApi == nri::GraphicsAPI::D3D12 && mNativeD3D12Device != nullptr)
+	{
+		const HRESULT hr = mNativeD3D12Device->GetDeviceRemovedReason();
+		reason = FStringf("%s (0x%08X)", GetDxgiErrorName(hr), (unsigned)hr);
+	}
+
+	I_FatalError("NRI renderer device lost during %s: %s.\n"
+		"The renderer cannot recover this graphics device during the current run. "
+		"Startup recovery has recorded the device-loss state and will apply Safe Mode on the next launch.",
+		failureContext,
+		reason.GetChars());
+}
+
 bool NRIRenderDevice::SubmitWaitAndRestartCommandList(const char* reason)
 {
 	if (mTerminalDeviceLoss)
@@ -3365,6 +3395,10 @@ bool NRIRenderDevice::SubmitWaitAndRestartCommandList(const char* reason)
 			MarkTerminalDeviceLoss(reason != nullptr ? reason : "SubmitWaitAndRestartCommandList");
 		}
 		LogD3D12FailureDiagnostics(reason != nullptr ? reason : "SubmitWaitAndRestartCommandList");
+		if (mLastSubmitAndWaitResult == nri::Result::DEVICE_LOST)
+		{
+			FatalTerminalDeviceLoss(reason != nullptr ? reason : "SubmitWaitAndRestartCommandList");
+		}
 		return false;
 	}
 	if (mPreloadCommandContextActive && wasOpen)
@@ -3397,7 +3431,7 @@ bool NRIRenderDevice::BeginPreloadCommandContext(const char* reason)
 	{
 		if ((int)nri_ptloadingtrace >= 1)
 		{
-			Printf("NRI PT loading gate: event=preload-command result=ready reason=terminal-device-loss\n");
+			Printf("NRI PT loading gate: event=preload-command result=failed reason=terminal-device-loss\n");
 		}
 		return false;
 	}
@@ -3460,6 +3494,10 @@ bool NRIRenderDevice::EndPreloadCommandContext(const char* reason)
 			MarkTerminalDeviceLoss(reason != nullptr ? reason : "EndPreloadCommandContext");
 		}
 		LogD3D12FailureDiagnostics(reason != nullptr ? reason : "EndPreloadCommandContext");
+		if (mLastSubmitAndWaitResult == nri::Result::DEVICE_LOST)
+		{
+			FatalTerminalDeviceLoss(reason != nullptr ? reason : "EndPreloadCommandContext");
+		}
 	}
 	else if ((int)nri_ptloadingtrace >= 1)
 	{
@@ -5873,9 +5911,9 @@ bool NRIRenderDevice::TickPathTracingLevelPreload()
 		mPathTracingLevelPreloadPending = false;
 		if ((int)nri_ptloadingtrace >= 1)
 		{
-			Printf("NRI PT loading gate: event=device-tick result=ready reason=terminal-device-loss\n");
+			Printf("NRI PT loading gate: event=device-tick result=failed reason=terminal-device-loss\n");
 		}
-		return true;
+		return false;
 	}
 
 	if (!mPathTracingLevelPreloadPending)
@@ -9007,6 +9045,10 @@ void NRIRenderDevice::EndFrameAndPresent()
 		}
 		Printf(TEXTCOLOR_RED "NRI QueueSubmit failed with result '%s'.\n", GetNriResultName(submitResult));
 		LogD3D12FailureDiagnostics("QueueSubmit");
+		if (submitResult == nri::Result::DEVICE_LOST)
+		{
+			FatalTerminalDeviceLoss("QueueSubmit");
+		}
 	}
 
 	stageStartMs = I_msTimeF();
@@ -9059,6 +9101,10 @@ void NRIRenderDevice::EndFrameAndPresent()
 		}
 		Printf(TEXTCOLOR_RED "NRI QueuePresent failed with result '%s'.\n", GetNriResultName(presentResult));
 		LogD3D12FailureDiagnostics(IsFrameGenerationPresentPathActive() ? "FramegenPresent" : "QueuePresent");
+		if (presentResult == nri::Result::DEVICE_LOST)
+		{
+			FatalTerminalDeviceLoss(IsFrameGenerationPresentPathActive() ? "FramegenPresent" : "QueuePresent");
+		}
 		if (IsFrameGenerationPresentPathActive() && presentResult != nri::Result::DEVICE_LOST)
 		{
 			mFrameGeneration.RequestNativeFallback("proxy-present-failed");

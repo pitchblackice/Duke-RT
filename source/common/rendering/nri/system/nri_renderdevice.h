@@ -230,6 +230,7 @@ private:
 	bool BeginCommandList(const char* reason, bool waitForSlotReuse = false);
 	bool SubmitWaitAndRestartCommandList(const char* reason);
 	void MarkTerminalDeviceLoss(const char* context);
+	[[noreturn]] void FatalTerminalDeviceLoss(const char* context);
 	bool BeginPreloadCommandContext(const char* reason);
 	bool EndPreloadCommandContext(const char* reason);
 	bool EnsureSwapChainSize();
