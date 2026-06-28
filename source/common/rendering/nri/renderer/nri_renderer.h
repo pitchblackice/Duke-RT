@@ -2229,6 +2229,7 @@ private:
 	bool HasAnyDynamicBottomLevelAS() const;
 	void DestroyDynamicBottomLevelAccelerationStructures();
 	ResidentUploadScratchFrame& GetResidentUploadScratchFrame();
+	void ResetResidentUploadScratchFrame(const char* reason);
 	nri::DescriptorSet* GetCurrentSceneTextureSet() const;
 	nri::DescriptorSet* GetCurrentSceneDataSet() const;
 	bool IsCurrentSceneDataDescriptorsInitialized() const;

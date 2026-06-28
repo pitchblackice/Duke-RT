@@ -64,7 +64,12 @@ public:
 		services.submitWaitAndRestart = [](void* user, const char* reason) -> bool
 		{
 			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
-			return renderer->mFrameBuffer != nullptr && renderer->mFrameBuffer->SubmitWaitAndRestartCommandList(reason);
+			if (renderer->mFrameBuffer == nullptr || !renderer->mFrameBuffer->SubmitWaitAndRestartCommandList(reason))
+			{
+				return false;
+			}
+			renderer->ResetResidentUploadScratchFrame(reason);
+			return true;
 		};
 		services.isSubmitBudgetHit = [](void* user) -> bool
 		{
@@ -217,6 +222,10 @@ public:
 		}
 
 		const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
+		if (gpuLoadingEnabled)
+		{
+			renderer.ResetResidentUploadScratchFrame("voxel-preload-start");
+		}
 		NRIPersistentVoxelPreloadServices preloadServices = {};
 		preloadServices.user = &renderer;
 		preloadServices.pumpAdmissionQueue = [](void* user, const char* phase) -> bool

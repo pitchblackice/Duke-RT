@@ -397,6 +397,53 @@ NRIRenderer::ResidentUploadScratchFrame& NRIRenderer::GetResidentUploadScratchFr
 	return frameScratch;
 }
 
+void NRIRenderer::ResetResidentUploadScratchFrame(const char* reason)
+{
+	const uint32_t frameSlot = GetCurrentQueuedFrameIndex() % (uint32_t)mResidentUploadScratchFrames.size();
+	auto& frameScratch = mResidentUploadScratchFrames[frameSlot];
+	const uint32_t retiredBufferCount = (uint32_t)frameScratch.retiredBuffers.size();
+	const uint32_t retiredAccelerationCount = (uint32_t)frameScratch.retiredAccelerationStructures.size();
+
+	for (NRIBufferResource& retired : frameScratch.retiredBuffers)
+	{
+		DestroyBufferResource(retired);
+	}
+	frameScratch.retiredBuffers.clear();
+	for (NRIAccelerationStructureResource& retired : frameScratch.retiredAccelerationStructures)
+	{
+		DestroyAccelerationStructureResource(retired);
+	}
+	frameScratch.retiredAccelerationStructures.clear();
+
+	const uint64_t vertexBytes = frameScratch.vertex.cursor;
+	const uint64_t indexBytes = frameScratch.index.cursor;
+	const uint64_t primitiveBytes = frameScratch.primitive.cursor;
+	const uint64_t materialBytes = frameScratch.material.cursor;
+	frameScratch.frameIndex = mFrameIndex;
+	frameScratch.vertex.cursor = 0;
+	frameScratch.vertex.copySourceActive = false;
+	frameScratch.index.cursor = 0;
+	frameScratch.index.copySourceActive = false;
+	frameScratch.primitive.cursor = 0;
+	frameScratch.primitive.copySourceActive = false;
+	frameScratch.material.cursor = 0;
+	frameScratch.material.copySourceActive = false;
+
+	if ((int)nri_ptloadingtrace >= 2 && (vertexBytes != 0 || indexBytes != 0 || primitiveBytes != 0 || materialBytes != 0 || retiredBufferCount != 0 || retiredAccelerationCount != 0))
+	{
+		Printf("NRI PT preload upload scratch: event=reset reason=%s frame=%u slot=%u vertex=%llu index=%llu primitive=%llu material=%llu retired_buffers=%u retired_as=%u\n",
+			reason != nullptr ? reason : "unknown",
+			mFrameIndex,
+			frameSlot,
+			(unsigned long long)vertexBytes,
+			(unsigned long long)indexBytes,
+			(unsigned long long)primitiveBytes,
+			(unsigned long long)materialBytes,
+			retiredBufferCount,
+			retiredAccelerationCount);
+	}
+}
+
 nri::DescriptorSet* NRIRenderer::GetCurrentSceneTextureSet() const
 {
 	return NRIDescriptorSetManager::GetCurrentSceneTextureSet(*this);
