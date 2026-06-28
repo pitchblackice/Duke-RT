@@ -89,6 +89,10 @@ public:
 	bool StartPathTracingLevelPreload() override;
 	bool TickPathTracingLevelPreload() override;
 	bool IsPathTracingLevelPreloadPending() const override;
+	bool IsPreloadSubmitBudgetHit() const;
+	uint32_t GetPreloadSubmitCountThisTick() const;
+	uint32_t GetPreloadSubmitLimitThisTick() const;
+	bool HasTerminalDeviceLoss() const;
 	void CancelPathTracingLevelPreload() override;
 	void NotifyPathTracingLevelFirstFrameRelease() override;
 	void NotifyPathTracingLevelPreloadFinalCheckRelease() override;
@@ -225,6 +229,7 @@ private:
 	void DestroyRenderResources();
 	bool BeginCommandList(const char* reason, bool waitForSlotReuse = false);
 	bool SubmitWaitAndRestartCommandList(const char* reason);
+	void MarkTerminalDeviceLoss(const char* context);
 	bool BeginPreloadCommandContext(const char* reason);
 	bool EndPreloadCommandContext(const char* reason);
 	bool EnsureSwapChainSize();
@@ -401,6 +406,12 @@ private:
 	bool mStandaloneSavePicFrame = false;
 	bool mPreloadCommandContextActive = false;
 	bool mPathTracingLevelPreloadPending = false;
+	uint32_t mPreloadSubmitsThisTick = 0;
+	uint32_t mPreloadMaxSubmitsThisTick = 0;
+	bool mPreloadSubmitBudgetHit = false;
+	bool mTerminalDeviceLoss = false;
+	bool mLoggedTerminalDeviceLoss = false;
+	FString mLastPreloadSubmitReason = "none";
 	bool mHasAcquiredSwapChainImage = false;
 	bool mHasPresentedSwapChainFrame = false;
 	bool mHasSwapChainDisplayDesc = false;
@@ -416,6 +427,7 @@ private:
 	bool mInitialized = false;
 	bool mLoggedStartup = false;
 	bool mLoggedD3D12FailureDred = false;
+	nri::Result mLastSubmitAndWaitResult = nri::Result::SUCCESS;
 	FrameBoundaryDebugStats mLastFrameBoundaryStats;
 	FrameSequenceEntry mFrameSequenceHistory[FrameSequenceHistorySize] = {};
 	uint32_t mFrameSequenceWriteIndex = 0;

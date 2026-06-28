@@ -64,6 +64,24 @@ struct NRIMaterialTextureWarmupResult
 	uint32_t textureInserts = 0;
 	uint64_t estimatedBytes = 0;
 	double realizeMs = 0.0;
+	bool pending = false;
+	bool textureBudgetHit = false;
+	bool byteBudgetHit = false;
+	bool msBudgetHit = false;
+};
+
+struct NRIMaterialTextureWarmupOptions
+{
+	uint32_t maxTextureInserts = 0;
+	uint64_t maxUploadBytes = 0;
+	double maxMilliseconds = 0.0;
+};
+
+struct NRIMaterialTextureWarmupCursor
+{
+	uint64_t sourceKey = 0;
+	uint32_t nextTextureIndex = 0;
+	bool ready = false;
 };
 
 class NRISceneTextureResidency
@@ -91,6 +109,7 @@ public:
 	bool EnsurePaletteTexture(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials);
 	bool EnsureCacheEntry(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, double* outRealizeMs = nullptr);
 	bool WarmMaterialTextures(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials, NRIMaterialTextureWarmupResult& outResult);
+	bool WarmMaterialTexturesBudgeted(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials, const NRIMaterialTextureWarmupOptions& options, NRIMaterialTextureWarmupCursor& cursor, NRIMaterialTextureWarmupResult& outResult);
 	bool ResolveTextureDescriptor(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, bool tracePerf, SceneTextureResolveResult& outResult);
 	uint32_t TransitionInputsForCompute(NRIRenderDevice& device);
 

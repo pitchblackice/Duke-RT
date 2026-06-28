@@ -403,6 +403,113 @@ bool NRISceneTextureResidency::WarmMaterialTextures(NRIRenderDevice& device, con
 	return true;
 }
 
+bool NRISceneTextureResidency::WarmMaterialTexturesBudgeted(
+	NRIRenderDevice& device,
+	const nri_scene::MaterialBridgeData& materials,
+	const NRIMaterialTextureWarmupOptions& options,
+	NRIMaterialTextureWarmupCursor& cursor,
+	NRIMaterialTextureWarmupResult& outResult)
+{
+	outResult = {};
+	if (cursor.nextTextureIndex >= materials.textures.size())
+	{
+		cursor.nextTextureIndex = (uint32_t)materials.textures.size();
+		cursor.ready = true;
+		return true;
+	}
+
+	cursor.ready = false;
+	const auto start = std::chrono::steady_clock::now();
+	auto elapsedMs = [&]() -> double
+	{
+		return std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
+			std::chrono::steady_clock::now() - start).count();
+	};
+
+	for (size_t textureIndex = cursor.nextTextureIndex; textureIndex < materials.textures.size(); ++textureIndex)
+	{
+		if (options.maxMilliseconds > 0.0 && outResult.textureRequests != 0 && elapsedMs() >= options.maxMilliseconds)
+		{
+			outResult.pending = true;
+			outResult.msBudgetHit = true;
+			break;
+		}
+
+		const nri_scene::TextureUpload& upload = materials.textures[textureIndex];
+		cursor.nextTextureIndex = (uint32_t)textureIndex + 1u;
+		if (upload.width == 0 || upload.height == 0)
+		{
+			continue;
+		}
+
+		outResult.textureRequests++;
+		const bool wasCached = FindCacheIndex(upload.key) != UINT32_MAX;
+		if (wasCached)
+		{
+			outResult.textureHits++;
+			continue;
+		}
+
+		const uint64_t uploadBytes = EstimateSceneTextureUploadBytes(upload);
+		if (options.maxTextureInserts != 0 && outResult.textureInserts >= options.maxTextureInserts)
+		{
+			cursor.nextTextureIndex = (uint32_t)textureIndex;
+			outResult.pending = true;
+			outResult.textureBudgetHit = true;
+			break;
+		}
+		if (options.maxUploadBytes != 0 &&
+			outResult.textureInserts != 0 &&
+			outResult.estimatedBytes + uploadBytes > options.maxUploadBytes)
+		{
+			cursor.nextTextureIndex = (uint32_t)textureIndex;
+			outResult.pending = true;
+			outResult.byteBudgetHit = true;
+			break;
+		}
+
+		outResult.textureMisses++;
+		outResult.estimatedBytes += uploadBytes;
+		double realizeMs = 0.0;
+		if (!EnsureCacheEntry(device, upload, &realizeMs))
+		{
+			return false;
+		}
+		outResult.realizeMs += realizeMs;
+		if (FindCacheIndex(upload.key) != UINT32_MAX)
+		{
+			outResult.textureInserts++;
+		}
+
+		if (options.maxTextureInserts != 0 && outResult.textureInserts >= options.maxTextureInserts)
+		{
+			outResult.pending = cursor.nextTextureIndex < materials.textures.size();
+			outResult.textureBudgetHit = outResult.pending;
+			break;
+		}
+		if (options.maxUploadBytes != 0 &&
+			outResult.textureInserts != 0 &&
+			outResult.estimatedBytes >= options.maxUploadBytes)
+		{
+			outResult.pending = cursor.nextTextureIndex < materials.textures.size();
+			outResult.byteBudgetHit = outResult.pending;
+			break;
+		}
+	}
+
+	if (cursor.nextTextureIndex >= materials.textures.size())
+	{
+		cursor.nextTextureIndex = (uint32_t)materials.textures.size();
+		cursor.ready = true;
+		outResult.pending = false;
+	}
+	else
+	{
+		outResult.pending = true;
+	}
+	return true;
+}
+
 bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason)
 {
 	Clocker clock(NriPTSceneTextures);

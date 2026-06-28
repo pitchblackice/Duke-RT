@@ -433,6 +433,11 @@ bool NRIPersistentVoxelPreloadServices::WarmSharedBlas(const std::vector<nri_sce
 	return warmSharedBlas == nullptr || warmSharedBlas(user, variants, frameIndex);
 }
 
+bool NRIPersistentVoxelPreloadServices::IsSubmitBudgetHit() const
+{
+	return isSubmitBudgetHit != nullptr && isSubmitBudgetHit(user);
+}
+
 bool NRIPersistentVoxelAdmissionServices::AdmitVariantResource(
 	PersistentVoxelAdmissionEntry& entry,
 	uint64_t byteBudget,
@@ -465,6 +470,11 @@ bool NRIPersistentVoxelAdmissionServices::AdmitVariantResource(
 bool NRIPersistentVoxelAdmissionServices::SubmitWaitAndRestart(const char* reason) const
 {
 	return submitWaitAndRestart != nullptr && submitWaitAndRestart(user, reason);
+}
+
+bool NRIPersistentVoxelAdmissionServices::IsSubmitBudgetHit() const
+{
+	return isSubmitBudgetHit != nullptr && isSubmitBudgetHit(user);
 }
 
 void NRIPersistentVoxelAdmissionServices::RetireBuffer(NRIBufferResource& resource) const
@@ -1046,7 +1056,12 @@ bool NRIPersistentVoxelResidency::WarmMaterialResources(
 	}
 
 	outResult.paletteReady = services.EnsurePalette(batch.materialBridge);
-	return outResult.paletteReady && services.WarmTextures(batch.materialBridge, outResult.textureStats);
+	if (!outResult.paletteReady || !services.WarmTextures(batch.materialBridge, outResult.textureStats))
+	{
+		return false;
+	}
+	outResult.pending = outResult.textureStats.pending;
+	return true;
 }
 
 bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
@@ -3009,6 +3024,12 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 			entry->variant.primitiveCount >= (uint32_t)isolateBlasPrimitiveThreshold;
 		if (!admissionServices.AdmitVariantResource(*entry, remainingByteBudget, blasBudgetRemaining, uploadBytes, reusedMesh, reusedMaterial, inProgress, isolateBlasBuild, failureReason))
 		{
+			if (admissionServices.IsSubmitBudgetHit())
+			{
+				entry->lastReason = "preload-submit-budget";
+				stopReason = entry->lastReason;
+				break;
+			}
 			entry->state = PersistentVoxelAdmissionState::Failed;
 			entry->retryCount++;
 			entry->lastReason = failureReason != nullptr ? failureReason : "admit-failed";
@@ -3099,6 +3120,12 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		{
 			if (!admissionServices.SubmitWaitAndRestart("voxel-loading-blas"))
 			{
+				if (admissionServices.IsSubmitBudgetHit())
+				{
+					entry->lastReason = "preload-submit-budget";
+					stopReason = entry->lastReason;
+					break;
+				}
 				entry->state = PersistentVoxelAdmissionState::Failed;
 				entry->retryCount++;
 				entry->lastReason = "blas-submit-wait-failed";
@@ -3657,6 +3684,12 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			}
 			if (!services.SubmitWaitAndRestart("voxel-pre-blas-upload"))
 			{
+				if (services.IsSubmitBudgetHit())
+				{
+					outInProgress = true;
+					entry.lastReason = "preload-submit-budget";
+					return true;
+				}
 				return rollbackAdmission("pre-blas-submit-wait-failed", "pre_blas_submit");
 			}
 			entry.uploadSubmittedBeforeBlas = true;
@@ -6656,6 +6689,19 @@ bool NRIPersistentVoxelResidency::PreloadVariantResources(
 		uint32_t optionalPendingAfter = 0;
 		uint32_t failedAfter = 0;
 		CountAdmissionWork(requiredPendingAfter, requiredReadyAfter, optionalPendingAfter, failedAfter);
+		if (preloadServices.IsSubmitBudgetHit())
+		{
+			preloadPending = true;
+			if (loadingTraceLevel >= 1)
+			{
+				Printf("NRI PT loading gate: event=voxel-admission result=wait reason=preload-submit-budget required_pending=%u required_ready=%u optional_pending=%u failed=%u\n",
+					requiredPendingAfter,
+					requiredReadyAfter,
+					optionalPendingAfter,
+					failedAfter);
+			}
+			return false;
+		}
 		if (!ok)
 		{
 			if (loadingTraceLevel >= 1)

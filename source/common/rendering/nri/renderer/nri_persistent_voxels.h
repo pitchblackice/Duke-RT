@@ -263,15 +263,18 @@ struct NRIPersistentVoxelPreloadServices
 	using PumpAdmissionQueueFn = bool (*)(void* user, const char* phase);
 	using EnsureBatchFn = bool (*)(void* user, NRIPersistentVoxelBatchStats* outStats);
 	using WarmSharedBlasFn = bool (*)(void* user, const std::vector<nri_scene::PrecachedVoxelVariantView>& variants, uint32_t frameIndex);
+	using IsSubmitBudgetHitFn = bool (*)(void* user);
 
 	void* user = nullptr;
 	PumpAdmissionQueueFn pumpAdmissionQueue = nullptr;
 	EnsureBatchFn ensureBatch = nullptr;
 	WarmSharedBlasFn warmSharedBlas = nullptr;
+	IsSubmitBudgetHitFn isSubmitBudgetHit = nullptr;
 
 	bool PumpAdmissionQueue(const char* phase) const;
 	bool EnsureBatch(NRIPersistentVoxelBatchStats* outStats = nullptr) const;
 	bool WarmSharedBlas(const std::vector<nri_scene::PrecachedVoxelVariantView>& variants, uint32_t frameIndex) const;
+	bool IsSubmitBudgetHit() const;
 };
 
 struct NRIPersistentVoxelAdmissionServices
@@ -288,6 +291,7 @@ struct NRIPersistentVoxelAdmissionServices
 		bool isolateBlasBuild,
 		const char*& outFailureReason);
 	using SubmitWaitAndRestartFn = bool (*)(void* user, const char* reason);
+	using IsSubmitBudgetHitFn = bool (*)(void* user);
 	using RetireBufferFn = void (*)(void* user, NRIBufferResource& resource);
 	using RetireAccelerationStructureFn = void (*)(void* user, NRIAccelerationStructureResource& resource);
 	using BuildMaterialsFn = void (*)(void* user, nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label);
@@ -311,6 +315,7 @@ struct NRIPersistentVoxelAdmissionServices
 	void* user = nullptr;
 	AdmitVariantResourceFn admitVariantResource = nullptr;
 	SubmitWaitAndRestartFn submitWaitAndRestart = nullptr;
+	IsSubmitBudgetHitFn isSubmitBudgetHit = nullptr;
 	RetireBufferFn retireBuffer = nullptr;
 	RetireAccelerationStructureFn retireAccelerationStructure = nullptr;
 	BuildMaterialsFn buildMaterials = nullptr;
@@ -334,6 +339,7 @@ struct NRIPersistentVoxelAdmissionServices
 		bool isolateBlasBuild,
 		const char*& outFailureReason) const;
 	bool SubmitWaitAndRestart(const char* reason) const;
+	bool IsSubmitBudgetHit() const;
 	void RetireBuffer(NRIBufferResource& resource) const;
 	void RetireAccelerationStructure(NRIAccelerationStructureResource& resource) const;
 	void BuildMaterials(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label) const;
@@ -485,6 +491,10 @@ struct NRIPersistentVoxelMaterialWarmupStats
 	uint32_t textureInserts = 0;
 	uint64_t estimatedBytes = 0;
 	double realizeMs = 0.0;
+	bool pending = false;
+	bool textureBudgetHit = false;
+	bool byteBudgetHit = false;
+	bool msBudgetHit = false;
 };
 
 struct NRIPersistentVoxelMaterialWarmupResult
@@ -493,6 +503,7 @@ struct NRIPersistentVoxelMaterialWarmupResult
 	bool paletteReady = true;
 	uint32_t materialCount = 0;
 	uint32_t variantResourceCount = 0;
+	bool pending = false;
 	NRIPersistentVoxelMaterialWarmupStats textureStats = {};
 };
 

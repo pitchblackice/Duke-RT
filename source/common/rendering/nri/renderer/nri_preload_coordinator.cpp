@@ -256,6 +256,20 @@ NRIPreloadCoordinator::StepResult NRIPreloadCoordinator::PreloadResidentSceneRes
 	}
 	if (!renderer.PreloadMaterialResources())
 	{
+		if (renderer.HasMaterialPreloadPending())
+		{
+			const NRIRenderer::PreloadMaterialStatus& materialStatus = renderer.GetPreloadMaterialStatus();
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				Printf("NRI PT loading gate: event=renderer-preload result=wait reason=material-pending static_pending=%u voxel_pending=%u submit_budget_hit=%u ms_budget_hit=%u ms=%.3f\n",
+					materialStatus.staticTexturesPending,
+					materialStatus.voxelTexturesPending,
+					materialStatus.submitBudgetHit ? 1u : 0u,
+					materialStatus.msBudgetHit ? 1u : 0u,
+					DurationMs(context.start, std::chrono::steady_clock::now()));
+			}
+			return StepResult::Wait;
+		}
 		renderer.LogFallback("PT preload material warmup failed.");
 		if ((int)nri_ptloadingtrace >= 1)
 		{
@@ -310,7 +324,8 @@ bool NRIPreloadCoordinator::Finish(NRIRenderer& renderer, const Context& context
 		renderer.mStaticMapScene.accelerationResident &&
 		(!renderer.mMapWorld.valid || renderer.mStaticMapScene.buildSerial == renderer.mMapWorld.buildSerial);
 	const NRIPersistentVoxelPreloadStatus voxelStatus = renderer.mPersistentVoxels.BuildPreloadStatusSnapshot();
-	Printf("NRI PT loading summary: static_ready=%u startup_correction_pending=%u required_voxel_pending=%u required_voxel_ready=%u optional_voxel_pending=%u voxel_batch_ready=%u voxel_batch_pending=%u deferred_texture_prewarm=%u deferred_onboarding=%u frame_target_used=%u standalone_context_used=%u gpu_voxel_loading=%u static_light_refresh=%u\n",
+	const NRIRenderer::PreloadMaterialStatus& materialStatus = renderer.GetPreloadMaterialStatus();
+	Printf("NRI PT loading summary: static_ready=%u startup_correction_pending=%u required_voxel_pending=%u required_voxel_ready=%u optional_voxel_pending=%u voxel_batch_ready=%u voxel_batch_pending=%u deferred_texture_prewarm=%u deferred_onboarding=%u material_pending=%u material_static_ready=%u material_static_pending=%u material_static_realized=%u material_static_bytes=%llu material_voxel_ready=%u material_voxel_pending=%u material_voxel_realized=%u material_voxel_bytes=%llu preload_submits=%u preload_submit_limit=%u submit_budget_hit=%u ms_budget_hit=%u frame_target_used=%u standalone_context_used=%u gpu_voxel_loading=%u static_light_refresh=%u\n",
 		staticReady ? 1u : 0u,
 		renderer.mAllowStartupMapWorldCorrection ? 1u : 0u,
 		voxelStatus.requiredPending,
@@ -320,6 +335,19 @@ bool NRIPreloadCoordinator::Finish(NRIRenderer& renderer, const Context& context
 		voxelStatus.batchPendingActors,
 		voxelStatus.deferredTexturePrewarm,
 		voxelStatus.deferredOnboarding,
+		materialStatus.pending ? 1u : 0u,
+		materialStatus.staticReady ? 1u : 0u,
+		materialStatus.staticTexturesPending,
+		materialStatus.staticTexturesRealized,
+		(unsigned long long)materialStatus.staticUploadBytes,
+		materialStatus.voxelReady ? 1u : 0u,
+		materialStatus.voxelTexturesPending,
+		materialStatus.voxelTexturesRealized,
+		(unsigned long long)materialStatus.voxelUploadBytes,
+		materialStatus.preloadSubmits,
+		materialStatus.preloadSubmitLimit,
+		materialStatus.submitBudgetHit ? 1u : 0u,
+		materialStatus.msBudgetHit ? 1u : 0u,
 		context.frameTargetUsed ? 1u : 0u,
 		context.standaloneContextUsed ? 1u : 0u,
 		voxelStatus.gpuLoadingEnabled ? 1u : 0u,

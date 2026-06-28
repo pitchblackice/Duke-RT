@@ -66,6 +66,11 @@ public:
 			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
 			return renderer->mFrameBuffer != nullptr && renderer->mFrameBuffer->SubmitWaitAndRestartCommandList(reason);
 		};
+		services.isSubmitBudgetHit = [](void* user) -> bool
+		{
+			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			return renderer->mFrameBuffer != nullptr && renderer->mFrameBuffer->IsPreloadSubmitBudgetHit();
+		};
 		services.retireBuffer = [](void* user, NRIBufferResource& resource)
 		{
 			static_cast<NRIRenderer*>(user)->RetireResidentBufferResource(resource);
@@ -268,6 +273,11 @@ public:
 				(bool)nri_voxelstats,
 				BuildResetServices(renderer),
 				BuildAccelerationServices(renderer));
+		};
+		preloadServices.isSubmitBudgetHit = [](void* user) -> bool
+		{
+			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			return renderer->mFrameBuffer != nullptr && renderer->mFrameBuffer->IsPreloadSubmitBudgetHit();
 		};
 		return renderer.mPersistentVoxels.PreloadResources(
 			variants,

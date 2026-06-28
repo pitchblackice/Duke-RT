@@ -167,6 +167,35 @@ public:
 		uint32_t asBuildCount = 0;
 	};
 
+	struct PreloadMaterialStatus
+	{
+		bool hasStaticMaterials = false;
+		bool hasVoxelMaterials = false;
+		bool paletteReady = true;
+		bool pending = false;
+		bool failed = false;
+		bool staticReady = true;
+		bool voxelReady = true;
+		bool submitBudgetHit = false;
+		bool msBudgetHit = false;
+		bool textureBudgetHit = false;
+		bool byteBudgetHit = false;
+		uint32_t staticMaterialCount = 0;
+		uint32_t staticTexturesReady = 0;
+		uint32_t staticTexturesPending = 0;
+		uint32_t staticTexturesRealized = 0;
+		uint64_t staticUploadBytes = 0;
+		uint32_t voxelMaterialCount = 0;
+		uint32_t voxelVariantResourceCount = 0;
+		uint32_t voxelTexturesReady = 0;
+		uint32_t voxelTexturesPending = 0;
+		uint32_t voxelTexturesRealized = 0;
+		uint64_t voxelUploadBytes = 0;
+		uint32_t preloadSubmits = 0;
+		uint32_t preloadSubmitLimit = 0;
+		double realizeMs = 0.0;
+	};
+
 	struct MaterialBuildTraceEntry
 	{
 		uint32_t calls = 0;
@@ -1763,6 +1792,8 @@ public:
 	void Shutdown();
 	bool RenderScene(HWDrawInfo& di, int drawmode, bool portal);
 	bool PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight, bool frameTargetUsed, bool standaloneContextUsed);
+	bool HasMaterialPreloadPending() const { return mPreloadMaterialStatus.pending; }
+	const PreloadMaterialStatus& GetPreloadMaterialStatus() const { return mPreloadMaterialStatus; }
 	void ResetHistory();
 	void RequestAutoExposureReset(const char* reason);
 	LevelTransitionSnapshot BuildLevelTransitionSnapshot() const;
@@ -2362,6 +2393,9 @@ private:
 	const NRITextureResource* GetActiveSkyTexture() const { return mSkyEnvironment.ActiveTexture(); }
 
 	NRISceneTextureResidency mSceneTextures;
+	NRIMaterialTextureWarmupCursor mStaticPreloadMaterialCursor = {};
+	NRIMaterialTextureWarmupCursor mVoxelPreloadMaterialCursor = {};
+	PreloadMaterialStatus mPreloadMaterialStatus = {};
 	std::array<NRITextureResource, (size_t)FrameTextureSlot::Count> mFrameTextures = {};
 	NRIExposureController mExposure;
 

@@ -306,6 +306,14 @@ CVAR(Int, nri_ptvoxelmeshbuilds, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptloadingtrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+CVAR(Int, nri_ptpreloadmaxsubmitspertick, 8, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CVAR(Int, nri_ptpreloadmaterialtexturespersubmit, 64, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CVAR(Int, nri_ptpreloadmaterialbytespersubmit, 64 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CVAR(Int, nri_ptpreloadmaterialmaxms, 100, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
 CVAR(Bool, nri_ptloadingmutationbaseline, false, 0)
 
 CVAR(Bool, nri_ptloadingvoxelcpu, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

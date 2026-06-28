@@ -3257,6 +3257,7 @@ void NRIRenderDevice::WaitForCommands(bool finish)
 
 bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 {
+	mLastSubmitAndWaitResult = nri::Result::SUCCESS;
 	if (mCommandBuffer == nullptr || !mCommandBufferOpen)
 	{
 		return true;
@@ -3269,6 +3270,7 @@ bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 	nri::Fence* submitFence = nullptr;
 	if (mCore.CreateFence(*mDevice, 0, submitFence) != nri::Result::SUCCESS)
 	{
+		mLastSubmitAndWaitResult = nri::Result::FAILURE;
 		return false;
 	}
 
@@ -3282,6 +3284,7 @@ bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 	submitDesc.signalFences = &signalFence;
 	submitDesc.signalFenceNum = 1;
 	const nri::Result submitResult = mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
+	mLastSubmitAndWaitResult = submitResult;
 	if (submitResult == nri::Result::SUCCESS)
 	{
 		mCore.Wait(*submitFence, signalFence.value);
@@ -3291,15 +3294,95 @@ bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 	return submitResult == nri::Result::SUCCESS;
 }
 
+bool NRIRenderDevice::IsPreloadSubmitBudgetHit() const
+{
+	return mPreloadSubmitBudgetHit;
+}
+
+uint32_t NRIRenderDevice::GetPreloadSubmitCountThisTick() const
+{
+	return mPreloadSubmitsThisTick;
+}
+
+uint32_t NRIRenderDevice::GetPreloadSubmitLimitThisTick() const
+{
+	return mPreloadMaxSubmitsThisTick;
+}
+
+bool NRIRenderDevice::HasTerminalDeviceLoss() const
+{
+	return mTerminalDeviceLoss;
+}
+
+void NRIRenderDevice::MarkTerminalDeviceLoss(const char* context)
+{
+	if (!mTerminalDeviceLoss || !mLoggedTerminalDeviceLoss)
+	{
+		Printf(TEXTCOLOR_RED "NRI terminal device loss: context=%s preload_pending=%u preload_context=%u command_open=%u submits=%u limit=%u.\n",
+			context != nullptr ? context : "unknown",
+			mPathTracingLevelPreloadPending ? 1u : 0u,
+			mPreloadCommandContextActive ? 1u : 0u,
+			mCommandBufferOpen ? 1u : 0u,
+			mPreloadSubmitsThisTick,
+			mPreloadMaxSubmitsThisTick);
+		mLoggedTerminalDeviceLoss = true;
+	}
+	mTerminalDeviceLoss = true;
+	mPathTracingLevelPreloadPending = false;
+	StartupRecovery_MarkNriDeviceLost(context != nullptr ? context : "NRI");
+}
+
 bool NRIRenderDevice::SubmitWaitAndRestartCommandList(const char* reason)
 {
+	if (mTerminalDeviceLoss)
+	{
+		return false;
+	}
+	if (mPreloadCommandContextActive &&
+		mPreloadMaxSubmitsThisTick != 0 &&
+		mPreloadSubmitsThisTick >= mPreloadMaxSubmitsThisTick)
+	{
+		mPreloadSubmitBudgetHit = true;
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=preload-submit result=wait reason=submit-budget-hit submits=%u limit=%u last_reason=%s requested_reason=%s\n",
+				mPreloadSubmitsThisTick,
+				mPreloadMaxSubmitsThisTick,
+				mLastPreloadSubmitReason.GetChars(),
+				reason != nullptr ? reason : "unknown");
+		}
+		return false;
+	}
+
 	const bool wasOpen = mCommandBufferOpen;
 	if (!SubmitAndWaitCurrentCommandBuffer())
 	{
 		Printf(TEXTCOLOR_RED "NRI SubmitWaitAndRestartCommandList failed (reason=%s).\n",
 			reason != nullptr ? reason : "unknown");
+		if (mLastSubmitAndWaitResult == nri::Result::DEVICE_LOST)
+		{
+			mFrameGeneration.NoteReset("device-lost");
+			MarkTerminalDeviceLoss(reason != nullptr ? reason : "SubmitWaitAndRestartCommandList");
+		}
 		LogD3D12FailureDiagnostics(reason != nullptr ? reason : "SubmitWaitAndRestartCommandList");
 		return false;
+	}
+	if (mPreloadCommandContextActive && wasOpen)
+	{
+		mPreloadSubmitsThisTick++;
+		mLastPreloadSubmitReason = reason != nullptr ? reason : "unknown";
+		if (mPreloadMaxSubmitsThisTick != 0 && mPreloadSubmitsThisTick >= mPreloadMaxSubmitsThisTick)
+		{
+			mPreloadSubmitBudgetHit = true;
+		}
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=preload-submit result=submitted reason=%s submits=%u limit=%u budget_hit=%u\n",
+				mLastPreloadSubmitReason.GetChars(),
+				mPreloadSubmitsThisTick,
+				mPreloadMaxSubmitsThisTick,
+				mPreloadSubmitBudgetHit ? 1u : 0u);
+		}
 	}
 	if (!wasOpen)
 	{
@@ -3310,6 +3393,14 @@ bool NRIRenderDevice::SubmitWaitAndRestartCommandList(const char* reason)
 
 bool NRIRenderDevice::BeginPreloadCommandContext(const char* reason)
 {
+	if (mTerminalDeviceLoss)
+	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=preload-command result=ready reason=terminal-device-loss\n");
+		}
+		return false;
+	}
 	if (!mInitialized || mFrameBegun || mCommandBufferOpen || mPreloadCommandContextActive)
 	{
 		if ((int)nri_ptloadingtrace >= 1)
@@ -3331,6 +3422,10 @@ bool NRIRenderDevice::BeginPreloadCommandContext(const char* reason)
 	mHasAcquiredSwapChainImage = false;
 	mHasPresentedSwapChainFrame = false;
 	mPreloadCommandContextActive = true;
+	mPreloadSubmitsThisTick = 0;
+	mPreloadMaxSubmitsThisTick = std::max<int>(0, (int)nri_ptpreloadmaxsubmitspertick);
+	mPreloadSubmitBudgetHit = false;
+	mLastPreloadSubmitReason = "none";
 	if (!BeginCommandList(reason != nullptr ? reason : "preload", true))
 	{
 		mPreloadCommandContextActive = false;
@@ -3347,6 +3442,11 @@ bool NRIRenderDevice::EndPreloadCommandContext(const char* reason)
 	}
 
 	const bool success = SubmitAndWaitCurrentCommandBuffer();
+	if (success && !mPreloadSubmitBudgetHit)
+	{
+		mPreloadSubmitsThisTick++;
+		mLastPreloadSubmitReason = reason != nullptr ? reason : "unknown";
+	}
 	mPreloadCommandContextActive = false;
 	mActiveTarget = nullptr;
 	mCurrentPresentTarget = nullptr;
@@ -3354,7 +3454,20 @@ bool NRIRenderDevice::EndPreloadCommandContext(const char* reason)
 	{
 		Printf(TEXTCOLOR_RED "NRI preload command context submit failed (reason=%s).\n",
 			reason != nullptr ? reason : "unknown");
+		if (mLastSubmitAndWaitResult == nri::Result::DEVICE_LOST)
+		{
+			mFrameGeneration.NoteReset("device-lost");
+			MarkTerminalDeviceLoss(reason != nullptr ? reason : "EndPreloadCommandContext");
+		}
 		LogD3D12FailureDiagnostics(reason != nullptr ? reason : "EndPreloadCommandContext");
+	}
+	else if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT loading gate: event=preload-submit result=submitted reason=%s submits=%u limit=%u budget_hit=%u final=1\n",
+			reason != nullptr ? reason : mLastPreloadSubmitReason.GetChars(),
+			mPreloadSubmitsThisTick,
+			mPreloadMaxSubmitsThisTick,
+			mPreloadSubmitBudgetHit ? 1u : 0u);
 	}
 	return success;
 }
@@ -5755,6 +5868,16 @@ bool NRIRenderDevice::StartPathTracingLevelPreload()
 
 bool NRIRenderDevice::TickPathTracingLevelPreload()
 {
+	if (mTerminalDeviceLoss)
+	{
+		mPathTracingLevelPreloadPending = false;
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=device-tick result=ready reason=terminal-device-loss\n");
+		}
+		return true;
+	}
+
 	if (!mPathTracingLevelPreloadPending)
 	{
 		if ((int)nri_ptloadingtrace >= 2)
