@@ -95,6 +95,21 @@ LIGHTOVR
         flicker 16
     }
 
+    actorrule "OctabrainProjectile"
+    {
+        actorclass "DukeCoolExplosion1"
+        shadowreceive off
+        shadowcast off
+        fullbright on
+        type "point"
+        color 1.0 0.4 1.0
+        intensity 2.0
+        radius 256.0
+        offset 0.0 0.0 0.0
+        nudgefromsurface 16.0
+        random -1.0 1.0
+    }
+
     actorrule "MoreTrashFire"
     {
         actorclass "DukeFire"
