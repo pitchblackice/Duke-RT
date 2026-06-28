@@ -282,15 +282,51 @@ NRIPreloadCoordinator::StepResult NRIPreloadCoordinator::PreloadResidentSceneRes
 
 	NRIRenderer::EmissiveSamplingBuildContext emissiveSamplingContext = {};
 	emissiveSamplingContext.staticGeometry = &renderer.mStaticMapScene.geometry;
+	const NRIPersistentVoxelOverlayStats persistentVoxelStats = renderer.mPersistentVoxels.BuildOverlayStats();
+	auto deferStandaloneEmissiveTlas = [&](const char* reason) -> StepResult
+	{
+		renderer.mEmissiveTlasInstanceCount = 0;
+		renderer.mEmissiveTlasStaticInstanceCount = 0;
+		renderer.mEmissiveTlasDynamicInstanceCount = 0;
+		renderer.mEmissiveTlasInstancePayloadCacheValid = false;
+		renderer.mEmissiveTlasInstancePayloadHash = 0;
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=emissive-tlas result=defer reason=%s ms=%.3f\n",
+				reason,
+				DurationMs(context.start, std::chrono::steady_clock::now()));
+		}
+		if (!renderer.PreGrowLevelSceneResourcesForLoading())
+		{
+			renderer.LogFallback("PT preload scene resource pre-grow failed.");
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				Printf("NRI PT loading gate: event=renderer-preload result=ready reason=pre-grow-failed ms=%.3f\n",
+					DurationMs(context.start, std::chrono::steady_clock::now()));
+			}
+			return StepResult::Ready;
+		}
+		return StepResult::Continue;
+	};
 	if ((int)nri_ptloadingtrace >= 1)
 	{
-		const NRIPersistentVoxelOverlayStats persistentVoxelStats = renderer.mPersistentVoxels.BuildOverlayStats();
 		Printf("NRI PT loading gate: event=emissive-sampling result=begin standalone_context=%u surfaces=%u persistent_actors=%u persistent_prims=%u ms=%.3f\n",
 			context.standaloneContextUsed ? 1u : 0u,
 			(uint32_t)renderer.mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
 			persistentVoxelStats.actorCount,
 			persistentVoxelStats.primitiveCount,
 			DurationMs(context.start, std::chrono::steady_clock::now()));
+	}
+	if (context.standaloneContextUsed && persistentVoxelStats.actorCount > 0)
+	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=emissive-sampling result=defer reason=standalone-persistent-voxel-overlay persistent_actors=%u persistent_prims=%u ms=%.3f\n",
+				persistentVoxelStats.actorCount,
+				persistentVoxelStats.primitiveCount,
+				DurationMs(context.start, std::chrono::steady_clock::now()));
+		}
+		return deferStandaloneEmissiveTlas("standalone-persistent-voxel-overlay");
 	}
 	if (!renderer.UpdateEmissiveSamplingBuffers(emissiveSamplingContext))
 	{
@@ -310,27 +346,7 @@ NRIPreloadCoordinator::StepResult NRIPreloadCoordinator::PreloadResidentSceneRes
 	}
 	if (context.standaloneContextUsed)
 	{
-		renderer.mEmissiveTlasInstanceCount = 0;
-		renderer.mEmissiveTlasStaticInstanceCount = 0;
-		renderer.mEmissiveTlasDynamicInstanceCount = 0;
-		renderer.mEmissiveTlasInstancePayloadCacheValid = false;
-		renderer.mEmissiveTlasInstancePayloadHash = 0;
-		if ((int)nri_ptloadingtrace >= 1)
-		{
-			Printf("NRI PT loading gate: event=emissive-tlas result=defer reason=standalone-preload ms=%.3f\n",
-				DurationMs(context.start, std::chrono::steady_clock::now()));
-		}
-		if (!renderer.PreGrowLevelSceneResourcesForLoading())
-		{
-			renderer.LogFallback("PT preload scene resource pre-grow failed.");
-			if ((int)nri_ptloadingtrace >= 1)
-			{
-				Printf("NRI PT loading gate: event=renderer-preload result=ready reason=pre-grow-failed ms=%.3f\n",
-					DurationMs(context.start, std::chrono::steady_clock::now()));
-			}
-			return StepResult::Ready;
-		}
-		return StepResult::Continue;
+		return deferStandaloneEmissiveTlas("standalone-preload");
 	}
 	if (!renderer.BuildEmissiveTopLevelAccelerationStructure())
 	{

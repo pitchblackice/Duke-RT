@@ -5203,9 +5203,22 @@ uint64_t SceneLightSystem::BuildEmissiveSamplingPayloadHash(const EmissiveSampli
 	hash = nri_scene::HashCombine64(hash, HashGeometryForEmissiveSampling(context.surfaceLightOverlayGeometry));
 	hash = nri_scene::HashCombine64(hash, (uint64_t)context.surfaceLightOverlayPrimitiveBaseOffset);
 
-	hash = nri_scene::HashCombine64(hash, (uint64_t)mEmissiveSurfaces.activeSurfaces.size());
+	uint32_t sampledSurfaceCount = 0;
 	for (const auto& surface : mEmissiveSurfaces.activeSurfaces)
 	{
+		if (surface.source == SceneLightRecordSource::PersistentVoxelScene)
+		{
+			continue;
+		}
+		sampledSurfaceCount++;
+	}
+	hash = nri_scene::HashCombine64(hash, (uint64_t)sampledSurfaceCount);
+	for (const auto& surface : mEmissiveSurfaces.activeSurfaces)
+	{
+		if (surface.source == SceneLightRecordSource::PersistentVoxelScene)
+		{
+			continue;
+		}
 		hash = nri_scene::HashCombine64(hash, surface.stableKey);
 
 		const auto propertyIt = mEmissiveSurfaces.activePropertyHashes.find(surface.stableKey);
