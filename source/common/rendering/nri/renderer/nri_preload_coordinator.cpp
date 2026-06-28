@@ -282,6 +282,16 @@ NRIPreloadCoordinator::StepResult NRIPreloadCoordinator::PreloadResidentSceneRes
 
 	NRIRenderer::EmissiveSamplingBuildContext emissiveSamplingContext = {};
 	emissiveSamplingContext.staticGeometry = &renderer.mStaticMapScene.geometry;
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		const NRIPersistentVoxelOverlayStats persistentVoxelStats = renderer.mPersistentVoxels.BuildOverlayStats();
+		Printf("NRI PT loading gate: event=emissive-sampling result=begin standalone_context=%u surfaces=%u persistent_actors=%u persistent_prims=%u ms=%.3f\n",
+			context.standaloneContextUsed ? 1u : 0u,
+			(uint32_t)renderer.mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
+			persistentVoxelStats.actorCount,
+			persistentVoxelStats.primitiveCount,
+			DurationMs(context.start, std::chrono::steady_clock::now()));
+	}
 	if (!renderer.UpdateEmissiveSamplingBuffers(emissiveSamplingContext))
 	{
 		renderer.LogFallback("PT preload emissive primitive update failed.");
@@ -292,10 +302,14 @@ NRIPreloadCoordinator::StepResult NRIPreloadCoordinator::PreloadResidentSceneRes
 		}
 		return StepResult::Ready;
 	}
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT loading gate: event=emissive-sampling result=ready primitives=%u ms=%.3f\n",
+			renderer.mBoundEmissivePrimitiveCount,
+			DurationMs(context.start, std::chrono::steady_clock::now()));
+	}
 	if (context.standaloneContextUsed)
 	{
-		renderer.RetireTopLevelAccelerationStructure(renderer.mEmissiveTopLevelAS);
-		renderer.DestroyBufferResource(renderer.mEmissiveTlasInstanceBuffer);
 		renderer.mEmissiveTlasInstanceCount = 0;
 		renderer.mEmissiveTlasStaticInstanceCount = 0;
 		renderer.mEmissiveTlasDynamicInstanceCount = 0;
