@@ -4541,13 +4541,15 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				admissionVariant.sourcePicnum = cacheEntry.sourcePicnum;
 				admissionVariant.resolvedVoxelIndex = cacheEntry.resolvedVoxelIndex;
 				admissionVariant.primitiveCount = cacheEntry.primitiveCount;
-				admissionVariant.priority = 1;
+				admissionVariant.sourceBits = loadingWarmupActive ? nri_scene::PrecachedVoxelSourceBit_MountedVoxelPreload : 0u;
+				admissionVariant.priority = loadingWarmupActive ? 0 : 1;
 				admissionVariant.admissionRank = admissionVariant.priority * 10000 + 9900;
+				admissionVariant.gpuForce = loadingWarmupActive;
 				admissionVariant.surface = cacheEntry.surface;
 				admissionVariant.material = cacheEntry.lightSurface != nullptr ? cacheEntry.lightSurface->material : cacheEntry.surface->material;
 				EnqueueAdmission(
 					admissionVariant,
-					true,
+					!loadingWarmupActive,
 					"runtime-actor",
 					buildSerial,
 					settings,
@@ -5461,6 +5463,19 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 	}
 	if (!next.valid)
 	{
+		if (persistentVoxelBuildPending && next.actors.empty())
+		{
+			if (loadingTraceLevel >= 1 || voxelStatsEnabled)
+			{
+				Printf("NRI PT persistent voxel batch: event=defer reason=all-actors-pending entries=%u instances=%u mesh_resources=%u material_resources=%u\n",
+					(uint32_t)cacheEntries.size(),
+					(uint32_t)instances.size(),
+					(uint32_t)meshVariantResources.size(),
+					(uint32_t)materialVariantResources.size());
+			}
+			emitVoxelPromotionTrace();
+			return false;
+		}
 		Reset("persistent-voxel-invalid-instance-batch", false, loadingTraceLevel >= 1 || voxelStatsEnabled, resetServices);
 		return false;
 	}
@@ -6939,6 +6954,10 @@ bool NRIPersistentVoxelResidency::PreloadResources(
 	lastPreloadStatus.batchPendingActors = ready ? 0u : std::max<uint32_t>(
 		1u,
 		lastPreloadStatus.deferredTexturePrewarm + lastPreloadStatus.deferredOnboarding);
+	if (!lastPreloadStatus.batchReady)
+	{
+		preloadPending = true;
+	}
 
 	if (loadingTraceLevel >= 1)
 	{

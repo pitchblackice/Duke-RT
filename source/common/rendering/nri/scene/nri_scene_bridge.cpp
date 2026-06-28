@@ -4800,7 +4800,10 @@ namespace
 			ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelClassifyMs);
 			cacheLookup = TrackVoxelActorSignature(sprite, voxelTexture, voxelMaterial, stats);
 		}
-		if (cacheLookup.stability == VoxelActorStability::Stable && cacheLookup.entry != nullptr && cacheLookup.entry->hasSurface)
+		if (cacheLookup.stability == VoxelActorStability::Stable &&
+			cacheLookup.entry != nullptr &&
+			cacheLookup.entry->hasSurface &&
+			cacheLookup.entry->persistentReady)
 		{
 			return true;
 		}
@@ -5727,14 +5730,37 @@ void SetPersistentVoxelActorStartupTransientMode(bool active, const char* reason
 
 	gVoxelActorStartupTransientMode = active;
 	++gVoxelActorCacheSerial;
+	uint32_t promotedEntries = 0;
+	if (!active)
+	{
+		for (auto& pair : gVoxelActorCache)
+		{
+			VoxelActorCacheEntry& entry = pair.second;
+			if (!entry.startupPending)
+			{
+				continue;
+			}
+			entry.startupPending = false;
+			if (!entry.persistentReady && CanPromoteVoxelActorCacheEntry(entry))
+			{
+				entry.persistentReady = true;
+			}
+			++promotedEntries;
+		}
+		if (promotedEntries > 0)
+		{
+			++gVoxelActorCacheSerial;
+		}
+	}
 	if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
 	{
-		Printf("NRI PT voxel actor startup transient: active=%u reason=%s serial=%llu frame=%llu entries=%u\n",
+		Printf("NRI PT voxel actor startup transient: active=%u reason=%s serial=%llu frame=%llu entries=%u promoted=%u\n",
 			active ? 1u : 0u,
 			reason != nullptr && *reason != '\0' ? reason : "unspecified",
 			(unsigned long long)gVoxelActorCacheSerial,
 			(unsigned long long)gVoxelActorCacheFrame,
-			(uint32_t)gVoxelActorCache.size());
+			(uint32_t)gVoxelActorCache.size(),
+			promotedEntries);
 	}
 }
 

@@ -489,15 +489,19 @@ static bool RunPathTracingLevelPreloadFinalCheck()
 		gPendingPathTracingLevelPreload = true;
 	}
 
-	if ((int)nri_ptloadingtrace >= 1 && gPathTracingLevelPreloadFirstLevelFrameCaptured)
+	if (gPathTracingLevelPreloadFirstLevelFrameCaptured)
 	{
-		Printf("NRI PT loading gate: event=first-level-capture-final-drain gamestate=%s gameaction=%d gametic=%d hold=%u screen_pending=%u\n",
-			GetGameStateName(gamestate),
-			(int)gameaction,
-			gametic,
-			gPathTracingLevelPreloadSimulationHoldActive ? 1u : 0u,
-			screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
-		PrintPathTracingLevelPreloadActorCacheStats("first-level-capture-final-drain-cache");
+		nri_scene::SetPersistentVoxelActorStartupTransientMode(false, "first-level-capture-final-drain");
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=first-level-capture-final-drain gamestate=%s gameaction=%d gametic=%d hold=%u screen_pending=%u\n",
+				GetGameStateName(gamestate),
+				(int)gameaction,
+				gametic,
+				gPathTracingLevelPreloadSimulationHoldActive ? 1u : 0u,
+				screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
+			PrintPathTracingLevelPreloadActorCacheStats("first-level-capture-final-drain-cache");
+		}
 	}
 
 	for (uint32_t pass = 0; pass < 8u && screen->IsPathTracingLevelPreloadPending(); ++pass)
@@ -1044,6 +1048,7 @@ void Display()
 			}
 			else if (!gPathTracingLevelPreloadFinalCheckNeeded)
 			{
+				nri_scene::SetPersistentVoxelActorStartupTransientMode(false, "first-level-frame-release");
 				if ((int)nri_ptloadingtrace >= 1)
 				{
 					PrintPathTracingLevelPreloadActorCacheStats("first-level-frame-release-cache");
@@ -1060,7 +1065,6 @@ void Display()
 				{
 					screen->NotifyPathTracingLevelFirstFrameRelease();
 				}
-				nri_scene::SetPersistentVoxelActorStartupTransientMode(false, "first-level-frame-release");
 				if (cutscene.runner != nullptr)
 				{
 					EndScreenJob();
