@@ -41,13 +41,13 @@ namespace
 	static constexpr float SurfaceLightEditorDefaultWidth = 32.0f;
 	static constexpr float SurfaceLightEditorDefaultHeight = 32.0f;
 	static constexpr float SurfaceLightEditorDefaultOffset = 0.5f;
-	static constexpr float SurfaceLightEditorDefaultIntensity = 4.0f;
-	static constexpr float SurfaceLightEditorDefaultRadius = 512.0f;
+	static constexpr float SurfaceLightEditorDefaultIntensity = 0.5f;
+	static constexpr float SurfaceLightEditorDefaultRadius = 256.0f;
 	static constexpr float SurfaceLightEditorDefaultColor[3] = { 1.0f, 1.0f, 1.0f };
 	static constexpr const char* SurfaceLightEditorDefaultTexture = "#00707";
 	static constexpr float SurfaceLightEditorRotateStep = 15.0f;
 	static constexpr float SurfaceLightEditorSizeStep = 4.0f;
-	static constexpr float SurfaceLightEditorIntensityStep = 0.5f;
+	static constexpr float SurfaceLightEditorIntensityStep = 0.2f;
 	static constexpr float SurfaceLightEditorRadiusStep = 32.0f;
 	static constexpr const char* SurfaceLightEditorTextureOptions[] =
 	{
