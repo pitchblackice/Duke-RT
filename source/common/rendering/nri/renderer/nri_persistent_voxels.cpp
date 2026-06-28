@@ -3029,7 +3029,6 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		const uint32_t blasBefore = blasBudgetRemaining;
 		const int isolateBlasPrimitiveThreshold = settings.admitIsolateBlasPrimitives;
 		const bool isolateBlasBuild =
-			loadingPhase &&
 			isolateBlasPrimitiveThreshold > 0 &&
 			entry->variant.primitiveCount >= (uint32_t)isolateBlasPrimitiveThreshold;
 		if (!admissionServices.AdmitVariantResource(*entry, remainingByteBudget, blasBudgetRemaining, uploadBytes, reusedMesh, reusedMaterial, inProgress, isolateBlasBuild, failureReason))
@@ -3126,9 +3125,18 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 				reusedMesh ? 1u : 0u,
 				reusedMaterial ? 1u : 0u);
 		}
-		if (loadingPhase && blasBuiltThisEntry != 0)
+		if (blasBuiltThisEntry != 0 && (loadingPhase || isolateBlasBuild))
 		{
-			if (!admissionServices.SubmitWaitAndRestart("voxel-loading-blas"))
+			const char* submitReason = loadingPhase ? "voxel-loading-blas" : "voxel-runtime-large-blas";
+			if (traceLevel1 && !loadingPhase)
+			{
+				Printf("NRI PT voxel admission entry: event=post-blas-submit tex=%d voxel=%d mesh_variant=0x%llx prims=%u reason=isolate-large-runtime-blas\n",
+					entry->variant.sourcePicnum,
+					entry->variant.resolvedVoxelIndex,
+					(unsigned long long)entry->variant.meshKeyHash,
+					entry->variant.primitiveCount);
+			}
+			if (!admissionServices.SubmitWaitAndRestart(submitReason))
 			{
 				if (admissionServices.IsSubmitBudgetHit())
 				{
@@ -3143,7 +3151,7 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 				stopReason = entry->lastReason;
 				break;
 			}
-			stopReason = "blas-submit-wait";
+			stopReason = loadingPhase ? "blas-submit-wait" : "runtime-blas-submit-wait";
 			break;
 		}
 	}
