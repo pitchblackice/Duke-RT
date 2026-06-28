@@ -2,6 +2,7 @@
 #include "nri_cvars.h"
 
 #include "c_cvars.h"
+#include "printf.h"
 
 #include <algorithm>
 
@@ -53,6 +54,33 @@ namespace
 	{
 		return std::clamp(value, 0.001f, 0.1f);
 	}
+
+	void MigratePreloadSettingsCVars()
+	{
+		constexpr int CurrentLoadingSettingsVersion = 1;
+		if ((int)nri_ptloadingsettingsversion >= CurrentLoadingSettingsVersion)
+		{
+			return;
+		}
+
+		bool migrated = false;
+		if ((int)nri_ptloadingvoxelvariants == 128)
+		{
+			nri_ptloadingvoxelvariants = 256;
+			migrated = true;
+		}
+		if ((int)nri_ptloadingvoxelcpumaxvariants == 64)
+		{
+			nri_ptloadingvoxelcpumaxvariants = 256;
+			migrated = true;
+		}
+
+		nri_ptloadingsettingsversion = CurrentLoadingSettingsVersion;
+		if (migrated)
+		{
+			Printf("NRI preload config: migrated voxel preload variant defaults to nri_ptloadingvoxelvariants=256 and nri_ptloadingvoxelcpumaxvariants=256\n");
+		}
+	}
 }
 
 NRITraceSettings BuildNRITraceSettingsFromCVars()
@@ -88,6 +116,8 @@ NRIDenoiserSettings BuildNRIDenoiserSettingsFromCVars()
 
 NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars()
 {
+	MigratePreloadSettingsCVars();
+
 	NRIPersistentVoxelSettings settings = {};
 	settings.buildActors = (uint32_t)std::max(1, (int)nri_ptpersistentvoxelbuildactors);
 	settings.buildPrimitives = (int)nri_ptpersistentvoxelbuildprims <= 0 ? 0u : (uint32_t)(int)nri_ptpersistentvoxelbuildprims;
