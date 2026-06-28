@@ -2586,6 +2586,7 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 	const uint64_t maxResidentBytes = settings.residentMaxBytes;
 	const uint64_t minHeadroomBytes = settings.residentMinHeadroomBytes;
 	const uint32_t maxColdMaps = settings.residentMaxColdMaps;
+	const bool loadingTrimCold = settings.trimColdOnLoading && phase != nullptr && std::strcmp(phase, "loading") == 0;
 	uint64_t pressureBytes = 0;
 	if (maxResidentBytes != 0 && voxelResidentBytes > maxResidentBytes)
 	{
@@ -2608,6 +2609,7 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 		bool force = false;
 		bool prefer = false;
 		bool coldAge = false;
+		bool loadingTrim = false;
 	};
 	std::vector<MeshEvictionCandidate> meshCandidates;
 	meshCandidates.reserve(meshVariantResources.size());
@@ -2621,12 +2623,12 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 		const uint32_t ageMaps = residencyMapGeneration >= resource.lastDesiredMapGeneration ?
 			residencyMapGeneration - resource.lastDesiredMapGeneration : 0u;
 		const bool oldEnough = maxColdMaps != UINT32_MAX && ageMaps > maxColdMaps;
-		if (pressureBytes == 0 && !oldEnough)
+		if (pressureBytes == 0 && !oldEnough && !loadingTrimCold)
 		{
 			continue;
 		}
 		meshCandidates.push_back({ pair.first, resource.residentBytes, resource.primitiveCount, resource.lastDesiredMapGeneration,
-			resource.lastUsedFrame, resource.sourceBits, resource.priority, resource.gpuForce, resource.gpuPrefer, oldEnough });
+			resource.lastUsedFrame, resource.sourceBits, resource.priority, resource.gpuForce, resource.gpuPrefer, oldEnough, loadingTrimCold });
 	}
 	std::sort(meshCandidates.begin(), meshCandidates.end(), [](const MeshEvictionCandidate& left, const MeshEvictionCandidate& right)
 	{
@@ -2657,7 +2659,7 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 	uint32_t evictedMeshes = 0;
 	for (const MeshEvictionCandidate& candidate : meshCandidates)
 	{
-		if (pressureBytes != 0 && evictedBytes >= pressureBytes && !candidate.coldAge)
+		if (pressureBytes != 0 && evictedBytes >= pressureBytes && !candidate.coldAge && !candidate.loadingTrim)
 		{
 			continue;
 		}
@@ -2667,7 +2669,7 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 			continue;
 		}
 		PersistentVoxelMeshVariantResource& resource = it->second;
-		const char* reason = candidate.coldAge ? "cold-age" : "pressure";
+		const char* reason = candidate.coldAge ? "cold-age" : (candidate.loadingTrim ? "loading-cold" : "pressure");
 		if (traceEnabled)
 		{
 			Printf("NRI PT voxel residency evict: reason=%s phase=%s tex=-1 voxel=-1 mesh_variant=0x%llx bytes=%llu prims=%u last_map=%u last_frame=%u source_bits=0x%x priority=%d force=%u prefer=%u active_refs=%u\n",
@@ -2716,7 +2718,7 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 		const uint32_t ageMaps = residencyMapGeneration >= resource.lastDesiredMapGeneration ?
 			residencyMapGeneration - resource.lastDesiredMapGeneration : 0u;
 		const bool oldEnough = maxColdMaps != UINT32_MAX && ageMaps > maxColdMaps;
-		if (pressureBytes == 0 && !oldEnough)
+		if (pressureBytes == 0 && !oldEnough && !loadingTrimCold)
 		{
 			++it;
 			continue;
@@ -2724,7 +2726,7 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 		if (traceEnabled)
 		{
 			Printf("NRI PT voxel residency evict: reason=%s phase=%s tex=-1 voxel=-1 mesh_variant=0x0 mat_variant=0x%llx bytes=%llu last_map=%u last_frame=%u source_bits=0x%x priority=%d force=%u prefer=%u active_refs=%u\n",
-				oldEnough ? "cold-age" : "pressure",
+				oldEnough ? "cold-age" : (loadingTrimCold ? "loading-cold" : "pressure"),
 				phase != nullptr ? phase : "unknown",
 				(unsigned long long)it->first,
 				(unsigned long long)resource.residentBytes,
@@ -2977,6 +2979,14 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		}
 		const bool requiredAdmission = IsRequiredAdmission(*entry);
 		const bool uploadState = isUploadState(entry->state);
+		if (!loadingPhase && !entry->runtimeRequested && !requiredAdmission && !uploadState)
+		{
+			stats.skippedBudget++;
+			entry->state = PersistentVoxelAdmissionState::Deferred;
+			entry->lastReason = "optional-preload-runtime";
+			stopReason = entry->lastReason;
+			continue;
+		}
 		if (postLoadGraceActive && !requiredAdmission && !uploadState && optionalAdmitted >= settings.admissionGraceVariants)
 		{
 			stats.skippedBudget++;
@@ -3189,7 +3199,12 @@ void NRIPersistentVoxelResidency::ArmPostLoadAdmissionGrace(uint32_t frameIndex,
 		return;
 	}
 
-	postLoadAdmissionGraceEndFrame = frameIndex + settings.admissionGraceFrames;
+	const uint32_t requestedEndFrame = frameIndex + settings.admissionGraceFrames;
+	const bool sameGeneration = postLoadAdmissionGraceMapGeneration == residencyMapGeneration;
+	postLoadAdmissionGraceEndFrame =
+		sameGeneration ?
+		std::max(postLoadAdmissionGraceEndFrame, requestedEndFrame) :
+		requestedEndFrame;
 	postLoadAdmissionGraceMapGeneration = residencyMapGeneration;
 	if (loadingTraceLevel >= 1)
 	{

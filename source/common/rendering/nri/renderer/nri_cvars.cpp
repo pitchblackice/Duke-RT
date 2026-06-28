@@ -1374,6 +1374,8 @@ CVAR(Int, nri_ptvoxeladmissiongraceframes, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptvoxeladmissiongracevariants, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+CVAR(Int, nri_ptvoxelpreloadreadygraceframes, 16, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
 CVAR(Int, nri_ptvoxeladmitmaxbytesloading, 64 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptvoxeladmitmaxbytesruntime, 16 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -1395,6 +1397,8 @@ CVAR(Int, nri_ptvoxelresidentmaxbytes, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelresidentminheadroombytes, 512 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptvoxelresidentmaxcoldmaps, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CVAR(Bool, nri_ptvoxeltrimcoldloading, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, nri_ptvoxeltransformkeyed, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 

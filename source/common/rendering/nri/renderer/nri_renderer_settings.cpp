@@ -101,6 +101,7 @@ NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars()
 	settings.admissionRuntimeBytes = (int)nri_ptvoxeladmissionruntimebytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmissionruntimebytes;
 	settings.admissionGraceFrames = (uint32_t)std::max(0, (int)nri_ptvoxeladmissiongraceframes);
 	settings.admissionGraceVariants = (int)nri_ptvoxeladmissiongracevariants <= 0 ? 0u : (uint32_t)(int)nri_ptvoxeladmissiongracevariants;
+	settings.preloadReadyGraceFrames = (uint32_t)std::max(0, (int)nri_ptvoxelpreloadreadygraceframes);
 	settings.admitMaxBytesLoading = (int)nri_ptvoxeladmitmaxbytesloading <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmitmaxbytesloading;
 	settings.admitMaxBytesRuntime = (int)nri_ptvoxeladmitmaxbytesruntime <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmitmaxbytesruntime;
 	settings.admitMaxMsLoading = (uint32_t)std::max(0, (int)nri_ptvoxeladmitmaxmsloading);
@@ -112,6 +113,7 @@ NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars()
 	settings.residentMaxBytes = (int)nri_ptvoxelresidentmaxbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxelresidentmaxbytes;
 	settings.residentMinHeadroomBytes = (int)nri_ptvoxelresidentminheadroombytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxelresidentminheadroombytes;
 	settings.residentMaxColdMaps = (int)nri_ptvoxelresidentmaxcoldmaps < 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxelresidentmaxcoldmaps;
+	settings.trimColdOnLoading = (bool)nri_ptvoxeltrimcoldloading;
 	settings.sharedBlasBuildEnabled = (bool)nri_ptvoxelsharedblasbuild;
 	settings.sharedBlasBuildsPerFrame = (int)nri_ptvoxelsharedblasbuilds <= 0 ? 0u : (uint32_t)(int)nri_ptvoxelsharedblasbuilds;
 	settings.sharedBlasLoadingWarmupEnabled = (bool)nri_ptvoxelsharedblasloading;

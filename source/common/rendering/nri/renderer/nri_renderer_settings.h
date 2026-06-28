@@ -46,6 +46,7 @@ struct NRIPersistentVoxelSettings
 	uint64_t admissionRuntimeBytes = 0;
 	uint32_t admissionGraceFrames = 0;
 	uint32_t admissionGraceVariants = 0;
+	uint32_t preloadReadyGraceFrames = 0;
 	uint64_t admitMaxBytesLoading = 0;
 	uint64_t admitMaxBytesRuntime = 0;
 	uint32_t admitMaxMsLoading = 0;
@@ -57,6 +58,7 @@ struct NRIPersistentVoxelSettings
 	uint64_t residentMaxBytes = 0;
 	uint64_t residentMinHeadroomBytes = 0;
 	uint32_t residentMaxColdMaps = 0;
+	bool trimColdOnLoading = false;
 	bool sharedBlasBuildEnabled = false;
 	uint32_t sharedBlasBuildsPerFrame = 0;
 	bool sharedBlasLoadingWarmupEnabled = false;

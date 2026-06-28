@@ -2,6 +2,7 @@
 #include "nri_renderer.h"
 #include "nri_cvars.h"
 #include "nri_frame_resources.h"
+#include "nri_renderer_settings.h"
 #include "nri_sky_environment.h"
 #include "../system/nri_renderdevice.h"
 
@@ -358,6 +359,14 @@ bool NRIPreloadCoordinator::Finish(NRIRenderer& renderer, const Context& context
 		(uint32_t)renderer.mStaticMapScene.chunks.size(),
 		(uint32_t)renderer.mStaticMapScene.geometry.primitives.size(),
 		(uint32_t)renderer.mStaticMapScene.gpuMaterials.size());
+	{
+		NRIPersistentVoxelSettings settings = BuildNRIPersistentVoxelSettingsFromCVars();
+		settings.admissionGraceFrames = std::max(settings.admissionGraceFrames, settings.preloadReadyGraceFrames);
+		renderer.mPersistentVoxels.ArmPostLoadAdmissionGrace(
+			renderer.mFrameIndex,
+			settings,
+			(int)nri_ptloadingtrace);
+	}
 	if ((int)nri_ptloadingtrace >= 1)
 	{
 		Printf("NRI PT loading gate: event=renderer-preload result=ready reason=complete static_light_refresh=%u ms=%.3f\n",
