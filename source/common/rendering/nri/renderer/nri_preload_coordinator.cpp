@@ -292,6 +292,32 @@ NRIPreloadCoordinator::StepResult NRIPreloadCoordinator::PreloadResidentSceneRes
 		}
 		return StepResult::Ready;
 	}
+	if (context.standaloneContextUsed)
+	{
+		renderer.RetireTopLevelAccelerationStructure(renderer.mEmissiveTopLevelAS);
+		renderer.DestroyBufferResource(renderer.mEmissiveTlasInstanceBuffer);
+		renderer.mEmissiveTlasInstanceCount = 0;
+		renderer.mEmissiveTlasStaticInstanceCount = 0;
+		renderer.mEmissiveTlasDynamicInstanceCount = 0;
+		renderer.mEmissiveTlasInstancePayloadCacheValid = false;
+		renderer.mEmissiveTlasInstancePayloadHash = 0;
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=emissive-tlas result=defer reason=standalone-preload ms=%.3f\n",
+				DurationMs(context.start, std::chrono::steady_clock::now()));
+		}
+		if (!renderer.PreGrowLevelSceneResourcesForLoading())
+		{
+			renderer.LogFallback("PT preload scene resource pre-grow failed.");
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				Printf("NRI PT loading gate: event=renderer-preload result=ready reason=pre-grow-failed ms=%.3f\n",
+					DurationMs(context.start, std::chrono::steady_clock::now()));
+			}
+			return StepResult::Ready;
+		}
+		return StepResult::Continue;
+	}
 	if (!renderer.BuildEmissiveTopLevelAccelerationStructure())
 	{
 		renderer.LogFallback("PT preload emissive TLAS update failed.");
