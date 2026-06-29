@@ -67,6 +67,11 @@ function Stop-NriPerfProcess {
     }
 
     try {
+        if ($Process.CloseMainWindow()) {
+            if ($Process.WaitForExit(10000)) {
+                return
+            }
+        }
         $Process.Kill()
         $Process.WaitForExit(5000) | Out-Null
     }

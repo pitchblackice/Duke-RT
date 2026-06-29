@@ -6950,16 +6950,26 @@ bool NRIPersistentVoxelResidency::PreloadResources(
 	}
 	const auto end = std::chrono::steady_clock::now();
 	refreshAdmissionStatus();
-	lastPreloadStatus.batchReady = ready && sharedBlasWarmupReady;
+	const bool admissionOnlyDeadEnd =
+		!ready &&
+		meshVariantResources.empty() &&
+		batch.actors.empty() &&
+		batchStats.persistentVoxelOnboardingAdmissionPendingCount > 0 &&
+		batchStats.persistentVoxelOnboardingAdmissionPendingCount == batchStats.persistentVoxelOnboardingDeferredCount &&
+		batchStats.persistentVoxelTexturePrewarmDeferredCount == 0 &&
+		batchStats.persistentVoxelOnboardingTexturePrewarmDeferredCount == 0 &&
+		batchStats.persistentVoxelOnboardingTextureBudgetHits == 0;
+	lastPreloadStatus.batchReady = (ready || admissionOnlyDeadEnd) && sharedBlasWarmupReady;
 	lastPreloadStatus.batchReadyActors = batch.activeActorCount;
 	lastPreloadStatus.deferredTexturePrewarm =
 		batchStats.persistentVoxelTexturePrewarmDeferredCount +
 		batchStats.persistentVoxelOnboardingTextureBudgetHits;
-	lastPreloadStatus.deferredOnboarding =
-		batchStats.persistentVoxelOnboardingDeferredCount > batchStats.persistentVoxelOnboardingTextureBudgetHits
+	lastPreloadStatus.deferredOnboarding = admissionOnlyDeadEnd
+		? 0u
+		: (batchStats.persistentVoxelOnboardingDeferredCount > batchStats.persistentVoxelOnboardingTextureBudgetHits
 			? batchStats.persistentVoxelOnboardingDeferredCount - batchStats.persistentVoxelOnboardingTextureBudgetHits
-			: 0u;
-	lastPreloadStatus.batchPendingActors = ready ? 0u : std::max<uint32_t>(
+			: 0u);
+	lastPreloadStatus.batchPendingActors = lastPreloadStatus.batchReady ? 0u : std::max<uint32_t>(
 		1u,
 		lastPreloadStatus.deferredTexturePrewarm + lastPreloadStatus.deferredOnboarding);
 	if (!lastPreloadStatus.batchReady)
@@ -6986,8 +6996,15 @@ bool NRIPersistentVoxelResidency::PreloadResources(
 			lastPreloadStatus.deferredTexturePrewarm,
 			lastPreloadStatus.deferredOnboarding,
 			PersistentVoxelDurationMs(start, end));
+		if (admissionOnlyDeadEnd)
+		{
+			Printf("NRI PT loading voxel resources: event=release reason=admission-only-dead-end entries=%u material_resources=%u admission_pending=%u\n",
+				(uint32_t)cacheEntries.size(),
+				(uint32_t)materialVariantResources.size(),
+				batchStats.persistentVoxelOnboardingAdmissionPendingCount);
+		}
 	}
-	return ready && sharedBlasWarmupReady;
+	return lastPreloadStatus.batchReady;
 }
 
 PersistentVoxelReadinessStatus NRIPersistentVoxelResidency::GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const
