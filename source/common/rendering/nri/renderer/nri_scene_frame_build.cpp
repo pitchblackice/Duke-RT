@@ -1709,7 +1709,8 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	{
 		if (mGpuSceneHasDynamicOverlay)
 		{
-			if (!NRISceneUploadManager::UpdateSceneDataSet(*this,
+			if (!NRISceneUploadManager::UpdateRuntimeLightAndSectorSceneData(*this, "runtime_overlay_light_refresh") &&
+				!NRISceneUploadManager::UpdateSceneDataSet(*this,
 				mStaticVertexBuffer,
 				mStaticIndexBuffer,
 				mStaticPrimitiveBuffer,
@@ -1735,7 +1736,8 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		}
 		else if (!sceneLightUsesStaticMapScene)
 		{
-			if (!NRISceneUploadManager::UpdateSceneDataSet(*this,
+			if (!NRISceneUploadManager::UpdateRuntimeLightAndSectorSceneData(*this, "captured_scene_light_refresh") &&
+				!NRISceneUploadManager::UpdateSceneDataSet(*this,
 				GetCurrentDynamicVertexBuffer(),
 				GetCurrentDynamicIndexBuffer(),
 				GetCurrentDynamicPrimitiveBuffer(),

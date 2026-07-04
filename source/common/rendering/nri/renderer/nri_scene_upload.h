@@ -66,6 +66,7 @@ public:
 		uint32_t staticMaterialCount,
 		uint32_t dynamicMaterialCount,
 		const char* reason);
+	static bool UpdateRuntimeLightAndSectorSceneData(NRIRenderer& renderer, const char* reason);
 
 private:
 	static bool SceneDataDescriptorsReady(NRIRenderer& renderer);
@@ -77,4 +78,20 @@ private:
 		uint64_t size,
 		uint32_t stride,
 		bool* ioWaitedForWrites);
+	static bool EnsureSceneDataBatched(
+		NRIRenderer& renderer,
+		bool& waitedForWrites,
+		const char* reason,
+		NRIBufferResource& resource,
+		SceneBufferDebugStats& stats,
+		const char* bufferLabel,
+		const void* data,
+		uint64_t size,
+		uint32_t stride,
+		nri::BufferUsageBits usage,
+		nri::AccessStage after,
+		double& uploadMs,
+		uint64_t& requestedBytes,
+		uint64_t& uploadedBytes,
+		bool writesQuiesced);
 };
