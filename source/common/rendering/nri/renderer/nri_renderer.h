@@ -2137,11 +2137,6 @@ private:
 		NRIBufferResource sceneInstanceBuffer;
 		SceneBufferDebugStats sceneInstanceStats = { "SceneDataSnapshotSceneInstance" };
 		uint64_t retireFenceValue = 0;
-		uint64_t frameIndex = UINT64_MAX;
-		uint64_t sceneInstanceHash = 0;
-		uint64_t tlasInstanceHash = 0;
-		uint32_t sceneInstanceCount = 0;
-		uint32_t tlasInstanceCount = 0;
 	};
 
 	using RuntimeMutationResidentUploadRange = ::RuntimeMutationResidentUploadRange;

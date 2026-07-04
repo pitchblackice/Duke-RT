@@ -2340,7 +2340,6 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 			renderer.WaitForCommandsTracked("scene_data_snapshot_reuse");
 		}
 
-		snapshot.frameIndex = renderer.mFrameIndex;
 		snapshot.retireFenceValue = renderer.mFrameIndex + 1u;
 		return &snapshot;
 	};
@@ -2365,9 +2364,16 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 	const uint64_t portalSize = scenePortals.size() * sizeof(ScenePortalData);
 	const uint64_t portalHash = HashSceneDataPayload(scenePortals.empty() ? nullptr : scenePortals.data(), portalSize, scenePortals.size());
 	const uint64_t portalBuildSerial = renderer.mMapWorld.valid ? renderer.mMapWorld.buildSerial : 0ull;
-	const uint64_t sceneInstanceHash = HashSceneDataPayload(sceneInstances.data(), sceneInstanceSize, sceneInstances.size());
 	const uint64_t tlasInstanceHash = renderer.mLastWorldTlasInstancePayloadHash;
 	const uint32_t tlasInstanceCount = renderer.mLastWorldTlasInstanceCount;
+	const bool hasCurrentWorldTlasSceneInstanceHash =
+		renderer.mLastWorldTlasInstanceFrameIndex == renderer.mFrameIndex &&
+		renderer.mLastWorldTlasSceneInstancePayloadHash != 0 &&
+		tlasInstanceCount == (uint32_t)sceneInstances.size();
+	const uint64_t sceneInstanceHash =
+		hasCurrentWorldTlasSceneInstanceHash ?
+		renderer.mLastWorldTlasSceneInstancePayloadHash :
+		HashSceneDataPayload(sceneInstances.data(), sceneInstanceSize, sceneInstances.size());
 	const bool sceneInstancesMatchLastWorldTlas =
 		renderer.mLastWorldTlasSceneInstancePayloadHash != 0 &&
 		renderer.mLastWorldTlasSceneInstancePayloadHash == sceneInstanceHash;
@@ -2495,13 +2501,6 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 			renderer.mSceneInstancePayloadCacheValid = true;
 			renderer.mSceneInstancePayloadHash = sceneInstanceHash;
 			renderer.mSceneInstancePayloadCount = (uint32_t)sceneInstances.size();
-		}
-		else
-		{
-			sceneDataSnapshot->sceneInstanceHash = sceneInstanceHash;
-			sceneDataSnapshot->tlasInstanceHash = tlasInstanceHash;
-			sceneDataSnapshot->sceneInstanceCount = (uint32_t)sceneInstances.size();
-			sceneDataSnapshot->tlasInstanceCount = tlasInstanceCount;
 		}
 	}
 	renderer.mBoundSceneInstances = sceneInstances;
