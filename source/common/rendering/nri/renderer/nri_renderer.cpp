@@ -2643,6 +2643,19 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	accumulateBuffer(mReprojectionBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mVisibleChunkBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mVisibleFlatPlaneBuffer, telemetry.sceneBufferBytes);
+	for (const SceneDataFrameSlot& slot : mSceneDataFrameRing)
+	{
+		accumulateBuffer(slot.reprojectionBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.visibleChunkBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.visibleFlatPlaneBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.sceneInstanceBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.portalBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.runtimeLightBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.runtimeLightTileHeaderBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.runtimeLightTileIndexBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.sectorLightHeaderBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.sectorLightBuffer, telemetry.sceneBufferBytes);
+	}
 	accumulateBuffer(mScratchBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mResidentStaticBlasScratchBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mTopLevelScratchBuffer, telemetry.sceneBufferBytes);

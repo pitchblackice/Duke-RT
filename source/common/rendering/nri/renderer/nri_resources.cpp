@@ -234,6 +234,11 @@ void NRIRenderer::DestroySceneBuffers()
 		DestroyBufferResource(slot.visibleFlatPlaneBuffer);
 		DestroyBufferResource(slot.sceneInstanceBuffer);
 		DestroyBufferResource(slot.portalBuffer);
+		DestroyBufferResource(slot.runtimeLightBuffer);
+		DestroyBufferResource(slot.runtimeLightTileHeaderBuffer);
+		DestroyBufferResource(slot.runtimeLightTileIndexBuffer);
+		DestroyBufferResource(slot.sectorLightHeaderBuffer);
+		DestroyBufferResource(slot.sectorLightBuffer);
 	}
 	mSceneDataFrameRing.clear();
 	mSceneDataFrameRingHighWaterBytes = 0;
@@ -307,6 +312,10 @@ void NRIRenderer::DestroySceneBuffers()
 	mRuntimeLightClusterPayloadHash = 0;
 	mRuntimeLightClusterCameraHash = 0;
 	mRuntimeLightSceneDataDirty = false;
+	mPortalPayloadCacheValid = false;
+	mPortalPayloadHash = 0;
+	mPortalPayloadBuildSerial = 0;
+	mPortalPayloadCount = 0;
 	mSceneDataSnapshotGenerationCounter = 0;
 	mSceneDataSnapshotGeneration = 0;
 	mSceneDataSnapshotFrameIndex = UINT64_MAX;

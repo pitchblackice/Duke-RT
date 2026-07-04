@@ -224,12 +224,24 @@ namespace
 		const NRISceneDataFrameSlot& slot,
 		uint64_t reprojectionSize,
 		uint64_t visibleChunkSize,
-		uint64_t visibleFlatPlaneSize)
+		uint64_t visibleFlatPlaneSize,
+		uint64_t sceneInstanceSize,
+		uint64_t runtimeLightSize,
+		uint64_t runtimeLightTileHeaderSize,
+		uint64_t runtimeLightTileIndexSize,
+		uint64_t sectorLightHeaderSize,
+		uint64_t sectorLightSize)
 	{
 		return
 			EstimateSceneDataFrameResourceCapacity(slot.reprojectionBuffer, reprojectionSize, (uint32_t)reprojectionSize) +
 			EstimateSceneDataFrameResourceCapacity(slot.visibleChunkBuffer, visibleChunkSize, sizeof(uint32_t)) +
-			EstimateSceneDataFrameResourceCapacity(slot.visibleFlatPlaneBuffer, visibleFlatPlaneSize, sizeof(uint32_t));
+			EstimateSceneDataFrameResourceCapacity(slot.visibleFlatPlaneBuffer, visibleFlatPlaneSize, sizeof(uint32_t)) +
+			EstimateSceneDataFrameResourceCapacity(slot.sceneInstanceBuffer, sceneInstanceSize, sizeof(SceneInstanceData)) +
+			EstimateSceneDataFrameResourceCapacity(slot.runtimeLightBuffer, runtimeLightSize, sizeof(NRIRuntimePointLightGpuData)) +
+			EstimateSceneDataFrameResourceCapacity(slot.runtimeLightTileHeaderBuffer, runtimeLightTileHeaderSize, sizeof(NRIRuntimeLightTileHeaderGpuData)) +
+			EstimateSceneDataFrameResourceCapacity(slot.runtimeLightTileIndexBuffer, runtimeLightTileIndexSize, sizeof(uint32_t)) +
+			EstimateSceneDataFrameResourceCapacity(slot.sectorLightHeaderBuffer, sectorLightHeaderSize, sizeof(NRISectorLightHeaderGpuData)) +
+			EstimateSceneDataFrameResourceCapacity(slot.sectorLightBuffer, sectorLightSize, sizeof(NRISectorLightGpuData));
 	}
 
 	static void NoteSceneDataWaitEvent(
@@ -2313,6 +2325,26 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 	const uint64_t visibleFlatPlaneSize = renderer.mCurrentVisibleFlatPlaneWords.empty() ? sizeof(defaultVisibleFlatPlaneWord) : renderer.mCurrentVisibleFlatPlaneWords.size() * sizeof(uint32_t);
 	const uint64_t sceneInstanceSize = sceneInstances.size() * sizeof(SceneInstanceData);
 	const uint64_t portalSize = scenePortals.size() * sizeof(ScenePortalData);
+	const uint64_t portalHash = HashSceneDataPayload(scenePortals.empty() ? nullptr : scenePortals.data(), portalSize, scenePortals.size());
+	const uint64_t portalBuildSerial = renderer.mMapWorld.valid ? renderer.mMapWorld.buildSerial : 0ull;
+	const uint64_t sceneInstanceHash = HashSceneDataPayload(sceneInstances.data(), sceneInstanceSize, sceneInstances.size());
+	const uint64_t tlasInstanceHash = renderer.mLastWorldTlasInstancePayloadHash;
+	const uint32_t tlasInstanceCount = renderer.mLastWorldTlasInstanceCount;
+	const bool sceneInstanceCanUseFrameSlot =
+		renderer.mLastWorldTlasInstanceFrameIndex == renderer.mFrameIndex &&
+		tlasInstanceCount != 0 &&
+		tlasInstanceCount == (uint32_t)sceneInstances.size();
+	const uint32_t activeRuntimeLightCount = (uint32_t)renderer.mSceneLights.GetAnalyticLights().activeLights.size();
+	const uint64_t estimatedRuntimeLightSize = (uint64_t)activeRuntimeLightCount * sizeof(NRIRuntimePointLightGpuData);
+	const uint64_t estimatedRuntimeLightTileHeaderSize =
+		(uint64_t)renderer.mBoundRuntimeLightTileCountX *
+		renderer.mBoundRuntimeLightTileCountY *
+		sizeof(NRIRuntimeLightTileHeaderGpuData);
+	const uint64_t estimatedRuntimeLightTileIndexSize =
+		(uint64_t)renderer.mBoundRuntimeLightTileIndexCount * sizeof(uint32_t);
+	const uint64_t estimatedSectorLightHeaderSize = sizeof(NRISectorLightHeaderGpuData);
+	const uint64_t estimatedSectorLightSize =
+		(uint64_t)renderer.mBoundSectorLightSectorCount * sizeof(NRISectorLightGpuData);
 	bool useSceneDataFrameRing = renderer.ShouldUseSceneDataFrameRing();
 	bool sceneDataFrameRingFallback = false;
 	bool sceneDataFrameRingOverCap = false;
@@ -2329,7 +2361,13 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 				*sceneDataFrameSlot,
 				reprojectionSize,
 				visibleChunkSize,
-				visibleFlatPlaneSize);
+				visibleFlatPlaneSize,
+				sceneInstanceCanUseFrameSlot ? sceneInstanceSize : 0u,
+				estimatedRuntimeLightSize,
+				estimatedRuntimeLightTileHeaderSize,
+				estimatedRuntimeLightTileIndexSize,
+				estimatedSectorLightHeaderSize,
+				estimatedSectorLightSize);
 			if (currentRingCapacity - currentSlotCapacity + estimatedSlotCapacity > maxRingBytes)
 			{
 				renderer.mSceneDataFrameRingDisabledFrameIndex = renderer.mFrameIndex;
@@ -2344,6 +2382,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		}
 	}
 	renderer.NoteSceneDataFrameRingTelemetry(sceneDataFrameSlot, useSceneDataFrameRing, sceneDataFrameRingFallback, sceneDataFrameRingOverCap);
+	const bool sceneInstanceUsesFrameSlot = sceneDataFrameSlot != nullptr && sceneInstanceCanUseFrameSlot;
 
 	{
 		ScopedPtPerfTimer reprojectionTimer(renderer.mLastPerfShellTraceStats.sceneDataSetReprojectionMs);
@@ -2371,9 +2410,13 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 
 	renderer.mBoundRuntimeLightCount = 0;
 
+	NRIBufferResource& sceneInstanceBuffer =
+		sceneInstanceUsesFrameSlot ? sceneDataFrameSlot->sceneInstanceBuffer : renderer.mSceneInstanceBuffer;
+	SceneBufferDebugStats& sceneInstanceStats =
+		sceneInstanceUsesFrameSlot ? sceneDataFrameSlot->sceneInstanceStats : renderer.mSceneInstanceBufferStats;
 	if (!ensureSceneDataBatched(
-		renderer.mSceneInstanceBuffer,
-		renderer.mSceneInstanceBufferStats,
+		sceneInstanceBuffer,
+		sceneInstanceStats,
 		"scene_instance",
 		sceneInstances.data(),
 		sceneInstanceSize,
@@ -2383,33 +2426,43 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		renderer.mLastPerfShellTraceStats.sceneDataSetSceneInstanceMs,
 		renderer.mLastPerfShellTraceStats.sceneDataSetSceneInstanceRequestedBytes,
 		renderer.mLastPerfShellTraceStats.sceneDataSetSceneInstanceUploadedBytes,
-		false))
+		sceneInstanceUsesFrameSlot))
 	{
 		return false;
 	}
 	renderer.mBoundSceneInstances = sceneInstances;
 
-	if (!ensureSceneDataBatched(
-		renderer.mPortalBuffer,
-		renderer.mPortalBufferStats,
-		"portal",
-		scenePortals.data(),
-		portalSize,
-		sizeof(ScenePortalData),
-		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIResourceComputeShaderResourceAccess(),
-		renderer.mLastPerfShellTraceStats.sceneDataSetPortalMs,
-		renderer.mLastPerfShellTraceStats.sceneDataSetPortalRequestedBytes,
-		renderer.mLastPerfShellTraceStats.sceneDataSetPortalUploadedBytes,
-		false))
+	const bool portalNeedsUpload =
+		!renderer.mPortalPayloadCacheValid ||
+		renderer.mPortalPayloadHash != portalHash ||
+		renderer.mPortalPayloadBuildSerial != portalBuildSerial ||
+		renderer.mPortalPayloadCount != (uint32_t)scenePortals.size() ||
+		renderer.mPortalBuffer.shaderView == nullptr ||
+		renderer.mPortalBuffer.usedSize < portalSize;
+	if (portalNeedsUpload)
 	{
-		return false;
+		if (!ensureSceneDataBatched(
+			renderer.mPortalBuffer,
+			renderer.mPortalBufferStats,
+			"portal",
+			scenePortals.data(),
+			portalSize,
+			sizeof(ScenePortalData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIResourceComputeShaderResourceAccess(),
+			renderer.mLastPerfShellTraceStats.sceneDataSetPortalMs,
+			renderer.mLastPerfShellTraceStats.sceneDataSetPortalRequestedBytes,
+			renderer.mLastPerfShellTraceStats.sceneDataSetPortalUploadedBytes,
+			false))
+		{
+			return false;
+		}
+		renderer.mPortalPayloadCacheValid = true;
+		renderer.mPortalPayloadHash = portalHash;
+		renderer.mPortalPayloadBuildSerial = portalBuildSerial;
+		renderer.mPortalPayloadCount = (uint32_t)scenePortals.size();
 	}
 
-	const uint64_t sceneInstanceHash = HashSceneDataPayload(sceneInstances.data(), sceneInstanceSize, sceneInstances.size());
-	const uint64_t portalHash = HashSceneDataPayload(scenePortals.empty() ? nullptr : scenePortals.data(), portalSize, scenePortals.size());
-	const uint64_t tlasInstanceHash = renderer.mLastWorldTlasInstancePayloadHash;
-	const uint32_t tlasInstanceCount = renderer.mLastWorldTlasInstanceCount;
 	uint32_t snapshotMismatchCount = 0;
 	if (renderer.mLastWorldTlasInstanceFrameIndex == renderer.mFrameIndex &&
 		tlasInstanceCount != 0 &&
@@ -2428,7 +2481,6 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		runtimeLightUsesFrameSlot ? sceneDataFrameSlot->runtimeLightBuffer : renderer.mRuntimeLightBuffer;
 	SceneBufferDebugStats& runtimeLightStats =
 		runtimeLightUsesFrameSlot ? sceneDataFrameSlot->runtimeLightStats : renderer.mRuntimeLightBufferStats;
-	const uint32_t activeRuntimeLightCount = (uint32_t)renderer.mSceneLights.GetAnalyticLights().activeLights.size();
 	if (runtimeLightUsesFrameSlot ||
 		!renderer.mRuntimeLightPayloadCacheValid ||
 		renderer.mRuntimeLightPayloadHash != runtimeLightPayloadHash ||
@@ -2730,6 +2782,8 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		sceneDataFrameSlot != nullptr ? sceneDataFrameSlot->sectorLightHeaderBuffer : renderer.mSectorLightHeaderBuffer;
 	const NRIBufferResource& sectorLightDescriptorBuffer =
 		sceneDataFrameSlot != nullptr ? sceneDataFrameSlot->sectorLightBuffer : renderer.mSectorLightBuffer;
+	const NRIBufferResource& sceneInstanceDescriptorBuffer =
+		sceneInstanceUsesFrameSlot ? sceneDataFrameSlot->sceneInstanceBuffer : renderer.mSceneInstanceBuffer;
 	{
 		ScopedPtPerfTimer descriptorBuildTimer(renderer.mLastPerfShellTraceStats.sceneDataSetDescriptorBuildMs);
 		renderer.mSceneDataDescriptors.fill(nullptr);
@@ -2741,7 +2795,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		renderer.mSceneDataDescriptors[5] = selectView(dynamicIndexBuffer, staticIndexBuffer);
 		renderer.mSceneDataDescriptors[6] = selectView(dynamicPrimitiveBuffer, staticPrimitiveBuffer);
 		renderer.mSceneDataDescriptors[7] = selectView(dynamicMaterialBuffer, staticMaterialBuffer);
-		renderer.mSceneDataDescriptors[8] = renderer.mSceneInstanceBuffer.shaderView;
+		renderer.mSceneDataDescriptors[8] = sceneInstanceDescriptorBuffer.shaderView;
 		renderer.mSceneDataDescriptors[9] = renderer.mPortalBuffer.shaderView;
 		renderer.mSceneDataDescriptors[10] = runtimeLightDescriptorBuffer.shaderView;
 		renderer.mSceneDataDescriptors[11] = runtimeLightTileHeaderDescriptorBuffer.shaderView;

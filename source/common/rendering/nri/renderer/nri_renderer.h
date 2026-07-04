@@ -2664,6 +2664,10 @@ private:
 	uint64_t mRuntimeLightClusterPayloadHash = 0;
 	uint64_t mRuntimeLightClusterCameraHash = 0;
 	bool mRuntimeLightSceneDataDirty = false;
+	bool mPortalPayloadCacheValid = false;
+	uint64_t mPortalPayloadHash = 0;
+	uint64_t mPortalPayloadBuildSerial = 0;
+	uint32_t mPortalPayloadCount = 0;
 	uint64_t mSceneDataSnapshotGenerationCounter = 0;
 	uint64_t mSceneDataSnapshotGeneration = 0;
 	uint64_t mSceneDataSnapshotFrameIndex = UINT64_MAX;
