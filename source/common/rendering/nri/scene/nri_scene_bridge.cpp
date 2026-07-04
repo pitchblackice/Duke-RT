@@ -6,6 +6,7 @@
 #include "nri_surface_builder.h"
 #include "nri_scene_texture_utils.h"
 #include "nri_texture_signature.h"
+#include "nri_voxel_geometry_hash.h"
 
 #include "c_cvars.h"
 #include "coreactor.h"
@@ -120,6 +121,8 @@ namespace
 	{
 		SurfaceRef canonicalSurface;
 		uint64_t meshVariantHash = 0;
+		uint64_t geometryContentHash = 0;
+		uint64_t renderPrimitiveHash = 0;
 		int32_t sourcePicnum = -1;
 		int32_t resolvedVoxelIndex = -1;
 		bool built = false;
@@ -170,6 +173,8 @@ namespace
 		uint64_t identityKey = 0;
 		uint64_t meshKeyHash = 0;
 		uint64_t materialKeyHash = 0;
+		uint64_t geometryContentHash = 0;
+		uint64_t renderPrimitiveHash = 0;
 		uint64_t meshVariantHash = 0;
 		uint64_t materialVariantHash = 0;
 		uint64_t instanceKeyHash = 0;
@@ -383,6 +388,8 @@ namespace
 		uint64_t transformBasisSignature = 0;
 		uint64_t meshKeyHash = 0;
 		uint64_t materialKeyHash = 0;
+		uint64_t geometryContentHash = 0;
+		uint64_t renderPrimitiveHash = 0;
 		uint64_t meshVariantHash = 0;
 		uint64_t materialVariantHash = 0;
 		uint64_t instanceKeyHash = 0;
@@ -2485,6 +2492,7 @@ namespace
 	}
 
 	bool IsVoxelMeshVariantSurfaceReady(uint64_t meshVariantHash);
+	bool GetReadyVoxelMeshVariantContentHashes(uint64_t meshVariantHash, uint64_t& outGeometryContentHash, uint64_t& outRenderPrimitiveHash);
 
 	bool IsVoxelActorSharedVariantReady(const VoxelActorCacheEntry& entry)
 	{
@@ -2824,6 +2832,40 @@ namespace
 		entry.transformBasisSignature = lookup.transformBasisSignature;
 		entry.meshKeyHash = lookup.meshKeyHash;
 		entry.materialKeyHash = lookup.materialKeyHash;
+		uint64_t geometryContentHash = lookup.geometryContentHash;
+		uint64_t renderPrimitiveHash = lookup.renderPrimitiveHash;
+		if ((geometryContentHash == 0 || renderPrimitiveHash == 0) &&
+			sharedVariantReady &&
+			lookup.meshVariantHash != 0)
+		{
+			uint64_t cachedGeometryContentHash = 0;
+			uint64_t cachedRenderPrimitiveHash = 0;
+			if (GetReadyVoxelMeshVariantContentHashes(lookup.meshVariantHash, cachedGeometryContentHash, cachedRenderPrimitiveHash))
+			{
+				if (geometryContentHash == 0)
+				{
+					geometryContentHash = cachedGeometryContentHash;
+				}
+				if (renderPrimitiveHash == 0)
+				{
+					renderPrimitiveHash = cachedRenderPrimitiveHash;
+				}
+			}
+		}
+		if (geometryContentHash == 0 || renderPrimitiveHash == 0)
+		{
+			const VoxelGeometryContentHashes hashes = BuildVoxelGeometryContentHashes(meshSurface);
+			if (geometryContentHash == 0)
+			{
+				geometryContentHash = hashes.geometryContentHash;
+			}
+			if (renderPrimitiveHash == 0)
+			{
+				renderPrimitiveHash = hashes.renderPrimitiveHash;
+			}
+		}
+		entry.geometryContentHash = geometryContentHash;
+		entry.renderPrimitiveHash = renderPrimitiveHash;
 		entry.meshVariantHash = lookup.meshVariantHash;
 		entry.materialVariantHash = lookup.materialVariantHash;
 		InitializeVoxelActorCacheEntryIdentity(entry, lookup);
@@ -4636,6 +4678,35 @@ namespace
 		return &found->second.canonicalSurface;
 	}
 
+	bool GetReadyVoxelMeshVariantContentHashes(uint64_t meshVariantHash, uint64_t& outGeometryContentHash, uint64_t& outRenderPrimitiveHash)
+	{
+		outGeometryContentHash = 0;
+		outRenderPrimitiveHash = 0;
+		auto found = gVoxelMeshVariantSurfaceCache.find(meshVariantHash);
+		if (found == gVoxelMeshVariantSurfaceCache.end() ||
+			!found->second.built ||
+			!found->second.valid)
+		{
+			return false;
+		}
+
+		if (found->second.geometryContentHash == 0 || found->second.renderPrimitiveHash == 0)
+		{
+			const VoxelGeometryContentHashes hashes = BuildVoxelGeometryContentHashes(found->second.canonicalSurface);
+			if (found->second.geometryContentHash == 0)
+			{
+				found->second.geometryContentHash = hashes.geometryContentHash;
+			}
+			if (found->second.renderPrimitiveHash == 0)
+			{
+				found->second.renderPrimitiveHash = hashes.renderPrimitiveHash;
+			}
+		}
+		outGeometryContentHash = found->second.geometryContentHash;
+		outRenderPrimitiveHash = found->second.renderPrimitiveHash;
+		return outGeometryContentHash != 0 || outRenderPrimitiveHash != 0;
+	}
+
 	const SurfaceRef* GetCachedVoxelMeshVariantSurface(
 		const VoxelActorCacheLookup& lookup,
 		const FVoxelMeshData& mesh,
@@ -4655,6 +4726,12 @@ namespace
 			entry.resolvedVoxelIndex = lookup.resolvedVoxelIndex;
 			entry.built = true;
 			entry.valid = BuildCanonicalVoxelMeshSurface(mesh, entry.canonicalSurface);
+			if (entry.valid)
+			{
+				const VoxelGeometryContentHashes hashes = BuildVoxelGeometryContentHashes(entry.canonicalSurface);
+				entry.geometryContentHash = hashes.geometryContentHash;
+				entry.renderPrimitiveHash = hashes.renderPrimitiveHash;
+			}
 			if (recordPerf)
 			{
 				gDynamicCapturePerfStats.voxelCanonicalSurfaceBuilds++;
@@ -4680,6 +4757,18 @@ namespace
 		if (!entry.built || !entry.valid)
 		{
 			return nullptr;
+		}
+		if (found->second.geometryContentHash == 0 || found->second.renderPrimitiveHash == 0)
+		{
+			const VoxelGeometryContentHashes hashes = BuildVoxelGeometryContentHashes(found->second.canonicalSurface);
+			if (found->second.geometryContentHash == 0)
+			{
+				found->second.geometryContentHash = hashes.geometryContentHash;
+			}
+			if (found->second.renderPrimitiveHash == 0)
+			{
+				found->second.renderPrimitiveHash = hashes.renderPrimitiveHash;
+			}
 		}
 		return &entry.canonicalSurface;
 	}
@@ -5840,6 +5929,26 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.transformBasisSignature = entry.second->transformBasisSignature;
 		view.meshKeyHash = entry.second->meshKeyHash;
 		view.materialKeyHash = entry.second->materialKeyHash;
+		uint64_t geometryContentHash = entry.second->geometryContentHash;
+		uint64_t renderPrimitiveHash = entry.second->renderPrimitiveHash;
+		if ((geometryContentHash == 0 || renderPrimitiveHash == 0) && entry.second->sharedVariantSurface)
+		{
+			uint64_t cachedGeometryContentHash = 0;
+			uint64_t cachedRenderPrimitiveHash = 0;
+			if (GetReadyVoxelMeshVariantContentHashes(entry.second->meshVariantHash, cachedGeometryContentHash, cachedRenderPrimitiveHash))
+			{
+				if (geometryContentHash == 0)
+				{
+					geometryContentHash = cachedGeometryContentHash;
+				}
+				if (renderPrimitiveHash == 0)
+				{
+					renderPrimitiveHash = cachedRenderPrimitiveHash;
+				}
+			}
+		}
+		view.geometryContentHash = geometryContentHash;
+		view.renderPrimitiveHash = renderPrimitiveHash;
 		view.meshVariantHash = entry.second->meshVariantHash;
 		view.materialVariantHash = entry.second->materialVariantHash;
 		view.meshBakeSpace = entry.second->meshBakeSpace;
@@ -5933,6 +6042,12 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 	uint32_t selectedHeuristic = 0;
 	std::unordered_set<uint64_t> seenVariantPairs;
 	std::unordered_set<uint64_t> selectedMeshVariants;
+	std::unordered_map<uint64_t, uint32_t> selectedGeometryHashes;
+	std::unordered_map<uint64_t, uint32_t> selectedRenderPrimitiveHashes;
+	uint32_t selectedGeometryHashMissing = 0;
+	uint32_t selectedRenderPrimitiveHashMissing = 0;
+	uint32_t selectedDuplicateGeometryMeshes = 0;
+	uint32_t selectedDuplicateRenderPrimitiveMeshes = 0;
 
 	LoadingVoxelPreloadRequestGraph graph;
 	BuildLiveActorVoxelPreloadRequestGraph(graph);
@@ -5981,6 +6096,14 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 		}
 
 		const uint32_t primitiveCount = CountSurfacePrimitives(*surface);
+		uint64_t geometryContentHash = 0;
+		uint64_t renderPrimitiveHash = 0;
+		if (!GetReadyVoxelMeshVariantContentHashes(request.meshVariantHash, geometryContentHash, renderPrimitiveHash))
+		{
+			const VoxelGeometryContentHashes hashes = BuildVoxelGeometryContentHashes(*surface);
+			geometryContentHash = hashes.geometryContentHash;
+			renderPrimitiveHash = hashes.renderPrimitiveHash;
+		}
 		const uint64_t estimatedMeshUploadBytes =
 			(uint64_t)surface->vertices.size() * (uint64_t)sizeof(SceneVertex) +
 			(uint64_t)surface->indices.size() * (uint64_t)sizeof(uint32_t) +
@@ -6087,6 +6210,8 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 			view.meshKeyHash = request.meshVariantHash;
 			view.materialKeyHash = materialVariantHash;
 			view.geometrySignature = request.meshVariantHash;
+			view.geometryContentHash = geometryContentHash;
+			view.renderPrimitiveHash = renderPrimitiveHash;
 			view.meshVariantHash = request.meshVariantHash;
 			view.materialVariantHash = materialVariantHash;
 			view.sourceBits = request.sourceBits | context.sourceBits;
@@ -6103,6 +6228,22 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 			if (meshBudgetFirstUse)
 			{
 				selectedMeshVariants.insert(request.meshVariantHash);
+				if (geometryContentHash == 0)
+				{
+					selectedGeometryHashMissing++;
+				}
+				else if (++selectedGeometryHashes[geometryContentHash] > 1)
+				{
+					selectedDuplicateGeometryMeshes++;
+				}
+				if (renderPrimitiveHash == 0)
+				{
+					selectedRenderPrimitiveHashMissing++;
+				}
+				else if (++selectedRenderPrimitiveHashes[renderPrimitiveHash] > 1)
+				{
+					selectedDuplicateRenderPrimitiveMeshes++;
+				}
 				primitiveTotal += primitiveCount;
 			}
 			uploadByteTotal += estimatedUploadBytes;
@@ -6143,6 +6284,14 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 			primitiveLimit,
 			(unsigned long long)byteLimit,
 			variantLimit);
+		Printf("NRI PT voxel geometry dedupe: mesh_keys=%u geometry_hashes=%u render_primitive_hashes=%u geometry_hash_missing=%u render_primitive_hash_missing=%u duplicate_geometry_meshes=%u duplicate_render_primitive_meshes=%u hash_scope=picnum-independent\n",
+			(uint32_t)selectedMeshVariants.size(),
+			(uint32_t)selectedGeometryHashes.size(),
+			(uint32_t)selectedRenderPrimitiveHashes.size(),
+			selectedGeometryHashMissing,
+			selectedRenderPrimitiveHashMissing,
+			selectedDuplicateGeometryMeshes,
+			selectedDuplicateRenderPrimitiveMeshes);
 	}
 
 	return !outEntries.empty();

@@ -995,6 +995,7 @@ set (NRI_SOURCES
 	common/rendering/nri/scene/nri_scene_stats.cpp
 	common/rendering/nri/scene/nri_scene_texture_utils.cpp
 	common/rendering/nri/scene/nri_texture_signature.cpp
+	common/rendering/nri/scene/nri_voxel_geometry_hash.cpp
 	common/rendering/nri/scene/nri_scene_bridge.cpp
 	common/rendering/nri/scene/nri_portal_bridge.cpp
 	common/rendering/nri/scene/nri_geometry_bridge.cpp

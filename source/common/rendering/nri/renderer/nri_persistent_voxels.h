@@ -67,6 +67,8 @@ struct PersistentVoxelMeshVariantResource
 	uint64_t resourceKey = 0;
 	uint64_t meshKeyHash = 0;
 	uint64_t geometrySignature = 0;
+	uint64_t geometryContentHash = 0;
+	uint64_t renderPrimitiveHash = 0;
 	uint64_t transformBasisSignature = 0;
 	nri_scene::VoxelMeshBakeSpace meshBakeSpace = nri_scene::VoxelMeshBakeSpace::Unknown;
 	uint32_t primitiveCount = 0;
@@ -700,6 +702,7 @@ public:
 		uint64_t buildSerial,
 		const char* levelName,
 		uint32_t frameIndex,
+		const NRIPersistentVoxelSettings& settings,
 		int loadingTraceLevel,
 		const NRIPersistentVoxelResetServices& services);
 	bool EnqueueAdmission(

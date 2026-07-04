@@ -132,11 +132,40 @@ bool IsPersistentVoxelMeshResourceTransformKeyed(const nri_scene::PersistentVoxe
 		cacheEntry.meshBakeSpace != nri_scene::VoxelMeshBakeSpace::LocalSpace;
 }
 
+uint64_t BuildPersistentVoxelContentMeshResourceKey(uint64_t renderPrimitiveHash, uint64_t geometryContentHash)
+{
+	(void)geometryContentHash;
+	if (renderPrimitiveHash != 0)
+	{
+		return nri_scene::HashCombine64(0x50564d4553485231ull, renderPrimitiveHash); // PVMESHR1
+	}
+	return 0;
+}
+
+uint64_t BuildPersistentVoxelVariantMeshResourceKey(const nri_scene::PrecachedVoxelVariantView& variant)
+{
+	const uint64_t contentKey = BuildPersistentVoxelContentMeshResourceKey(variant.renderPrimitiveHash, variant.geometryContentHash);
+	return contentKey != 0 ? contentKey : variant.meshKeyHash;
+}
+
+uint64_t ResolvePersistentVoxelVariantGeometrySignature(const nri_scene::PrecachedVoxelVariantView& variant)
+{
+	return variant.geometryContentHash != 0 ?
+		variant.geometryContentHash :
+		(variant.geometrySignature != 0 ? variant.geometrySignature : variant.meshVariantHash);
+}
+
+uint64_t ResolvePersistentVoxelCacheEntryGeometrySignature(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry)
+{
+	return cacheEntry.geometryContentHash != 0 ? cacheEntry.geometryContentHash : cacheEntry.geometrySignature;
+}
+
 uint64_t BuildPersistentVoxelMeshResourceKey(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, const NRIPersistentVoxelSettings& settings)
 {
 	if (!IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry, settings))
 	{
-		return cacheEntry.meshKeyHash;
+		const uint64_t contentKey = BuildPersistentVoxelContentMeshResourceKey(cacheEntry.renderPrimitiveHash, cacheEntry.geometryContentHash);
+		return contentKey != 0 ? contentKey : cacheEntry.meshKeyHash;
 	}
 	uint64_t hash = cacheEntry.meshKeyHash;
 	hash = nri_scene::HashCombine64(hash, cacheEntry.transformBasisSignature);
@@ -2532,7 +2561,7 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 		{
 			continue;
 		}
-		admissionMeshes.insert(entry.variant.meshKeyHash);
+		admissionMeshes.insert(BuildPersistentVoxelVariantMeshResourceKey(entry.variant));
 		admissionMaterials.insert(entry.variant.materialKeyHash);
 		queuedBytes += entry.estimatedBytes;
 	}
@@ -2855,13 +2884,14 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		{
 			continue;
 		}
-		const PersistentVoxelReadinessStatus readiness = GetSharedVariantReadiness(entry.variant.meshKeyHash, entry.variant.materialKeyHash);
+		const uint64_t meshResourceKey = BuildPersistentVoxelVariantMeshResourceKey(entry.variant);
+		const PersistentVoxelReadinessStatus readiness = GetSharedVariantReadiness(meshResourceKey, entry.variant.materialKeyHash);
 		const bool resourcesReady = readiness.ready;
 		if (resourcesReady)
 		{
 			if (entry.state != PersistentVoxelAdmissionState::Ready && entry.runtimeRequested)
 			{
-				TraceReadiness("skip-ready", phase, &entry, entry.variant.meshKeyHash, entry.variant.materialKeyHash, readiness, traceLevel2);
+				TraceReadiness("skip-ready", phase, &entry, meshResourceKey, entry.variant.materialKeyHash, readiness, traceLevel2);
 			}
 			if (entry.uploadPrepared)
 			{
@@ -2874,7 +2904,7 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		}
 		if (entry.state == PersistentVoxelAdmissionState::Ready)
 		{
-			TraceReadiness("stale-ready", phase, &entry, entry.variant.meshKeyHash, entry.variant.materialKeyHash, readiness, traceLevel2);
+			TraceReadiness("stale-ready", phase, &entry, meshResourceKey, entry.variant.materialKeyHash, readiness, traceLevel2);
 			entry.state = PersistentVoxelAdmissionState::Pending;
 			entry.lastReason = "stale-ready";
 		}
@@ -2951,12 +2981,13 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 	const char* stopReason = "queue-drained";
 	for (PersistentVoxelAdmissionEntry* entry : candidates)
 	{
-		const PersistentVoxelReadinessStatus currentReadiness = GetSharedVariantReadiness(entry->variant.meshKeyHash, entry->variant.materialKeyHash);
+		const uint64_t meshResourceKey = BuildPersistentVoxelVariantMeshResourceKey(entry->variant);
+		const PersistentVoxelReadinessStatus currentReadiness = GetSharedVariantReadiness(meshResourceKey, entry->variant.materialKeyHash);
 		if (currentReadiness.ready)
 		{
 			if (entry->state != PersistentVoxelAdmissionState::Ready || entry->runtimeRequested)
 			{
-				TraceReadiness("skip-ready", phase, entry, entry->variant.meshKeyHash, entry->variant.materialKeyHash, currentReadiness, traceLevel2);
+				TraceReadiness("skip-ready", phase, entry, meshResourceKey, entry->variant.materialKeyHash, currentReadiness, traceLevel2);
 			}
 			if (entry->uploadPrepared)
 			{
@@ -2969,7 +3000,7 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		}
 		if (entry->state == PersistentVoxelAdmissionState::Ready)
 		{
-			TraceReadiness("stale-ready", phase, entry, entry->variant.meshKeyHash, entry->variant.materialKeyHash, currentReadiness, traceLevel2);
+			TraceReadiness("stale-ready", phase, entry, meshResourceKey, entry->variant.materialKeyHash, currentReadiness, traceLevel2);
 			entry->state = PersistentVoxelAdmissionState::Pending;
 			entry->lastReason = "stale-ready";
 		}
@@ -3254,7 +3285,8 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 	outInProgress = false;
 	outFailureReason = "none";
 	const nri_scene::PrecachedVoxelVariantView& variant = entry.variant;
-	if (variant.surface == nullptr || variant.meshKeyHash == 0 || variant.materialKeyHash == 0)
+	const uint64_t meshResourceKey = BuildPersistentVoxelVariantMeshResourceKey(variant);
+	if (variant.surface == nullptr || variant.meshKeyHash == 0 || meshResourceKey == 0 || variant.materialKeyHash == 0)
 	{
 		outFailureReason = "invalid-variant";
 		return false;
@@ -3447,7 +3479,6 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			}
 		}
 
-		const uint64_t meshResourceKey = variant.meshKeyHash;
 		auto existingMeshIt = meshVariantResources.find(meshResourceKey);
 		const bool existingMeshReady =
 			existingMeshIt != meshVariantResources.end() &&
@@ -3463,7 +3494,9 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			primitiveBuffer.buffer != nullptr;
 		if (existingMeshReady)
 		{
-			existingMeshIt->second.geometrySignature = variant.geometrySignature != 0 ? variant.geometrySignature : variant.meshVariantHash;
+			existingMeshIt->second.geometrySignature = ResolvePersistentVoxelVariantGeometrySignature(variant);
+			existingMeshIt->second.geometryContentHash = variant.geometryContentHash;
+			existingMeshIt->second.renderPrimitiveHash = variant.renderPrimitiveHash;
 			existingMeshIt->second.lastDesiredMapGeneration = residencyMapGeneration;
 			existingMeshIt->second.lastUsedMapGeneration = residencyMapGeneration;
 			existingMeshIt->second.lastUsedFrame = frameIndex;
@@ -3473,7 +3506,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			existingMeshIt->second.gpuPrefer = existingMeshIt->second.gpuPrefer || entry.gpuPrefer;
 			existingMeshIt->second.cold = false;
 			materialVariantResources[variant.materialKeyHash] = std::move(entry.uploadMaterialResource);
-			publishedMeshKeys.insert(variant.meshKeyHash);
+			publishedMeshKeys.insert(meshResourceKey);
 			publishedMaterialKeys.insert(variant.materialKeyHash);
 			entry.uploadMaterialResource = {};
 			outReusedMesh = true;
@@ -3554,7 +3587,9 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 
 		meshResource.resourceKey = meshResourceKey;
 		meshResource.meshKeyHash = variant.meshKeyHash;
-		meshResource.geometrySignature = variant.geometrySignature != 0 ? variant.geometrySignature : variant.meshVariantHash;
+		meshResource.geometrySignature = ResolvePersistentVoxelVariantGeometrySignature(variant);
+		meshResource.geometryContentHash = variant.geometryContentHash;
+		meshResource.renderPrimitiveHash = variant.renderPrimitiveHash;
 		meshResource.transformBasisSignature = 0;
 		meshResource.meshBakeSpace = nri_scene::VoxelMeshBakeSpace::LocalSpace;
 		meshResource.vertexCount = (uint32_t)entry.uploadGeometry.vertices.size();
@@ -3744,7 +3779,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		}
 	}
 
-	auto existingMeshIt = meshVariantResources.find(variant.meshKeyHash);
+	auto existingMeshIt = meshVariantResources.find(meshResourceKey);
 	if (existingMeshIt != meshVariantResources.end())
 	{
 		services.RetireBuffer(existingMeshIt->second.vertexBuffer);
@@ -3767,9 +3802,9 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 	entry.uploadMaterialResource.gpuPrefer = entry.uploadMaterialResource.gpuPrefer || entry.gpuPrefer;
 	entry.uploadMaterialResource.residentBytes =
 		(uint64_t)entry.uploadMaterialResource.materialBridge.materials.size() * (uint64_t)sizeof(nri_scene::MaterialData);
-	meshVariantResources[variant.meshKeyHash] = std::move(entry.uploadMeshResource);
+	meshVariantResources[meshResourceKey] = std::move(entry.uploadMeshResource);
 	materialVariantResources[variant.materialKeyHash] = std::move(entry.uploadMaterialResource);
-	publishedMeshKeys.insert(variant.meshKeyHash);
+	publishedMeshKeys.insert(meshResourceKey);
 	publishedMaterialKeys.insert(variant.materialKeyHash);
 	entry.uploadMeshResource = {};
 	entry.uploadMaterialResource = {};
@@ -4430,7 +4465,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			PersistentVoxelBatch::ActorEntry actor = existingActor != nullptr ? *existingActor : PersistentVoxelBatch::ActorEntry{};
 			actor.identityKey = cacheEntry.identityKey;
 			actor.signature = cacheEntry.signature;
-			actor.geometrySignature = cacheEntry.geometrySignature;
+			actor.geometrySignature = ResolvePersistentVoxelCacheEntryGeometrySignature(cacheEntry);
 			actor.surfaceSignature = cacheEntry.surfaceSignature;
 			actor.bakedSurfaceSignature = cacheEntry.bakedSurfaceSignature;
 			actor.materialSignature = cacheEntry.materialSignature;
@@ -4542,8 +4577,11 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			if (!IsSharedVariantReady(baseMeshResourceKey, cacheEntry.materialKeyHash))
 			{
 				nri_scene::PrecachedVoxelVariantView admissionVariant = {};
-				admissionVariant.meshKeyHash = baseMeshResourceKey;
+				admissionVariant.meshKeyHash = cacheEntry.meshKeyHash;
 				admissionVariant.materialKeyHash = cacheEntry.materialKeyHash;
+				admissionVariant.geometrySignature = cacheEntry.geometrySignature;
+				admissionVariant.geometryContentHash = cacheEntry.geometryContentHash;
+				admissionVariant.renderPrimitiveHash = cacheEntry.renderPrimitiveHash;
 				admissionVariant.meshVariantHash = cacheEntry.meshVariantHash;
 				admissionVariant.materialVariantHash = cacheEntry.materialVariantHash;
 				admissionVariant.sourcePicnum = cacheEntry.sourcePicnum;
@@ -4618,6 +4656,9 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 		}
 
 		uint64_t meshResourceKey = baseMeshResourceKey;
+		const bool meshResourceTransformKeyed = IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry, settings);
+		const bool contentResourceKeyed = !meshResourceTransformKeyed &&
+			(cacheEntry.renderPrimitiveHash != 0 || cacheEntry.geometryContentHash != 0);
 		auto existingMeshResourceIt = meshVariantResources.find(meshResourceKey);
 		if (existingMeshResourceIt != meshVariantResources.end() &&
 			(existingMeshResourceIt->second.vertexCount != (uint32_t)actorGeometry.vertices.size() ||
@@ -4666,10 +4707,12 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			meshResource.primitiveOffset,
 			meshResource.primitiveCapacity);
 
-		const bool meshResourceTransformKeyed = IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry, settings);
 		const bool meshResourceChanged =
 			meshResource.resourceKey != meshResourceKey ||
-			meshResource.meshKeyHash != cacheEntry.meshKeyHash ||
+			(contentResourceKeyed ?
+				(meshResource.renderPrimitiveHash != cacheEntry.renderPrimitiveHash ||
+					meshResource.geometryContentHash != cacheEntry.geometryContentHash) :
+				meshResource.meshKeyHash != cacheEntry.meshKeyHash) ||
 			(meshResourceTransformKeyed && meshResource.transformBasisSignature != cacheEntry.transformBasisSignature) ||
 			meshResource.meshBakeSpace != cacheEntry.meshBakeSpace ||
 			meshResource.vertexCount != (uint32_t)actorGeometry.vertices.size() ||
@@ -4809,6 +4852,9 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				batchServices.RetireAccelerationStructure(meshResource.accelerationStructure);
 				meshResource.resourceKey = meshResourceKey;
 				meshResource.meshKeyHash = cacheEntry.meshKeyHash;
+				meshResource.geometrySignature = ResolvePersistentVoxelCacheEntryGeometrySignature(cacheEntry);
+				meshResource.geometryContentHash = cacheEntry.geometryContentHash;
+				meshResource.renderPrimitiveHash = cacheEntry.renderPrimitiveHash;
 				meshResource.transformBasisSignature = cacheEntry.transformBasisSignature;
 				meshResource.meshBakeSpace = cacheEntry.meshBakeSpace;
 				meshResource.vertexCount = (uint32_t)actorGeometry.vertices.size();
@@ -4864,7 +4910,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 		PersistentVoxelBatch::ActorEntry actor = existingActor != nullptr ? *existingActor : PersistentVoxelBatch::ActorEntry{};
 		actor.identityKey = cacheEntry.identityKey;
 		actor.signature = cacheEntry.signature;
-		actor.geometrySignature = cacheEntry.geometrySignature;
+		actor.geometrySignature = ResolvePersistentVoxelCacheEntryGeometrySignature(cacheEntry);
 		actor.surfaceSignature = cacheEntry.surfaceSignature;
 		actor.bakedSurfaceSignature = cacheEntry.bakedSurfaceSignature;
 		actor.materialSignature = cacheEntry.materialSignature;
@@ -5160,6 +5206,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			auto meshResourceIt = actor.meshResourceKey != 0 ? meshVariantResources.find(actor.meshResourceKey) : meshVariantResources.end();
 			std::array<float, 12> expectedInstanceTransform = {};
 			CopyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, expectedInstanceTransform);
+			const uint64_t expectedGeometrySignature = ResolvePersistentVoxelCacheEntryGeometrySignature(cacheEntry);
 			if (meshResourceIt != meshVariantResources.end())
 			{
 				FillPersistentVoxelActorInstanceTransform(cacheEntry, meshResourceIt->second, expectedInstanceTransform);
@@ -5174,7 +5221,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			const bool actorVisibilityChunkNeedsUpdate = actor.visibilityChunkIndex != expectedVisibilityChunkIndex;
 			const bool actorNeedsUpdate =
 				actor.signature != cacheEntry.signature ||
-				actor.geometrySignature != cacheEntry.geometrySignature ||
+				actor.geometrySignature != expectedGeometrySignature ||
 				actor.surfaceSignature != cacheEntry.surfaceSignature ||
 				actor.bakedSurfaceSignature != cacheEntry.bakedSurfaceSignature ||
 				actor.materialSignature != cacheEntry.materialSignature ||
@@ -5188,7 +5235,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 					!actorGeometryNeedsUpdate &&
 					(actorInstanceTransformNeedsUpdate || actorVisibilityChunkNeedsUpdate) &&
 					actor.signature == cacheEntry.signature &&
-					actor.geometrySignature == cacheEntry.geometrySignature &&
+					actor.geometrySignature == expectedGeometrySignature &&
 					actor.materialSignature == cacheEntry.materialSignature &&
 					actor.meshKeyHash == cacheEntry.meshKeyHash &&
 					actor.materialKeyHash == cacheEntry.materialKeyHash &&
@@ -5787,7 +5834,7 @@ bool NRIPersistentVoxelResidency::WarmSharedBlasForLoading(
 	}
 	for (const nri_scene::PrecachedVoxelVariantView& variant : variants)
 	{
-		warmSharedMesh(variant.meshKeyHash, variant.geometrySignature != 0 ? variant.geometrySignature : variant.meshVariantHash);
+		warmSharedMesh(BuildPersistentVoxelVariantMeshResourceKey(variant), ResolvePersistentVoxelVariantGeometrySignature(variant));
 	}
 
 	if (voxelStatsEnabled || loadingTraceLevel >= 1)
@@ -6005,6 +6052,7 @@ void NRIPersistentVoxelResidency::ReconcileResidency(
 	uint64_t buildSerial,
 	const char* levelName,
 	uint32_t frameIndex,
+	const NRIPersistentVoxelSettings& settings,
 	int loadingTraceLevel,
 	const NRIPersistentVoxelResetServices& services)
 {
@@ -6091,7 +6139,7 @@ void NRIPersistentVoxelResidency::ReconcileResidency(
 	for (const nri_scene::PrecachedVoxelVariantView& variant : variants)
 	{
 		addDesired(
-			variant.meshKeyHash,
+			BuildPersistentVoxelVariantMeshResourceKey(variant),
 			variant.materialKeyHash,
 			variant.sourceBits,
 			variant.priority,
@@ -6109,7 +6157,7 @@ void NRIPersistentVoxelResidency::ReconcileResidency(
 	for (const nri_scene::PersistentVoxelCacheEntryView& cacheEntry : cacheEntries)
 	{
 		addDesired(
-			cacheEntry.meshKeyHash,
+			BuildPersistentVoxelMeshResourceKey(cacheEntry, settings),
 			cacheEntry.materialKeyHash,
 			0,
 			0,
@@ -6444,7 +6492,8 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 	bool voxelStatsEnabled,
 	const NRIPersistentVoxelResetServices& services)
 {
-	if (variant.surface == nullptr || variant.meshKeyHash == 0 || variant.materialKeyHash == 0)
+	const uint64_t meshResourceKey = BuildPersistentVoxelVariantMeshResourceKey(variant);
+	if (variant.surface == nullptr || variant.meshKeyHash == 0 || meshResourceKey == 0 || variant.materialKeyHash == 0)
 	{
 		return false;
 	}
@@ -6455,7 +6504,7 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 		loadingTraceLevel >= 1 || voxelStatsEnabled,
 		services);
 
-	const uint64_t pairKey = nri_scene::HashCombine64(variant.meshKeyHash, variant.materialKeyHash);
+	const uint64_t pairKey = nri_scene::HashCombine64(meshResourceKey, variant.materialKeyHash);
 	const uint64_t estimatedBytes =
 		(uint64_t)variant.surface->vertices.size() * (uint64_t)sizeof(nri_scene::SceneVertex) +
 		(uint64_t)variant.surface->indices.size() * (uint64_t)sizeof(uint32_t) +
@@ -6500,7 +6549,8 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 		const int32_t oldPriority = entry.priority;
 		const bool oldForce = entry.gpuForce;
 		const bool wasReady = entry.state == PersistentVoxelAdmissionState::Ready;
-		const PersistentVoxelReadinessStatus readiness = GetSharedVariantReadiness(entry.variant.meshKeyHash, entry.variant.materialKeyHash);
+		const uint64_t entryMeshResourceKey = BuildPersistentVoxelVariantMeshResourceKey(entry.variant);
+		const PersistentVoxelReadinessStatus readiness = GetSharedVariantReadiness(entryMeshResourceKey, entry.variant.materialKeyHash);
 		const bool resourcesReady = readiness.ready;
 		if (!resourcesReady && entry.variant.primitiveCount > maxBlasPrimitives)
 		{
@@ -6555,7 +6605,7 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 		return true;
 	}
 
-	const PersistentVoxelReadinessStatus readiness = GetSharedVariantReadiness(variant.meshKeyHash, variant.materialKeyHash);
+	const PersistentVoxelReadinessStatus readiness = GetSharedVariantReadiness(meshResourceKey, variant.materialKeyHash);
 	const bool resourcesReady = readiness.ready;
 	if (!resourcesReady && variant.primitiveCount > maxBlasPrimitives)
 	{
@@ -6585,7 +6635,7 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 			"dedupe-ready",
 			sourceLabel,
 			&admissionQueue[pairKey],
-			variant.meshKeyHash,
+			meshResourceKey,
 			variant.materialKeyHash,
 			readiness,
 			loadingTraceLevel >= 2 || voxelStatsEnabled);
@@ -6861,6 +6911,7 @@ bool NRIPersistentVoxelResidency::PreloadResources(
 		buildSerial,
 		levelName,
 		frameIndex,
+		settings,
 		loadingTraceLevel,
 		resetServices);
 
@@ -7110,7 +7161,7 @@ void NRIPersistentVoxelResidency::CountAdmissionWork(uint32_t& requiredPending, 
 		}
 
 		const bool required = IsRequiredAdmission(entry);
-		const bool ready = IsSharedVariantReady(entry.variant.meshKeyHash, entry.variant.materialKeyHash);
+		const bool ready = IsSharedVariantReady(BuildPersistentVoxelVariantMeshResourceKey(entry.variant), entry.variant.materialKeyHash);
 		if (ready)
 		{
 			if (required)
