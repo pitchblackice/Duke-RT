@@ -2414,6 +2414,12 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		sceneInstanceUsesFrameSlot ? sceneDataFrameSlot->sceneInstanceBuffer : renderer.mSceneInstanceBuffer;
 	SceneBufferDebugStats& sceneInstanceStats =
 		sceneInstanceUsesFrameSlot ? sceneDataFrameSlot->sceneInstanceStats : renderer.mSceneInstanceBufferStats;
+	if (sceneInstanceUsesFrameSlot && (sceneInstanceBuffer.buffer != nullptr || sceneInstanceBuffer.shaderView != nullptr))
+	{
+		// Scene-instance records are keyed by TLAS instance IDs. Keep each recorded frame's records immutable
+		// until the GPU can no longer be reading the descriptor set that referenced them.
+		renderer.RetireResidentBufferResource(sceneInstanceBuffer);
+	}
 	if (!ensureSceneDataBatched(
 		sceneInstanceBuffer,
 		sceneInstanceStats,
