@@ -1927,6 +1927,10 @@ void NRIRenderer::Shutdown()
 	mSamplerSet = nullptr;
 	mSceneTextureSets.clear();
 	mSceneDataSets.clear();
+	mSceneDataSnapshots.clear();
+	mActiveSceneDataSet = nullptr;
+	mActiveSceneDataSetFrameIndex = UINT64_MAX;
+	mSceneDataSnapshotCursor = 0;
 	mFrameTextureSet = nullptr;
 	mOutputSet = nullptr;
 	mCompositionFrameTextureSet = nullptr;

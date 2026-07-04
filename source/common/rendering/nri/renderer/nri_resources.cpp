@@ -241,6 +241,15 @@ void NRIRenderer::DestroySceneBuffers()
 		DestroyBufferResource(slot.sectorLightBuffer);
 	}
 	mSceneDataFrameRing.clear();
+	for (SceneDataDescriptorSnapshot& snapshot : mSceneDataSnapshots)
+	{
+		DestroyBufferResource(snapshot.sceneInstanceBuffer);
+		snapshot = {};
+	}
+	mSceneDataSnapshots.clear();
+	mActiveSceneDataSet = nullptr;
+	mActiveSceneDataSetFrameIndex = UINT64_MAX;
+	mSceneDataSnapshotCursor = 0;
 	mSceneDataFrameRingHighWaterBytes = 0;
 	mSceneDataFrameRingFallbackCount = 0;
 	mSceneDataFrameRingOverCapCount = 0;

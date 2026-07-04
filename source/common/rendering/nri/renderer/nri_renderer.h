@@ -2131,6 +2131,19 @@ private:
 		std::vector<NRIAccelerationStructureResource> retiredAccelerationStructures;
 	};
 
+	struct SceneDataDescriptorSnapshot
+	{
+		nri::DescriptorSet* sceneDataSet = nullptr;
+		NRIBufferResource sceneInstanceBuffer;
+		SceneBufferDebugStats sceneInstanceStats = { "SceneDataSnapshotSceneInstance" };
+		uint64_t retireFenceValue = 0;
+		uint64_t frameIndex = UINT64_MAX;
+		uint64_t sceneInstanceHash = 0;
+		uint64_t tlasInstanceHash = 0;
+		uint32_t sceneInstanceCount = 0;
+		uint32_t tlasInstanceCount = 0;
+	};
+
 	using RuntimeMutationResidentUploadRange = ::RuntimeMutationResidentUploadRange;
 	using RuntimeMapMutationFrameState = ::RuntimeMapMutationFrameState;
 
@@ -2370,6 +2383,7 @@ private:
 	void RetireResidentBufferResource(NRIBufferResource& resource);
 	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
 	void RetireTopLevelAccelerationStructure(NRIAccelerationStructureResource& resource);
+	bool IsFrameFenceValueComplete(uint64_t fenceValue) const;
 	bool UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors, const char* reason = nullptr);
 	bool EnsureAutoExposureResources(const NRIAutoExposureSettings& settings);
 	void DestroyAutoExposureResources();
@@ -2407,6 +2421,10 @@ private:
 	nri::DescriptorSet* mSamplerSet = nullptr;
 	std::vector<nri::DescriptorSet*> mSceneTextureSets;
 	std::vector<nri::DescriptorSet*> mSceneDataSets;
+	std::vector<SceneDataDescriptorSnapshot> mSceneDataSnapshots;
+	nri::DescriptorSet* mActiveSceneDataSet = nullptr;
+	uint64_t mActiveSceneDataSetFrameIndex = UINT64_MAX;
+	uint32_t mSceneDataSnapshotCursor = 0;
 	nri::DescriptorSet* mFrameTextureSet = nullptr;
 	nri::DescriptorSet* mOutputSet = nullptr;
 	nri::DescriptorSet* mCompositionFrameTextureSet = nullptr;

@@ -2200,6 +2200,19 @@ void NRIRenderer::RetireTopLevelAccelerationStructure(NRIAccelerationStructureRe
 	RetireResidentAccelerationStructure(resource);
 }
 
+bool NRIRenderer::IsFrameFenceValueComplete(uint64_t fenceValue) const
+{
+	if (fenceValue == 0)
+	{
+		return true;
+	}
+	if (mFrameBuffer == nullptr || mFrameBuffer->mFrameFence == nullptr)
+	{
+		return false;
+	}
+	return mFrameBuffer->mCore.GetFenceValue(*mFrameBuffer->mFrameFence) >= fenceValue;
+}
+
 bool NRIRenderer::EnsureResidentStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind)
 {
 	const uint64_t requiredSize = std::max<uint64_t>(size, stride);
@@ -2300,11 +2313,36 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 	ScopedPtPerfTimer perfTimer(renderer.mLastPerfShellTraceStats.sceneDataSetMs);
 	renderer.mLastPerfShellTraceStats.sceneDataSetCalls++;
 	renderer.SetCurrentSceneDataDescriptorsInitialized(false);
+	renderer.mActiveSceneDataSet = nullptr;
+	renderer.mActiveSceneDataSetFrameIndex = UINT64_MAX;
 	bool waitedForWrites = false;
 	const char* sceneDataReason = reason != nullptr ? reason : "scene_data_full_rebuild";
 	const auto ensureSceneDataBatched = [&](NRIBufferResource& resource, SceneBufferDebugStats& stats, const char* bufferLabel, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, double& uploadMs, uint64_t& requestedBytes, uint64_t& uploadedBytes, bool writesQuiesced) -> bool
 	{
 		return EnsureSceneDataBatched(renderer, waitedForWrites, sceneDataReason, resource, stats, bufferLabel, data, size, stride, usage, after, uploadMs, requestedBytes, uploadedBytes, writesQuiesced);
+	};
+	const auto acquireSceneDataDescriptorSnapshot = [&]() -> NRIRenderer::SceneDataDescriptorSnapshot*
+	{
+		if (renderer.mSceneDataSnapshots.empty() || renderer.mFrameBuffer == nullptr)
+		{
+			return nullptr;
+		}
+
+		const uint32_t snapshotIndex = renderer.mSceneDataSnapshotCursor++ % (uint32_t)renderer.mSceneDataSnapshots.size();
+		NRIRenderer::SceneDataDescriptorSnapshot& snapshot = renderer.mSceneDataSnapshots[snapshotIndex];
+		if (snapshot.sceneDataSet == nullptr)
+		{
+			return nullptr;
+		}
+
+		if (!renderer.IsFrameFenceValueComplete(snapshot.retireFenceValue))
+		{
+			renderer.WaitForCommandsTracked("scene_data_snapshot_reuse");
+		}
+
+		snapshot.frameIndex = renderer.mFrameIndex;
+		snapshot.retireFenceValue = renderer.mFrameIndex + 1u;
+		return &snapshot;
 	};
 
 	if (sceneInstances.empty())
@@ -2330,12 +2368,10 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 	const uint64_t sceneInstanceHash = HashSceneDataPayload(sceneInstances.data(), sceneInstanceSize, sceneInstances.size());
 	const uint64_t tlasInstanceHash = renderer.mLastWorldTlasInstancePayloadHash;
 	const uint32_t tlasInstanceCount = renderer.mLastWorldTlasInstanceCount;
-	const bool sceneInstanceFrameSlotOwnershipEnabled = false;
 	const bool sceneInstancesMatchLastWorldTlas =
 		renderer.mLastWorldTlasSceneInstancePayloadHash != 0 &&
 		renderer.mLastWorldTlasSceneInstancePayloadHash == sceneInstanceHash;
 	const bool sceneInstanceCanUseFrameSlot =
-		sceneInstanceFrameSlotOwnershipEnabled &&
 		renderer.mLastWorldTlasInstanceFrameIndex == renderer.mFrameIndex &&
 		tlasInstanceCount != 0 &&
 		tlasInstanceCount == (uint32_t)sceneInstances.size() &&
@@ -2368,7 +2404,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 				reprojectionSize,
 				visibleChunkSize,
 				visibleFlatPlaneSize,
-				sceneInstanceCanUseFrameSlot ? sceneInstanceSize : 0u,
+				0u,
 				estimatedRuntimeLightSize,
 				estimatedRuntimeLightTileHeaderSize,
 				estimatedRuntimeLightTileIndexSize,
@@ -2388,7 +2424,16 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		}
 	}
 	renderer.NoteSceneDataFrameRingTelemetry(sceneDataFrameSlot, useSceneDataFrameRing, sceneDataFrameRingFallback, sceneDataFrameRingOverCap);
-	const bool sceneInstanceUsesFrameSlot = sceneDataFrameSlot != nullptr && sceneInstanceCanUseFrameSlot;
+	NRIRenderer::SceneDataDescriptorSnapshot* sceneDataSnapshot =
+		sceneDataFrameSlot != nullptr && sceneInstanceCanUseFrameSlot ?
+		acquireSceneDataDescriptorSnapshot() :
+		nullptr;
+	const bool sceneInstanceUsesFrameSlot = sceneDataSnapshot != nullptr;
+	if (sceneInstanceUsesFrameSlot)
+	{
+		renderer.mActiveSceneDataSet = sceneDataSnapshot->sceneDataSet;
+		renderer.mActiveSceneDataSetFrameIndex = renderer.mFrameIndex;
+	}
 
 	{
 		ScopedPtPerfTimer reprojectionTimer(renderer.mLastPerfShellTraceStats.sceneDataSetReprojectionMs);
@@ -2417,15 +2462,9 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 	renderer.mBoundRuntimeLightCount = 0;
 
 	NRIBufferResource& sceneInstanceBuffer =
-		sceneInstanceUsesFrameSlot ? sceneDataFrameSlot->sceneInstanceBuffer : renderer.mSceneInstanceBuffer;
+		sceneInstanceUsesFrameSlot ? sceneDataSnapshot->sceneInstanceBuffer : renderer.mSceneInstanceBuffer;
 	SceneBufferDebugStats& sceneInstanceStats =
-		sceneInstanceUsesFrameSlot ? sceneDataFrameSlot->sceneInstanceStats : renderer.mSceneInstanceBufferStats;
-	if (sceneInstanceUsesFrameSlot && (sceneInstanceBuffer.buffer != nullptr || sceneInstanceBuffer.shaderView != nullptr))
-	{
-		// Scene-instance records are keyed by TLAS instance IDs. Keep each recorded frame's records immutable
-		// until the GPU can no longer be reading the descriptor set that referenced them.
-		renderer.RetireResidentBufferResource(sceneInstanceBuffer);
-	}
+		sceneInstanceUsesFrameSlot ? sceneDataSnapshot->sceneInstanceStats : renderer.mSceneInstanceBufferStats;
 	const bool sceneInstanceNeedsUpload =
 		sceneInstanceUsesFrameSlot ||
 		!renderer.mSceneInstancePayloadCacheValid ||
@@ -2456,6 +2495,13 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 			renderer.mSceneInstancePayloadCacheValid = true;
 			renderer.mSceneInstancePayloadHash = sceneInstanceHash;
 			renderer.mSceneInstancePayloadCount = (uint32_t)sceneInstances.size();
+		}
+		else
+		{
+			sceneDataSnapshot->sceneInstanceHash = sceneInstanceHash;
+			sceneDataSnapshot->tlasInstanceHash = tlasInstanceHash;
+			sceneDataSnapshot->sceneInstanceCount = (uint32_t)sceneInstances.size();
+			sceneDataSnapshot->tlasInstanceCount = tlasInstanceCount;
 		}
 	}
 	renderer.mBoundSceneInstances = sceneInstances;
@@ -2811,7 +2857,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 	const NRIBufferResource& sectorLightDescriptorBuffer =
 		sceneDataFrameSlot != nullptr ? sceneDataFrameSlot->sectorLightBuffer : renderer.mSectorLightBuffer;
 	const NRIBufferResource& sceneInstanceDescriptorBuffer =
-		sceneInstanceUsesFrameSlot ? sceneDataFrameSlot->sceneInstanceBuffer : renderer.mSceneInstanceBuffer;
+		sceneInstanceUsesFrameSlot ? sceneDataSnapshot->sceneInstanceBuffer : renderer.mSceneInstanceBuffer;
 	{
 		ScopedPtPerfTimer descriptorBuildTimer(renderer.mLastPerfShellTraceStats.sceneDataSetDescriptorBuildMs);
 		renderer.mSceneDataDescriptors.fill(nullptr);

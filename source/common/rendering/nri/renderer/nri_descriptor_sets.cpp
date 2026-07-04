@@ -73,6 +73,12 @@ bool NRIDescriptorSetManager::AllocateDescriptorSets(NRIRenderer& renderer)
 	renderer.mSceneTextureSets.assign(queuedFrameCount, nullptr);
 	renderer.mSceneDataSets.assign(queuedFrameCount, nullptr);
 	renderer.mSceneDataDescriptorsInitialized.assign(queuedFrameCount, 0u);
+	const uint32_t sceneDataSnapshotCount = std::max(8u, queuedFrameCount * 4u);
+	renderer.mSceneDataSnapshots.clear();
+	renderer.mSceneDataSnapshots.resize(sceneDataSnapshotCount);
+	renderer.mActiveSceneDataSet = nullptr;
+	renderer.mActiveSceneDataSetFrameIndex = UINT64_MAX;
+	renderer.mSceneDataSnapshotCursor = 0;
 
 	auto allocateSets = [&](nri::PipelineLayout* layout, uint32_t setIndex, auto& sets) -> bool
 	{
@@ -87,10 +93,21 @@ bool NRIDescriptorSetManager::AllocateDescriptorSets(NRIRenderer& renderer)
 		return true;
 	};
 
+	bool sceneDataSnapshotsAllocated = true;
+	for (NRIRenderer::SceneDataDescriptorSnapshot& snapshot : renderer.mSceneDataSnapshots)
+	{
+		if (renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mPipelineLayout, 2, &snapshot.sceneDataSet, 1, 0) != nri::Result::SUCCESS)
+		{
+			sceneDataSnapshotsAllocated = false;
+			break;
+		}
+	}
+
 	return
 		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mPipelineLayout, 0, &renderer.mSamplerSet, 1, 0) == nri::Result::SUCCESS &&
 		allocateSets(renderer.mPipelineLayout, 1, renderer.mSceneTextureSets) &&
 		allocateSets(renderer.mPipelineLayout, 2, renderer.mSceneDataSets) &&
+		sceneDataSnapshotsAllocated &&
 		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mPipelineLayout, 3, &renderer.mFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
 		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mPipelineLayout, 4, &renderer.mOutputSet, 1, 0) == nri::Result::SUCCESS &&
 		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mPipelineLayout, 3, &renderer.mCompositionFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
@@ -238,6 +255,11 @@ nri::DescriptorSet* NRIDescriptorSetManager::GetCurrentSceneTextureSet(const NRI
 
 nri::DescriptorSet* NRIDescriptorSetManager::GetCurrentSceneDataSet(const NRIRenderer& renderer)
 {
+	if (renderer.mActiveSceneDataSet != nullptr && renderer.mActiveSceneDataSetFrameIndex == renderer.mFrameIndex)
+	{
+		return renderer.mActiveSceneDataSet;
+	}
+
 	const uint32_t queuedFrameIndex = renderer.GetCurrentQueuedFrameIndex();
 	return queuedFrameIndex < renderer.mSceneDataSets.size() ? renderer.mSceneDataSets[queuedFrameIndex] : nullptr;
 }
