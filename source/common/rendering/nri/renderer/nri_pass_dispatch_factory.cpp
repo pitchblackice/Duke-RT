@@ -281,7 +281,7 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext()
 	std::copy(mGroundColor, mGroundColor + 3, init.frame.groundColor.begin());
 	init.frame.guiCaptureActive = mGuiCaptureActive;
 	init.frame.resetHistory = mResetHistory;
-	init.sceneStats.sceneInstanceCount = mSceneInstanceBuffer.stride != 0 ? (uint32_t)(mSceneInstanceBuffer.usedSize / mSceneInstanceBuffer.stride) : 0u;
+	init.sceneStats.sceneInstanceCount = (uint32_t)mBoundSceneInstances.size();
 	init.sceneStats.staticPrimitiveCount = mBoundStaticPrimitiveCount;
 	init.sceneStats.dynamicPrimitiveCount = mBoundDynamicPrimitiveCount;
 	init.sceneStats.staticMaterialCount = mBoundStaticMaterialCount;
