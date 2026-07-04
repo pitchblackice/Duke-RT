@@ -4576,12 +4576,13 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 
 			if (!IsSharedVariantReady(baseMeshResourceKey, cacheEntry.materialKeyHash))
 			{
+				const bool admissionTransformKeyed = IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry, settings);
 				nri_scene::PrecachedVoxelVariantView admissionVariant = {};
-				admissionVariant.meshKeyHash = cacheEntry.meshKeyHash;
+				admissionVariant.meshKeyHash = admissionTransformKeyed ? baseMeshResourceKey : cacheEntry.meshKeyHash;
 				admissionVariant.materialKeyHash = cacheEntry.materialKeyHash;
 				admissionVariant.geometrySignature = cacheEntry.geometrySignature;
-				admissionVariant.geometryContentHash = cacheEntry.geometryContentHash;
-				admissionVariant.renderPrimitiveHash = cacheEntry.renderPrimitiveHash;
+				admissionVariant.geometryContentHash = admissionTransformKeyed ? 0ull : cacheEntry.geometryContentHash;
+				admissionVariant.renderPrimitiveHash = admissionTransformKeyed ? 0ull : cacheEntry.renderPrimitiveHash;
 				admissionVariant.meshVariantHash = cacheEntry.meshVariantHash;
 				admissionVariant.materialVariantHash = cacheEntry.materialVariantHash;
 				admissionVariant.sourcePicnum = cacheEntry.sourcePicnum;
