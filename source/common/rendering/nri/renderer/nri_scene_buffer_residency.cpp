@@ -130,16 +130,17 @@ bool NRISceneUploadManager::EnsureStructuredBuffer(
 		const bool isSceneBufferUpload =
 			waitReason != nullptr &&
 			std::strcmp(waitReason, "scene_buffer_upload") == 0;
-		const uint64_t oldSize = resource.size;
+		NRIBufferResource oldResource = resource;
+		const uint64_t oldSize = oldResource.size;
 		const uint64_t grownSize =
 			isSceneBufferUpload ?
-			GetNRISceneUploadGrownBufferSize(resource.size, requiredSize, stride) :
-			GetNRIGrownBufferSize(resource.size, requiredSize, stride);
-		if (!writesQuiesced && (resource.buffer != nullptr || resource.shaderView != nullptr))
+			GetNRISceneUploadGrownBufferSize(oldResource.size, requiredSize, stride) :
+			GetNRIGrownBufferSize(oldResource.size, requiredSize, stride);
+		if (!writesQuiesced && (oldResource.buffer != nullptr || oldResource.shaderView != nullptr))
 		{
 			resourceServices.WaitForCommands(waitReason);
 		}
-		resourceServices.DestroyBufferResource(resource);
+		resource = {};
 
 		nri::BufferDesc desc = {};
 		desc.size = std::max<uint64_t>(grownSize, stride);
@@ -148,6 +149,7 @@ bool NRISceneUploadManager::EnsureStructuredBuffer(
 
 		if (resourceContext.core->CreateCommittedBuffer(*resourceContext.device, nri::MemoryLocation::DEVICE_UPLOAD, 0.0f, desc, resource.buffer) != nri::Result::SUCCESS)
 		{
+			resource = oldResource;
 			return false;
 		}
 
@@ -167,6 +169,8 @@ bool NRISceneUploadManager::EnsureStructuredBuffer(
 		viewDesc.structureStride = stride;
 		if (resourceContext.core->CreateBufferView(viewDesc, resource.shaderView) != nri::Result::SUCCESS)
 		{
+			resourceServices.DestroyBufferResource(resource);
+			resource = oldResource;
 			return false;
 		}
 
@@ -175,6 +179,17 @@ bool NRISceneUploadManager::EnsureStructuredBuffer(
 		stats.growthOldBytesLastFrame = oldSize;
 		stats.growthRequestedBytesLastFrame = requiredSize;
 		stats.growthAllocatedBytesLastFrame = desc.size;
+		if (oldResource.buffer != nullptr || oldResource.shaderView != nullptr)
+		{
+			if (writesQuiesced)
+			{
+				renderer.RetireResidentBufferResource(oldResource);
+			}
+			else
+			{
+				resourceServices.DestroyBufferResource(oldResource);
+			}
+		}
 	}
 	else
 	{
