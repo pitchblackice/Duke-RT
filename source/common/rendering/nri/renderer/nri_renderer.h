@@ -14,6 +14,7 @@
 #include "nri_resources.h"
 #include "nri_runtime_mutation.h"
 #include "nri_runtime_space_link_state.h"
+#include "nri_scene_data_frame_ring.h"
 #include "nri_scene_frame_geometry.h"
 #include "nri_scene_textures.h"
 #include "nri_sky_environment.h"
@@ -807,6 +808,17 @@ public:
 		double sceneDataSetDescriptorValidateMs = 0.0;
 		double sceneDataSetDescriptorUpdateMs = 0.0;
 		double sceneDataSetDescriptorHashMs = 0.0;
+		uint32_t sceneDataSetFrameSlot = 0;
+		uint32_t sceneDataSetFrameSlotCount = 0;
+		uint32_t sceneDataSetFrameSlotEnabled = 0;
+		uint32_t sceneDataSetFrameSlotFallbacks = 0;
+		uint32_t sceneDataSetFrameSlotOverCap = 0;
+		uint32_t sceneDataSetFrameSlotWaits = 0;
+		uint32_t sceneDataSetFrameSlotGrows = 0;
+		uint64_t sceneDataSetFrameSlotUsedBytes = 0;
+		uint64_t sceneDataSetFrameSlotCapacityBytes = 0;
+		uint64_t sceneDataSetFrameRingCapacityBytes = 0;
+		uint64_t sceneDataSetFrameRingHighWaterBytes = 0;
 		uint32_t sceneDataSetWaitCount = 0;
 		uint32_t sceneDataSetDescriptorUpdateCount = 0;
 		uint32_t sceneDataSetDescriptorNullCount = 0;
@@ -2114,6 +2126,7 @@ private:
 	using StaticMapSceneResources = ::StaticMapSceneResources;
 
 	using SceneUploadBufferRingSlot = ::SceneUploadBufferRingSlot;
+	using SceneDataFrameSlot = ::NRISceneDataFrameSlot;
 
 	enum SceneDataBufferMask : uint32_t
 	{
@@ -2214,6 +2227,11 @@ private:
 	uint32_t GetCurrentQueuedFrameIndex() const;
 	SceneUploadBufferRingSlot& GetCurrentSceneUploadBufferRingSlot();
 	const SceneUploadBufferRingSlot* GetCurrentSceneUploadBufferRingSlot() const;
+	SceneDataFrameSlot& GetCurrentSceneDataFrameSlot();
+	const SceneDataFrameSlot* GetCurrentSceneDataFrameSlot() const;
+	bool ShouldUseSceneDataFrameRing() const;
+	uint64_t GetSceneDataFrameRingCapacityBytes() const;
+	void NoteSceneDataFrameRingTelemetry(const SceneDataFrameSlot* slot, bool enabled, bool fallback, bool overCap);
 	NRIBufferResource& GetCurrentDynamicVertexBuffer();
 	NRIBufferResource& GetCurrentDynamicIndexBuffer();
 	NRIBufferResource& GetCurrentDynamicPrimitiveBuffer();
@@ -2445,6 +2463,13 @@ private:
 	std::vector<nri::TopLevelInstance> mSelectCapturedTopLevelInstanceScratch;
 	std::vector<SceneInstanceData> mSelectCapturedSceneInstanceScratch;
 	std::vector<SceneUploadBufferRingSlot> mSceneUploadBufferRing;
+	std::vector<SceneDataFrameSlot> mSceneDataFrameRing;
+	uint64_t mSceneDataFrameRingHighWaterBytes = 0;
+	uint32_t mSceneDataFrameRingFallbackCount = 0;
+	uint32_t mSceneDataFrameRingOverCapCount = 0;
+	uint32_t mSceneDataFrameRingSlotWaitCount = 0;
+	uint32_t mSceneDataFrameRingDisabledFrameIndex = UINT32_MAX;
+	uint32_t mSceneDataFrameRingOverCapFrameIndex = UINT32_MAX;
 	std::vector<SceneUploadDirtyRange> mSceneUploadPrimitiveDirtyRangeScratch;
 	std::vector<SceneUploadDirtyRange> mSceneUploadMaterialDirtyRangeScratch;
 	std::vector<DynamicOverlayBlasAsset> mDynamicOverlayBlasAssets;

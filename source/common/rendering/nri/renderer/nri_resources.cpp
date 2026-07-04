@@ -227,6 +227,21 @@ void NRIRenderer::DestroySceneBuffers()
 		DestroyBufferResource(slot.materialBuffer);
 	}
 	mSceneUploadBufferRing.clear();
+	for (SceneDataFrameSlot& slot : mSceneDataFrameRing)
+	{
+		DestroyBufferResource(slot.reprojectionBuffer);
+		DestroyBufferResource(slot.visibleChunkBuffer);
+		DestroyBufferResource(slot.visibleFlatPlaneBuffer);
+		DestroyBufferResource(slot.sceneInstanceBuffer);
+		DestroyBufferResource(slot.portalBuffer);
+	}
+	mSceneDataFrameRing.clear();
+	mSceneDataFrameRingHighWaterBytes = 0;
+	mSceneDataFrameRingFallbackCount = 0;
+	mSceneDataFrameRingOverCapCount = 0;
+	mSceneDataFrameRingSlotWaitCount = 0;
+	mSceneDataFrameRingDisabledFrameIndex = UINT32_MAX;
+	mSceneDataFrameRingOverCapFrameIndex = UINT32_MAX;
 	DestroyBufferResource(mTlasInstanceBuffer);
 	DestroyBufferResource(mEmissiveTlasInstanceBuffer);
 	DestroyBufferResource(mSceneInstanceBuffer);

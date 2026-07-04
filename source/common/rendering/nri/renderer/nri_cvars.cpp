@@ -190,6 +190,10 @@ namespace
 
 CVAR(Bool, nri_ptsanity, false, 0)
 
+CVAR(Bool, nri_ptscenedataring, false, 0)
+
+CVAR(Bool, nri_ptscenedataringtrace, false, 0)
+
 CVAR(Bool, nri_ptwaitpresent, true, 0)
 
 CVAR(Bool, nri_ptslowdowntrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -284,6 +288,14 @@ CUSTOM_CVAR(Int, nri_ptswapflags, -1, 0)
 // Moved from source/common/rendering/nri/scene/nri_portal_bridge.cpp
 
 CVAR(Int, nri_ptportaldepth, 6, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CUSTOM_CVAR(Int, nri_ptscenedataringmaxbytes, 0, 0)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+}
 
 
 // Moved from source/common/rendering/nri/scene/nri_scene_bridge.cpp

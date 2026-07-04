@@ -4765,7 +4765,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				entry.waitMs);
 		}
 		Printf(
-			"PERF pt scene state detail NRI: frame=%llu scene_data=%.3f wait_check=%.3f wait=%.3f wait_count=%u reprojection=%.3f visible_flat=%.3f visible_chunk=%.3f scene_instance=%.3f scene_instance_requested=%llu scene_instance_uploaded=%llu portal=%.3f portal_requested=%llu portal_uploaded=%llu runtime_light_hash=%.3f runtime_light=%.3f runtime_light_uploads=%u runtime_light_hits=%u runtime_light_requested=%llu runtime_light_uploaded=%llu runtime_light_cluster=%.3f runtime_light_cluster_uploads=%u runtime_light_cluster_hits=%u runtime_light_cluster_requested=%llu runtime_light_cluster_uploaded=%llu emissive=%.3f emissive_uploads=%u emissive_hits=%u emissive_requested=%llu emissive_uploaded=%llu sector_light=%.3f sector_light_uploads=%u sector_light_hits=%u sector_light_requested=%llu sector_light_uploaded=%llu descriptor_build=%.3f descriptor_validate=%.3f descriptor_update=%.3f descriptor_hash=%.3f descriptor_updates=%u descriptor_nulls=%u resource_grow=%u resource_overwrite=%u state_commit=%.3f state_flags=%.3f state_dynamic=%.3f state_geometry=%.3f state_stats=%.3f\n",
+			"PERF pt scene state detail NRI: frame=%llu scene_data=%.3f wait_check=%.3f wait=%.3f wait_count=%u reprojection=%.3f visible_flat=%.3f visible_chunk=%.3f scene_instance=%.3f scene_instance_requested=%llu scene_instance_uploaded=%llu portal=%.3f portal_requested=%llu portal_uploaded=%llu runtime_light_hash=%.3f runtime_light=%.3f runtime_light_uploads=%u runtime_light_hits=%u runtime_light_requested=%llu runtime_light_uploaded=%llu runtime_light_cluster=%.3f runtime_light_cluster_uploads=%u runtime_light_cluster_hits=%u runtime_light_cluster_requested=%llu runtime_light_cluster_uploaded=%llu emissive=%.3f emissive_uploads=%u emissive_hits=%u emissive_requested=%llu emissive_uploaded=%llu sector_light=%.3f sector_light_uploads=%u sector_light_hits=%u sector_light_requested=%llu sector_light_uploaded=%llu descriptor_build=%.3f descriptor_validate=%.3f descriptor_update=%.3f descriptor_hash=%.3f scene_data_slot=%u scene_data_slots=%u scene_data_slot_enabled=%u scene_data_slot_fallbacks=%u scene_data_slot_over_cap=%u scene_data_slot_waits=%u scene_data_slot_grows=%u scene_data_slot_used_bytes=%llu scene_data_slot_capacity_bytes=%llu scene_data_ring_capacity_bytes=%llu scene_data_ring_high_water_bytes=%llu descriptor_updates=%u descriptor_nulls=%u resource_grow=%u resource_overwrite=%u state_commit=%.3f state_flags=%.3f state_dynamic=%.3f state_geometry=%.3f state_stats=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneDataSetMs,
 			shell.sceneDataSetWaitCheckMs,
@@ -4805,6 +4805,17 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneDataSetDescriptorValidateMs,
 			shell.sceneDataSetDescriptorUpdateMs,
 			shell.sceneDataSetDescriptorHashMs,
+			shell.sceneDataSetFrameSlot,
+			shell.sceneDataSetFrameSlotCount,
+			shell.sceneDataSetFrameSlotEnabled,
+			shell.sceneDataSetFrameSlotFallbacks,
+			shell.sceneDataSetFrameSlotOverCap,
+			shell.sceneDataSetFrameSlotWaits,
+			shell.sceneDataSetFrameSlotGrows,
+			(unsigned long long)shell.sceneDataSetFrameSlotUsedBytes,
+			(unsigned long long)shell.sceneDataSetFrameSlotCapacityBytes,
+			(unsigned long long)shell.sceneDataSetFrameRingCapacityBytes,
+			(unsigned long long)shell.sceneDataSetFrameRingHighWaterBytes,
 			shell.sceneDataSetDescriptorUpdateCount,
 			shell.sceneDataSetDescriptorNullCount,
 			shell.sceneDataSetResourceGrowEvents,
