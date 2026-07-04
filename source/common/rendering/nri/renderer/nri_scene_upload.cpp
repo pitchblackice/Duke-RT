@@ -224,16 +224,12 @@ namespace
 		const NRISceneDataFrameSlot& slot,
 		uint64_t reprojectionSize,
 		uint64_t visibleChunkSize,
-		uint64_t visibleFlatPlaneSize,
-		uint64_t sceneInstanceSize,
-		uint64_t portalSize)
+		uint64_t visibleFlatPlaneSize)
 	{
 		return
 			EstimateSceneDataFrameResourceCapacity(slot.reprojectionBuffer, reprojectionSize, (uint32_t)reprojectionSize) +
 			EstimateSceneDataFrameResourceCapacity(slot.visibleChunkBuffer, visibleChunkSize, sizeof(uint32_t)) +
-			EstimateSceneDataFrameResourceCapacity(slot.visibleFlatPlaneBuffer, visibleFlatPlaneSize, sizeof(uint32_t)) +
-			EstimateSceneDataFrameResourceCapacity(slot.sceneInstanceBuffer, sceneInstanceSize, sizeof(SceneInstanceData)) +
-			EstimateSceneDataFrameResourceCapacity(slot.portalBuffer, portalSize, sizeof(ScenePortalData));
+			EstimateSceneDataFrameResourceCapacity(slot.visibleFlatPlaneBuffer, visibleFlatPlaneSize, sizeof(uint32_t));
 	}
 
 	static void NoteSceneDataWaitEvent(
@@ -2301,9 +2297,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 				*sceneDataFrameSlot,
 				reprojectionSize,
 				visibleChunkSize,
-				visibleFlatPlaneSize,
-				sceneInstanceSize,
-				portalSize);
+				visibleFlatPlaneSize);
 			if (currentRingCapacity - currentSlotCapacity + estimatedSlotCapacity > maxRingBytes)
 			{
 				renderer.mSceneDataFrameRingDisabledFrameIndex = renderer.mFrameIndex;
@@ -2345,11 +2339,9 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 
 	renderer.mBoundRuntimeLightCount = 0;
 
-	NRIBufferResource& sceneInstanceBuffer = sceneDataFrameSlot != nullptr ? sceneDataFrameSlot->sceneInstanceBuffer : renderer.mSceneInstanceBuffer;
-	SceneBufferDebugStats& sceneInstanceStats = sceneDataFrameSlot != nullptr ? sceneDataFrameSlot->sceneInstanceStats : renderer.mSceneInstanceBufferStats;
 	if (!ensureStructuredBufferBatched(
-		sceneInstanceBuffer,
-		sceneInstanceStats,
+		renderer.mSceneInstanceBuffer,
+		renderer.mSceneInstanceBufferStats,
 		"scene_instance",
 		sceneInstances.data(),
 		sceneInstanceSize,
@@ -2359,17 +2351,15 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		renderer.mLastPerfShellTraceStats.sceneDataSetSceneInstanceMs,
 		renderer.mLastPerfShellTraceStats.sceneDataSetSceneInstanceRequestedBytes,
 		renderer.mLastPerfShellTraceStats.sceneDataSetSceneInstanceUploadedBytes,
-		sceneDataFrameSlot != nullptr))
+		false))
 	{
 		return false;
 	}
 	renderer.mBoundSceneInstances = sceneInstances;
 
-	NRIBufferResource& portalBuffer = sceneDataFrameSlot != nullptr ? sceneDataFrameSlot->portalBuffer : renderer.mPortalBuffer;
-	SceneBufferDebugStats& portalStats = sceneDataFrameSlot != nullptr ? sceneDataFrameSlot->portalStats : renderer.mPortalBufferStats;
 	if (!ensureStructuredBufferBatched(
-		portalBuffer,
-		portalStats,
+		renderer.mPortalBuffer,
+		renderer.mPortalBufferStats,
 		"portal",
 		scenePortals.data(),
 		portalSize,
@@ -2379,7 +2369,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		renderer.mLastPerfShellTraceStats.sceneDataSetPortalMs,
 		renderer.mLastPerfShellTraceStats.sceneDataSetPortalRequestedBytes,
 		renderer.mLastPerfShellTraceStats.sceneDataSetPortalUploadedBytes,
-		sceneDataFrameSlot != nullptr))
+		false))
 	{
 		return false;
 	}
@@ -2674,11 +2664,6 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		sceneDataFrameSlot != nullptr ? sceneDataFrameSlot->visibleChunkBuffer : renderer.mVisibleChunkBuffer;
 	const NRIBufferResource& visibleFlatPlaneDescriptorBuffer =
 		sceneDataFrameSlot != nullptr ? sceneDataFrameSlot->visibleFlatPlaneBuffer : renderer.mVisibleFlatPlaneBuffer;
-	const NRIBufferResource& sceneInstanceDescriptorBuffer =
-		sceneDataFrameSlot != nullptr ? sceneDataFrameSlot->sceneInstanceBuffer : renderer.mSceneInstanceBuffer;
-	const NRIBufferResource& portalDescriptorBuffer =
-		sceneDataFrameSlot != nullptr ? sceneDataFrameSlot->portalBuffer : renderer.mPortalBuffer;
-
 	{
 		ScopedPtPerfTimer descriptorBuildTimer(renderer.mLastPerfShellTraceStats.sceneDataSetDescriptorBuildMs);
 		renderer.mSceneDataDescriptors.fill(nullptr);
@@ -2690,8 +2675,8 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		renderer.mSceneDataDescriptors[5] = selectView(dynamicIndexBuffer, staticIndexBuffer);
 		renderer.mSceneDataDescriptors[6] = selectView(dynamicPrimitiveBuffer, staticPrimitiveBuffer);
 		renderer.mSceneDataDescriptors[7] = selectView(dynamicMaterialBuffer, staticMaterialBuffer);
-		renderer.mSceneDataDescriptors[8] = sceneInstanceDescriptorBuffer.shaderView;
-		renderer.mSceneDataDescriptors[9] = portalDescriptorBuffer.shaderView;
+		renderer.mSceneDataDescriptors[8] = renderer.mSceneInstanceBuffer.shaderView;
+		renderer.mSceneDataDescriptors[9] = renderer.mPortalBuffer.shaderView;
 		renderer.mSceneDataDescriptors[10] = renderer.mRuntimeLightBuffer.shaderView;
 		renderer.mSceneDataDescriptors[11] = renderer.mRuntimeLightTileHeaderBuffer.shaderView;
 		renderer.mSceneDataDescriptors[12] = renderer.mRuntimeLightTileIndexBuffer.shaderView;
