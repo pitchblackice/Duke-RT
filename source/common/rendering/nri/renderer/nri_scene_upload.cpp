@@ -2330,10 +2330,16 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 	const uint64_t sceneInstanceHash = HashSceneDataPayload(sceneInstances.data(), sceneInstanceSize, sceneInstances.size());
 	const uint64_t tlasInstanceHash = renderer.mLastWorldTlasInstancePayloadHash;
 	const uint32_t tlasInstanceCount = renderer.mLastWorldTlasInstanceCount;
+	const bool sceneInstanceFrameSlotOwnershipEnabled = false;
+	const bool sceneInstancesMatchLastWorldTlas =
+		renderer.mLastWorldTlasSceneInstancePayloadHash != 0 &&
+		renderer.mLastWorldTlasSceneInstancePayloadHash == sceneInstanceHash;
 	const bool sceneInstanceCanUseFrameSlot =
+		sceneInstanceFrameSlotOwnershipEnabled &&
 		renderer.mLastWorldTlasInstanceFrameIndex == renderer.mFrameIndex &&
 		tlasInstanceCount != 0 &&
-		tlasInstanceCount == (uint32_t)sceneInstances.size();
+		tlasInstanceCount == (uint32_t)sceneInstances.size() &&
+		sceneInstancesMatchLastWorldTlas;
 	const uint32_t activeRuntimeLightCount = (uint32_t)renderer.mSceneLights.GetAnalyticLights().activeLights.size();
 	const uint64_t estimatedRuntimeLightSize = (uint64_t)activeRuntimeLightCount * sizeof(NRIRuntimePointLightGpuData);
 	const uint64_t estimatedRuntimeLightTileHeaderSize =
@@ -2420,21 +2426,37 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		// until the GPU can no longer be reading the descriptor set that referenced them.
 		renderer.RetireResidentBufferResource(sceneInstanceBuffer);
 	}
-	if (!ensureSceneDataBatched(
-		sceneInstanceBuffer,
-		sceneInstanceStats,
-		"scene_instance",
-		sceneInstances.data(),
-		sceneInstanceSize,
-		sizeof(SceneInstanceData),
-		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIResourceComputeShaderResourceAccess(),
-		renderer.mLastPerfShellTraceStats.sceneDataSetSceneInstanceMs,
-		renderer.mLastPerfShellTraceStats.sceneDataSetSceneInstanceRequestedBytes,
-		renderer.mLastPerfShellTraceStats.sceneDataSetSceneInstanceUploadedBytes,
-		sceneInstanceUsesFrameSlot))
+	const bool sceneInstanceNeedsUpload =
+		sceneInstanceUsesFrameSlot ||
+		!renderer.mSceneInstancePayloadCacheValid ||
+		renderer.mSceneInstancePayloadHash != sceneInstanceHash ||
+		renderer.mSceneInstancePayloadCount != (uint32_t)sceneInstances.size() ||
+		sceneInstanceBuffer.buffer == nullptr ||
+		sceneInstanceBuffer.shaderView == nullptr;
+	if (sceneInstanceNeedsUpload)
 	{
-		return false;
+		if (!ensureSceneDataBatched(
+			sceneInstanceBuffer,
+			sceneInstanceStats,
+			"scene_instance",
+			sceneInstances.data(),
+			sceneInstanceSize,
+			sizeof(SceneInstanceData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIResourceComputeShaderResourceAccess(),
+			renderer.mLastPerfShellTraceStats.sceneDataSetSceneInstanceMs,
+			renderer.mLastPerfShellTraceStats.sceneDataSetSceneInstanceRequestedBytes,
+			renderer.mLastPerfShellTraceStats.sceneDataSetSceneInstanceUploadedBytes,
+			sceneInstanceUsesFrameSlot))
+		{
+			return false;
+		}
+		if (!sceneInstanceUsesFrameSlot)
+		{
+			renderer.mSceneInstancePayloadCacheValid = true;
+			renderer.mSceneInstancePayloadHash = sceneInstanceHash;
+			renderer.mSceneInstancePayloadCount = (uint32_t)sceneInstances.size();
+		}
 	}
 	renderer.mBoundSceneInstances = sceneInstances;
 

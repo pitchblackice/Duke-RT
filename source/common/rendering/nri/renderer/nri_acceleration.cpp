@@ -6,6 +6,7 @@
 #include "nri_persistent_voxel_services.h"
 #include "nri_scene_upload.h"
 #include "nri_shader_contracts.h"
+#include "nri_upload_hash.h"
 #include "../scene/nri_hash.h"
 #include "../system/nri_renderdevice.h"
 #include "../../hwrenderer/data/hw_clock.h"
@@ -81,6 +82,15 @@ namespace
 			}
 		}
 
+		return hash;
+	}
+
+	uint64_t BuildSceneInstancePayloadHash(const std::vector<SceneInstanceData>& sceneInstances)
+	{
+		const uint64_t size = (uint64_t)sceneInstances.size() * sizeof(SceneInstanceData);
+		uint64_t hash = 1469598103934665603ull;
+		hash = nri_scene::HashCombine64(hash, (uint64_t)sceneInstances.size());
+		hash = nri_scene::HashCombine64(hash, NRIHashUploadPayloadBytes(sceneInstances.empty() ? nullptr : sceneInstances.data(), size));
 		return hash;
 	}
 }
@@ -592,6 +602,7 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 	renderer.mLastPerfShellTraceStats.worldTlasBuildCalls++;
 	renderer.mLastPerfShellTraceStats.worldTlasInstanceCount = (uint32_t)instances.size();
 	renderer.mLastWorldTlasInstancePayloadHash = BuildTlasInstancePayloadHash(instances);
+	renderer.mLastWorldTlasSceneInstancePayloadHash = 0;
 	renderer.mLastWorldTlasInstanceFrameIndex = renderer.mFrameIndex;
 	renderer.mLastWorldTlasInstanceCount = (uint32_t)instances.size();
 	if (instances.empty())
@@ -900,6 +911,20 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask)
 {
 	return NRIAccelerationStructureManager::BuildTopLevel(*this, instances, sceneBufferMask);
+}
+
+bool NRIRenderer::BuildTopLevelAccelerationStructure(
+	const std::vector<nri::TopLevelInstance>& instances,
+	uint32_t sceneBufferMask,
+	const std::vector<SceneInstanceData>& sceneInstances)
+{
+	if (!BuildTopLevelAccelerationStructure(instances, sceneBufferMask))
+	{
+		return false;
+	}
+
+	mLastWorldTlasSceneInstancePayloadHash = BuildSceneInstancePayloadHash(sceneInstances);
+	return true;
 }
 
 bool NRIRenderer::BuildTopLevelAccelerationStructure(

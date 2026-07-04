@@ -2181,6 +2181,10 @@ private:
 	bool BuildTopLevelAccelerationStructure(
 		const std::vector<nri::TopLevelInstance>& instances,
 		uint32_t sceneBufferMask,
+		const std::vector<SceneInstanceData>& sceneInstances);
+	bool BuildTopLevelAccelerationStructure(
+		const std::vector<nri::TopLevelInstance>& instances,
+		uint32_t sceneBufferMask,
 		NRIAccelerationStructureResource& topLevelAS,
 		NRIBufferResource& tlasInstanceBuffer,
 		NRIBufferResource& topLevelScratchBuffer,
@@ -2664,6 +2668,9 @@ private:
 	uint64_t mRuntimeLightClusterPayloadHash = 0;
 	uint64_t mRuntimeLightClusterCameraHash = 0;
 	bool mRuntimeLightSceneDataDirty = false;
+	bool mSceneInstancePayloadCacheValid = false;
+	uint64_t mSceneInstancePayloadHash = 0;
+	uint32_t mSceneInstancePayloadCount = 0;
 	bool mPortalPayloadCacheValid = false;
 	uint64_t mPortalPayloadHash = 0;
 	uint64_t mPortalPayloadBuildSerial = 0;
@@ -2680,6 +2687,7 @@ private:
 	uint32_t mSceneDataSnapshotPortalCount = 0;
 	uint64_t mSceneDataDescriptorGeneration = 0;
 	uint64_t mLastWorldTlasInstancePayloadHash = 0;
+	uint64_t mLastWorldTlasSceneInstancePayloadHash = 0;
 	uint64_t mLastWorldTlasInstanceFrameIndex = UINT64_MAX;
 	uint32_t mLastWorldTlasInstanceCount = 0;
 	uint32_t mBoundEmissivePrimitiveCount = 0;

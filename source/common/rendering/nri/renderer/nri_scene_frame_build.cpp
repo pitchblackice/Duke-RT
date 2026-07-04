@@ -1041,7 +1041,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			if (overlayGeometry.primitives.empty() && !hasPersistentVoxelOverlay)
 			{
 				accelerationReady =
-					BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static) &&
+					BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static, sceneInstances) &&
 					NRISceneUploadManager::UpdateSceneDataSet(*this,
 						mStaticVertexBuffer,
 						mStaticIndexBuffer,
@@ -1297,7 +1297,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 					if (selectedSceneHasDynamicOverlay)
 					{
 						accelerationReady =
-							BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static | SceneDataBufferMask_Dynamic) &&
+							BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static | SceneDataBufferMask_Dynamic, sceneInstances) &&
 							NRISceneUploadManager::UpdateSceneDataSet(*this,
 								mStaticVertexBuffer,
 								mStaticIndexBuffer,
@@ -1317,7 +1317,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 					else
 					{
 						accelerationReady =
-							BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static) &&
+							BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static, sceneInstances) &&
 							NRISceneUploadManager::UpdateSceneDataSet(*this,
 								mStaticVertexBuffer,
 								mStaticIndexBuffer,
@@ -1619,7 +1619,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				auto& instances = mSelectCapturedTopLevelInstanceScratch;
 				instances.clear();
 				instances.push_back(instance);
-				accelerationReady = BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Dynamic);
+				accelerationReady = BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Dynamic, sceneInstances);
 			}
 		}
 		else
