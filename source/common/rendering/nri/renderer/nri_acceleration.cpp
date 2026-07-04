@@ -61,7 +61,7 @@ namespace
 		return bits;
 	}
 
-	uint64_t BuildEmissiveTlasInstancePayloadHash(const std::vector<nri::TopLevelInstance>& instances)
+	uint64_t BuildTlasInstancePayloadHash(const std::vector<nri::TopLevelInstance>& instances)
 	{
 		uint64_t hash = 1469598103934665603ull;
 		hash = nri_scene::HashCombine64(hash, (uint64_t)instances.size());
@@ -470,7 +470,7 @@ bool NRIAccelerationStructureManager::BuildEmissiveTopLevel(NRIRenderer& rendere
 		return true;
 	}
 
-	const uint64_t payloadHash = BuildEmissiveTlasInstancePayloadHash(instances);
+	const uint64_t payloadHash = BuildTlasInstancePayloadHash(instances);
 	if (renderer.mEmissiveTlasInstancePayloadCacheValid &&
 		renderer.mEmissiveTlasInstancePayloadHash == payloadHash &&
 		renderer.mEmissiveTlasInstanceBuffer.buffer != nullptr &&
@@ -591,6 +591,9 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 	ScopedPtPerfTimer perfTimer(renderer.mLastPerfShellTraceStats.worldTlasMs);
 	renderer.mLastPerfShellTraceStats.worldTlasBuildCalls++;
 	renderer.mLastPerfShellTraceStats.worldTlasInstanceCount = (uint32_t)instances.size();
+	renderer.mLastWorldTlasInstancePayloadHash = BuildTlasInstancePayloadHash(instances);
+	renderer.mLastWorldTlasInstanceFrameIndex = renderer.mFrameIndex;
+	renderer.mLastWorldTlasInstanceCount = (uint32_t)instances.size();
 	if (instances.empty())
 	{
 		return false;

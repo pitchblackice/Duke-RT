@@ -19,6 +19,14 @@ struct NRISceneDataFrameSlot
 	SceneBufferDebugStats sceneInstanceStats = { "SceneDataSlotSceneInstance" };
 	SceneBufferDebugStats portalStats = { "SceneDataSlotPortal" };
 
+	uint64_t snapshotGeneration = 0;
+	uint64_t sceneInstanceHash = 0;
+	uint64_t tlasInstanceHash = 0;
+	uint64_t portalHash = 0;
+	uint32_t sceneInstanceCount = 0;
+	uint32_t tlasInstanceCount = 0;
+	uint32_t portalCount = 0;
+
 	uint64_t UsedBytes() const
 	{
 		return

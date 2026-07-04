@@ -158,6 +158,7 @@ bool NRIDescriptorSetManager::CommitSceneDataDescriptors(NRIRenderer& renderer, 
 		renderer.mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
 	}
 	renderer.mLastPerfShellTraceStats.sceneDataSetDescriptorUpdateCount++;
+	renderer.mSceneDataDescriptorGeneration++;
 	SetCurrentSceneDataDescriptorsInitialized(renderer, true);
 	{
 		ScopedDescriptorPerfTimer descriptorHashTimer(renderer.mLastPerfShellTraceStats.sceneDataSetDescriptorHashMs);
