@@ -172,7 +172,7 @@ namespace
 
 	bool IsFullGeneratedReadbackEnabled()
 	{
-		return (bool)nri_ptvoxelcomputevalidatefullreadback && !IsDirectGpuPublicationEnabled();
+		return (bool)nri_ptvoxelcomputevalidatefullreadback;
 	}
 
 	const char* AdmissionStateName(VoxelComputeAdmissionState state)
@@ -791,14 +791,14 @@ bool ShouldEmitNRIVoxelComputeMeshing()
 
 bool ShouldConsumeNRIVoxelComputeMeshing()
 {
-	return IsConsumptionEnabled();
+	return IsConsumptionEnabled() && !(bool)nri_ptvoxelcomputeforcecpu;
 }
 
 NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeGeneratedGeometry(uint64_t requestKey, FVoxelModel* model)
 {
 	constexpr uint32_t MaxConsumptionPrimitives = 8192;
 	VoxelComputeState& state = gVoxelComputeState;
-	if (!IsConsumptionEnabled() || requestKey == 0 || model == nullptr)
+	if (!ShouldConsumeNRIVoxelComputeMeshing() || requestKey == 0 || model == nullptr)
 	{
 		return NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
 	}

@@ -330,6 +330,8 @@ CVAR(Bool, nri_ptvoxelcomputerawarchive, false, 0)
 
 CVAR(Bool, nri_ptvoxelcomputevalidatefullreadback, true, 0)
 
+CVAR(Bool, nri_ptvoxelcomputeforcecpu, false, 0)
+
 CVAR(Int, nri_ptloadingtrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptpreloadmaxsubmitspertick, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

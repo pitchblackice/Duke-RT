@@ -4701,6 +4701,43 @@ namespace
 		return true;
 	}
 
+	bool BuildCanonicalVoxelMeshSurface(const GeometryData& geometry, SurfaceRef& outSurface)
+	{
+		outSurface = {};
+		outSurface.vertices.reserve(geometry.vertices.size());
+		for (const SceneVertex& source : geometry.vertices)
+		{
+			CapturedVertex vertex = {};
+			vertex.position[0] = source.position[0];
+			vertex.position[1] = source.position[1];
+			vertex.position[2] = source.position[2];
+			vertex.prevPosition[0] = source.prevPosition[0];
+			vertex.prevPosition[1] = source.prevPosition[1];
+			vertex.prevPosition[2] = source.prevPosition[2];
+			vertex.uv[0] = source.uv[0];
+			vertex.uv[1] = source.uv[1];
+			outSurface.vertices.push_back(vertex);
+		}
+
+		const uint32_t vertexCount = (uint32_t)geometry.vertices.size();
+		outSurface.indices.reserve(geometry.indices.size());
+		for (size_t i = 0; i + 2u < geometry.indices.size(); i += 3u)
+		{
+			const uint32_t i0 = geometry.indices[i + 0u];
+			const uint32_t i1 = geometry.indices[i + 1u];
+			const uint32_t i2 = geometry.indices[i + 2u];
+			if (i0 >= vertexCount || i1 >= vertexCount || i2 >= vertexCount)
+			{
+				continue;
+			}
+			outSurface.indices.push_back(i0);
+			outSurface.indices.push_back(i1);
+			outSurface.indices.push_back(i2);
+		}
+
+		return !outSurface.indices.empty();
+	}
+
 	bool IsVoxelMeshVariantSurfaceReady(uint64_t meshVariantHash)
 	{
 		auto found = gVoxelMeshVariantSurfaceCache.find(meshVariantHash);
@@ -4719,6 +4756,89 @@ namespace
 			return nullptr;
 		}
 		return &found->second.canonicalSurface;
+	}
+
+	bool TryPromoteVoxelMeshVariantSurfaceFromCompute(
+		const VoxelActorCacheLookup& lookup,
+		FVoxelModel* model,
+		bool& outPending)
+	{
+		outPending = false;
+		if (!ShouldConsumeNRIVoxelComputeMeshing() ||
+			lookup.meshVariantHash == 0 ||
+			model == nullptr ||
+			IsVoxelMeshVariantSurfaceReady(lookup.meshVariantHash))
+		{
+			return false;
+		}
+
+		GeometryData generatedGeometry;
+		uint32_t computeJobId = 0;
+		if (TakeNRIVoxelComputeGeneratedGeometry(lookup.meshVariantHash, generatedGeometry, &computeJobId))
+		{
+			VoxelMeshVariantSurfaceCacheEntry entry = {};
+			entry.meshVariantHash = lookup.meshVariantHash;
+			entry.sourcePicnum = lookup.sourcePicnum;
+			entry.resolvedVoxelIndex = lookup.resolvedVoxelIndex;
+			entry.built = true;
+			entry.valid = BuildCanonicalVoxelMeshSurface(generatedGeometry, entry.canonicalSurface);
+			if (entry.valid)
+			{
+				const VoxelGeometryContentHashes hashes = BuildVoxelGeometryContentHashes(entry.canonicalSurface);
+				entry.geometryContentHash = hashes.geometryContentHash;
+				entry.renderPrimitiveHash = hashes.renderPrimitiveHash;
+				gDynamicCapturePerfStats.voxelCanonicalSurfaceBuilds++;
+				gVoxelMeshVariantSurfaceCache[lookup.meshVariantHash] = std::move(entry);
+				if (ShouldTraceNRIVoxelComputeMeshing())
+				{
+					Printf("PERF pt voxel compute cutover NRI: action=surface-ready source=compute mesh_variant=0x%llx job=%u vertices=%u indices=%u primitives=%u\n",
+						(unsigned long long)lookup.meshVariantHash,
+						computeJobId,
+						(uint32_t)generatedGeometry.vertices.size(),
+						(uint32_t)generatedGeometry.indices.size(),
+						(uint32_t)generatedGeometry.primitives.size());
+				}
+			}
+			else
+			{
+				gDynamicCapturePerfStats.voxelCanonicalSurfaceInvalid++;
+				if (ShouldTraceNRIVoxelComputeMeshing())
+				{
+					Printf("PERF pt voxel compute cutover NRI: action=fallback reason=invalid-surface mesh_variant=0x%llx job=%u vertices=%u indices=%u primitives=%u\n",
+						(unsigned long long)lookup.meshVariantHash,
+						computeJobId,
+						(uint32_t)generatedGeometry.vertices.size(),
+						(uint32_t)generatedGeometry.indices.size(),
+						(uint32_t)generatedGeometry.primitives.size());
+				}
+			}
+			return entry.valid;
+		}
+
+		const NRIVoxelComputeGeneratedGeometryStatus status =
+			RequestNRIVoxelComputeGeneratedGeometry(lookup.meshVariantHash, model);
+		if (status == NRIVoxelComputeGeneratedGeometryStatus::Queued)
+		{
+			outPending = true;
+			if (ShouldTraceNRIVoxelComputeMeshing())
+			{
+				Printf("PERF pt voxel compute cutover NRI: action=defer reason=compute-pending mesh_variant=0x%llx tex=%d voxel=%d\n",
+					(unsigned long long)lookup.meshVariantHash,
+					lookup.sourcePicnum,
+					lookup.resolvedVoxelIndex);
+			}
+			return false;
+		}
+
+		if (ShouldTraceNRIVoxelComputeMeshing())
+		{
+			Printf("PERF pt voxel compute cutover NRI: action=fallback reason=%s mesh_variant=0x%llx tex=%d voxel=%d\n",
+				status == NRIVoxelComputeGeneratedGeometryStatus::Failed ? "compute-failed" : "compute-unavailable",
+				(unsigned long long)lookup.meshVariantHash,
+				lookup.sourcePicnum,
+				lookup.resolvedVoxelIndex);
+		}
+		return false;
 	}
 
 	bool GetReadyVoxelMeshVariantContentHashes(uint64_t meshVariantHash, uint64_t& outGeometryContentHash, uint64_t& outRenderPrimitiveHash)
@@ -4974,6 +5094,43 @@ namespace
 		{
 			gDynamicCapturePerfStats.modelBudgetTruncations++;
 			return deferDesiredVariant(VoxelActorPendingReason::ActorBudget);
+		}
+
+		bool computeSurfacePending = false;
+		if (cacheSurfaceUpdate &&
+			cacheLookup.meshVariantHash != 0 &&
+			TryPromoteVoxelMeshVariantSurfaceFromCompute(cacheLookup, sprite.voxel->model, computeSurfacePending))
+		{
+			if (const SurfaceRef* canonicalSurface = GetReadyVoxelMeshVariantSurface(cacheLookup.meshVariantHash))
+			{
+				const unsigned int previousStores = stats.voxelCacheSurfaceStores;
+				const unsigned int previousRebuilds = stats.voxelCacheSurfaceRebuilds;
+				const unsigned int previousTransformRebakes = stats.voxelCacheTransformRebakes;
+				const bool wasPersistentReady = cacheLookup.entry != nullptr && cacheLookup.entry->persistentReady;
+				SurfaceRef lightSurface = {};
+				lightSurface.material = voxelMaterial;
+				lightSurface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, lightSurface.material.flags);
+				{
+					ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelStoreMs);
+					StoreVoxelActorCacheSurface(cacheLookup, *canonicalSurface, lightSurface, VoxelMeshBakeSpace::LocalSpace, true, stats);
+				}
+				gDynamicCapturePerfStats.voxelCacheStores += stats.voxelCacheSurfaceStores - previousStores;
+				gDynamicCapturePerfStats.voxelCacheRebuilds += stats.voxelCacheSurfaceRebuilds - previousRebuilds;
+				gDynamicCapturePerfStats.voxelCacheRebuilds += stats.voxelCacheTransformRebakes - previousTransformRebakes;
+				const auto storedEntry = gVoxelActorCache.find(cacheLookup.identityKey);
+				if (!wasPersistentReady &&
+					cacheLookup.identityKey != 0 &&
+					storedEntry != gVoxelActorCache.end() &&
+					storedEntry->second.persistentReady)
+				{
+					EmitVoxelActorKeyTrace(sprite, cacheLookup, "compute-variant-promote");
+				}
+				return true;
+			}
+		}
+		if (computeSurfacePending)
+		{
+			return deferDesiredVariant(VoxelActorPendingReason::MeshDeferred);
 		}
 
 		const FVoxelMeshData* mesh = nullptr;
