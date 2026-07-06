@@ -349,12 +349,19 @@ void FVoxelModel::BuildCpuMesh(FVoxelMeshData& outMesh) const
 //
 //===========================================================================
 
-void FVoxelModel::BuildRawMeshStats(FVoxelRawMeshStats& outStats, TArray<FVoxelRawSlabRecord>* outSlabs) const
+void FVoxelModel::BuildRawMeshStats(
+	FVoxelRawMeshStats& outStats,
+	TArray<FVoxelRawSlabRecord>* outSlabs,
+	TArray<FVoxelRawFaceRecord>* outFaces) const
 {
 	outStats = {};
 	if (outSlabs != nullptr)
 	{
 		outSlabs->Clear();
+	}
+	if (outFaces != nullptr)
+	{
+		outFaces->Clear();
 	}
 	if (mVoxel == nullptr)
 	{
@@ -370,11 +377,38 @@ void FVoxelModel::BuildRawMeshStats(FVoxelRawMeshStats& outStats, TArray<FVoxelR
 	outStats.sizeX = (uint32_t)mip->SizeX;
 	outStats.sizeY = (uint32_t)mip->SizeY;
 	outStats.sizeZ = (uint32_t)mip->SizeZ;
+	outStats.pivotX = mip->Pivot.X;
+	outStats.pivotY = mip->Pivot.Y;
+	outStats.pivotZ = mip->Pivot.Z;
 	const uint8_t* slabData = mip->GetSlabData(false);
 	if (slabData == nullptr)
 	{
 		return;
 	}
+
+	const auto pushFace = [&](int x1, int y1, int z1, int x2, int y2, int z2, int x3, int y3, int z3, int x4, int y4, int z4, uint8_t color)
+	{
+		if (outFaces == nullptr)
+		{
+			return;
+		}
+
+		FVoxelRawFaceRecord face = {};
+		face.x[0] = x1;
+		face.y[0] = y1;
+		face.z[0] = z1;
+		face.x[1] = x2;
+		face.y[1] = y2;
+		face.z[1] = z2;
+		face.x[2] = x3;
+		face.y[2] = y3;
+		face.z[2] = z3;
+		face.x[3] = x4;
+		face.y[3] = y4;
+		face.z[3] = z4;
+		face.color = color;
+		outFaces->Push(face);
+	};
 
 	for (int x = 0; x < mip->SizeX; ++x)
 	{
@@ -389,9 +423,15 @@ void FVoxelModel::BuildRawMeshStats(FVoxelRawMeshStats& outStats, TArray<FVoxelR
 			{
 				const uint32_t zleng = (uint32_t)voxptr->zleng;
 				const uint32_t cull = (uint32_t)voxptr->backfacecull;
+				const uint32_t ztop = (uint32_t)voxptr->ztop;
 				if (zleng == 0)
 				{
 					continue;
+				}
+
+				if ((cull & 16u) != 0)
+				{
+					pushFace(x, y, (int)ztop, x + 1, y, (int)ztop, x, y + 1, (int)ztop, x + 1, y + 1, (int)ztop, voxptr->col[0]);
 				}
 
 				uint32_t colorRuns = 0;
@@ -405,8 +445,31 @@ void FVoxelModel::BuildRawMeshStats(FVoxelRawMeshStats& outStats, TArray<FVoxelR
 						++run;
 					}
 					++colorRuns;
+					const int z0 = (int)(ztop + z);
+					const int z1 = (int)(ztop + z + run);
+					if ((cull & 1u) != 0)
+					{
+						pushFace(x, y, z0, x, y + 1, z0, x, y, z1, x, y + 1, z1, col[0]);
+					}
+					if ((cull & 2u) != 0)
+					{
+						pushFace(x + 1, y + 1, z0, x + 1, y, z0, x + 1, y + 1, z1, x + 1, y, z1, col[0]);
+					}
+					if ((cull & 4u) != 0)
+					{
+						pushFace(x + 1, y, z0, x, y, z0, x + 1, y, z1, x, y, z1, col[0]);
+					}
+					if ((cull & 8u) != 0)
+					{
+						pushFace(x, y + 1, z0, x + 1, y + 1, z0, x, y + 1, z1, x + 1, y + 1, z1, col[0]);
+					}
 					z += run;
 					col += run;
+				}
+				if ((cull & 32u) != 0)
+				{
+					const int zz = (int)(ztop + zleng - 1u);
+					pushFace(x + 1, y, zz + 1, x, y, zz + 1, x + 1, y + 1, zz + 1, x, y + 1, zz + 1, voxptr->col[zleng - 1]);
 				}
 
 				const uint32_t topFaces = (cull & 16u) != 0 ? 1u : 0u;

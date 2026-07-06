@@ -1948,6 +1948,7 @@ public:
 		Final,
 		BloomCopy,
 		VoxelComputeCount,
+		VoxelComputeEmit,
 		BloomDownsample,
 		BloomUpsample,
 		BloomComposite,

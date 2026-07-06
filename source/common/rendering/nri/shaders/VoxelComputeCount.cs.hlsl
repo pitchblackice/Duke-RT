@@ -43,12 +43,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	result.VertexCountNoDedupe = faceCount * 4u;
 	result.VoxelCount = voxelCount;
 	result.SlabCount = job.SlabCount;
+	result.PrimitiveCount = faceCount * 2u;
 	result.MismatchMask = 0u;
 	result.MismatchMask |= result.FaceCount == job.ExpectedFaces ? 0u : 1u;
 	result.MismatchMask |= result.IndexCount == job.ExpectedIndices ? 0u : 2u;
 	result.MismatchMask |= result.VertexCountNoDedupe == job.ExpectedVerticesNoDedupe ? 0u : 4u;
 	result.MismatchMask |= result.VoxelCount == job.ExpectedVoxels ? 0u : 8u;
 	result.JobId = job.JobId;
-	result.Status = result.MismatchMask == 0u ? 1u : 2u;
+	result.Status = result.MismatchMask == 0u ? NRI_VOXEL_COMPUTE_STATUS_COUNT_OK : NRI_VOXEL_COMPUTE_STATUS_COUNT_MISMATCH;
+	result.VertexHash = 0u;
+	result.IndexHash = 0u;
+	result.PrimitiveHash = 0u;
 	VoxelComputeResults[jobIndex] = result;
 }

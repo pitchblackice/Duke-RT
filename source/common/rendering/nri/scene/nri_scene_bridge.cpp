@@ -4561,11 +4561,15 @@ namespace
 			{
 				FVoxelRawMeshStats rawStats = {};
 				TArray<FVoxelRawSlabRecord> rawSlabs;
-				model->BuildRawMeshStats(rawStats, ShouldRunNRIVoxelComputeMeshing() ? &rawSlabs : nullptr);
+				TArray<FVoxelRawFaceRecord> rawFaces;
+				model->BuildRawMeshStats(
+					rawStats,
+					ShouldRunNRIVoxelComputeMeshing() ? &rawSlabs : nullptr,
+					ShouldEmitNRIVoxelComputeMeshing() ? &rawFaces : nullptr);
 				if (ShouldTraceNRIVoxelComputeMeshing())
 				{
 					Printf(
-						"PERF pt voxel raw census NRI: model=%p size=%ux%ux%u raw_bytes=%llu slabs=%u voxels=%u faces=%u top=%u bottom=%u side_spans=%u vertices_nodedupe=%u cpu_vertices=%u indices=%u cpu_indices=%u queued_compute=%u\n",
+						"PERF pt voxel raw census NRI: model=%p size=%ux%ux%u raw_bytes=%llu slabs=%u voxels=%u faces=%u face_records=%u top=%u bottom=%u side_spans=%u vertices_nodedupe=%u cpu_vertices=%u indices=%u cpu_indices=%u queued_compute=%u emit_compute=%u\n",
 						(void*)model,
 						rawStats.sizeX,
 						rawStats.sizeY,
@@ -4574,6 +4578,7 @@ namespace
 						rawStats.slabCount,
 						rawStats.voxelCount,
 						rawStats.coalescedFaceCount,
+						(uint32_t)rawFaces.Size(),
 						rawStats.topFaceCount,
 						rawStats.bottomFaceCount,
 						rawStats.sideFaceSpanCount,
@@ -4581,9 +4586,15 @@ namespace
 						(uint32_t)entry.mesh.vertices.Size(),
 						rawStats.indexCount,
 						(uint32_t)entry.mesh.indices.Size(),
-						ShouldRunNRIVoxelComputeMeshing() ? 1u : 0u);
+						ShouldRunNRIVoxelComputeMeshing() ? 1u : 0u,
+						ShouldEmitNRIVoxelComputeMeshing() ? 1u : 0u);
 				}
-				QueueNRIVoxelComputeCountJob(model, rawStats, ShouldRunNRIVoxelComputeMeshing() ? &rawSlabs : nullptr, entry.mesh);
+				QueueNRIVoxelComputeCountJob(
+					model,
+					rawStats,
+					ShouldRunNRIVoxelComputeMeshing() ? &rawSlabs : nullptr,
+					ShouldEmitNRIVoxelComputeMeshing() ? &rawFaces : nullptr,
+					entry.mesh);
 			}
 			entry.built = true;
 			entry.valid = entry.mesh.vertices.Size() > 0 && entry.mesh.indices.Size() >= 3;

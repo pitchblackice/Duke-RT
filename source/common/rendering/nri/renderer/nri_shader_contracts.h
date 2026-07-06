@@ -259,14 +259,20 @@ constexpr uint32_t NRI_VOXEL_COMPUTE_SET_INPUTS = 0;
 constexpr uint32_t NRI_VOXEL_COMPUTE_SET_OUTPUTS = 1;
 constexpr uint32_t NRI_VOXEL_COMPUTE_SET_ROOT = 2;
 constexpr uint32_t NRI_VOXEL_COMPUTE_INPUT_DESCRIPTOR_NUM = 2;
-constexpr uint32_t NRI_VOXEL_COMPUTE_OUTPUT_DESCRIPTOR_NUM = 1;
+constexpr uint32_t NRI_VOXEL_COMPUTE_FACE_DESCRIPTOR_NUM = 1;
+constexpr uint32_t NRI_VOXEL_COMPUTE_RESULT_DESCRIPTOR_NUM = 1;
+constexpr uint32_t NRI_VOXEL_COMPUTE_EMIT_OUTPUT_DESCRIPTOR_NUM = 3;
 constexpr uint32_t NRI_VOXEL_COMPUTE_ROOT_REGISTER = 0;
+constexpr uint32_t NRI_VOXEL_COMPUTE_STATUS_COUNT_OK = 1;
+constexpr uint32_t NRI_VOXEL_COMPUTE_STATUS_COUNT_MISMATCH = 2;
+constexpr uint32_t NRI_VOXEL_COMPUTE_STATUS_EMIT_OK = 3;
+constexpr uint32_t NRI_VOXEL_COMPUTE_STATUS_EMIT_MISMATCH = 4;
 
 struct NRIVoxelComputeConstants
 {
 	uint32_t JobCount = 0;
 	uint32_t SlabRecordCount = 0;
-	uint32_t Reserved0 = 0;
+	uint32_t FaceRecordCount = 0;
 	uint32_t Reserved1 = 0;
 };
 
@@ -274,11 +280,18 @@ struct NRIVoxelComputeJob
 {
 	uint32_t SlabOffset = 0;
 	uint32_t SlabCount = 0;
+	uint32_t FaceOffset = 0;
 	uint32_t ExpectedFaces = 0;
 	uint32_t ExpectedIndices = 0;
 	uint32_t ExpectedVerticesNoDedupe = 0;
 	uint32_t ExpectedVoxels = 0;
 	uint32_t JobId = 0;
+	uint32_t VertexOffset = 0;
+	uint32_t IndexOffset = 0;
+	uint32_t PrimitiveOffset = 0;
+	float PivotX = 0.0f;
+	float PivotY = 0.0f;
+	float PivotZ = 0.0f;
 	uint32_t Reserved0 = 0;
 };
 
@@ -297,12 +310,48 @@ struct NRIVoxelComputeResult
 	uint32_t VertexCountNoDedupe = 0;
 	uint32_t VoxelCount = 0;
 	uint32_t SlabCount = 0;
+	uint32_t PrimitiveCount = 0;
 	uint32_t MismatchMask = 0;
 	uint32_t JobId = 0;
 	uint32_t Status = 0;
+	uint32_t VertexHash = 0;
+	uint32_t IndexHash = 0;
+	uint32_t PrimitiveHash = 0;
+};
+
+struct NRIVoxelComputeFaceRecord
+{
+	int32_t X[4] = {};
+	int32_t Y[4] = {};
+	int32_t Z[4] = {};
+	uint32_t Color = 0;
+	uint32_t MaterialIndex = 0;
+};
+
+struct NRIVoxelComputeSceneVertex
+{
+	float Position[3] = {};
+	float PrevPosition[3] = {};
+	float Uv[2] = {};
+};
+
+struct NRIVoxelComputePrimitiveData
+{
+	uint32_t Indices[3] = {};
+	uint32_t MaterialIndex = 0;
+	float Uv0[2] = {};
+	float Uv1[2] = {};
+	float Uv2[2] = {};
+	float Normal[3] = {};
+	uint32_t Flags = 0;
+	uint32_t PortalIndex = UINT32_MAX;
+	uint32_t Reserved0 = UINT32_MAX;
 };
 
 static_assert(sizeof(NRIVoxelComputeConstants) == 16, "NRIVoxelComputeConstants must match VoxelComputeConstants.hlsli.");
-static_assert(sizeof(NRIVoxelComputeJob) == 32, "NRIVoxelComputeJob must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputeJob) == 60, "NRIVoxelComputeJob must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeSlabRecord) == 16, "NRIVoxelComputeSlabRecord must match VoxelComputeConstants.hlsli.");
-static_assert(sizeof(NRIVoxelComputeResult) == 32, "NRIVoxelComputeResult must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputeResult) == 48, "NRIVoxelComputeResult must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputeFaceRecord) == 56, "NRIVoxelComputeFaceRecord must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputeSceneVertex) == 32, "NRIVoxelComputeSceneVertex must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputePrimitiveData) == 64, "NRIVoxelComputePrimitiveData must match VoxelComputeConstants.hlsli.");
