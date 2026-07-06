@@ -40,6 +40,7 @@ namespace
 		VoxelComputeAdmissionState admissionState = VoxelComputeAdmissionState::Queued;
 		std::vector<NRIVoxelComputeSlabRecord> slabs;
 		std::vector<NRIVoxelComputeFaceRecord> faces;
+		std::vector<NRIVoxelComputeColorRunRecord> colorRuns;
 	};
 
 	struct RawVoxelSourceArchiveEntry
@@ -47,11 +48,15 @@ namespace
 		FVoxelRawMeshStats stats = {};
 		std::vector<NRIVoxelComputeSlabRecord> slabs;
 		std::vector<NRIVoxelComputeFaceRecord> faces;
+		std::vector<NRIVoxelComputeColorRunRecord> colorRuns;
 		NRIBufferResource slabUploadBuffer = {};
+		NRIBufferResource colorRunUploadBuffer = {};
 		NRIBufferResource slabBuffer = {};
+		NRIBufferResource colorRunBuffer = {};
 		uint64_t recordSerial = 0;
 		uint64_t slabBytes = 0;
 		uint64_t faceBytes = 0;
+		uint64_t colorRunBytes = 0;
 		bool uploadQueued = false;
 		bool uploaded = false;
 		bool failed = false;
@@ -112,9 +117,11 @@ namespace
 		NRIBufferResource jobUploadBuffer = {};
 		NRIBufferResource slabUploadBuffer = {};
 		NRIBufferResource faceUploadBuffer = {};
+		NRIBufferResource colorRunUploadBuffer = {};
 		NRIBufferResource jobBuffer = {};
 		NRIBufferResource slabBuffer = {};
 		NRIBufferResource faceBuffer = {};
+		NRIBufferResource colorRunBuffer = {};
 		NRIBufferResource resultBuffer = {};
 		NRIBufferResource vertexBuffer = {};
 		NRIBufferResource indexBuffer = {};
@@ -204,9 +211,28 @@ namespace
 		{
 			const FVoxelRawSlabRecord& slab = source[i];
 			NRIVoxelComputeSlabRecord record = {};
+			record.X = slab.x;
+			record.Y = slab.y;
+			record.ZTop = slab.zTop;
 			record.CullMask = slab.cullMask;
 			record.ZLength = slab.zLength;
 			record.ColorRunCount = slab.colorRunCount;
+			record.ColorRunOffset = slab.colorRunOffset;
+			target.push_back(record);
+		}
+	}
+
+	void CopyColorRunRecords(const TArray<FVoxelRawColorRunRecord>& source, std::vector<NRIVoxelComputeColorRunRecord>& target)
+	{
+		target.clear();
+		target.reserve((size_t)source.Size());
+		for (unsigned int i = 0; i < source.Size(); ++i)
+		{
+			const FVoxelRawColorRunRecord& run = source[i];
+			NRIVoxelComputeColorRunRecord record = {};
+			record.ZOffset = run.zOffset;
+			record.ZLength = run.zLength;
+			record.Color = run.color;
 			target.push_back(record);
 		}
 	}
@@ -235,9 +261,11 @@ namespace
 		FVoxelModel* model,
 		const FVoxelRawMeshStats& stats,
 		const TArray<FVoxelRawSlabRecord>& slabs,
-		const TArray<FVoxelRawFaceRecord>* faces)
+		const TArray<FVoxelRawFaceRecord>* faces,
+		const TArray<FVoxelRawColorRunRecord>* colorRuns)
 	{
-		if (!IsRawSourceArchiveEnabled() || model == nullptr || stats.slabCount == 0 || slabs.Size() != stats.slabCount)
+		if (!IsRawSourceArchiveEnabled() || model == nullptr || stats.slabCount == 0 || slabs.Size() != stats.slabCount ||
+			colorRuns == nullptr || colorRuns->Size() == 0)
 		{
 			return nullptr;
 		}
@@ -254,12 +282,14 @@ namespace
 		entry.stats = stats;
 		entry.recordSerial = state.nextRawSourceSerial++;
 		CopySlabRecords(slabs, entry.slabs);
+		CopyColorRunRecords(*colorRuns, entry.colorRuns);
 		if (faces != nullptr)
 		{
 			CopyFaceRecords(*faces, entry.faces);
 		}
 		entry.slabBytes = (uint64_t)entry.slabs.size() * sizeof(NRIVoxelComputeSlabRecord);
 		entry.faceBytes = (uint64_t)entry.faces.size() * sizeof(NRIVoxelComputeFaceRecord);
+		entry.colorRunBytes = (uint64_t)entry.colorRuns.size() * sizeof(NRIVoxelComputeColorRunRecord);
 		entry.uploadQueued = true;
 		state.rawSourceArchiveMisses++;
 		state.rawSourceArchiveRecords++;
@@ -268,17 +298,36 @@ namespace
 		if (IsTraceEnabled())
 		{
 			Printf(
-				"PERF pt voxel raw source archive NRI: event=record model=%p serial=%llu raw_bytes=%llu slab_upload_bytes=%llu transient_face_bytes=%llu slabs=%u faces=%u voxels=%u\n",
+				"PERF pt voxel raw source archive NRI: event=record model=%p serial=%llu raw_bytes=%llu slab_upload_bytes=%llu color_run_bytes=%llu transient_face_bytes=%llu slabs=%u color_runs=%u faces=%u voxels=%u\n",
 				(void*)model,
 				(unsigned long long)archived.recordSerial,
 				(unsigned long long)archived.stats.rawByteCount,
 				(unsigned long long)archived.slabBytes,
+				(unsigned long long)archived.colorRunBytes,
 				(unsigned long long)archived.faceBytes,
 				archived.stats.slabCount,
+				(uint32_t)archived.colorRuns.size(),
 				archived.stats.coalescedFaceCount,
 				archived.stats.voxelCount);
 		}
 		return &archived;
+	}
+
+	RawVoxelSourceArchiveEntry* FindUploadedRawSourceArchive(FVoxelModel* model)
+	{
+		if (model == nullptr)
+		{
+			return nullptr;
+		}
+		VoxelComputeState& state = gVoxelComputeState;
+		auto found = state.rawSourceArchive.find(model);
+		if (found == state.rawSourceArchive.end() || !found->second.uploaded || found->second.failed ||
+			found->second.slabBuffer.shaderView == nullptr || found->second.colorRunBuffer.shaderView == nullptr)
+		{
+			return nullptr;
+		}
+		state.rawSourceArchiveHits++;
+		return &found->second;
 	}
 
 	bool CreateBuffer(
@@ -493,7 +542,9 @@ namespace
 		for (auto& archivePair : state.rawSourceArchive)
 		{
 			RawVoxelSourceArchiveEntry& entry = archivePair.second;
-			if (!entry.uploadQueued || entry.uploaded || entry.failed || entry.slabBytes == 0 || entry.slabs.empty())
+			if (!entry.uploadQueued || entry.uploaded || entry.failed ||
+				entry.slabBytes == 0 || entry.colorRunBytes == 0 ||
+				entry.slabs.empty() || entry.colorRuns.empty())
 			{
 				continue;
 			}
@@ -501,7 +552,10 @@ namespace
 			const bool ok =
 				EnsureBuffer(services, entry.slabUploadBuffer, entry.slabBytes, sizeof(NRIVoxelComputeSlabRecord), nri::BufferUsageBits::NONE, nri::MemoryLocation::DEVICE_UPLOAD, nri::BufferView::STRUCTURED_BUFFER, false) &&
 				EnsureBuffer(services, entry.slabBuffer, entry.slabBytes, sizeof(NRIVoxelComputeSlabRecord), nri::BufferUsageBits::SHADER_RESOURCE, nri::MemoryLocation::DEVICE, nri::BufferView::STRUCTURED_BUFFER, true) &&
-				CopyToUploadBuffer(services.context, entry.slabUploadBuffer, entry.slabs.data(), entry.slabBytes);
+				EnsureBuffer(services, entry.colorRunUploadBuffer, entry.colorRunBytes, sizeof(NRIVoxelComputeColorRunRecord), nri::BufferUsageBits::NONE, nri::MemoryLocation::DEVICE_UPLOAD, nri::BufferView::STRUCTURED_BUFFER, false) &&
+				EnsureBuffer(services, entry.colorRunBuffer, entry.colorRunBytes, sizeof(NRIVoxelComputeColorRunRecord), nri::BufferUsageBits::SHADER_RESOURCE, nri::MemoryLocation::DEVICE, nri::BufferView::STRUCTURED_BUFFER, true) &&
+				CopyToUploadBuffer(services.context, entry.slabUploadBuffer, entry.slabs.data(), entry.slabBytes) &&
+				CopyToUploadBuffer(services.context, entry.colorRunUploadBuffer, entry.colorRuns.data(), entry.colorRunBytes);
 
 			if (!ok)
 			{
@@ -512,30 +566,38 @@ namespace
 				continue;
 			}
 
-			nri::BufferBarrierDesc uploadBarriers[2] = {};
+			nri::BufferBarrierDesc uploadBarriers[4] = {};
 			uploadBarriers[0].buffer = entry.slabUploadBuffer.buffer;
 			uploadBarriers[0].after = NRIResourceCopySourceAccess();
 			uploadBarriers[1].buffer = entry.slabBuffer.buffer;
 			uploadBarriers[1].after = NRIResourceCopyDestinationAccess();
+			uploadBarriers[2].buffer = entry.colorRunUploadBuffer.buffer;
+			uploadBarriers[2].after = NRIResourceCopySourceAccess();
+			uploadBarriers[3].buffer = entry.colorRunBuffer.buffer;
+			uploadBarriers[3].after = NRIResourceCopyDestinationAccess();
 			nri::BarrierDesc uploadBarrier = {};
 			uploadBarrier.buffers = uploadBarriers;
-			uploadBarrier.bufferNum = 2;
+			uploadBarrier.bufferNum = 4;
 			services.context.core->CmdBarrier(*services.context.commandBuffer, uploadBarrier);
 			services.context.core->CmdCopyBuffer(*services.context.commandBuffer, *entry.slabBuffer.buffer, 0, *entry.slabUploadBuffer.buffer, 0, entry.slabBytes);
+			services.context.core->CmdCopyBuffer(*services.context.commandBuffer, *entry.colorRunBuffer.buffer, 0, *entry.colorRunUploadBuffer.buffer, 0, entry.colorRunBytes);
 
-			nri::BufferBarrierDesc shaderBarriers[1] = {};
+			nri::BufferBarrierDesc shaderBarriers[2] = {};
 			shaderBarriers[0].buffer = entry.slabBuffer.buffer;
 			shaderBarriers[0].before = NRIResourceCopyDestinationAccess();
 			shaderBarriers[0].after = NRIResourceComputeShaderResourceAccess();
+			shaderBarriers[1].buffer = entry.colorRunBuffer.buffer;
+			shaderBarriers[1].before = NRIResourceCopyDestinationAccess();
+			shaderBarriers[1].after = NRIResourceComputeShaderResourceAccess();
 			nri::BarrierDesc shaderBarrier = {};
 			shaderBarrier.buffers = shaderBarriers;
-			shaderBarrier.bufferNum = 1;
+			shaderBarrier.bufferNum = 2;
 			services.context.core->CmdBarrier(*services.context.commandBuffer, shaderBarrier);
 
 			entry.uploaded = true;
 			entry.uploadQueued = false;
 			uploads++;
-			uploadedBytes += entry.slabBytes;
+			uploadedBytes += entry.slabBytes + entry.colorRunBytes;
 		}
 
 		if (uploads != 0 || failures != 0)
@@ -775,8 +837,9 @@ NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeGeneratedGeometry(u
 	FVoxelRawMeshStats rawStats = {};
 	TArray<FVoxelRawSlabRecord> rawSlabs;
 	TArray<FVoxelRawFaceRecord> rawFaces;
-	model->BuildRawMeshStats(rawStats, &rawSlabs, &rawFaces);
-	RawVoxelSourceArchiveEntry* archivedSource = RecordRawSourceArchive(model, rawStats, rawSlabs, &rawFaces);
+	TArray<FVoxelRawColorRunRecord> rawColorRuns;
+	model->BuildRawMeshStats(rawStats, &rawSlabs, &rawFaces, &rawColorRuns);
+	RawVoxelSourceArchiveEntry* archivedSource = RecordRawSourceArchive(model, rawStats, rawSlabs, &rawFaces, &rawColorRuns);
 	if (rawStats.slabCount == 0 || rawStats.coalescedFaceCount == 0 ||
 		rawFaces.Size() != rawStats.coalescedFaceCount ||
 		rawStats.coalescedFaceCount > MaxConsumptionPrimitives / 2u)
@@ -803,11 +866,13 @@ NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeGeneratedGeometry(u
 	{
 		job.slabs = archivedSource->slabs;
 		job.faces = archivedSource->faces;
+		job.colorRuns = archivedSource->colorRuns;
 	}
 	else
 	{
 		CopySlabRecords(rawSlabs, job.slabs);
 		CopyFaceRecords(rawFaces, job.faces);
+		CopyColorRunRecords(rawColorRuns, job.colorRuns);
 	}
 	state.queuedConsumeKeys.insert(requestKey);
 	state.queuedJobs.push_back(std::move(job));
@@ -847,6 +912,7 @@ void QueueNRIVoxelComputeCountJob(
 	const FVoxelRawMeshStats& stats,
 	const TArray<FVoxelRawSlabRecord>* slabs,
 	const TArray<FVoxelRawFaceRecord>* faces,
+	const TArray<FVoxelRawColorRunRecord>* colorRuns,
 	const FVoxelMeshData& cpuMesh)
 {
 	if (!ShouldRunNRIVoxelComputeMeshing() || model == nullptr || slabs == nullptr || stats.slabCount == 0)
@@ -870,11 +936,12 @@ void QueueNRIVoxelComputeCountJob(
 	job.cpuVertexCount = (uint32_t)cpuMesh.vertices.Size();
 	job.cpuIndexCount = (uint32_t)cpuMesh.indices.Size();
 	job.jobId = gVoxelComputeState.nextJobId++;
-	RawVoxelSourceArchiveEntry* archivedSource = RecordRawSourceArchive(model, stats, *slabs, faces);
+	RawVoxelSourceArchiveEntry* archivedSource = colorRuns != nullptr ? RecordRawSourceArchive(model, stats, *slabs, faces, colorRuns) : nullptr;
 	if (archivedSource != nullptr)
 	{
 		job.slabs = archivedSource->slabs;
 		job.faces = archivedSource->faces;
+		job.colorRuns = archivedSource->colorRuns;
 	}
 	else
 	{
@@ -882,6 +949,10 @@ void QueueNRIVoxelComputeCountJob(
 		if (faces != nullptr)
 		{
 			CopyFaceRecords(*faces, job.faces);
+		}
+		if (colorRuns != nullptr)
+		{
+			CopyColorRunRecords(*colorRuns, job.colorRuns);
 		}
 	}
 	gVoxelComputeState.queuedJobs.push_back(std::move(job));
@@ -914,18 +985,24 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	const bool emit = IsEmitEnabled();
 	const bool buildBlas = emit && IsBlasEnabled();
 	const bool fullGeneratedReadback = emit && IsFullGeneratedReadbackEnabled();
+	const bool directSource = emit && IsDirectGpuPublicationEnabled() && IsRawSourceArchiveEnabled();
+	RawVoxelSourceArchiveEntry* directArchive = nullptr;
 	std::vector<NRIVoxelComputeJob> gpuJobs;
 	std::vector<NRIVoxelComputeSlabRecord> gpuSlabs;
 	std::vector<NRIVoxelComputeFaceRecord> gpuFaces;
+	std::vector<NRIVoxelComputeColorRunRecord> gpuColorRuns;
 	std::vector<PendingReadbackJob> pendingJobs;
 	gpuJobs.reserve(state.queuedJobs.size());
 	uint32_t slabOffset = 0;
 	uint32_t faceOffset = 0;
+	uint32_t colorRunOffset = 0;
 	uint32_t vertexOffset = 0;
 	uint32_t indexOffset = 0;
 	uint32_t primitiveOffset = 0;
-	for (PendingVoxelComputeJob& queued : state.queuedJobs)
+	const size_t jobsToProcess = directSource ? 1u : state.queuedJobs.size();
+	for (size_t queuedIndex = 0; queuedIndex < jobsToProcess; ++queuedIndex)
 	{
+		PendingVoxelComputeJob& queued = state.queuedJobs[queuedIndex];
 		if (emit && queued.faces.size() != queued.stats.coalescedFaceCount)
 		{
 			if (queued.consumeKey != 0)
@@ -935,11 +1012,19 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 			}
 			continue;
 		}
+		if (directSource)
+		{
+			directArchive = FindUploadedRawSourceArchive(queued.model);
+			if (directArchive == nullptr)
+			{
+				return;
+			}
+		}
 
 		NRIVoxelComputeJob gpuJob = {};
-		gpuJob.SlabOffset = slabOffset;
-		gpuJob.SlabCount = (uint32_t)queued.slabs.size();
-		gpuJob.FaceOffset = faceOffset;
+		gpuJob.SlabOffset = directSource ? 0u : slabOffset;
+		gpuJob.SlabCount = directSource ? (uint32_t)directArchive->slabs.size() : (uint32_t)queued.slabs.size();
+		gpuJob.FaceOffset = directSource ? 0u : faceOffset;
 		gpuJob.ExpectedFaces = queued.stats.coalescedFaceCount;
 		gpuJob.ExpectedIndices = queued.stats.indexCount;
 		gpuJob.ExpectedVerticesNoDedupe = queued.stats.noDedupeVertexCount;
@@ -974,32 +1059,52 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		}
 		TraceAdmission(frameNumber, pending, pending.admissionState, "dispatch");
 
-		gpuSlabs.insert(gpuSlabs.end(), queued.slabs.begin(), queued.slabs.end());
-		gpuFaces.insert(gpuFaces.end(), queued.faces.begin(), queued.faces.end());
+		if (!directSource)
+		{
+			for (NRIVoxelComputeSlabRecord slab : queued.slabs)
+			{
+				slab.ColorRunOffset += colorRunOffset;
+				gpuSlabs.push_back(slab);
+			}
+			gpuFaces.insert(gpuFaces.end(), queued.faces.begin(), queued.faces.end());
+			gpuColorRuns.insert(gpuColorRuns.end(), queued.colorRuns.begin(), queued.colorRuns.end());
+		}
 		slabOffset += gpuJob.SlabCount;
 		faceOffset += gpuJob.ExpectedFaces;
+		colorRunOffset += (uint32_t)queued.colorRuns.size();
 		vertexOffset += gpuJob.ExpectedVerticesNoDedupe;
 		indexOffset += gpuJob.ExpectedIndices;
 		primitiveOffset += gpuJob.ExpectedFaces * 2u;
 	}
-	state.queuedJobs.clear();
+	if (directSource)
+	{
+		state.queuedJobs.erase(state.queuedJobs.begin());
+	}
+	else
+	{
+		state.queuedJobs.clear();
+	}
 
-	if (gpuJobs.empty() || gpuSlabs.empty())
+	if (gpuJobs.empty() || (!directSource && gpuSlabs.empty()))
 	{
 		return;
 	}
 
 	const uint64_t jobBytes = (uint64_t)gpuJobs.size() * sizeof(NRIVoxelComputeJob);
-	const uint64_t slabBytes = (uint64_t)gpuSlabs.size() * sizeof(NRIVoxelComputeSlabRecord);
-	const uint64_t faceBytes = (uint64_t)gpuFaces.size() * sizeof(NRIVoxelComputeFaceRecord);
+	const uint64_t slabBytes = directSource && directArchive != nullptr ? directArchive->slabBytes : (uint64_t)gpuSlabs.size() * sizeof(NRIVoxelComputeSlabRecord);
+	const uint64_t faceBytes = directSource ? 0 : (uint64_t)gpuFaces.size() * sizeof(NRIVoxelComputeFaceRecord);
+	const uint64_t colorRunBytes = directSource && directArchive != nullptr ? directArchive->colorRunBytes : (uint64_t)gpuColorRuns.size() * sizeof(NRIVoxelComputeColorRunRecord);
 	const uint64_t resultBytes = (uint64_t)gpuJobs.size() * sizeof(NRIVoxelComputeResult);
 	const uint64_t vertexBytes = (uint64_t)vertexOffset * sizeof(NRIVoxelComputeSceneVertex);
 	const uint64_t indexBytes = (uint64_t)indexOffset * sizeof(uint32_t);
 	const uint64_t primitiveBytes = (uint64_t)primitiveOffset * sizeof(NRIVoxelComputePrimitiveData);
 	if (!EnsureBuffer(services, state.jobUploadBuffer, jobBytes, sizeof(NRIVoxelComputeJob), nri::BufferUsageBits::NONE, nri::MemoryLocation::DEVICE_UPLOAD, nri::BufferView::STRUCTURED_BUFFER, false) ||
-		!EnsureBuffer(services, state.slabUploadBuffer, slabBytes, sizeof(NRIVoxelComputeSlabRecord), nri::BufferUsageBits::NONE, nri::MemoryLocation::DEVICE_UPLOAD, nri::BufferView::STRUCTURED_BUFFER, false) ||
 		!EnsureBuffer(services, state.jobBuffer, jobBytes, sizeof(NRIVoxelComputeJob), nri::BufferUsageBits::SHADER_RESOURCE, nri::MemoryLocation::DEVICE, nri::BufferView::STRUCTURED_BUFFER, true) ||
-		!EnsureBuffer(services, state.slabBuffer, slabBytes, sizeof(NRIVoxelComputeSlabRecord), nri::BufferUsageBits::SHADER_RESOURCE, nri::MemoryLocation::DEVICE, nri::BufferView::STRUCTURED_BUFFER, true) ||
+		(!directSource &&
+			(!EnsureBuffer(services, state.slabUploadBuffer, slabBytes, sizeof(NRIVoxelComputeSlabRecord), nri::BufferUsageBits::NONE, nri::MemoryLocation::DEVICE_UPLOAD, nri::BufferView::STRUCTURED_BUFFER, false) ||
+			!EnsureBuffer(services, state.slabBuffer, slabBytes, sizeof(NRIVoxelComputeSlabRecord), nri::BufferUsageBits::SHADER_RESOURCE, nri::MemoryLocation::DEVICE, nri::BufferView::STRUCTURED_BUFFER, true) ||
+			!EnsureBuffer(services, state.colorRunUploadBuffer, colorRunBytes, sizeof(NRIVoxelComputeColorRunRecord), nri::BufferUsageBits::NONE, nri::MemoryLocation::DEVICE_UPLOAD, nri::BufferView::STRUCTURED_BUFFER, false) ||
+			!EnsureBuffer(services, state.colorRunBuffer, colorRunBytes, sizeof(NRIVoxelComputeColorRunRecord), nri::BufferUsageBits::SHADER_RESOURCE, nri::MemoryLocation::DEVICE, nri::BufferView::STRUCTURED_BUFFER, true))) ||
 		!EnsureBuffer(services, state.resultBuffer, resultBytes, sizeof(NRIVoxelComputeResult), nri::BufferUsageBits::SHADER_RESOURCE_STORAGE, nri::MemoryLocation::DEVICE, nri::BufferView::STORAGE_STRUCTURED_BUFFER, true) ||
 		!EnsureBuffer(services, state.readbackBuffer, resultBytes, sizeof(NRIVoxelComputeResult), nri::BufferUsageBits::NONE, nri::MemoryLocation::HOST_READBACK, nri::BufferView::STRUCTURED_BUFFER, false))
 	{
@@ -1007,9 +1112,12 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	}
 	if (emit)
 	{
-		if (gpuFaces.empty() ||
-			!EnsureBuffer(services, state.faceUploadBuffer, faceBytes, sizeof(NRIVoxelComputeFaceRecord), nri::BufferUsageBits::NONE, nri::MemoryLocation::DEVICE_UPLOAD, nri::BufferView::STRUCTURED_BUFFER, false) ||
-			!EnsureBuffer(services, state.faceBuffer, faceBytes, sizeof(NRIVoxelComputeFaceRecord), nri::BufferUsageBits::SHADER_RESOURCE, nri::MemoryLocation::DEVICE, nri::BufferView::STRUCTURED_BUFFER, true) ||
+		if ((!directSource && gpuFaces.empty()) ||
+			(!directSource &&
+				(!EnsureBuffer(services, state.faceUploadBuffer, faceBytes, sizeof(NRIVoxelComputeFaceRecord), nri::BufferUsageBits::NONE, nri::MemoryLocation::DEVICE_UPLOAD, nri::BufferView::STRUCTURED_BUFFER, false) ||
+				!EnsureBuffer(services, state.faceBuffer, faceBytes, sizeof(NRIVoxelComputeFaceRecord), nri::BufferUsageBits::SHADER_RESOURCE, nri::MemoryLocation::DEVICE, nri::BufferView::STRUCTURED_BUFFER, true))) ||
+			(directSource &&
+				!EnsureBuffer(services, state.faceBuffer, sizeof(NRIVoxelComputeFaceRecord), sizeof(NRIVoxelComputeFaceRecord), nri::BufferUsageBits::SHADER_RESOURCE, nri::MemoryLocation::DEVICE, nri::BufferView::STRUCTURED_BUFFER, true)) ||
 			!EnsureBuffer(services, state.vertexBuffer, vertexBytes, sizeof(NRIVoxelComputeSceneVertex), NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE_STORAGE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), nri::MemoryLocation::DEVICE, nri::BufferView::STORAGE_STRUCTURED_BUFFER, true) ||
 			!EnsureBuffer(services, state.indexBuffer, indexBytes, sizeof(uint32_t), NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE_STORAGE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), nri::MemoryLocation::DEVICE, nri::BufferView::STORAGE_STRUCTURED_BUFFER, true) ||
 			!EnsureBuffer(services, state.primitiveBuffer, primitiveBytes, sizeof(NRIVoxelComputePrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE_STORAGE, nri::MemoryLocation::DEVICE, nri::BufferView::STORAGE_STRUCTURED_BUFFER, true) ||
@@ -1023,56 +1131,69 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	}
 
 	if (!CopyToUploadBuffer(context, state.jobUploadBuffer, gpuJobs.data(), jobBytes) ||
-		!CopyToUploadBuffer(context, state.slabUploadBuffer, gpuSlabs.data(), slabBytes) ||
-		(emit && !CopyToUploadBuffer(context, state.faceUploadBuffer, gpuFaces.data(), faceBytes)))
+		(!directSource &&
+			(!CopyToUploadBuffer(context, state.slabUploadBuffer, gpuSlabs.data(), slabBytes) ||
+			!CopyToUploadBuffer(context, state.colorRunUploadBuffer, gpuColorRuns.data(), colorRunBytes) ||
+			(emit && !CopyToUploadBuffer(context, state.faceUploadBuffer, gpuFaces.data(), faceBytes)))))
 	{
 		return;
 	}
 
 	std::vector<nri::BufferBarrierDesc> uploadBarriers;
-	uploadBarriers.resize(emit ? 6 : 4);
+	uploadBarriers.resize(directSource ? 2 : (emit ? 8 : 6));
 	uploadBarriers[0].buffer = state.jobUploadBuffer.buffer;
 	uploadBarriers[0].after = NRIResourceCopySourceAccess();
-	uploadBarriers[1].buffer = state.slabUploadBuffer.buffer;
-	uploadBarriers[1].after = NRIResourceCopySourceAccess();
-	uploadBarriers[2].buffer = state.jobBuffer.buffer;
-	uploadBarriers[2].after = NRIResourceCopyDestinationAccess();
-	uploadBarriers[3].buffer = state.slabBuffer.buffer;
-	uploadBarriers[3].after = NRIResourceCopyDestinationAccess();
-	if (emit)
+	uploadBarriers[1].buffer = state.jobBuffer.buffer;
+	uploadBarriers[1].after = NRIResourceCopyDestinationAccess();
+	if (!directSource)
 	{
-		uploadBarriers[4].buffer = state.faceUploadBuffer.buffer;
+		uploadBarriers[2].buffer = state.slabUploadBuffer.buffer;
+		uploadBarriers[2].after = NRIResourceCopySourceAccess();
+		uploadBarriers[3].buffer = state.slabBuffer.buffer;
+		uploadBarriers[3].after = NRIResourceCopyDestinationAccess();
+		uploadBarriers[4].buffer = state.colorRunUploadBuffer.buffer;
 		uploadBarriers[4].after = NRIResourceCopySourceAccess();
-		uploadBarriers[5].buffer = state.faceBuffer.buffer;
+		uploadBarriers[5].buffer = state.colorRunBuffer.buffer;
 		uploadBarriers[5].after = NRIResourceCopyDestinationAccess();
+		if (emit)
+		{
+			uploadBarriers[6].buffer = state.faceUploadBuffer.buffer;
+			uploadBarriers[6].after = NRIResourceCopySourceAccess();
+			uploadBarriers[7].buffer = state.faceBuffer.buffer;
+			uploadBarriers[7].after = NRIResourceCopyDestinationAccess();
+		}
 	}
 	nri::BarrierDesc uploadBarrier = {};
 	uploadBarrier.buffers = uploadBarriers.data();
 	uploadBarrier.bufferNum = (uint32_t)uploadBarriers.size();
 	context.core->CmdBarrier(*context.commandBuffer, uploadBarrier);
 	context.core->CmdCopyBuffer(*context.commandBuffer, *state.jobBuffer.buffer, 0, *state.jobUploadBuffer.buffer, 0, jobBytes);
-	context.core->CmdCopyBuffer(*context.commandBuffer, *state.slabBuffer.buffer, 0, *state.slabUploadBuffer.buffer, 0, slabBytes);
-	if (emit)
+	if (!directSource)
 	{
-		context.core->CmdCopyBuffer(*context.commandBuffer, *state.faceBuffer.buffer, 0, *state.faceUploadBuffer.buffer, 0, faceBytes);
+		context.core->CmdCopyBuffer(*context.commandBuffer, *state.slabBuffer.buffer, 0, *state.slabUploadBuffer.buffer, 0, slabBytes);
+		context.core->CmdCopyBuffer(*context.commandBuffer, *state.colorRunBuffer.buffer, 0, *state.colorRunUploadBuffer.buffer, 0, colorRunBytes);
+		if (emit)
+		{
+			context.core->CmdCopyBuffer(*context.commandBuffer, *state.faceBuffer.buffer, 0, *state.faceUploadBuffer.buffer, 0, faceBytes);
+		}
 	}
 
 	std::vector<nri::BufferBarrierDesc> computeBarriers;
-	computeBarriers.resize(emit ? 7 : 3);
+	computeBarriers.resize(directSource ? (emit ? 7 : 4) : (emit ? 8 : 4));
 	computeBarriers[0].buffer = state.jobBuffer.buffer;
 	computeBarriers[0].before = NRIResourceCopyDestinationAccess();
 	computeBarriers[0].after = NRIResourceComputeShaderResourceAccess();
-	computeBarriers[1].buffer = state.slabBuffer.buffer;
-	computeBarriers[1].before = NRIResourceCopyDestinationAccess();
+	computeBarriers[1].buffer = directSource && directArchive != nullptr ? directArchive->slabBuffer.buffer : state.slabBuffer.buffer;
+	computeBarriers[1].before = directSource ? NRIResourceComputeShaderResourceAccess() : NRIResourceCopyDestinationAccess();
 	computeBarriers[1].after = NRIResourceComputeShaderResourceAccess();
-	computeBarriers[2].buffer = state.resultBuffer.buffer;
-	computeBarriers[2].before = NRIResourceCopySourceAccess();
-	computeBarriers[2].after = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
+	computeBarriers[2].buffer = directSource && directArchive != nullptr ? directArchive->colorRunBuffer.buffer : state.colorRunBuffer.buffer;
+	computeBarriers[2].before = directSource ? NRIResourceComputeShaderResourceAccess() : NRIResourceCopyDestinationAccess();
+	computeBarriers[2].after = NRIResourceComputeShaderResourceAccess();
+	computeBarriers[3].buffer = state.resultBuffer.buffer;
+	computeBarriers[3].before = NRIResourceCopySourceAccess();
+	computeBarriers[3].after = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
 	if (emit)
 	{
-		computeBarriers[3].buffer = state.faceBuffer.buffer;
-		computeBarriers[3].before = NRIResourceCopyDestinationAccess();
-		computeBarriers[3].after = NRIResourceComputeShaderResourceAccess();
 		computeBarriers[4].buffer = state.vertexBuffer.buffer;
 		computeBarriers[4].before = buildBlas ? NRIResourceAccelerationStructureBuildInputAccess() : NRIResourceCopySourceAccess();
 		computeBarriers[4].after = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
@@ -1082,13 +1203,22 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		computeBarriers[6].buffer = state.primitiveBuffer.buffer;
 		computeBarriers[6].before = NRIResourceCopySourceAccess();
 		computeBarriers[6].after = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
+		if (!directSource)
+		{
+			computeBarriers[7].buffer = state.faceBuffer.buffer;
+			computeBarriers[7].before = NRIResourceCopyDestinationAccess();
+			computeBarriers[7].after = NRIResourceComputeShaderResourceAccess();
+		}
 	}
 	nri::BarrierDesc computeBarrier = {};
 	computeBarrier.buffers = computeBarriers.data();
 	computeBarrier.bufferNum = (uint32_t)computeBarriers.size();
 	context.core->CmdBarrier(*context.commandBuffer, computeBarrier);
 
-	const nri::Descriptor* inputDescriptors[2] = { state.jobBuffer.shaderView, state.slabBuffer.shaderView };
+	const nri::Descriptor* inputDescriptors[2] = {
+		state.jobBuffer.shaderView,
+		directSource && directArchive != nullptr ? directArchive->slabBuffer.shaderView : state.slabBuffer.shaderView
+	};
 	nri::UpdateDescriptorRangeDesc inputUpdate = {};
 	inputUpdate.descriptorSet = renderer.mVoxelComputeInputSet;
 	inputUpdate.rangeIndex = 0;
@@ -1097,12 +1227,15 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	context.core->UpdateDescriptorRanges(&inputUpdate, 1);
 	if (emit)
 	{
-		const nri::Descriptor* faceDescriptor[1] = { state.faceBuffer.shaderView };
+		const nri::Descriptor* faceDescriptor[2] = {
+			state.faceBuffer.shaderView,
+			directSource && directArchive != nullptr ? directArchive->colorRunBuffer.shaderView : state.colorRunBuffer.shaderView
+		};
 		nri::UpdateDescriptorRangeDesc faceUpdate = {};
 		faceUpdate.descriptorSet = renderer.mVoxelComputeInputSet;
 		faceUpdate.rangeIndex = 1;
 		faceUpdate.descriptors = faceDescriptor;
-		faceUpdate.descriptorNum = 1;
+		faceUpdate.descriptorNum = 2;
 		context.core->UpdateDescriptorRanges(&faceUpdate, 1);
 	}
 
@@ -1126,8 +1259,9 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 
 	NRIVoxelComputeConstants constants = {};
 	constants.JobCount = (uint32_t)gpuJobs.size();
-	constants.SlabRecordCount = (uint32_t)gpuSlabs.size();
-	constants.FaceRecordCount = (uint32_t)gpuFaces.size();
+	constants.SlabRecordCount = directSource && directArchive != nullptr ? (uint32_t)directArchive->slabs.size() : (uint32_t)gpuSlabs.size();
+	constants.FaceRecordCount = directSource ? 0u : (uint32_t)gpuFaces.size();
+	constants.ColorRunRecordCount = directSource && directArchive != nullptr ? (uint32_t)directArchive->colorRuns.size() : 0u;
 	context.core->CmdSetPipelineLayout(*context.commandBuffer, nri::BindPoint::COMPUTE, *renderer.mVoxelComputePipelineLayout);
 	context.core->CmdSetRootConstants(*context.commandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
 	context.core->CmdSetDescriptorSet(*context.commandBuffer, { 0, renderer.mVoxelComputeInputSet, nri::BindPoint::COMPUTE });
@@ -1176,10 +1310,10 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	{
 		nri::BufferBarrierDesc blasBarriers[2] = {};
 		blasBarriers[0].buffer = state.vertexBuffer.buffer;
-		blasBarriers[0].before = NRIResourceCopySourceAccess();
+		blasBarriers[0].before = fullGeneratedReadback ? NRIResourceCopySourceAccess() : nri::AccessStage{ nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
 		blasBarriers[0].after = NRIResourceAccelerationStructureBuildInputAccess();
 		blasBarriers[1].buffer = state.indexBuffer.buffer;
-		blasBarriers[1].before = NRIResourceCopySourceAccess();
+		blasBarriers[1].before = fullGeneratedReadback ? NRIResourceCopySourceAccess() : nri::AccessStage{ nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
 		blasBarriers[1].after = NRIResourceAccelerationStructureBuildInputAccess();
 		nri::BarrierDesc blasBarrierDesc = {};
 		blasBarrierDesc.buffers = blasBarriers;
@@ -1208,7 +1342,7 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		if (IsTraceEnabled())
 		{
 			Printf(
-				"PERF pt voxel compute blas NRI: frame=%llu jobs=%u success=%u vertices=%u indices=%u primitives=%u blas_bytes=%llu scratch_bytes=%llu\n",
+				"PERF pt voxel compute blas NRI: frame=%llu jobs=%u success=%u vertices=%u indices=%u primitives=%u blas_bytes=%llu scratch_bytes=%llu direct_source=%u full_readback=%u\n",
 				(unsigned long long)frameNumber,
 				(unsigned)gpuJobs.size(),
 				blasOk ? 1u : 0u,
@@ -1216,7 +1350,9 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 				indexOffset,
 				primitiveOffset,
 				(unsigned long long)state.diagnosticBlas.memorySize,
-				(unsigned long long)state.diagnosticBlas.buildScratchSize);
+				(unsigned long long)state.diagnosticBlas.buildScratchSize,
+				directSource ? 1u : 0u,
+				fullGeneratedReadback ? 1u : 0u);
 		}
 		if (blasOk)
 		{
@@ -1226,7 +1362,7 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	else if (buildBlas && IsTraceEnabled())
 	{
 		Printf(
-			"PERF pt voxel compute blas NRI: frame=%llu jobs=%u success=0 skipped=1 reason=%s vertices=%u indices=%u primitives=%u max_primitives=%u submitted=%u\n",
+			"PERF pt voxel compute blas NRI: frame=%llu jobs=%u success=0 skipped=1 reason=%s vertices=%u indices=%u primitives=%u max_primitives=%u submitted=%u direct_source=%u full_readback=%u\n",
 			(unsigned long long)frameNumber,
 			(unsigned)gpuJobs.size(),
 			state.diagnosticBlasBuildsSubmitted != 0 ? "single_build_budget" : "primitive_budget",
@@ -1234,7 +1370,9 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 			indexOffset,
 			primitiveOffset,
 			MaxDiagnosticBlasPrimitives,
-			state.diagnosticBlasBuildsSubmitted);
+			state.diagnosticBlasBuildsSubmitted,
+			directSource ? 1u : 0u,
+			fullGeneratedReadback ? 1u : 0u);
 	}
 
 	state.pendingFrame = frameNumber;
@@ -1256,14 +1394,17 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	if (IsTraceEnabled())
 	{
 		Printf(
-			"PERF pt voxel compute dispatch NRI: frame=%llu mode=%s jobs=%u slab_records=%u face_records=%u job_bytes=%llu slab_bytes=%llu face_bytes=%llu result_bytes=%llu vertex_bytes=%llu index_bytes=%llu primitive_bytes=%llu production_readback_bytes=%llu validation_readback_bytes=%llu direct_gpu=%u raw_archive=%u\n",
+			"PERF pt voxel compute dispatch NRI: frame=%llu mode=%s source=%s jobs=%u slab_records=%u color_run_records=%u face_records=%u job_bytes=%llu slab_bytes=%llu color_run_bytes=%llu face_bytes=%llu result_bytes=%llu vertex_bytes=%llu index_bytes=%llu primitive_bytes=%llu production_readback_bytes=%llu validation_readback_bytes=%llu direct_gpu=%u raw_archive=%u\n",
 			(unsigned long long)frameNumber,
 			emit ? (buildBlas ? "emit_blas" : "emit") : "count",
+			directSource ? "archive_decode" : (emit ? "face_records" : "slab_count"),
 			(unsigned)gpuJobs.size(),
-			(unsigned)gpuSlabs.size(),
-			(unsigned)gpuFaces.size(),
+			directSource && directArchive != nullptr ? (uint32_t)directArchive->slabs.size() : (uint32_t)gpuSlabs.size(),
+			directSource && directArchive != nullptr ? (uint32_t)directArchive->colorRuns.size() : 0u,
+			directSource ? 0u : (uint32_t)gpuFaces.size(),
 			(unsigned long long)jobBytes,
 			(unsigned long long)slabBytes,
+			(unsigned long long)colorRunBytes,
 			(unsigned long long)faceBytes,
 			(unsigned long long)resultBytes,
 			(unsigned long long)vertexBytes,
@@ -1283,9 +1424,11 @@ void DestroyNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer)
 	services.DestroyBufferResource(state.jobUploadBuffer);
 	services.DestroyBufferResource(state.slabUploadBuffer);
 	services.DestroyBufferResource(state.faceUploadBuffer);
+	services.DestroyBufferResource(state.colorRunUploadBuffer);
 	services.DestroyBufferResource(state.jobBuffer);
 	services.DestroyBufferResource(state.slabBuffer);
 	services.DestroyBufferResource(state.faceBuffer);
+	services.DestroyBufferResource(state.colorRunBuffer);
 	services.DestroyBufferResource(state.resultBuffer);
 	services.DestroyBufferResource(state.vertexBuffer);
 	services.DestroyBufferResource(state.indexBuffer);
@@ -1298,7 +1441,9 @@ void DestroyNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer)
 	{
 		RawVoxelSourceArchiveEntry& entry = archivePair.second;
 		services.DestroyBufferResource(entry.slabUploadBuffer);
+		services.DestroyBufferResource(entry.colorRunUploadBuffer);
 		services.DestroyBufferResource(entry.slabBuffer);
+		services.DestroyBufferResource(entry.colorRunBuffer);
 	}
 	renderer.DestroyAccelerationStructureResource(state.diagnosticBlas);
 	state.queuedJobs.clear();

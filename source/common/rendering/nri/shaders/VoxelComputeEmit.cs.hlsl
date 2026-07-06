@@ -3,6 +3,7 @@
 StructuredBuffer<NRIVoxelComputeJob> VoxelComputeJobs : register(t0, space0);
 StructuredBuffer<NRIVoxelComputeSlabRecord> VoxelComputeSlabs : register(t1, space0);
 StructuredBuffer<NRIVoxelComputeFaceRecord> VoxelComputeFaces : register(t2, space0);
+StructuredBuffer<NRIVoxelComputeColorRunRecord> VoxelComputeColorRuns : register(t3, space0);
 RWStructuredBuffer<NRIVoxelComputeResult> VoxelComputeResults : register(u0, space1);
 RWStructuredBuffer<NRIVoxelComputeSceneVertex> VoxelComputeVertices : register(u1, space1);
 RWStructuredBuffer<uint> VoxelComputeIndices : register(u2, space1);
@@ -51,6 +52,71 @@ NRIVoxelComputePrimitiveData MakePrimitive(uint3 indices, uint materialIndex, fl
 	return primitive;
 }
 
+void EmitFace(
+	NRIVoxelComputeJob job,
+	int4 x,
+	int4 y,
+	int4 z,
+	uint color,
+	uint materialIndex,
+	inout uint emittedFaces,
+	inout uint vertexHash,
+	inout uint indexHash,
+	inout uint primitiveHash)
+{
+	const float2 uv = VoxelUv(color);
+	const float3 p0 = TransformVoxelPoint(job, x.x, y.x, z.x);
+	const float3 p1 = TransformVoxelPoint(job, x.y, y.y, z.y);
+	const float3 p2 = TransformVoxelPoint(job, x.w, y.w, z.w);
+	const float3 p3 = TransformVoxelPoint(job, x.z, y.z, z.z);
+
+	const uint vertexBase = job.VertexOffset + emittedFaces * 4u;
+	const uint indexBase = job.IndexOffset + emittedFaces * 6u;
+	const uint primitiveBase = job.PrimitiveOffset + emittedFaces * 2u;
+
+	VoxelComputeVertices[vertexBase + 0u] = MakeVertex(p0, uv);
+	VoxelComputeVertices[vertexBase + 1u] = MakeVertex(p1, uv);
+	VoxelComputeVertices[vertexBase + 2u] = MakeVertex(p2, uv);
+	VoxelComputeVertices[vertexBase + 3u] = MakeVertex(p3, uv);
+
+	const uint indices[6] = {
+		vertexBase + 0u,
+		vertexBase + 1u,
+		vertexBase + 3u,
+		vertexBase + 1u,
+		vertexBase + 2u,
+		vertexBase + 3u
+	};
+	[unroll]
+	for (uint i = 0u; i < 6u; ++i)
+	{
+		VoxelComputeIndices[indexBase + i] = indices[i];
+		indexHash = HashCombine(indexHash, indices[i]);
+	}
+
+	VoxelComputePrimitives[primitiveBase + 0u] = MakePrimitive(uint3(indices[0], indices[1], indices[2]), materialIndex, uv, uv, uv, p0, p1, p3);
+	VoxelComputePrimitives[primitiveBase + 1u] = MakePrimitive(uint3(indices[3], indices[4], indices[5]), materialIndex, uv, uv, uv, p1, p2, p3);
+
+	[unroll]
+	for (uint v = 0u; v < 4u; ++v)
+	{
+		const NRIVoxelComputeSceneVertex vertex = VoxelComputeVertices[vertexBase + v];
+		vertexHash = HashCombine(vertexHash, asuint(vertex.Position.x));
+		vertexHash = HashCombine(vertexHash, asuint(vertex.Position.y));
+		vertexHash = HashCombine(vertexHash, asuint(vertex.Position.z));
+		vertexHash = HashCombine(vertexHash, asuint(vertex.Uv.x));
+		vertexHash = HashCombine(vertexHash, asuint(vertex.Uv.y));
+	}
+	primitiveHash = HashCombine(primitiveHash, materialIndex);
+	primitiveHash = HashCombine(primitiveHash, indices[0]);
+	primitiveHash = HashCombine(primitiveHash, indices[1]);
+	primitiveHash = HashCombine(primitiveHash, indices[2]);
+	primitiveHash = HashCombine(primitiveHash, indices[3]);
+	primitiveHash = HashCombine(primitiveHash, indices[4]);
+	primitiveHash = HashCombine(primitiveHash, indices[5]);
+	++emittedFaces;
+}
+
 [numthreads(1, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -66,66 +132,79 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	uint primitiveHash = 2166136261u;
 	uint emittedFaces = 0u;
 
-	for (uint localFace = 0u; localFace < job.ExpectedFaces; ++localFace)
+	if (gVoxelComputeConstants.ColorRunRecordCount != 0u)
 	{
-		const uint faceIndex = job.FaceOffset + localFace;
-		if (faceIndex >= gVoxelComputeConstants.FaceRecordCount)
+		for (uint localSlab = 0u; localSlab < job.SlabCount; ++localSlab)
 		{
-			break;
+			const uint slabIndex = job.SlabOffset + localSlab;
+			if (slabIndex >= gVoxelComputeConstants.SlabRecordCount)
+			{
+				break;
+			}
+			const NRIVoxelComputeSlabRecord slab = VoxelComputeSlabs[slabIndex];
+			const int x = int(slab.X);
+			const int y = int(slab.Y);
+			const int zTop = int(slab.ZTop);
+			if ((slab.CullMask & 16u) != 0u && slab.ColorRunCount != 0u)
+			{
+				const uint runIndex = slab.ColorRunOffset;
+				if (runIndex < gVoxelComputeConstants.ColorRunRecordCount)
+				{
+					const uint color = VoxelComputeColorRuns[runIndex].Color;
+					EmitFace(job, int4(x, x + 1, x, x + 1), int4(y, y, y + 1, y + 1), int4(zTop, zTop, zTop, zTop), color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
+				}
+			}
+			for (uint localRun = 0u; localRun < slab.ColorRunCount; ++localRun)
+			{
+				const uint runIndex = slab.ColorRunOffset + localRun;
+				if (runIndex >= gVoxelComputeConstants.ColorRunRecordCount)
+				{
+					break;
+				}
+				const NRIVoxelComputeColorRunRecord run = VoxelComputeColorRuns[runIndex];
+				const int z0 = zTop + int(run.ZOffset);
+				const int z1 = z0 + int(run.ZLength);
+				if ((slab.CullMask & 1u) != 0u)
+				{
+					EmitFace(job, int4(x, x, x, x), int4(y, y + 1, y, y + 1), int4(z0, z0, z1, z1), run.Color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
+				}
+				if ((slab.CullMask & 2u) != 0u)
+				{
+					EmitFace(job, int4(x + 1, x + 1, x + 1, x + 1), int4(y + 1, y, y + 1, y), int4(z0, z0, z1, z1), run.Color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
+				}
+				if ((slab.CullMask & 4u) != 0u)
+				{
+					EmitFace(job, int4(x + 1, x, x + 1, x), int4(y, y, y, y), int4(z0, z0, z1, z1), run.Color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
+				}
+				if ((slab.CullMask & 8u) != 0u)
+				{
+					EmitFace(job, int4(x, x + 1, x, x + 1), int4(y + 1, y + 1, y + 1, y + 1), int4(z0, z0, z1, z1), run.Color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
+				}
+			}
+			if ((slab.CullMask & 32u) != 0u && slab.ColorRunCount != 0u)
+			{
+				const uint runIndex = slab.ColorRunOffset + slab.ColorRunCount - 1u;
+				if (runIndex < gVoxelComputeConstants.ColorRunRecordCount)
+				{
+					const uint color = VoxelComputeColorRuns[runIndex].Color;
+					const int z = zTop + int(slab.ZLength);
+					EmitFace(job, int4(x + 1, x, x + 1, x), int4(y, y, y + 1, y + 1), int4(z, z, z, z), color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
+				}
+			}
 		}
-
-		const NRIVoxelComputeFaceRecord face = VoxelComputeFaces[faceIndex];
-		const float2 uv = VoxelUv(face.Color);
-		const float3 p0 = TransformVoxelPoint(job, face.X[0], face.Y[0], face.Z[0]);
-		const float3 p1 = TransformVoxelPoint(job, face.X[1], face.Y[1], face.Z[1]);
-		const float3 p2 = TransformVoxelPoint(job, face.X[3], face.Y[3], face.Z[3]);
-		const float3 p3 = TransformVoxelPoint(job, face.X[2], face.Y[2], face.Z[2]);
-
-		const uint vertexBase = job.VertexOffset + localFace * 4u;
-		const uint indexBase = job.IndexOffset + localFace * 6u;
-		const uint primitiveBase = job.PrimitiveOffset + localFace * 2u;
-
-		VoxelComputeVertices[vertexBase + 0u] = MakeVertex(p0, uv);
-		VoxelComputeVertices[vertexBase + 1u] = MakeVertex(p1, uv);
-		VoxelComputeVertices[vertexBase + 2u] = MakeVertex(p2, uv);
-		VoxelComputeVertices[vertexBase + 3u] = MakeVertex(p3, uv);
-
-		const uint indices[6] = {
-			vertexBase + 0u,
-			vertexBase + 1u,
-			vertexBase + 3u,
-			vertexBase + 1u,
-			vertexBase + 2u,
-			vertexBase + 3u
-		};
-		[unroll]
-		for (uint i = 0u; i < 6u; ++i)
+	}
+	else
+	{
+		for (uint localFace = 0u; localFace < job.ExpectedFaces; ++localFace)
 		{
-			VoxelComputeIndices[indexBase + i] = indices[i];
-			indexHash = HashCombine(indexHash, indices[i]);
+			const uint faceIndex = job.FaceOffset + localFace;
+			if (faceIndex >= gVoxelComputeConstants.FaceRecordCount)
+			{
+				break;
+			}
+			const NRIVoxelComputeFaceRecord face = VoxelComputeFaces[faceIndex];
+			EmitFace(job, int4(face.X[0], face.X[1], face.X[2], face.X[3]), int4(face.Y[0], face.Y[1], face.Y[2], face.Y[3]), int4(face.Z[0], face.Z[1], face.Z[2], face.Z[3]), face.Color, face.MaterialIndex, emittedFaces, vertexHash, indexHash, primitiveHash);
 		}
-
-		VoxelComputePrimitives[primitiveBase + 0u] = MakePrimitive(uint3(indices[0], indices[1], indices[2]), face.MaterialIndex, uv, uv, uv, p0, p1, p3);
-		VoxelComputePrimitives[primitiveBase + 1u] = MakePrimitive(uint3(indices[3], indices[4], indices[5]), face.MaterialIndex, uv, uv, uv, p1, p2, p3);
-
-		[unroll]
-		for (uint v = 0u; v < 4u; ++v)
-		{
-			const NRIVoxelComputeSceneVertex vertex = VoxelComputeVertices[vertexBase + v];
-			vertexHash = HashCombine(vertexHash, asuint(vertex.Position.x));
-			vertexHash = HashCombine(vertexHash, asuint(vertex.Position.y));
-			vertexHash = HashCombine(vertexHash, asuint(vertex.Position.z));
-			vertexHash = HashCombine(vertexHash, asuint(vertex.Uv.x));
-			vertexHash = HashCombine(vertexHash, asuint(vertex.Uv.y));
-		}
-		primitiveHash = HashCombine(primitiveHash, face.MaterialIndex);
-		primitiveHash = HashCombine(primitiveHash, indices[0]);
-		primitiveHash = HashCombine(primitiveHash, indices[1]);
-		primitiveHash = HashCombine(primitiveHash, indices[2]);
-		primitiveHash = HashCombine(primitiveHash, indices[3]);
-		primitiveHash = HashCombine(primitiveHash, indices[4]);
-		primitiveHash = HashCombine(primitiveHash, indices[5]);
-		++emittedFaces;
 	}
 
 	NRIVoxelComputeResult result;

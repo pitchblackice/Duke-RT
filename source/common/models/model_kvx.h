@@ -46,9 +46,20 @@ struct FVoxelMeshData
 
 struct FVoxelRawSlabRecord
 {
+	uint32_t x = 0;
+	uint32_t y = 0;
+	uint32_t zTop = 0;
 	uint32_t cullMask = 0;
 	uint32_t zLength = 0;
 	uint32_t colorRunCount = 0;
+	uint32_t colorRunOffset = 0;
+};
+
+struct FVoxelRawColorRunRecord
+{
+	uint32_t zOffset = 0;
+	uint32_t zLength = 0;
+	uint32_t color = 0;
 };
 
 struct FVoxelRawFaceRecord
@@ -103,7 +114,8 @@ public:
 	void BuildRawMeshStats(
 		FVoxelRawMeshStats& outStats,
 		TArray<FVoxelRawSlabRecord>* outSlabs = nullptr,
-		TArray<FVoxelRawFaceRecord>* outFaces = nullptr) const;
+		TArray<FVoxelRawFaceRecord>* outFaces = nullptr,
+		TArray<FVoxelRawColorRunRecord>* outColorRuns = nullptr) const;
 	virtual int FindFrame(const char* name, bool nodefault) override;
 	virtual void RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, const TArray<VSMatrix>& boneData, int boneStartPosition) override;
 	virtual void AddSkins(uint8_t *hitlist, const FTextureID* surfaceskinids) override;

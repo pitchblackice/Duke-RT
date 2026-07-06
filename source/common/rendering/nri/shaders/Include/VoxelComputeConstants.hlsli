@@ -17,7 +17,7 @@ struct NRIVoxelComputeConstants
 	uint JobCount;
 	uint SlabRecordCount;
 	uint FaceRecordCount;
-	uint Reserved1;
+	uint ColorRunRecordCount;
 };
 
 struct NRIVoxelComputeJob
@@ -41,9 +41,21 @@ struct NRIVoxelComputeJob
 
 struct NRIVoxelComputeSlabRecord
 {
+	uint X;
+	uint Y;
+	uint ZTop;
 	uint CullMask;
 	uint ZLength;
 	uint ColorRunCount;
+	uint ColorRunOffset;
+	uint Reserved0;
+};
+
+struct NRIVoxelComputeColorRunRecord
+{
+	uint ZOffset;
+	uint ZLength;
+	uint Color;
 	uint Reserved0;
 };
 

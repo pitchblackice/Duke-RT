@@ -9,6 +9,7 @@ class NRIRenderer;
 struct FVoxelRawMeshStats;
 struct FVoxelRawSlabRecord;
 struct FVoxelRawFaceRecord;
+struct FVoxelRawColorRunRecord;
 struct FVoxelMeshData;
 namespace nri_scene { struct GeometryData; }
 
@@ -29,6 +30,7 @@ void QueueNRIVoxelComputeCountJob(
 	const FVoxelRawMeshStats& stats,
 	const TArray<FVoxelRawSlabRecord>* slabs,
 	const TArray<FVoxelRawFaceRecord>* faces,
+	const TArray<FVoxelRawColorRunRecord>* colorRuns,
 	const FVoxelMeshData& cpuMesh);
 NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeGeneratedGeometry(uint64_t requestKey, FVoxelModel* model);
 bool TakeNRIVoxelComputeGeneratedGeometry(uint64_t requestKey, nri_scene::GeometryData& outGeometry, uint32_t* outJobId = nullptr);

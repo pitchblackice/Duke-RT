@@ -4562,10 +4562,12 @@ namespace
 				FVoxelRawMeshStats rawStats = {};
 				TArray<FVoxelRawSlabRecord> rawSlabs;
 				TArray<FVoxelRawFaceRecord> rawFaces;
+				TArray<FVoxelRawColorRunRecord> rawColorRuns;
 				model->BuildRawMeshStats(
 					rawStats,
 					ShouldRunNRIVoxelComputeMeshing() ? &rawSlabs : nullptr,
-					ShouldEmitNRIVoxelComputeMeshing() ? &rawFaces : nullptr);
+					ShouldEmitNRIVoxelComputeMeshing() ? &rawFaces : nullptr,
+					ShouldRunNRIVoxelComputeMeshing() ? &rawColorRuns : nullptr);
 				if (ShouldTraceNRIVoxelComputeMeshing())
 				{
 					Printf(
@@ -4594,6 +4596,7 @@ namespace
 					rawStats,
 					ShouldRunNRIVoxelComputeMeshing() ? &rawSlabs : nullptr,
 					ShouldEmitNRIVoxelComputeMeshing() ? &rawFaces : nullptr,
+					ShouldRunNRIVoxelComputeMeshing() ? &rawColorRuns : nullptr,
 					entry.mesh);
 			}
 			entry.built = true;

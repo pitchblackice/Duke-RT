@@ -352,7 +352,8 @@ void FVoxelModel::BuildCpuMesh(FVoxelMeshData& outMesh) const
 void FVoxelModel::BuildRawMeshStats(
 	FVoxelRawMeshStats& outStats,
 	TArray<FVoxelRawSlabRecord>* outSlabs,
-	TArray<FVoxelRawFaceRecord>* outFaces) const
+	TArray<FVoxelRawFaceRecord>* outFaces,
+	TArray<FVoxelRawColorRunRecord>* outColorRuns) const
 {
 	outStats = {};
 	if (outSlabs != nullptr)
@@ -362,6 +363,10 @@ void FVoxelModel::BuildRawMeshStats(
 	if (outFaces != nullptr)
 	{
 		outFaces->Clear();
+	}
+	if (outColorRuns != nullptr)
+	{
+		outColorRuns->Clear();
 	}
 	if (mVoxel == nullptr)
 	{
@@ -437,6 +442,7 @@ void FVoxelModel::BuildRawMeshStats(
 				uint32_t colorRuns = 0;
 				const uint8_t* col = voxptr->col;
 				uint32_t z = 0;
+				const uint32_t colorRunOffset = outColorRuns != nullptr ? (uint32_t)outColorRuns->Size() : 0u;
 				while (z < zleng)
 				{
 					uint32_t run = 1;
@@ -445,6 +451,14 @@ void FVoxelModel::BuildRawMeshStats(
 						++run;
 					}
 					++colorRuns;
+					if (outColorRuns != nullptr)
+					{
+						FVoxelRawColorRunRecord runRecord = {};
+						runRecord.zOffset = z;
+						runRecord.zLength = run;
+						runRecord.color = col[0];
+						outColorRuns->Push(runRecord);
+					}
 					const int z0 = (int)(ztop + z);
 					const int z1 = (int)(ztop + z + run);
 					if ((cull & 1u) != 0)
@@ -492,9 +506,13 @@ void FVoxelModel::BuildRawMeshStats(
 				if (outSlabs != nullptr)
 				{
 					FVoxelRawSlabRecord record = {};
+					record.x = (uint32_t)x;
+					record.y = (uint32_t)y;
+					record.zTop = ztop;
 					record.cullMask = cull;
 					record.zLength = zleng;
 					record.colorRunCount = colorRuns;
+					record.colorRunOffset = colorRunOffset;
 					outSlabs->Push(record);
 				}
 			}

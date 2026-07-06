@@ -259,7 +259,7 @@ constexpr uint32_t NRI_VOXEL_COMPUTE_SET_INPUTS = 0;
 constexpr uint32_t NRI_VOXEL_COMPUTE_SET_OUTPUTS = 1;
 constexpr uint32_t NRI_VOXEL_COMPUTE_SET_ROOT = 2;
 constexpr uint32_t NRI_VOXEL_COMPUTE_INPUT_DESCRIPTOR_NUM = 2;
-constexpr uint32_t NRI_VOXEL_COMPUTE_FACE_DESCRIPTOR_NUM = 1;
+constexpr uint32_t NRI_VOXEL_COMPUTE_FACE_DESCRIPTOR_NUM = 2;
 constexpr uint32_t NRI_VOXEL_COMPUTE_RESULT_DESCRIPTOR_NUM = 1;
 constexpr uint32_t NRI_VOXEL_COMPUTE_EMIT_OUTPUT_DESCRIPTOR_NUM = 3;
 constexpr uint32_t NRI_VOXEL_COMPUTE_ROOT_REGISTER = 0;
@@ -273,7 +273,7 @@ struct NRIVoxelComputeConstants
 	uint32_t JobCount = 0;
 	uint32_t SlabRecordCount = 0;
 	uint32_t FaceRecordCount = 0;
-	uint32_t Reserved1 = 0;
+	uint32_t ColorRunRecordCount = 0;
 };
 
 struct NRIVoxelComputeJob
@@ -297,9 +297,21 @@ struct NRIVoxelComputeJob
 
 struct NRIVoxelComputeSlabRecord
 {
+	uint32_t X = 0;
+	uint32_t Y = 0;
+	uint32_t ZTop = 0;
 	uint32_t CullMask = 0;
 	uint32_t ZLength = 0;
 	uint32_t ColorRunCount = 0;
+	uint32_t ColorRunOffset = 0;
+	uint32_t Reserved0 = 0;
+};
+
+struct NRIVoxelComputeColorRunRecord
+{
+	uint32_t ZOffset = 0;
+	uint32_t ZLength = 0;
+	uint32_t Color = 0;
 	uint32_t Reserved0 = 0;
 };
 
@@ -350,7 +362,8 @@ struct NRIVoxelComputePrimitiveData
 
 static_assert(sizeof(NRIVoxelComputeConstants) == 16, "NRIVoxelComputeConstants must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeJob) == 60, "NRIVoxelComputeJob must match VoxelComputeConstants.hlsli.");
-static_assert(sizeof(NRIVoxelComputeSlabRecord) == 16, "NRIVoxelComputeSlabRecord must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputeSlabRecord) == 32, "NRIVoxelComputeSlabRecord must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputeColorRunRecord) == 16, "NRIVoxelComputeColorRunRecord must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeResult) == 48, "NRIVoxelComputeResult must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeFaceRecord) == 56, "NRIVoxelComputeFaceRecord must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeSceneVertex) == 32, "NRIVoxelComputeSceneVertex must match VoxelComputeConstants.hlsli.");
