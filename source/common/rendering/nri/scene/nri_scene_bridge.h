@@ -329,6 +329,7 @@ struct PrecachedVoxelVariantView
 	uint32_t primitiveCount = 0;
 	bool gpuForce = false;
 	bool gpuPrefer = false;
+	FVoxelModel* model = nullptr;
 	const SurfaceRef* surface = nullptr;
 	MaterialRef material;
 };

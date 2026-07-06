@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace
@@ -31,6 +33,7 @@ namespace
 	{
 		FVoxelModel* model = nullptr;
 		FVoxelRawMeshStats stats = {};
+		uint64_t consumeKey = 0;
 		uint32_t cpuVertexCount = 0;
 		uint32_t cpuIndexCount = 0;
 		uint32_t jobId = 0;
@@ -52,7 +55,17 @@ namespace
 		uint32_t vertexOffset = 0;
 		uint32_t indexOffset = 0;
 		uint32_t primitiveOffset = 0;
+		uint64_t consumeKey = 0;
 		VoxelComputeAdmissionState admissionState = VoxelComputeAdmissionState::Counting;
+	};
+
+	struct GeneratedVoxelGeometry
+	{
+		nri_scene::GeometryData geometry;
+		uint32_t jobId = 0;
+		uint32_t vertexHash = 0;
+		uint32_t indexHash = 0;
+		uint32_t primitiveHash = 0;
 	};
 
 	struct VoxelComputeState
@@ -68,6 +81,10 @@ namespace
 		uint32_t pendingIndexCount = 0;
 		uint32_t pendingPrimitiveCount = 0;
 		uint32_t diagnosticBlasBuildsSubmitted = 0;
+		std::unordered_set<uint64_t> queuedConsumeKeys;
+		std::unordered_set<uint64_t> pendingConsumeKeys;
+		std::unordered_set<uint64_t> failedConsumeKeys;
+		std::unordered_map<uint64_t, GeneratedVoxelGeometry> readyGeneratedGeometry;
 
 		NRIBufferResource jobUploadBuffer = {};
 		NRIBufferResource slabUploadBuffer = {};
@@ -106,6 +123,11 @@ namespace
 	bool IsBlasEnabled()
 	{
 		return (bool)nri_ptvoxelcompute && (int)nri_ptvoxelcomputemode >= 5;
+	}
+
+	bool IsConsumptionEnabled()
+	{
+		return (bool)nri_ptvoxelcompute && (int)nri_ptvoxelcomputemode >= 6;
 	}
 
 	const char* AdmissionStateName(VoxelComputeAdmissionState state)
@@ -234,6 +256,86 @@ namespace
 		return hash;
 	}
 
+	bool ImportGeneratedGeometry(
+		const PendingReadbackJob& job,
+		const NRIVoxelComputeResult& result,
+		const NRIVoxelComputeSceneVertex* vertices,
+		const uint32_t* indices,
+		const NRIVoxelComputePrimitiveData* primitives,
+		GeneratedVoxelGeometry& outGenerated)
+	{
+		if (vertices == nullptr || indices == nullptr || primitives == nullptr ||
+			result.VertexCountNoDedupe != job.expectedVerticesNoDedupe ||
+			result.IndexCount != job.expectedIndices ||
+			result.PrimitiveCount != job.expectedPrimitives)
+		{
+			return false;
+		}
+
+		nri_scene::GeometryData geometry = {};
+		geometry.vertices.resize(result.VertexCountNoDedupe);
+		geometry.indices.resize(result.IndexCount);
+		geometry.primitives.resize(result.PrimitiveCount);
+
+		for (uint32_t i = 0; i < result.VertexCountNoDedupe; ++i)
+		{
+			const NRIVoxelComputeSceneVertex& source = vertices[(uint64_t)job.vertexOffset + i];
+			nri_scene::SceneVertex& target = geometry.vertices[i];
+			target.position[0] = source.Position[0];
+			target.position[1] = source.Position[1];
+			target.position[2] = source.Position[2];
+			target.prevPosition[0] = source.PrevPosition[0];
+			target.prevPosition[1] = source.PrevPosition[1];
+			target.prevPosition[2] = source.PrevPosition[2];
+			target.uv[0] = source.Uv[0];
+			target.uv[1] = source.Uv[1];
+		}
+
+		for (uint32_t i = 0; i < result.IndexCount; ++i)
+		{
+			const uint32_t globalIndex = indices[(uint64_t)job.indexOffset + i];
+			if (globalIndex < job.vertexOffset || globalIndex >= job.vertexOffset + result.VertexCountNoDedupe)
+			{
+				return false;
+			}
+			geometry.indices[i] = globalIndex - job.vertexOffset;
+		}
+
+		for (uint32_t i = 0; i < result.PrimitiveCount; ++i)
+		{
+			const NRIVoxelComputePrimitiveData& source = primitives[(uint64_t)job.primitiveOffset + i];
+			nri_scene::PrimitiveData& target = geometry.primitives[i];
+			for (uint32_t vertex = 0; vertex < 3; ++vertex)
+			{
+				if (source.Indices[vertex] < job.vertexOffset || source.Indices[vertex] >= job.vertexOffset + result.VertexCountNoDedupe)
+				{
+					return false;
+				}
+				target.indices[vertex] = source.Indices[vertex] - job.vertexOffset;
+			}
+			target.materialIndex = source.MaterialIndex;
+			target.uv0[0] = source.Uv0[0];
+			target.uv0[1] = source.Uv0[1];
+			target.uv1[0] = source.Uv1[0];
+			target.uv1[1] = source.Uv1[1];
+			target.uv2[0] = source.Uv2[0];
+			target.uv2[1] = source.Uv2[1];
+			target.normal[0] = source.Normal[0];
+			target.normal[1] = source.Normal[1];
+			target.normal[2] = source.Normal[2];
+			target.flags = source.Flags;
+			target.portalIndex = source.PortalIndex;
+			target.reserved0 = source.Reserved0;
+		}
+
+		outGenerated.geometry = std::move(geometry);
+		outGenerated.jobId = job.jobId;
+		outGenerated.vertexHash = result.VertexHash;
+		outGenerated.indexHash = result.IndexHash;
+		outGenerated.primitiveHash = result.PrimitiveHash;
+		return true;
+	}
+
 	void TraceAdmission(uint64_t frameNumber, const PendingReadbackJob& job, VoxelComputeAdmissionState state, const char* reason)
 	{
 		if (!IsAdmissionTraceEnabled() && !IsTraceEnabled())
@@ -242,9 +344,10 @@ namespace
 		}
 
 		Printf(
-			"PERF pt voxel compute admission NRI: frame=%llu job=%u state=%s reason=%s faces=%u vertices=%u indices=%u primitives=%u\n",
+			"PERF pt voxel compute admission NRI: frame=%llu job=%u consume_key=0x%llx state=%s reason=%s faces=%u vertices=%u indices=%u primitives=%u\n",
 			(unsigned long long)frameNumber,
 			job.jobId,
+			(unsigned long long)job.consumeKey,
 			AdmissionStateName(state),
 			reason != nullptr ? reason : "unknown",
 			job.expectedFaces,
@@ -272,6 +375,24 @@ namespace
 		}
 
 		const NRIVoxelComputeResult* results = static_cast<const NRIVoxelComputeResult*>(mapped);
+		const NRIVoxelComputeSceneVertex* generatedVertices = nullptr;
+		const uint32_t* generatedIndices = nullptr;
+		const NRIVoxelComputePrimitiveData* generatedPrimitives = nullptr;
+		if (state.pendingEmit)
+		{
+			const uint64_t vertexBytes = (uint64_t)state.pendingVertexCount * sizeof(NRIVoxelComputeSceneVertex);
+			const uint64_t indexBytes = (uint64_t)state.pendingIndexCount * sizeof(uint32_t);
+			const uint64_t primitiveBytes = (uint64_t)state.pendingPrimitiveCount * sizeof(NRIVoxelComputePrimitiveData);
+			generatedVertices = state.vertexReadbackBuffer.buffer != nullptr && vertexBytes != 0 ?
+				static_cast<const NRIVoxelComputeSceneVertex*>(services.context.core->MapBuffer(*state.vertexReadbackBuffer.buffer, 0, vertexBytes)) :
+				nullptr;
+			generatedIndices = state.indexReadbackBuffer.buffer != nullptr && indexBytes != 0 ?
+				static_cast<const uint32_t*>(services.context.core->MapBuffer(*state.indexReadbackBuffer.buffer, 0, indexBytes)) :
+				nullptr;
+			generatedPrimitives = state.primitiveReadbackBuffer.buffer != nullptr && primitiveBytes != 0 ?
+				static_cast<const NRIVoxelComputePrimitiveData*>(services.context.core->MapBuffer(*state.primitiveReadbackBuffer.buffer, 0, primitiveBytes)) :
+				nullptr;
+		}
 		uint32_t okCount = 0;
 		uint32_t mismatchCount = 0;
 		for (size_t i = 0; i < state.pendingReadbackJobs.size(); ++i)
@@ -284,14 +405,37 @@ namespace
 			okCount += ok ? 1u : 0u;
 			mismatchCount += ok ? 0u : 1u;
 			job.admissionState = ok ? (state.pendingEmit ? VoxelComputeAdmissionState::ReadyForBlas : VoxelComputeAdmissionState::CountReady) : VoxelComputeAdmissionState::Failed;
+			if (job.consumeKey != 0)
+			{
+				state.pendingConsumeKeys.erase(job.consumeKey);
+				if (ok && state.pendingEmit)
+				{
+					GeneratedVoxelGeometry generated = {};
+					if (ImportGeneratedGeometry(job, result, generatedVertices, generatedIndices, generatedPrimitives, generated))
+					{
+						state.readyGeneratedGeometry[job.consumeKey] = std::move(generated);
+						state.failedConsumeKeys.erase(job.consumeKey);
+					}
+					else
+					{
+						state.failedConsumeKeys.insert(job.consumeKey);
+						job.admissionState = VoxelComputeAdmissionState::Failed;
+					}
+				}
+				else
+				{
+					state.failedConsumeKeys.insert(job.consumeKey);
+				}
+			}
 			TraceAdmission(state.pendingFrame, job, job.admissionState, state.pendingEmit ? "readback_emit" : "readback_count");
 			if (IsTraceEnabled())
 			{
 				Printf(
-					"PERF pt voxel compute %s NRI: frame=%llu job=%u status=%u mismatch=%u faces=%u expected_faces=%u indices=%u expected_indices=%u vertices_nodedupe=%u expected_vertices_nodedupe=%u primitives=%u expected_primitives=%u voxels=%u expected_voxels=%u cpu_vertices=%u cpu_indices=%u vertex_hash=%u index_hash=%u primitive_hash=%u\n",
+					"PERF pt voxel compute %s NRI: frame=%llu job=%u consume_key=0x%llx status=%u mismatch=%u faces=%u expected_faces=%u indices=%u expected_indices=%u vertices_nodedupe=%u expected_vertices_nodedupe=%u primitives=%u expected_primitives=%u voxels=%u expected_voxels=%u cpu_vertices=%u cpu_indices=%u vertex_hash=%u index_hash=%u primitive_hash=%u\n",
 					state.pendingEmit ? "emit" : "count",
 					(unsigned long long)state.pendingFrame,
 					job.jobId,
+					(unsigned long long)job.consumeKey,
 					result.Status,
 					result.MismatchMask,
 					result.FaceCount,
@@ -310,6 +454,18 @@ namespace
 					result.IndexHash,
 					result.PrimitiveHash);
 			}
+		}
+		if (generatedVertices != nullptr)
+		{
+			services.context.core->UnmapBuffer(*state.vertexReadbackBuffer.buffer);
+		}
+		if (generatedIndices != nullptr)
+		{
+			services.context.core->UnmapBuffer(*state.indexReadbackBuffer.buffer);
+		}
+		if (generatedPrimitives != nullptr)
+		{
+			services.context.core->UnmapBuffer(*state.primitiveReadbackBuffer.buffer);
 		}
 		services.context.core->UnmapBuffer(*state.readbackBuffer.buffer);
 
@@ -366,6 +522,135 @@ bool ShouldRunNRIVoxelComputeMeshing()
 bool ShouldEmitNRIVoxelComputeMeshing()
 {
 	return IsEmitEnabled();
+}
+
+bool ShouldConsumeNRIVoxelComputeMeshing()
+{
+	return IsConsumptionEnabled();
+}
+
+NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeGeneratedGeometry(uint64_t requestKey, FVoxelModel* model)
+{
+	constexpr uint32_t MaxConsumptionPrimitives = 8192;
+	VoxelComputeState& state = gVoxelComputeState;
+	if (!IsConsumptionEnabled() || requestKey == 0 || model == nullptr)
+	{
+		return NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
+	}
+	if (state.readyGeneratedGeometry.find(requestKey) != state.readyGeneratedGeometry.end())
+	{
+		return NRIVoxelComputeGeneratedGeometryStatus::Ready;
+	}
+	if (state.failedConsumeKeys.find(requestKey) != state.failedConsumeKeys.end())
+	{
+		return NRIVoxelComputeGeneratedGeometryStatus::Failed;
+	}
+	if (state.queuedConsumeKeys.find(requestKey) != state.queuedConsumeKeys.end() ||
+		state.pendingConsumeKeys.find(requestKey) != state.pendingConsumeKeys.end())
+	{
+		return NRIVoxelComputeGeneratedGeometryStatus::Queued;
+	}
+
+	const uint32_t maxJobs = std::max(0, (int)nri_ptvoxelcomputemaxjobs);
+	if (maxJobs == 0)
+	{
+		return NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
+	}
+	if (state.queuedJobs.size() >= maxJobs)
+	{
+		auto diagnosticJob = std::find_if(state.queuedJobs.rbegin(), state.queuedJobs.rend(), [](const PendingVoxelComputeJob& job)
+		{
+			return job.consumeKey == 0;
+		});
+		if (diagnosticJob == state.queuedJobs.rend())
+		{
+			return NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
+		}
+		state.queuedJobs.erase(std::next(diagnosticJob).base());
+	}
+
+	FVoxelRawMeshStats rawStats = {};
+	TArray<FVoxelRawSlabRecord> rawSlabs;
+	TArray<FVoxelRawFaceRecord> rawFaces;
+	model->BuildRawMeshStats(rawStats, &rawSlabs, &rawFaces);
+	if (rawStats.slabCount == 0 || rawStats.coalescedFaceCount == 0 ||
+		rawFaces.Size() != rawStats.coalescedFaceCount ||
+		rawStats.coalescedFaceCount > MaxConsumptionPrimitives / 2u)
+	{
+		if (IsTraceEnabled())
+		{
+			Printf(
+				"PERF pt voxel compute consume NRI: action=fallback reason=%s consume_key=0x%llx faces=%u primitives=%u max_primitives=%u\n",
+				rawStats.coalescedFaceCount > MaxConsumptionPrimitives / 2u ? "primitive_budget" : "invalid_raw",
+				(unsigned long long)requestKey,
+				rawStats.coalescedFaceCount,
+				rawStats.coalescedFaceCount * 2u,
+				MaxConsumptionPrimitives);
+		}
+		return NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
+	}
+
+	PendingVoxelComputeJob job = {};
+	job.model = model;
+	job.stats = rawStats;
+	job.consumeKey = requestKey;
+	job.jobId = state.nextJobId++;
+	job.slabs.reserve((size_t)rawSlabs.Size());
+	for (unsigned int i = 0; i < rawSlabs.Size(); ++i)
+	{
+		const FVoxelRawSlabRecord& slab = rawSlabs[i];
+		NRIVoxelComputeSlabRecord record = {};
+		record.CullMask = slab.cullMask;
+		record.ZLength = slab.zLength;
+		record.ColorRunCount = slab.colorRunCount;
+		job.slabs.push_back(record);
+	}
+	job.faces.reserve((size_t)rawFaces.Size());
+	for (unsigned int i = 0; i < rawFaces.Size(); ++i)
+	{
+		const FVoxelRawFaceRecord& face = rawFaces[i];
+		NRIVoxelComputeFaceRecord record = {};
+		for (uint32_t v = 0; v < 4; ++v)
+		{
+			record.X[v] = face.x[v];
+			record.Y[v] = face.y[v];
+			record.Z[v] = face.z[v];
+		}
+		record.Color = face.color;
+		record.MaterialIndex = face.materialIndex;
+		job.faces.push_back(record);
+	}
+	state.queuedConsumeKeys.insert(requestKey);
+	state.queuedJobs.push_back(std::move(job));
+	if (IsTraceEnabled())
+	{
+		Printf(
+			"PERF pt voxel compute consume NRI: action=queue consume_key=0x%llx job=%u faces=%u vertices=%u indices=%u primitives=%u\n",
+			(unsigned long long)requestKey,
+			state.queuedJobs.back().jobId,
+			rawStats.coalescedFaceCount,
+			rawStats.noDedupeVertexCount,
+			rawStats.indexCount,
+			rawStats.coalescedFaceCount * 2u);
+	}
+	return NRIVoxelComputeGeneratedGeometryStatus::Queued;
+}
+
+bool TakeNRIVoxelComputeGeneratedGeometry(uint64_t requestKey, nri_scene::GeometryData& outGeometry, uint32_t* outJobId)
+{
+	VoxelComputeState& state = gVoxelComputeState;
+	auto found = state.readyGeneratedGeometry.find(requestKey);
+	if (found == state.readyGeneratedGeometry.end())
+	{
+		return false;
+	}
+	if (outJobId != nullptr)
+	{
+		*outJobId = found->second.jobId;
+	}
+	outGeometry = std::move(found->second.geometry);
+	state.readyGeneratedGeometry.erase(found);
+	return true;
 }
 
 void QueueNRIVoxelComputeCountJob(
@@ -466,6 +751,11 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	{
 		if (emit && queued.faces.size() != queued.stats.coalescedFaceCount)
 		{
+			if (queued.consumeKey != 0)
+			{
+				state.queuedConsumeKeys.erase(queued.consumeKey);
+				state.failedConsumeKeys.insert(queued.consumeKey);
+			}
 			continue;
 		}
 
@@ -498,8 +788,13 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		pending.vertexOffset = gpuJob.VertexOffset;
 		pending.indexOffset = gpuJob.IndexOffset;
 		pending.primitiveOffset = gpuJob.PrimitiveOffset;
+		pending.consumeKey = queued.consumeKey;
 		pending.admissionState = emit ? VoxelComputeAdmissionState::Emitting : VoxelComputeAdmissionState::Counting;
 		pendingJobs.push_back(pending);
+		if (queued.consumeKey != 0)
+		{
+			state.queuedConsumeKeys.erase(queued.consumeKey);
+		}
 		TraceAdmission(frameNumber, pending, pending.admissionState, "dispatch");
 
 		gpuSlabs.insert(gpuSlabs.end(), queued.slabs.begin(), queued.slabs.end());
@@ -768,6 +1063,13 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	state.pendingReadbackValid = true;
 	state.pendingEmit = emit;
 	state.pendingBlas = buildBlas;
+	for (const PendingReadbackJob& job : pendingJobs)
+	{
+		if (job.consumeKey != 0)
+		{
+			state.pendingConsumeKeys.insert(job.consumeKey);
+		}
+	}
 	state.pendingReadbackJobs = std::move(pendingJobs);
 	state.pendingVertexCount = vertexOffset;
 	state.pendingIndexCount = indexOffset;
@@ -820,4 +1122,8 @@ void DestroyNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer)
 	state.pendingIndexCount = 0;
 	state.pendingPrimitiveCount = 0;
 	state.diagnosticBlasBuildsSubmitted = 0;
+	state.queuedConsumeKeys.clear();
+	state.pendingConsumeKeys.clear();
+	state.failedConsumeKeys.clear();
+	state.readyGeneratedGeometry.clear();
 }

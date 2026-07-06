@@ -6262,6 +6262,7 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 			view.primitiveCount = primitiveCount;
 			view.gpuForce = forcedGpu;
 			view.gpuPrefer = preferredGpu;
+			view.model = request.model;
 			view.surface = surface;
 			view.material = material;
 			outEntries.push_back(std::move(view));

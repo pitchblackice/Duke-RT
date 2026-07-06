@@ -170,6 +170,9 @@ struct PersistentVoxelAdmissionEntry
 	uint64_t indexArenaBytesUploaded = 0;
 	uint64_t primitiveBytesUploaded = 0;
 	bool uploadSubmittedBeforeBlas = false;
+	bool uploadGeometryFromCompute = false;
+	bool computeGeometryFailed = false;
+	uint32_t computeGeometryJobId = 0;
 	nri_scene::GeometryData uploadGeometry;
 	std::vector<uint32_t> uploadGpuIndices;
 	std::vector<nri_scene::PrimitiveData> uploadGpuPrimitives;

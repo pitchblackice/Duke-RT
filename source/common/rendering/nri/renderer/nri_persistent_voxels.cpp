@@ -5,6 +5,7 @@
 #include "nri_ray_scene_builder.h"
 #include "nri_shader_contracts.h"
 #include "nri_upload_hash.h"
+#include "nri_voxel_compute_meshing.h"
 #include "printf.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "stats.h"
@@ -3309,6 +3310,8 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		entry.indexArenaBytesUploaded = 0;
 		entry.primitiveBytesUploaded = 0;
 		entry.uploadSubmittedBeforeBlas = false;
+		entry.uploadGeometryFromCompute = false;
+		entry.computeGeometryJobId = 0;
 	};
 
 	auto rollbackAdmission = [&](const char* reason, const char* step) -> bool
@@ -3385,6 +3388,89 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				(unsigned long long)variant.meshKeyHash);
 		}
 	};
+	auto existingMeshResourceReady = [&]() -> bool
+	{
+		auto existingMeshIt = meshVariantResources.find(meshResourceKey);
+		return
+			existingMeshIt != meshVariantResources.end() &&
+			existingMeshIt->second.resourceKey == meshResourceKey &&
+			existingMeshIt->second.vertexCount != 0 &&
+			existingMeshIt->second.indexCount != 0 &&
+			existingMeshIt->second.primitiveCount != 0 &&
+			existingMeshIt->second.vertexBuffer.buffer != nullptr &&
+			existingMeshIt->second.indexBuffer.buffer != nullptr &&
+			existingMeshIt->second.accelerationStructure.accelerationStructure != nullptr &&
+			vertexBuffer.buffer != nullptr &&
+			indexBuffer.buffer != nullptr &&
+			primitiveBuffer.buffer != nullptr;
+	};
+
+	if (!entry.uploadPrepared &&
+		!entry.uploadGeometryFromCompute &&
+		!entry.computeGeometryFailed &&
+		!existingMeshResourceReady() &&
+		entry.runtimeRequested &&
+		ShouldConsumeNRIVoxelComputeMeshing() &&
+		variant.model != nullptr)
+	{
+		uint32_t computeJobId = 0;
+		if (TakeNRIVoxelComputeGeneratedGeometry(meshResourceKey, entry.uploadGeometry, &computeJobId))
+		{
+			entry.uploadGeometryFromCompute = true;
+			entry.computeGeometryJobId = computeJobId;
+			if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
+			{
+				Printf("PERF pt voxel compute consume NRI: action=import tex=%d voxel=%d mesh_variant=0x%llx job=%u vertices=%u indices=%u primitives=%u\n",
+					variant.sourcePicnum,
+					variant.resolvedVoxelIndex,
+					(unsigned long long)variant.meshKeyHash,
+					computeJobId,
+					(uint32_t)entry.uploadGeometry.vertices.size(),
+					(uint32_t)entry.uploadGeometry.indices.size(),
+					(uint32_t)entry.uploadGeometry.primitives.size());
+			}
+		}
+		else
+		{
+			const NRIVoxelComputeGeneratedGeometryStatus computeStatus =
+				RequestNRIVoxelComputeGeneratedGeometry(meshResourceKey, variant.model);
+			if (computeStatus == NRIVoxelComputeGeneratedGeometryStatus::Queued)
+			{
+				outInProgress = true;
+				entry.lastReason = "compute-geometry-pending";
+				if (loadingTraceLevel >= 2 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
+				{
+					Printf("PERF pt voxel compute consume NRI: action=defer reason=pending tex=%d voxel=%d mesh_variant=0x%llx\n",
+						variant.sourcePicnum,
+						variant.resolvedVoxelIndex,
+						(unsigned long long)variant.meshKeyHash);
+				}
+				return true;
+			}
+			if (computeStatus == NRIVoxelComputeGeneratedGeometryStatus::Failed)
+			{
+				entry.computeGeometryFailed = true;
+				if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
+				{
+					Printf("PERF pt voxel compute consume NRI: action=fallback reason=compute-failed tex=%d voxel=%d mesh_variant=0x%llx\n",
+						variant.sourcePicnum,
+						variant.resolvedVoxelIndex,
+						(unsigned long long)variant.meshKeyHash);
+				}
+			}
+			else
+			{
+				entry.computeGeometryFailed = true;
+				if (loadingTraceLevel >= 2 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
+				{
+					Printf("PERF pt voxel compute consume NRI: action=fallback reason=unavailable tex=%d voxel=%d mesh_variant=0x%llx\n",
+						variant.sourcePicnum,
+						variant.resolvedVoxelIndex,
+						(unsigned long long)variant.meshKeyHash);
+				}
+			}
+		}
+	}
 
 	if (!entry.uploadPrepared)
 	{
@@ -3511,6 +3597,9 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			entry.uploadMaterialResource = {};
 			outReusedMesh = true;
 			entry.uploadPrepared = false;
+			entry.uploadGeometryFromCompute = false;
+			entry.computeGeometryFailed = false;
+			entry.computeGeometryJobId = 0;
 			if (loadingTraceLevel >= 2 || voxelStatsEnabled)
 			{
 				Printf("NRI PT voxel admission transaction: event=commit reason=already-resident tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=0 step=publish\n",
@@ -3523,8 +3612,11 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			return true;
 		}
 
-		nri_scene::BuildGeometry(variantSceneView, entry.uploadGeometry);
-		services.AssignGeometryPortalIndices(entry.uploadGeometry);
+		if (!entry.uploadGeometryFromCompute)
+		{
+			nri_scene::BuildGeometry(variantSceneView, entry.uploadGeometry);
+			services.AssignGeometryPortalIndices(entry.uploadGeometry);
+		}
 		if (entry.uploadGeometry.vertices.empty() || entry.uploadGeometry.indices.empty() || entry.uploadGeometry.primitives.empty())
 		{
 			return rollbackAdmission("empty-geometry", "geometry");
@@ -3615,6 +3707,17 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		meshResource.cold = false;
 		entry.state = PersistentVoxelAdmissionState::UploadingVertices;
 		entry.uploadPrepared = true;
+		if (entry.uploadGeometryFromCompute && (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0))
+		{
+			Printf("PERF pt voxel compute consume NRI: action=prepare-resource tex=%d voxel=%d mesh_variant=0x%llx job=%u vertices=%u indices=%u primitives=%u\n",
+				variant.sourcePicnum,
+				variant.resolvedVoxelIndex,
+				(unsigned long long)variant.meshKeyHash,
+				entry.computeGeometryJobId,
+				meshResource.vertexCount,
+				meshResource.indexCount,
+				meshResource.primitiveCount);
+		}
 	}
 
 	auto uploadBytes = [&](const char* stream, NRIBufferResource& target, uint64_t targetOffset, const void* source, uint64_t sourceOffset, uint64_t totalBytes, uint32_t stride, nri::AccessStage after, int uploadKind, uint64_t& uploadedBytes) -> bool
@@ -3812,6 +3915,9 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 	entry.uploadGpuIndices.clear();
 	entry.uploadGpuPrimitives.clear();
 	entry.uploadPrepared = false;
+	entry.uploadGeometryFromCompute = false;
+	entry.computeGeometryFailed = false;
+	entry.computeGeometryJobId = 0;
 	entry.vertexBytesUploaded = 0;
 	entry.vertexArenaBytesUploaded = 0;
 	entry.indexBytesUploaded = 0;
@@ -6481,6 +6587,9 @@ void NRIPersistentVoxelResidency::DiscardAdmissionEntry(PersistentVoxelAdmission
 	entry.uploadGeometry = {};
 	entry.uploadGpuIndices.clear();
 	entry.uploadGpuPrimitives.clear();
+	entry.uploadGeometryFromCompute = false;
+	entry.computeGeometryFailed = false;
+	entry.computeGeometryJobId = 0;
 }
 
 bool NRIPersistentVoxelResidency::EnqueueAdmission(
