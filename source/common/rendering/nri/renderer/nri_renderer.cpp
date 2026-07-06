@@ -17,6 +17,7 @@
 #include "nri_shader_contracts.h"
 #include "nri_static_scene_geometry.h"
 #include "nri_upload_hash.h"
+#include "nri_voxel_compute_meshing.h"
 #include "nri_runtime_mutation_shared.h"
 #include "../scene/nri_hash.h"
 #include "../scene/nri_map_builder.h"
@@ -1852,6 +1853,7 @@ bool NRIRenderer::Initialize()
 		NRIPipelineStateManager::CreatePresentPipelineLayout(*this) &&
 		NRIPipelineStateManager::CreateExposurePipelineLayout(*this) &&
 		NRIPipelineStateManager::CreateBloomPipelineLayout(*this) &&
+		NRIPipelineStateManager::CreateVoxelComputePipelineLayout(*this) &&
 		NRIDescriptorSetManager::AllocateDescriptorSets(*this) &&
 		NRIDescriptorSetManager::UpdateSamplerSet(*this) &&
 		NRIPipelineStateManager::CreatePipelines(*this);
@@ -1869,6 +1871,7 @@ void NRIRenderer::Shutdown()
 
 	mNrd.Shutdown();
 	mUpscaler.Shutdown(*mFrameBuffer);
+	DestroyNRIVoxelComputeMeshingDiagnostics(*this);
 	DestroyAccelerationStructures();
 	ClearRuntimePointLights();
 	DestroySceneBuffers();
@@ -1923,6 +1926,11 @@ void NRIRenderer::Shutdown()
 		mFrameBuffer->mCore.DestroyPipelineLayout(mBloomPipelineLayout);
 		mBloomPipelineLayout = nullptr;
 	}
+	if (mVoxelComputePipelineLayout != nullptr)
+	{
+		mFrameBuffer->mCore.DestroyPipelineLayout(mVoxelComputePipelineLayout);
+		mVoxelComputePipelineLayout = nullptr;
+	}
 
 	mSamplerSet = nullptr;
 	mSceneTextureSets.clear();
@@ -1947,6 +1955,8 @@ void NRIRenderer::Shutdown()
 	mBloomOutputSets = {};
 	mExposureInputSets = {};
 	mExposureOutputSets = {};
+	mVoxelComputeInputSet = nullptr;
+	mVoxelComputeOutputSet = nullptr;
 	mAutoExposureInputSourceSlot = FrameTextureSlot::Count;
 	mSceneDataDescriptorsInitialized.clear();
 }

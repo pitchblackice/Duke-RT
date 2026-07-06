@@ -1947,6 +1947,7 @@ public:
 		DlssAfter,
 		Final,
 		BloomCopy,
+		VoxelComputeCount,
 		BloomDownsample,
 		BloomUpsample,
 		BloomComposite,
@@ -1972,6 +1973,8 @@ private:
 	friend bool DispatchNRIRendererAutoExposure(NRIRenderer& renderer, uint32_t sourceSlot);
 	friend void CopyNRIRendererAutoExposureStatsForReadback(NRIRenderer& renderer, uint64_t frameNumber);
 	friend void ReadbackNRIRendererAutoExposureStats(NRIRenderer& renderer);
+	friend void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t frameNumber);
+	friend void DestroyNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer);
 
 	NRIResourceContext BuildResourceContext() const;
 	NRIResourceServices BuildResourceServices();
@@ -2412,6 +2415,7 @@ private:
 	nri::PipelineLayout* mPresentPipelineLayout = nullptr;
 	nri::PipelineLayout* mExposurePipelineLayout = nullptr;
 	nri::PipelineLayout* mBloomPipelineLayout = nullptr;
+	nri::PipelineLayout* mVoxelComputePipelineLayout = nullptr;
 	std::array<nri::Pipeline*, (size_t)PipelineSlot::Count> mPipelines = {};
 	nri::DescriptorSet* mSamplerSet = nullptr;
 	std::vector<nri::DescriptorSet*> mSceneTextureSets;
@@ -2436,6 +2440,8 @@ private:
 	std::array<nri::DescriptorSet*, BloomDescriptorSetCount> mBloomOutputSets = {};
 	std::array<nri::DescriptorSet*, 2> mExposureInputSets = {};
 	std::array<nri::DescriptorSet*, 2> mExposureOutputSets = {};
+	nri::DescriptorSet* mVoxelComputeInputSet = nullptr;
+	nri::DescriptorSet* mVoxelComputeOutputSet = nullptr;
 	FrameTextureSlot mAutoExposureInputSourceSlot = FrameTextureSlot::Count;
 
 	NRITextureResource* GetActiveSkyTexture() { return mSkyEnvironment.ActiveTexture(); }

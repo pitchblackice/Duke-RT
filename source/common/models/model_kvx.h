@@ -44,6 +44,29 @@ struct FVoxelMeshData
 	TArray<unsigned int> indices;
 };
 
+struct FVoxelRawSlabRecord
+{
+	uint32_t cullMask = 0;
+	uint32_t zLength = 0;
+	uint32_t colorRunCount = 0;
+};
+
+struct FVoxelRawMeshStats
+{
+	uint32_t sizeX = 0;
+	uint32_t sizeY = 0;
+	uint32_t sizeZ = 0;
+	uint32_t slabCount = 0;
+	uint32_t voxelCount = 0;
+	uint32_t topFaceCount = 0;
+	uint32_t bottomFaceCount = 0;
+	uint32_t sideFaceSpanCount = 0;
+	uint32_t coalescedFaceCount = 0;
+	uint32_t noDedupeVertexCount = 0;
+	uint32_t indexCount = 0;
+	uint64_t rawByteCount = 0;
+};
+
 class FVoxelModel : public FModel
 {
 protected:
@@ -65,6 +88,7 @@ public:
 	bool Load(const char * fn, int lumpnum, const char * buffer, int length) override;
 	void Initialize();
 	void BuildCpuMesh(FVoxelMeshData& outMesh) const;
+	void BuildRawMeshStats(FVoxelRawMeshStats& outStats, TArray<FVoxelRawSlabRecord>* outSlabs = nullptr) const;
 	virtual int FindFrame(const char* name, bool nodefault) override;
 	virtual void RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, const TArray<VSMatrix>& boneData, int boneStartPosition) override;
 	virtual void AddSkins(uint8_t *hitlist, const FTextureID* surfaceskinids) override;
@@ -72,4 +96,3 @@ public:
 	void BuildVertexBuffer(FModelRenderer *renderer) override;
 	float getAspectFactor(float vscale) override;
 };
-

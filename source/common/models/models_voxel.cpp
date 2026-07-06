@@ -38,6 +38,7 @@
 #include "palettecontainer.h"
 #include "textures.h"
 #include "imagehelpers.h"
+#include <algorithm>
 
 #ifdef _MSC_VER
 #pragma warning(disable:4244) // warning C4244: conversion from 'double' to 'float', possible loss of data
@@ -340,6 +341,105 @@ void FVoxelModel::BuildCpuMesh(FVoxelMeshData& outMesh) const
 	outMesh.vertices.Clear();
 	outMesh.indices.Clear();
 	BuildMesh(outMesh.vertices, outMesh.indices);
+}
+
+//===========================================================================
+//
+//
+//
+//===========================================================================
+
+void FVoxelModel::BuildRawMeshStats(FVoxelRawMeshStats& outStats, TArray<FVoxelRawSlabRecord>* outSlabs) const
+{
+	outStats = {};
+	if (outSlabs != nullptr)
+	{
+		outSlabs->Clear();
+	}
+	if (mVoxel == nullptr)
+	{
+		return;
+	}
+
+	const FVoxelMipLevel* mip = &mVoxel->Mips[0];
+	if (mip->SizeX <= 0 || mip->SizeY <= 0 || mip->SizeZ <= 0 || mip->OffsetX == nullptr || mip->OffsetXY == nullptr)
+	{
+		return;
+	}
+
+	outStats.sizeX = (uint32_t)mip->SizeX;
+	outStats.sizeY = (uint32_t)mip->SizeY;
+	outStats.sizeZ = (uint32_t)mip->SizeZ;
+	const uint8_t* slabData = mip->GetSlabData(false);
+	if (slabData == nullptr)
+	{
+		return;
+	}
+
+	for (int x = 0; x < mip->SizeX; ++x)
+	{
+		const uint8_t* slabxoffs = &slabData[mip->OffsetX[x]];
+		const short* xyoffs = &mip->OffsetXY[x * (mip->SizeY + 1)];
+		outStats.rawByteCount += (uint64_t)std::max<int>(0, xyoffs[mip->SizeY]);
+		for (int y = 0; y < mip->SizeY; ++y)
+		{
+			kvxslab_t* voxptr = (kvxslab_t*)(slabxoffs + xyoffs[y]);
+			kvxslab_t* voxend = (kvxslab_t*)(slabxoffs + xyoffs[y + 1]);
+			for (; voxptr < voxend; voxptr = (kvxslab_t*)((uint8_t*)voxptr + voxptr->zleng + 3))
+			{
+				const uint32_t zleng = (uint32_t)voxptr->zleng;
+				const uint32_t cull = (uint32_t)voxptr->backfacecull;
+				if (zleng == 0)
+				{
+					continue;
+				}
+
+				uint32_t colorRuns = 0;
+				const uint8_t* col = voxptr->col;
+				uint32_t z = 0;
+				while (z < zleng)
+				{
+					uint32_t run = 1;
+					while (z + run < zleng && col[run] == col[0])
+					{
+						++run;
+					}
+					++colorRuns;
+					z += run;
+					col += run;
+				}
+
+				const uint32_t topFaces = (cull & 16u) != 0 ? 1u : 0u;
+				const uint32_t bottomFaces = (cull & 32u) != 0 ? 1u : 0u;
+				const uint32_t sideDirections =
+					((cull & 1u) != 0 ? 1u : 0u) +
+					((cull & 2u) != 0 ? 1u : 0u) +
+					((cull & 4u) != 0 ? 1u : 0u) +
+					((cull & 8u) != 0 ? 1u : 0u);
+				const uint32_t sideFaceSpans = sideDirections * colorRuns;
+				const uint32_t faceCount = topFaces + bottomFaces + sideFaceSpans;
+
+				outStats.slabCount++;
+				outStats.voxelCount += zleng;
+				outStats.topFaceCount += topFaces;
+				outStats.bottomFaceCount += bottomFaces;
+				outStats.sideFaceSpanCount += sideFaceSpans;
+				outStats.coalescedFaceCount += faceCount;
+
+				if (outSlabs != nullptr)
+				{
+					FVoxelRawSlabRecord record = {};
+					record.cullMask = cull;
+					record.zLength = zleng;
+					record.colorRunCount = colorRuns;
+					outSlabs->Push(record);
+				}
+			}
+		}
+	}
+
+	outStats.noDedupeVertexCount = outStats.coalescedFaceCount * 4u;
+	outStats.indexCount = outStats.coalescedFaceCount * 6u;
 }
 
 //===========================================================================

@@ -283,6 +283,48 @@ bool NRIPipelineStateManager::CreateBloomPipelineLayout(NRIRenderer& renderer)
 	return renderer.mFrameBuffer->mCore.CreatePipelineLayout(*renderer.mFrameBuffer->mDevice, desc, renderer.mBloomPipelineLayout) == nri::Result::SUCCESS;
 }
 
+bool NRIPipelineStateManager::CreateVoxelComputePipelineLayout(NRIRenderer& renderer)
+{
+	nri::DescriptorRangeDesc inputRange = {};
+	inputRange.baseRegisterIndex = 0;
+	inputRange.descriptorNum = NRI_VOXEL_COMPUTE_INPUT_DESCRIPTOR_NUM;
+	inputRange.descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
+	inputRange.shaderStages = PipelineComputeStage();
+	inputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+
+	nri::DescriptorRangeDesc outputRange = {};
+	outputRange.baseRegisterIndex = 0;
+	outputRange.descriptorNum = NRI_VOXEL_COMPUTE_OUTPUT_DESCRIPTOR_NUM;
+	outputRange.descriptorType = nri::DescriptorType::STORAGE_STRUCTURED_BUFFER;
+	outputRange.shaderStages = PipelineComputeStage();
+	outputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+
+	nri::DescriptorSetDesc descriptorSets[2] = {};
+	descriptorSets[0].registerSpace = NRI_VOXEL_COMPUTE_SET_INPUTS;
+	descriptorSets[0].ranges = &inputRange;
+	descriptorSets[0].rangeNum = 1;
+	descriptorSets[0].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
+	descriptorSets[1].registerSpace = NRI_VOXEL_COMPUTE_SET_OUTPUTS;
+	descriptorSets[1].ranges = &outputRange;
+	descriptorSets[1].rangeNum = 1;
+	descriptorSets[1].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
+
+	nri::RootConstantDesc rootConstant = {};
+	rootConstant.registerIndex = NRI_VOXEL_COMPUTE_ROOT_REGISTER;
+	rootConstant.size = sizeof(NRIVoxelComputeConstants);
+	rootConstant.shaderStages = PipelineComputeStage();
+
+	nri::PipelineLayoutDesc desc = {};
+	desc.rootRegisterSpace = NRI_VOXEL_COMPUTE_SET_ROOT;
+	desc.rootConstants = &rootConstant;
+	desc.rootConstantNum = 1;
+	desc.descriptorSets = descriptorSets;
+	desc.descriptorSetNum = (uint32_t)std::size(descriptorSets);
+	desc.shaderStages = PipelineComputeStage();
+
+	return renderer.mFrameBuffer->mCore.CreatePipelineLayout(*renderer.mFrameBuffer->mDevice, desc, renderer.mVoxelComputePipelineLayout) == nri::Result::SUCCESS;
+}
+
 bool NRIPipelineStateManager::CreatePipelines(NRIRenderer& renderer)
 {
 	auto createPipeline = [&renderer](const char* fileName, NRIRenderer::PipelineSlot slot, nri::PipelineLayout* layout)
@@ -332,6 +374,7 @@ bool NRIPipelineStateManager::CreatePipelines(NRIRenderer& renderer)
 	const std::string exposureHistogramBuild = "ExposureHistogramBuild.cs." + suffix;
 	const std::string exposureResolve = "ExposureResolve.cs." + suffix;
 	const std::string bloomCopy = "BloomCopy.cs." + suffix;
+	const std::string voxelComputeCount = "VoxelComputeCount.cs." + suffix;
 	const std::string bloomDownsample = "BloomDownsample.cs." + suffix;
 	const std::string bloomUpsample = "BloomUpsample.cs." + suffix;
 	const std::string bloomComposite = "BloomComposite.cs." + suffix;
@@ -351,6 +394,7 @@ bool NRIPipelineStateManager::CreatePipelines(NRIRenderer& renderer)
 		createPipeline(dlssAfter.c_str(), NRIRenderer::PipelineSlot::DlssAfter, renderer.mPipelineLayout) &&
 		createPipeline(final.c_str(), NRIRenderer::PipelineSlot::Final, renderer.mPipelineLayout) &&
 		createPipeline(bloomCopy.c_str(), NRIRenderer::PipelineSlot::BloomCopy, renderer.mBloomPipelineLayout) &&
+		createPipeline(voxelComputeCount.c_str(), NRIRenderer::PipelineSlot::VoxelComputeCount, renderer.mVoxelComputePipelineLayout) &&
 		createPipeline(bloomDownsample.c_str(), NRIRenderer::PipelineSlot::BloomDownsample, renderer.mBloomPipelineLayout) &&
 		createPipeline(bloomUpsample.c_str(), NRIRenderer::PipelineSlot::BloomUpsample, renderer.mBloomPipelineLayout) &&
 		createPipeline(bloomComposite.c_str(), NRIRenderer::PipelineSlot::BloomComposite, renderer.mBloomPipelineLayout);

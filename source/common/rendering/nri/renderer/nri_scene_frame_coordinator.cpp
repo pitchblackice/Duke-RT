@@ -22,6 +22,7 @@
 #include "nri_surface_light_overlay.h"
 #include "nri_runtime_mutation_shared.h"
 #include "nri_sky_environment.h"
+#include "nri_voxel_compute_meshing.h"
 #include "../scene/nri_hash.h"
 #include "../scene/nri_scene_stats.h"
 #include "../system/nri_renderdevice.h"
@@ -1138,6 +1139,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	{
 		return false;
 	}
+	DispatchNRIVoxelComputeMeshingDiagnostics(*this, traceFrameIndex);
 	RenderSceneDispatchInputs dispatchInputs = {};
 	dispatchInputs.bootstrapCapturedView = bootstrapCapturedView;
 	dispatchInputs.buffersReady = sceneFrame.buffersReady;

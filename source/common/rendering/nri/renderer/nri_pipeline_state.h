@@ -10,5 +10,6 @@ public:
 	static bool CreatePresentPipelineLayout(NRIRenderer& renderer);
 	static bool CreateExposurePipelineLayout(NRIRenderer& renderer);
 	static bool CreateBloomPipelineLayout(NRIRenderer& renderer);
+	static bool CreateVoxelComputePipelineLayout(NRIRenderer& renderer);
 	static bool CreatePipelines(NRIRenderer& renderer);
 };

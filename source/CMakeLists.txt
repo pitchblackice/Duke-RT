@@ -990,6 +990,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_surface_light_overlay.cpp
 	common/rendering/nri/renderer/nri_trace_stats.cpp
 	common/rendering/nri/renderer/nri_upscaler.cpp
+	common/rendering/nri/renderer/nri_voxel_compute_meshing.cpp
 	common/rendering/nri/scene/nri_map_world.cpp
 	common/rendering/nri/scene/nri_map_builder.cpp
 	common/rendering/nri/scene/nri_scene_stats.cpp
@@ -1490,6 +1491,8 @@ if (HAVE_NRI)
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureResolve.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/BloomCopy.cs.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/BloomCopy.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/VoxelComputeCount.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/VoxelComputeCount.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/BloomDownsample.cs.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/BloomDownsample.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/BloomUpsample.cs.dxil"
@@ -1529,6 +1532,8 @@ if (HAVE_NRI)
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureResolve.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/ExposureResolve.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/BloomCopy.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/BloomCopy.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/BloomCopy.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/BloomCopy.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/VoxelComputeCount.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/VoxelComputeCount.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/VoxelComputeCount.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/VoxelComputeCount.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/BloomDownsample.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/BloomDownsample.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/BloomDownsample.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/BloomDownsample.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/BloomUpsample.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/BloomUpsample.cs.hlsl"
@@ -1553,6 +1558,7 @@ if (HAVE_NRI)
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/ExposureHistogramBuild.cs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/ExposureResolve.cs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/BloomCopy.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/VoxelComputeCount.cs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/BloomDownsample.cs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/BloomUpsample.cs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/BloomComposite.cs.hlsl"
@@ -1591,6 +1597,8 @@ if (HAVE_NRI)
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureResolve.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/BloomCopy.cs.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/BloomCopy.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/VoxelComputeCount.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/VoxelComputeCount.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/BloomDownsample.cs.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/BloomDownsample.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/BloomUpsample.cs.dxil"

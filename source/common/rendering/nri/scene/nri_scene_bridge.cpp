@@ -7,6 +7,7 @@
 #include "nri_scene_texture_utils.h"
 #include "nri_texture_signature.h"
 #include "nri_voxel_geometry_hash.h"
+#include "../renderer/nri_voxel_compute_meshing.h"
 
 #include "c_cvars.h"
 #include "coreactor.h"
@@ -4555,6 +4556,34 @@ namespace
 			{
 				ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelMeshBuildMs);
 				model->BuildCpuMesh(entry.mesh);
+			}
+			if (ShouldTraceNRIVoxelComputeMeshing() || ShouldRunNRIVoxelComputeMeshing())
+			{
+				FVoxelRawMeshStats rawStats = {};
+				TArray<FVoxelRawSlabRecord> rawSlabs;
+				model->BuildRawMeshStats(rawStats, ShouldRunNRIVoxelComputeMeshing() ? &rawSlabs : nullptr);
+				if (ShouldTraceNRIVoxelComputeMeshing())
+				{
+					Printf(
+						"PERF pt voxel raw census NRI: model=%p size=%ux%ux%u raw_bytes=%llu slabs=%u voxels=%u faces=%u top=%u bottom=%u side_spans=%u vertices_nodedupe=%u cpu_vertices=%u indices=%u cpu_indices=%u queued_compute=%u\n",
+						(void*)model,
+						rawStats.sizeX,
+						rawStats.sizeY,
+						rawStats.sizeZ,
+						(unsigned long long)rawStats.rawByteCount,
+						rawStats.slabCount,
+						rawStats.voxelCount,
+						rawStats.coalescedFaceCount,
+						rawStats.topFaceCount,
+						rawStats.bottomFaceCount,
+						rawStats.sideFaceSpanCount,
+						rawStats.noDedupeVertexCount,
+						(uint32_t)entry.mesh.vertices.Size(),
+						rawStats.indexCount,
+						(uint32_t)entry.mesh.indices.Size(),
+						ShouldRunNRIVoxelComputeMeshing() ? 1u : 0u);
+				}
+				QueueNRIVoxelComputeCountJob(model, rawStats, ShouldRunNRIVoxelComputeMeshing() ? &rawSlabs : nullptr, entry.mesh);
 			}
 			entry.built = true;
 			entry.valid = entry.mesh.vertices.Size() > 0 && entry.mesh.indices.Size() >= 3;

@@ -316,6 +316,14 @@ CVAR(Int, nri_ptvoxelpersistentpromoteframes, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFI
 
 CVAR(Int, nri_ptvoxelmeshbuilds, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+CVAR(Bool, nri_ptvoxelcompute, false, 0)
+
+CVAR(Int, nri_ptvoxelcomputemode, 0, 0)
+
+CVAR(Int, nri_ptvoxelcomputemaxjobs, 32, 0)
+
+CVAR(Int, nri_ptvoxelcomputetrace, 0, 0)
+
 CVAR(Int, nri_ptloadingtrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptpreloadmaxsubmitspertick, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

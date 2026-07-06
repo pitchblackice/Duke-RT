@@ -125,7 +125,9 @@ bool NRIDescriptorSetManager::AllocateDescriptorSets(NRIRenderer& renderer)
 		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mExposurePipelineLayout, 0, &renderer.mExposureInputSets[0], 1, 0) == nri::Result::SUCCESS &&
 		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mExposurePipelineLayout, 1, &renderer.mExposureOutputSets[0], 1, 0) == nri::Result::SUCCESS &&
 		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mExposurePipelineLayout, 0, &renderer.mExposureInputSets[1], 1, 0) == nri::Result::SUCCESS &&
-		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mExposurePipelineLayout, 1, &renderer.mExposureOutputSets[1], 1, 0) == nri::Result::SUCCESS;
+		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mExposurePipelineLayout, 1, &renderer.mExposureOutputSets[1], 1, 0) == nri::Result::SUCCESS &&
+		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mVoxelComputePipelineLayout, NRI_VOXEL_COMPUTE_SET_INPUTS, &renderer.mVoxelComputeInputSet, 1, 0) == nri::Result::SUCCESS &&
+		renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *renderer.mVoxelComputePipelineLayout, NRI_VOXEL_COMPUTE_SET_OUTPUTS, &renderer.mVoxelComputeOutputSet, 1, 0) == nri::Result::SUCCESS;
 }
 
 bool NRIDescriptorSetManager::UpdateSamplerSet(NRIRenderer& renderer)

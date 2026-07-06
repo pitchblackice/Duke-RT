@@ -253,3 +253,56 @@ static_assert(offsetof(NRIBloomConstants, InputWidth) == 0, "NRIBloomConstants l
 static_assert(offsetof(NRIBloomConstants, Intensity) == 16, "NRIBloomConstants layout mismatch.");
 static_assert(offsetof(NRIBloomConstants, FrameIndex) == 32, "NRIBloomConstants layout mismatch.");
 static_assert(offsetof(NRIBloomConstants, InputTexelSizeX) == 48, "NRIBloomConstants layout mismatch.");
+
+// Mirrors shaders/Include/VoxelComputeConstants.hlsli.
+constexpr uint32_t NRI_VOXEL_COMPUTE_SET_INPUTS = 0;
+constexpr uint32_t NRI_VOXEL_COMPUTE_SET_OUTPUTS = 1;
+constexpr uint32_t NRI_VOXEL_COMPUTE_SET_ROOT = 2;
+constexpr uint32_t NRI_VOXEL_COMPUTE_INPUT_DESCRIPTOR_NUM = 2;
+constexpr uint32_t NRI_VOXEL_COMPUTE_OUTPUT_DESCRIPTOR_NUM = 1;
+constexpr uint32_t NRI_VOXEL_COMPUTE_ROOT_REGISTER = 0;
+
+struct NRIVoxelComputeConstants
+{
+	uint32_t JobCount = 0;
+	uint32_t SlabRecordCount = 0;
+	uint32_t Reserved0 = 0;
+	uint32_t Reserved1 = 0;
+};
+
+struct NRIVoxelComputeJob
+{
+	uint32_t SlabOffset = 0;
+	uint32_t SlabCount = 0;
+	uint32_t ExpectedFaces = 0;
+	uint32_t ExpectedIndices = 0;
+	uint32_t ExpectedVerticesNoDedupe = 0;
+	uint32_t ExpectedVoxels = 0;
+	uint32_t JobId = 0;
+	uint32_t Reserved0 = 0;
+};
+
+struct NRIVoxelComputeSlabRecord
+{
+	uint32_t CullMask = 0;
+	uint32_t ZLength = 0;
+	uint32_t ColorRunCount = 0;
+	uint32_t Reserved0 = 0;
+};
+
+struct NRIVoxelComputeResult
+{
+	uint32_t FaceCount = 0;
+	uint32_t IndexCount = 0;
+	uint32_t VertexCountNoDedupe = 0;
+	uint32_t VoxelCount = 0;
+	uint32_t SlabCount = 0;
+	uint32_t MismatchMask = 0;
+	uint32_t JobId = 0;
+	uint32_t Status = 0;
+};
+
+static_assert(sizeof(NRIVoxelComputeConstants) == 16, "NRIVoxelComputeConstants must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputeJob) == 32, "NRIVoxelComputeJob must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputeSlabRecord) == 16, "NRIVoxelComputeSlabRecord must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputeResult) == 32, "NRIVoxelComputeResult must match VoxelComputeConstants.hlsli.");
