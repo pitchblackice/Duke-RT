@@ -324,6 +324,12 @@ CVAR(Int, nri_ptvoxelcomputemaxjobs, 32, 0)
 
 CVAR(Int, nri_ptvoxelcomputetrace, 0, 0)
 
+CVAR(Bool, nri_ptvoxelcomputedirectgpu, false, 0)
+
+CVAR(Bool, nri_ptvoxelcomputerawarchive, false, 0)
+
+CVAR(Bool, nri_ptvoxelcomputevalidatefullreadback, true, 0)
+
 CVAR(Int, nri_ptloadingtrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptpreloadmaxsubmitspertick, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
