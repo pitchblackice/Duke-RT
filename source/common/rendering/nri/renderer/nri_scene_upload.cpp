@@ -1937,6 +1937,7 @@ bool NRIRenderer::CreateBufferWithoutViewAtLocation(NRIBufferResource& resource,
 	resource.memorySize = memoryDesc.size;
 	resource.usedSize = size;
 	resource.stride = stride;
+	resource.usage = usage;
 	resource.memoryLocation = memoryLocation;
 	return true;
 }
@@ -1948,6 +1949,7 @@ bool NRIRenderer::EnsureResidentArenaBuffer(NRIBufferResource& resource, uint64_
 		resource.shaderView != nullptr &&
 		resource.memoryLocation == nri::MemoryLocation::DEVICE &&
 		resource.stride == stride &&
+		NRIResourceUsageIncludes(resource.usage, usage) &&
 		resource.size >= alignedRequiredSize)
 	{
 		resource.usedSize = std::max(resource.usedSize, requiredSize);
@@ -1975,6 +1977,17 @@ bool NRIRenderer::EnsureResidentArenaBuffer(NRIBufferResource& resource, uint64_
 		DestroyBufferResource(resource);
 		resource = oldResource;
 		return false;
+	}
+	if (NRIResourceUsageIncludes(usage, nri::BufferUsageBits::SHADER_RESOURCE_STORAGE))
+	{
+		nri::BufferViewDesc storageViewDesc = viewDesc;
+		storageViewDesc.type = nri::BufferView::STORAGE_STRUCTURED_BUFFER;
+		if (mFrameBuffer->mCore.CreateBufferView(storageViewDesc, resource.storageView) != nri::Result::SUCCESS)
+		{
+			DestroyBufferResource(resource);
+			resource = oldResource;
+			return false;
+		}
 	}
 	resource.usedSize = requiredSize;
 
@@ -2016,7 +2029,7 @@ bool NRIRenderer::EnsureResidentArenaBuffer(NRIBufferResource& resource, uint64_
 		auto& frameScratch = GetResidentUploadScratchFrame();
 		frameScratch.retiredBuffers.push_back(oldResource);
 	}
-	else if (oldResource.buffer != nullptr || oldResource.shaderView != nullptr)
+	else if (oldResource.buffer != nullptr || oldResource.shaderView != nullptr || oldResource.storageView != nullptr)
 	{
 		DestroyBufferResource(oldResource);
 	}

@@ -34,9 +34,21 @@ namespace
 		FVoxelModel* model = nullptr;
 		FVoxelRawMeshStats stats = {};
 		uint64_t consumeKey = 0;
+		uint64_t directMeshResourceKey = 0;
+		uint64_t directKey = 0;
+		uint64_t directGeneration = 0;
+		uint64_t sourceArchiveSerial = 0;
 		uint32_t cpuVertexCount = 0;
 		uint32_t cpuIndexCount = 0;
 		uint32_t jobId = 0;
+		uint32_t materialBase = 0;
+		uint32_t materialCount = 0;
+		bool directPublication = false;
+		NRIVoxelComputeDirectPublishOutputKind outputKind = NRIVoxelComputeDirectPublishOutputKind::None;
+		NRIVoxelComputeDirectPublishOutputBuffers outputBuffers;
+		NRIVoxelComputeDirectPublishRange vertices;
+		NRIVoxelComputeDirectPublishRange indices;
+		NRIVoxelComputeDirectPublishRange primitives;
 		VoxelComputeAdmissionState admissionState = VoxelComputeAdmissionState::Queued;
 		std::vector<NRIVoxelComputeSlabRecord> slabs;
 		std::vector<NRIVoxelComputeFaceRecord> faces;
@@ -76,6 +88,17 @@ namespace
 		uint32_t indexOffset = 0;
 		uint32_t primitiveOffset = 0;
 		uint64_t consumeKey = 0;
+		uint64_t directMeshResourceKey = 0;
+		uint64_t directKey = 0;
+		uint64_t directGeneration = 0;
+		uint64_t sourceArchiveSerial = 0;
+		uint32_t materialBase = 0;
+		uint32_t materialCount = 0;
+		bool directPublication = false;
+		NRIVoxelComputeDirectPublishOutputKind outputKind = NRIVoxelComputeDirectPublishOutputKind::None;
+		NRIVoxelComputeDirectPublishRange vertices;
+		NRIVoxelComputeDirectPublishRange indices;
+		NRIVoxelComputeDirectPublishRange primitives;
 		VoxelComputeAdmissionState admissionState = VoxelComputeAdmissionState::Counting;
 	};
 
@@ -111,7 +134,11 @@ namespace
 		std::unordered_set<uint64_t> queuedConsumeKeys;
 		std::unordered_set<uint64_t> pendingConsumeKeys;
 		std::unordered_set<uint64_t> failedConsumeKeys;
+		std::unordered_set<uint64_t> queuedDirectKeys;
+		std::unordered_set<uint64_t> pendingDirectKeys;
+		std::unordered_set<uint64_t> failedDirectKeys;
 		std::unordered_map<uint64_t, GeneratedVoxelGeometry> readyGeneratedGeometry;
+		std::unordered_map<uint64_t, NRIVoxelComputeDirectPublishedMesh> readyDirectPublishedMeshes;
 		std::unordered_map<FVoxelModel*, RawVoxelSourceArchiveEntry> rawSourceArchive;
 
 		NRIBufferResource jobUploadBuffer = {};
@@ -165,6 +192,11 @@ namespace
 		return (bool)nri_ptvoxelcompute && (bool)nri_ptvoxelcomputedirectgpu;
 	}
 
+	bool IsDirectPublicationEnabled()
+	{
+		return (bool)nri_ptvoxelcompute && (bool)nri_ptvoxelcomputedirectpublish;
+	}
+
 	bool IsRawSourceArchiveEnabled()
 	{
 		return (bool)nri_ptvoxelcompute && (bool)nri_ptvoxelcomputerawarchive;
@@ -201,6 +233,23 @@ namespace
 		case NRIVoxelComputeDirectPublishOutputKind::PrivateBuffers: return "private_buffers";
 		default: return "unknown";
 		}
+	}
+
+	uint64_t BuildDirectPublishKey(uint64_t meshResourceKey, uint64_t generation)
+	{
+		uint64_t hash = meshResourceKey;
+		hash ^= generation + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
+		return hash;
+	}
+
+	bool DirectPublishBufferReady(const NRIBufferResource* resource, nri::BufferUsageBits usage)
+	{
+		return
+			resource != nullptr &&
+			resource->buffer != nullptr &&
+			resource->shaderView != nullptr &&
+			resource->storageView != nullptr &&
+			NRIResourceUsageIncludes(resource->usage, usage);
 	}
 
 	uint32_t HashBytes(const void* data, uint64_t size)
@@ -375,6 +424,7 @@ namespace
 		resource.memoryLocation = memoryLocation;
 		resource.usedSize = size;
 		resource.stride = stride;
+		resource.usage = usage;
 
 		if (createView)
 		{
@@ -404,7 +454,11 @@ namespace
 		nri::BufferView viewType,
 		bool createView)
 	{
-		if (resource.buffer != nullptr && resource.size >= size && resource.stride == stride && resource.memoryLocation == memoryLocation)
+		if (resource.buffer != nullptr &&
+			resource.size >= size &&
+			resource.stride == stride &&
+			resource.memoryLocation == memoryLocation &&
+			NRIResourceUsageIncludes(resource.usage, usage))
 		{
 			return true;
 		}
@@ -703,6 +757,50 @@ namespace
 					state.failedConsumeKeys.insert(job.consumeKey);
 				}
 			}
+			if (job.directPublication)
+			{
+				const bool stillPending = state.pendingDirectKeys.erase(job.directKey) != 0;
+				if (ok && state.pendingEmit && stillPending)
+				{
+					NRIVoxelComputeDirectPublishedMesh published = {};
+					published.meshResourceKey = job.directMeshResourceKey;
+					published.generation = job.directGeneration;
+					published.sourceArchiveSerial = job.sourceArchiveSerial;
+					published.jobId = job.jobId;
+					published.readyFrame = (uint32_t)std::min<uint64_t>(state.pendingFrame, UINT32_MAX);
+					published.status = NRIVoxelComputeGeneratedGeometryStatus::Ready;
+					published.failure = NRIVoxelComputeDirectPublishFailure::None;
+					published.outputKind = job.outputKind;
+					published.vertices = job.vertices;
+					published.vertices.count = result.VertexCountNoDedupe;
+					published.indices = job.indices;
+					published.indices.count = result.IndexCount;
+					published.primitives = job.primitives;
+					published.primitives.count = result.PrimitiveCount;
+					published.materialBase = job.materialBase;
+					published.materialCount = job.materialCount;
+					state.readyDirectPublishedMeshes[job.directKey] = published;
+					state.failedDirectKeys.erase(job.directKey);
+				}
+				else if (stillPending)
+				{
+					state.failedDirectKeys.insert(job.directKey);
+				}
+				if (IsTraceEnabled())
+				{
+					Printf(
+						"PERF pt voxel compute direct publish NRI: action=status frame=%llu job=%u generation=%llu status=%s mismatch=%u vertices=%u indices=%u primitives=%u source_serial=%llu\n",
+						(unsigned long long)state.pendingFrame,
+						job.jobId,
+						(unsigned long long)job.directGeneration,
+						ok ? "ready" : "failed",
+						result.MismatchMask,
+						result.VertexCountNoDedupe,
+						result.IndexCount,
+						result.PrimitiveCount,
+						(unsigned long long)job.sourceArchiveSerial);
+				}
+			}
 			TraceAdmission(state.pendingFrame, job, job.admissionState, state.pendingEmit ? "readback_emit" : "readback_count");
 			if (IsTraceEnabled())
 			{
@@ -811,6 +909,7 @@ bool ShouldDirectPublishNRIVoxelComputeMeshing()
 	return
 		ShouldConsumeNRIVoxelComputeMeshing() &&
 		IsDirectGpuPublicationEnabled() &&
+		IsDirectPublicationEnabled() &&
 		IsRawSourceArchiveEnabled() &&
 		!IsFullGeneratedReadbackEnabled();
 }
@@ -930,12 +1029,18 @@ bool TakeNRIVoxelComputeGeneratedGeometry(uint64_t requestKey, nri_scene::Geomet
 
 NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeDirectPublication(const NRIVoxelComputeDirectPublishRequest& request)
 {
+	constexpr uint32_t MaxDirectPublishPrimitives = 8192;
+	VoxelComputeState& state = gVoxelComputeState;
+	const uint64_t directKey = BuildDirectPublishKey(request.meshResourceKey, request.generation);
 	if (!ShouldDirectPublishNRIVoxelComputeMeshing())
 	{
 		return NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
 	}
 	if (request.meshResourceKey == 0 || request.generation == 0 || request.model == nullptr ||
-		request.outputKind == NRIVoxelComputeDirectPublishOutputKind::None)
+		request.outputKind == NRIVoxelComputeDirectPublishOutputKind::None ||
+		!DirectPublishBufferReady(request.outputBuffers.vertices, NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE_STORAGE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT)) ||
+		!DirectPublishBufferReady(request.outputBuffers.indices, NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE_STORAGE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT)) ||
+		!DirectPublishBufferReady(request.outputBuffers.primitives, nri::BufferUsageBits::SHADER_RESOURCE_STORAGE))
 	{
 		if (IsTraceEnabled())
 		{
@@ -946,6 +1051,19 @@ NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeDirectPublication(c
 				DirectPublishOutputKindName(request.outputKind));
 		}
 		return NRIVoxelComputeGeneratedGeometryStatus::Failed;
+	}
+	if (state.readyDirectPublishedMeshes.find(directKey) != state.readyDirectPublishedMeshes.end())
+	{
+		return NRIVoxelComputeGeneratedGeometryStatus::Ready;
+	}
+	if (state.failedDirectKeys.find(directKey) != state.failedDirectKeys.end())
+	{
+		return NRIVoxelComputeGeneratedGeometryStatus::Failed;
+	}
+	if (state.queuedDirectKeys.find(directKey) != state.queuedDirectKeys.end() ||
+		state.pendingDirectKeys.find(directKey) != state.pendingDirectKeys.end())
+	{
+		return NRIVoxelComputeGeneratedGeometryStatus::Queued;
 	}
 	if (request.outputKind != NRIVoxelComputeDirectPublishOutputKind::PrivateBlasInputsAndSharedArena)
 	{
@@ -959,13 +1077,73 @@ NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeDirectPublication(c
 		}
 		return NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
 	}
+
+	const uint32_t maxJobs = std::max(0, (int)nri_ptvoxelcomputemaxjobs);
+	if (maxJobs == 0 || state.queuedJobs.size() >= maxJobs)
+	{
+		return NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
+	}
+
+	FVoxelRawMeshStats rawStats = {};
+	TArray<FVoxelRawSlabRecord> rawSlabs;
+	TArray<FVoxelRawColorRunRecord> rawColorRuns;
+	request.model->BuildRawMeshStats(rawStats, &rawSlabs, nullptr, &rawColorRuns);
+	RawVoxelSourceArchiveEntry* archivedSource = RecordRawSourceArchive(request.model, rawStats, rawSlabs, nullptr, &rawColorRuns);
+	const uint32_t expectedPrimitives = rawStats.coalescedFaceCount * 2u;
+	if (rawStats.slabCount == 0 ||
+		rawStats.coalescedFaceCount == 0 ||
+		rawStats.coalescedFaceCount > MaxDirectPublishPrimitives / 2u ||
+		rawStats.noDedupeVertexCount > request.vertices.capacity ||
+		rawStats.indexCount > request.indices.capacity ||
+		expectedPrimitives > request.primitives.capacity)
+	{
+		state.failedDirectKeys.insert(directKey);
+		if (IsTraceEnabled())
+		{
+			Printf(
+				"PERF pt voxel compute direct publish NRI: action=reject reason=%s mesh_resource=0x%llx generation=%llu faces=%u vertices=%u/%u indices=%u/%u primitives=%u/%u max_primitives=%u\n",
+				rawStats.coalescedFaceCount > MaxDirectPublishPrimitives / 2u ? "primitive_budget" : "capacity_or_raw",
+				(unsigned long long)request.meshResourceKey,
+				(unsigned long long)request.generation,
+				rawStats.coalescedFaceCount,
+				rawStats.noDedupeVertexCount,
+				request.vertices.capacity,
+				rawStats.indexCount,
+				request.indices.capacity,
+				expectedPrimitives,
+				request.primitives.capacity,
+				MaxDirectPublishPrimitives);
+		}
+		return NRIVoxelComputeGeneratedGeometryStatus::Failed;
+	}
+
+	PendingVoxelComputeJob job = {};
+	job.model = request.model;
+	job.stats = rawStats;
+	job.directPublication = true;
+	job.directMeshResourceKey = request.meshResourceKey;
+	job.directKey = directKey;
+	job.directGeneration = request.generation;
+	job.sourceArchiveSerial = archivedSource != nullptr ? archivedSource->recordSerial : 0;
+	job.jobId = state.nextJobId++;
+	job.materialBase = request.materialBase;
+	job.materialCount = request.materialCount;
+	job.outputKind = request.outputKind;
+	job.outputBuffers = request.outputBuffers;
+	job.vertices = request.vertices;
+	job.indices = request.indices;
+	job.primitives = request.primitives;
+	state.queuedDirectKeys.insert(directKey);
+	state.queuedJobs.push_back(std::move(job));
 	if (IsTraceEnabled())
 	{
 		Printf(
-			"PERF pt voxel compute direct publish NRI: action=defer reason=output_writer_unimplemented mesh_resource=0x%llx generation=%llu output=%s vertex_offset=%u vertex_capacity=%u index_offset=%u index_capacity=%u primitive_offset=%u primitive_capacity=%u material_base=%u material_count=%u\n",
+			"PERF pt voxel compute direct publish NRI: action=queue mesh_resource=0x%llx generation=%llu output=%s job=%u source_serial=%llu vertex_offset=%u vertex_capacity=%u index_offset=%u index_capacity=%u primitive_offset=%u primitive_capacity=%u material_base=%u material_count=%u\n",
 			(unsigned long long)request.meshResourceKey,
 			(unsigned long long)request.generation,
 			DirectPublishOutputKindName(request.outputKind),
+			state.queuedJobs.back().jobId,
+			(unsigned long long)state.queuedJobs.back().sourceArchiveSerial,
 			request.vertices.offset,
 			request.vertices.capacity,
 			request.indices.offset,
@@ -975,20 +1153,45 @@ NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeDirectPublication(c
 			request.materialBase,
 			request.materialCount);
 	}
-	return NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
+	return NRIVoxelComputeGeneratedGeometryStatus::Queued;
 }
 
 bool TakeNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t generation, NRIVoxelComputeDirectPublishedMesh& outMesh)
 {
-	outMesh = {};
-	outMesh.meshResourceKey = meshResourceKey;
-	outMesh.generation = generation;
-	outMesh.status = NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
-	return false;
+	VoxelComputeState& state = gVoxelComputeState;
+	const uint64_t directKey = BuildDirectPublishKey(meshResourceKey, generation);
+	auto found = state.readyDirectPublishedMeshes.find(directKey);
+	if (found == state.readyDirectPublishedMeshes.end())
+	{
+		outMesh = {};
+		outMesh.meshResourceKey = meshResourceKey;
+		outMesh.generation = generation;
+		outMesh.status = state.failedDirectKeys.find(directKey) != state.failedDirectKeys.end() ?
+			NRIVoxelComputeGeneratedGeometryStatus::Failed :
+			NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
+		return false;
+	}
+	outMesh = found->second;
+	state.readyDirectPublishedMeshes.erase(found);
+	return true;
 }
 
 void CancelNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t generation)
 {
+	VoxelComputeState& state = gVoxelComputeState;
+	const uint64_t directKey = BuildDirectPublishKey(meshResourceKey, generation);
+	state.queuedDirectKeys.erase(directKey);
+	state.pendingDirectKeys.erase(directKey);
+	state.readyDirectPublishedMeshes.erase(directKey);
+	state.queuedJobs.erase(
+		std::remove_if(
+			state.queuedJobs.begin(),
+			state.queuedJobs.end(),
+			[directKey](const PendingVoxelComputeJob& job)
+			{
+				return job.directPublication && job.directKey == directKey;
+			}),
+		state.queuedJobs.end());
 	if (IsTraceEnabled() && meshResourceKey != 0)
 	{
 		Printf(
@@ -1090,6 +1293,13 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	uint32_t vertexOffset = 0;
 	uint32_t indexOffset = 0;
 	uint32_t primitiveOffset = 0;
+	uint32_t emittedVertexCount = 0;
+	uint32_t emittedIndexCount = 0;
+	uint32_t emittedPrimitiveCount = 0;
+	bool directOutput = false;
+	const NRIBufferResource* outputVertexBuffer = nullptr;
+	const NRIBufferResource* outputIndexBuffer = nullptr;
+	const NRIBufferResource* outputPrimitiveBuffer = nullptr;
 	const size_t jobsToProcess = directSource ? 1u : state.queuedJobs.size();
 	for (size_t queuedIndex = 0; queuedIndex < jobsToProcess; ++queuedIndex)
 	{
@@ -1121,12 +1331,16 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		gpuJob.ExpectedVerticesNoDedupe = queued.stats.noDedupeVertexCount;
 		gpuJob.ExpectedVoxels = queued.stats.voxelCount;
 		gpuJob.JobId = queued.jobId;
-		gpuJob.VertexOffset = vertexOffset;
-		gpuJob.IndexOffset = indexOffset;
-		gpuJob.PrimitiveOffset = primitiveOffset;
+		gpuJob.VertexOffset = queued.directPublication ? queued.vertices.offset : vertexOffset;
+		gpuJob.IndexOffset = queued.directPublication ? queued.indices.offset : indexOffset;
+		gpuJob.PrimitiveOffset = queued.directPublication ? queued.primitives.offset : primitiveOffset;
 		gpuJob.PivotX = queued.stats.pivotX;
 		gpuJob.PivotY = queued.stats.pivotY;
 		gpuJob.PivotZ = queued.stats.pivotZ;
+		gpuJob.MaterialBase = queued.directPublication ? queued.materialBase : 0u;
+		gpuJob.VertexCapacity = queued.directPublication ? queued.vertices.capacity : queued.stats.noDedupeVertexCount;
+		gpuJob.IndexCapacity = queued.directPublication ? queued.indices.capacity : queued.stats.indexCount;
+		gpuJob.PrimitiveCapacity = queued.directPublication ? queued.primitives.capacity : queued.stats.coalescedFaceCount * 2u;
 		gpuJobs.push_back(gpuJob);
 
 		PendingReadbackJob pending = {};
@@ -1142,11 +1356,33 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		pending.indexOffset = gpuJob.IndexOffset;
 		pending.primitiveOffset = gpuJob.PrimitiveOffset;
 		pending.consumeKey = queued.consumeKey;
+		pending.directPublication = queued.directPublication;
+		pending.directMeshResourceKey = queued.directMeshResourceKey;
+		pending.directKey = queued.directKey;
+		pending.directGeneration = queued.directGeneration;
+		pending.sourceArchiveSerial = directArchive != nullptr ? directArchive->recordSerial : queued.sourceArchiveSerial;
+		pending.materialBase = queued.materialBase;
+		pending.materialCount = queued.materialCount;
+		pending.outputKind = queued.outputKind;
+		pending.vertices = queued.vertices;
+		pending.indices = queued.indices;
+		pending.primitives = queued.primitives;
 		pending.admissionState = emit ? VoxelComputeAdmissionState::Emitting : VoxelComputeAdmissionState::Counting;
 		pendingJobs.push_back(pending);
 		if (queued.consumeKey != 0)
 		{
 			state.queuedConsumeKeys.erase(queued.consumeKey);
+		}
+		if (queued.directPublication)
+		{
+			directOutput = true;
+			outputVertexBuffer = queued.outputBuffers.vertices;
+			outputIndexBuffer = queued.outputBuffers.indices;
+			outputPrimitiveBuffer = queued.outputBuffers.primitives;
+			state.queuedDirectKeys.erase(queued.directKey);
+			emittedVertexCount += queued.stats.noDedupeVertexCount;
+			emittedIndexCount += queued.stats.indexCount;
+			emittedPrimitiveCount += queued.stats.coalescedFaceCount * 2u;
 		}
 		TraceAdmission(frameNumber, pending, pending.admissionState, "dispatch");
 
@@ -1163,9 +1399,15 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		slabOffset += gpuJob.SlabCount;
 		faceOffset += gpuJob.ExpectedFaces;
 		colorRunOffset += (uint32_t)queued.colorRuns.size();
-		vertexOffset += gpuJob.ExpectedVerticesNoDedupe;
-		indexOffset += gpuJob.ExpectedIndices;
-		primitiveOffset += gpuJob.ExpectedFaces * 2u;
+		if (!queued.directPublication)
+		{
+			vertexOffset += gpuJob.ExpectedVerticesNoDedupe;
+			indexOffset += gpuJob.ExpectedIndices;
+			primitiveOffset += gpuJob.ExpectedFaces * 2u;
+			emittedVertexCount += gpuJob.ExpectedVerticesNoDedupe;
+			emittedIndexCount += gpuJob.ExpectedIndices;
+			emittedPrimitiveCount += gpuJob.ExpectedFaces * 2u;
+		}
 	}
 	if (directSource)
 	{
@@ -1186,9 +1428,9 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	const uint64_t faceBytes = directSource ? 0 : (uint64_t)gpuFaces.size() * sizeof(NRIVoxelComputeFaceRecord);
 	const uint64_t colorRunBytes = directSource && directArchive != nullptr ? directArchive->colorRunBytes : (uint64_t)gpuColorRuns.size() * sizeof(NRIVoxelComputeColorRunRecord);
 	const uint64_t resultBytes = (uint64_t)gpuJobs.size() * sizeof(NRIVoxelComputeResult);
-	const uint64_t vertexBytes = (uint64_t)vertexOffset * sizeof(NRIVoxelComputeSceneVertex);
-	const uint64_t indexBytes = (uint64_t)indexOffset * sizeof(uint32_t);
-	const uint64_t primitiveBytes = (uint64_t)primitiveOffset * sizeof(NRIVoxelComputePrimitiveData);
+	const uint64_t vertexBytes = (uint64_t)emittedVertexCount * sizeof(NRIVoxelComputeSceneVertex);
+	const uint64_t indexBytes = (uint64_t)emittedIndexCount * sizeof(uint32_t);
+	const uint64_t primitiveBytes = (uint64_t)emittedPrimitiveCount * sizeof(NRIVoxelComputePrimitiveData);
 	if (!EnsureBuffer(services, state.jobUploadBuffer, jobBytes, sizeof(NRIVoxelComputeJob), nri::BufferUsageBits::NONE, nri::MemoryLocation::DEVICE_UPLOAD, nri::BufferView::STRUCTURED_BUFFER, false) ||
 		!EnsureBuffer(services, state.jobBuffer, jobBytes, sizeof(NRIVoxelComputeJob), nri::BufferUsageBits::SHADER_RESOURCE, nri::MemoryLocation::DEVICE, nri::BufferView::STRUCTURED_BUFFER, true) ||
 		(!directSource &&
@@ -1209,9 +1451,10 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 				!EnsureBuffer(services, state.faceBuffer, faceBytes, sizeof(NRIVoxelComputeFaceRecord), nri::BufferUsageBits::SHADER_RESOURCE, nri::MemoryLocation::DEVICE, nri::BufferView::STRUCTURED_BUFFER, true))) ||
 			(directSource &&
 				!EnsureBuffer(services, state.faceBuffer, sizeof(NRIVoxelComputeFaceRecord), sizeof(NRIVoxelComputeFaceRecord), nri::BufferUsageBits::SHADER_RESOURCE, nri::MemoryLocation::DEVICE, nri::BufferView::STRUCTURED_BUFFER, true)) ||
-			!EnsureBuffer(services, state.vertexBuffer, vertexBytes, sizeof(NRIVoxelComputeSceneVertex), NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE_STORAGE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), nri::MemoryLocation::DEVICE, nri::BufferView::STORAGE_STRUCTURED_BUFFER, true) ||
-			!EnsureBuffer(services, state.indexBuffer, indexBytes, sizeof(uint32_t), NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE_STORAGE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), nri::MemoryLocation::DEVICE, nri::BufferView::STORAGE_STRUCTURED_BUFFER, true) ||
-			!EnsureBuffer(services, state.primitiveBuffer, primitiveBytes, sizeof(NRIVoxelComputePrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE_STORAGE, nri::MemoryLocation::DEVICE, nri::BufferView::STORAGE_STRUCTURED_BUFFER, true) ||
+			(!directOutput &&
+				(!EnsureBuffer(services, state.vertexBuffer, vertexBytes, sizeof(NRIVoxelComputeSceneVertex), NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE_STORAGE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), nri::MemoryLocation::DEVICE, nri::BufferView::STORAGE_STRUCTURED_BUFFER, true) ||
+				!EnsureBuffer(services, state.indexBuffer, indexBytes, sizeof(uint32_t), NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE_STORAGE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), nri::MemoryLocation::DEVICE, nri::BufferView::STORAGE_STRUCTURED_BUFFER, true) ||
+				!EnsureBuffer(services, state.primitiveBuffer, primitiveBytes, sizeof(NRIVoxelComputePrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE_STORAGE, nri::MemoryLocation::DEVICE, nri::BufferView::STORAGE_STRUCTURED_BUFFER, true))) ||
 			(fullGeneratedReadback &&
 				(!EnsureBuffer(services, state.vertexReadbackBuffer, vertexBytes, sizeof(NRIVoxelComputeSceneVertex), nri::BufferUsageBits::NONE, nri::MemoryLocation::HOST_READBACK, nri::BufferView::STRUCTURED_BUFFER, false) ||
 				!EnsureBuffer(services, state.indexReadbackBuffer, indexBytes, sizeof(uint32_t), nri::BufferUsageBits::NONE, nri::MemoryLocation::HOST_READBACK, nri::BufferView::STRUCTURED_BUFFER, false) ||
@@ -1269,6 +1512,10 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		}
 	}
 
+	const NRIBufferResource& emitVertexBuffer = directOutput ? *outputVertexBuffer : state.vertexBuffer;
+	const NRIBufferResource& emitIndexBuffer = directOutput ? *outputIndexBuffer : state.indexBuffer;
+	const NRIBufferResource& emitPrimitiveBuffer = directOutput ? *outputPrimitiveBuffer : state.primitiveBuffer;
+
 	std::vector<nri::BufferBarrierDesc> computeBarriers;
 	computeBarriers.resize(directSource ? (emit ? 7 : 4) : (emit ? 8 : 4));
 	computeBarriers[0].buffer = state.jobBuffer.buffer;
@@ -1285,14 +1532,14 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	computeBarriers[3].after = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
 	if (emit)
 	{
-		computeBarriers[4].buffer = state.vertexBuffer.buffer;
-		computeBarriers[4].before = buildBlas ? NRIResourceAccelerationStructureBuildInputAccess() : NRIResourceCopySourceAccess();
+		computeBarriers[4].buffer = emitVertexBuffer.buffer;
+		computeBarriers[4].before = directOutput ? NRIResourceComputeShaderResourceAccess() : (buildBlas ? NRIResourceAccelerationStructureBuildInputAccess() : NRIResourceCopySourceAccess());
 		computeBarriers[4].after = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
-		computeBarriers[5].buffer = state.indexBuffer.buffer;
-		computeBarriers[5].before = buildBlas ? NRIResourceAccelerationStructureBuildInputAccess() : NRIResourceCopySourceAccess();
+		computeBarriers[5].buffer = emitIndexBuffer.buffer;
+		computeBarriers[5].before = directOutput ? NRIResourceComputeShaderResourceAccess() : (buildBlas ? NRIResourceAccelerationStructureBuildInputAccess() : NRIResourceCopySourceAccess());
 		computeBarriers[5].after = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
-		computeBarriers[6].buffer = state.primitiveBuffer.buffer;
-		computeBarriers[6].before = NRIResourceCopySourceAccess();
+		computeBarriers[6].buffer = emitPrimitiveBuffer.buffer;
+		computeBarriers[6].before = directOutput ? NRIResourceComputeShaderResourceAccess() : NRIResourceCopySourceAccess();
 		computeBarriers[6].after = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
 		if (!directSource)
 		{
@@ -1339,7 +1586,11 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	context.core->UpdateDescriptorRanges(&resultUpdate, 1);
 	if (emit)
 	{
-		const nri::Descriptor* emitDescriptors[3] = { state.vertexBuffer.shaderView, state.indexBuffer.shaderView, state.primitiveBuffer.shaderView };
+		const nri::Descriptor* emitDescriptors[3] = {
+			directOutput ? emitVertexBuffer.storageView : emitVertexBuffer.shaderView,
+			directOutput ? emitIndexBuffer.storageView : emitIndexBuffer.shaderView,
+			directOutput ? emitPrimitiveBuffer.storageView : emitPrimitiveBuffer.shaderView
+		};
 		nri::UpdateDescriptorRangeDesc emitUpdate = {};
 		emitUpdate.descriptorSet = renderer.mVoxelComputeOutputSet;
 		emitUpdate.rangeIndex = 1;
@@ -1361,7 +1612,7 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	context.core->CmdDispatch(*context.commandBuffer, { (uint32_t)gpuJobs.size(), 1, 1 });
 
 	std::vector<nri::BufferBarrierDesc> readbackBarriers;
-	readbackBarriers.resize(fullGeneratedReadback ? 4 : 1);
+	readbackBarriers.resize((fullGeneratedReadback ? 4 : 1) + (directOutput ? 3 : 0));
 	readbackBarriers[0].buffer = state.resultBuffer.buffer;
 	readbackBarriers[0].before = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
 	readbackBarriers[0].after = NRIResourceCopySourceAccess();
@@ -1376,6 +1627,19 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		readbackBarriers[3].buffer = state.primitiveBuffer.buffer;
 		readbackBarriers[3].before = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
 		readbackBarriers[3].after = NRIResourceCopySourceAccess();
+	}
+	if (directOutput)
+	{
+		const uint32_t directBarrierOffset = fullGeneratedReadback ? 4u : 1u;
+		readbackBarriers[directBarrierOffset + 0u].buffer = emitVertexBuffer.buffer;
+		readbackBarriers[directBarrierOffset + 0u].before = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
+		readbackBarriers[directBarrierOffset + 0u].after = NRIResourceComputeShaderResourceAccess();
+		readbackBarriers[directBarrierOffset + 1u].buffer = emitIndexBuffer.buffer;
+		readbackBarriers[directBarrierOffset + 1u].before = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
+		readbackBarriers[directBarrierOffset + 1u].after = NRIResourceComputeShaderResourceAccess();
+		readbackBarriers[directBarrierOffset + 2u].buffer = emitPrimitiveBuffer.buffer;
+		readbackBarriers[directBarrierOffset + 2u].before = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
+		readbackBarriers[directBarrierOffset + 2u].after = NRIResourceComputeShaderResourceAccess();
 	}
 	nri::BarrierDesc readbackBarrierDesc = {};
 	readbackBarrierDesc.buffers = readbackBarriers.data();
@@ -1392,6 +1656,7 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	constexpr uint32_t MaxDiagnosticBlasPrimitives = 8192;
 	const bool allowDiagnosticBlas =
 		buildBlas &&
+		!directOutput &&
 		state.diagnosticBlasBuildsSubmitted == 0 &&
 		vertexOffset > 0 &&
 		indexOffset > 0 &&
@@ -1477,15 +1742,19 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		{
 			state.pendingConsumeKeys.insert(job.consumeKey);
 		}
+		if (job.directPublication)
+		{
+			state.pendingDirectKeys.insert(job.directKey);
+		}
 	}
 	state.pendingReadbackJobs = std::move(pendingJobs);
-	state.pendingVertexCount = vertexOffset;
-	state.pendingIndexCount = indexOffset;
-	state.pendingPrimitiveCount = primitiveOffset;
+	state.pendingVertexCount = emittedVertexCount;
+	state.pendingIndexCount = emittedIndexCount;
+	state.pendingPrimitiveCount = emittedPrimitiveCount;
 	if (IsTraceEnabled())
 	{
 		Printf(
-			"PERF pt voxel compute dispatch NRI: frame=%llu mode=%s source=%s jobs=%u slab_records=%u color_run_records=%u face_records=%u job_bytes=%llu slab_bytes=%llu color_run_bytes=%llu face_bytes=%llu result_bytes=%llu vertex_bytes=%llu index_bytes=%llu primitive_bytes=%llu production_readback_bytes=%llu validation_readback_bytes=%llu direct_gpu=%u raw_archive=%u\n",
+			"PERF pt voxel compute dispatch NRI: frame=%llu mode=%s source=%s jobs=%u slab_records=%u color_run_records=%u face_records=%u job_bytes=%llu slab_bytes=%llu color_run_bytes=%llu face_bytes=%llu result_bytes=%llu vertex_bytes=%llu index_bytes=%llu primitive_bytes=%llu production_readback_bytes=%llu validation_readback_bytes=%llu direct_gpu=%u raw_archive=%u direct_publish=%u\n",
 			(unsigned long long)frameNumber,
 			emit ? (buildBlas ? "emit_blas" : "emit") : "count",
 			directSource ? "archive_decode" : (emit ? "face_records" : "slab_count"),
@@ -1504,7 +1773,8 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 			(unsigned long long)resultBytes,
 			(unsigned long long)(fullGeneratedReadback ? vertexBytes + indexBytes + primitiveBytes : 0),
 			IsDirectGpuPublicationEnabled() ? 1u : 0u,
-			IsRawSourceArchiveEnabled() ? 1u : 0u);
+			IsRawSourceArchiveEnabled() ? 1u : 0u,
+			directOutput ? 1u : 0u);
 	}
 }
 
@@ -1557,6 +1827,10 @@ void DestroyNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer)
 	state.queuedConsumeKeys.clear();
 	state.pendingConsumeKeys.clear();
 	state.failedConsumeKeys.clear();
+	state.queuedDirectKeys.clear();
+	state.pendingDirectKeys.clear();
+	state.failedDirectKeys.clear();
 	state.readyGeneratedGeometry.clear();
+	state.readyDirectPublishedMeshes.clear();
 	state.rawSourceArchive.clear();
 }

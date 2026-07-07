@@ -4765,6 +4765,7 @@ namespace
 	{
 		outPending = false;
 		if (!ShouldConsumeNRIVoxelComputeMeshing() ||
+			ShouldDirectPublishNRIVoxelComputeMeshing() ||
 			lookup.meshVariantHash == 0 ||
 			model == nullptr ||
 			IsVoxelMeshVariantSurfaceReady(lookup.meshVariantHash))

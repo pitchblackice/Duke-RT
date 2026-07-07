@@ -375,6 +375,11 @@ void NRIRenderer::DestroyBufferResource(NRIBufferResource& resource)
 		mFrameBuffer->mCore.DestroyDescriptor(resource.shaderView);
 		resource.shaderView = nullptr;
 	}
+	if (resource.storageView != nullptr)
+	{
+		mFrameBuffer->mCore.DestroyDescriptor(resource.storageView);
+		resource.storageView = nullptr;
+	}
 
 	if (resource.buffer != nullptr)
 	{
@@ -389,6 +394,7 @@ void NRIRenderer::DestroyBufferResource(NRIBufferResource& resource)
 	resource.payloadSize = 0;
 	resource.stride = 0;
 	resource.payloadStride = 0;
+	resource.usage = nri::BufferUsageBits::NONE;
 	resource.memoryLocation = nri::MemoryLocation::DEVICE;
 }
 

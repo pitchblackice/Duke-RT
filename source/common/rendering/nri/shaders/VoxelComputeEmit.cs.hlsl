@@ -52,7 +52,7 @@ NRIVoxelComputePrimitiveData MakePrimitive(uint3 indices, uint materialIndex, fl
 	return primitive;
 }
 
-void EmitFace(
+bool EmitFace(
 	NRIVoxelComputeJob job,
 	int4 x,
 	int4 y,
@@ -64,15 +64,26 @@ void EmitFace(
 	inout uint indexHash,
 	inout uint primitiveHash)
 {
+	const uint localVertexBase = emittedFaces * 4u;
+	const uint localIndexBase = emittedFaces * 6u;
+	const uint localPrimitiveBase = emittedFaces * 2u;
+	if (localVertexBase + 4u > job.VertexCapacity ||
+		localIndexBase + 6u > job.IndexCapacity ||
+		localPrimitiveBase + 2u > job.PrimitiveCapacity)
+	{
+		return false;
+	}
+
 	const float2 uv = VoxelUv(color);
 	const float3 p0 = TransformVoxelPoint(job, x.x, y.x, z.x);
 	const float3 p1 = TransformVoxelPoint(job, x.y, y.y, z.y);
 	const float3 p2 = TransformVoxelPoint(job, x.w, y.w, z.w);
 	const float3 p3 = TransformVoxelPoint(job, x.z, y.z, z.z);
 
-	const uint vertexBase = job.VertexOffset + emittedFaces * 4u;
-	const uint indexBase = job.IndexOffset + emittedFaces * 6u;
-	const uint primitiveBase = job.PrimitiveOffset + emittedFaces * 2u;
+	const uint vertexBase = job.VertexOffset + localVertexBase;
+	const uint indexBase = job.IndexOffset + localIndexBase;
+	const uint primitiveBase = job.PrimitiveOffset + localPrimitiveBase;
+	const uint globalMaterialIndex = job.MaterialBase + materialIndex;
 
 	VoxelComputeVertices[vertexBase + 0u] = MakeVertex(p0, uv);
 	VoxelComputeVertices[vertexBase + 1u] = MakeVertex(p1, uv);
@@ -94,8 +105,8 @@ void EmitFace(
 		indexHash = HashCombine(indexHash, indices[i]);
 	}
 
-	VoxelComputePrimitives[primitiveBase + 0u] = MakePrimitive(uint3(indices[0], indices[1], indices[2]), materialIndex, uv, uv, uv, p0, p1, p3);
-	VoxelComputePrimitives[primitiveBase + 1u] = MakePrimitive(uint3(indices[3], indices[4], indices[5]), materialIndex, uv, uv, uv, p1, p2, p3);
+	VoxelComputePrimitives[primitiveBase + 0u] = MakePrimitive(uint3(indices[0], indices[1], indices[2]), globalMaterialIndex, uv, uv, uv, p0, p1, p3);
+	VoxelComputePrimitives[primitiveBase + 1u] = MakePrimitive(uint3(indices[3], indices[4], indices[5]), globalMaterialIndex, uv, uv, uv, p1, p2, p3);
 
 	[unroll]
 	for (uint v = 0u; v < 4u; ++v)
@@ -107,7 +118,7 @@ void EmitFace(
 		vertexHash = HashCombine(vertexHash, asuint(vertex.Uv.x));
 		vertexHash = HashCombine(vertexHash, asuint(vertex.Uv.y));
 	}
-	primitiveHash = HashCombine(primitiveHash, materialIndex);
+	primitiveHash = HashCombine(primitiveHash, globalMaterialIndex);
 	primitiveHash = HashCombine(primitiveHash, indices[0]);
 	primitiveHash = HashCombine(primitiveHash, indices[1]);
 	primitiveHash = HashCombine(primitiveHash, indices[2]);
@@ -115,6 +126,7 @@ void EmitFace(
 	primitiveHash = HashCombine(primitiveHash, indices[4]);
 	primitiveHash = HashCombine(primitiveHash, indices[5]);
 	++emittedFaces;
+	return true;
 }
 
 [numthreads(1, 1, 1)]
@@ -131,6 +143,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	uint indexHash = 2166136261u;
 	uint primitiveHash = 2166136261u;
 	uint emittedFaces = 0u;
+	bool outputOverflow = false;
 
 	if (gVoxelComputeConstants.ColorRunRecordCount != 0u)
 	{
@@ -151,10 +164,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				if (runIndex < gVoxelComputeConstants.ColorRunRecordCount)
 				{
 					const uint color = VoxelComputeColorRuns[runIndex].Color;
-					EmitFace(job, int4(x, x + 1, x, x + 1), int4(y, y, y + 1, y + 1), int4(zTop, zTop, zTop, zTop), color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
+					outputOverflow = !EmitFace(job, int4(x, x + 1, x, x + 1), int4(y, y, y + 1, y + 1), int4(zTop, zTop, zTop, zTop), color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
 				}
 			}
-			for (uint localRun = 0u; localRun < slab.ColorRunCount; ++localRun)
+			for (uint localRun = 0u; localRun < slab.ColorRunCount && !outputOverflow; ++localRun)
 			{
 				const uint runIndex = slab.ColorRunOffset + localRun;
 				if (runIndex >= gVoxelComputeConstants.ColorRunRecordCount)
@@ -166,36 +179,40 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const int z1 = z0 + int(run.ZLength);
 				if ((slab.CullMask & 1u) != 0u)
 				{
-					EmitFace(job, int4(x, x, x, x), int4(y, y + 1, y, y + 1), int4(z0, z0, z1, z1), run.Color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
+					outputOverflow = !EmitFace(job, int4(x, x, x, x), int4(y, y + 1, y, y + 1), int4(z0, z0, z1, z1), run.Color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
 				}
-				if ((slab.CullMask & 2u) != 0u)
+				if (!outputOverflow && (slab.CullMask & 2u) != 0u)
 				{
-					EmitFace(job, int4(x + 1, x + 1, x + 1, x + 1), int4(y + 1, y, y + 1, y), int4(z0, z0, z1, z1), run.Color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
+					outputOverflow = !EmitFace(job, int4(x + 1, x + 1, x + 1, x + 1), int4(y + 1, y, y + 1, y), int4(z0, z0, z1, z1), run.Color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
 				}
-				if ((slab.CullMask & 4u) != 0u)
+				if (!outputOverflow && (slab.CullMask & 4u) != 0u)
 				{
-					EmitFace(job, int4(x + 1, x, x + 1, x), int4(y, y, y, y), int4(z0, z0, z1, z1), run.Color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
+					outputOverflow = !EmitFace(job, int4(x + 1, x, x + 1, x), int4(y, y, y, y), int4(z0, z0, z1, z1), run.Color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
 				}
-				if ((slab.CullMask & 8u) != 0u)
+				if (!outputOverflow && (slab.CullMask & 8u) != 0u)
 				{
-					EmitFace(job, int4(x, x + 1, x, x + 1), int4(y + 1, y + 1, y + 1, y + 1), int4(z0, z0, z1, z1), run.Color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
+					outputOverflow = !EmitFace(job, int4(x, x + 1, x, x + 1), int4(y + 1, y + 1, y + 1, y + 1), int4(z0, z0, z1, z1), run.Color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
 				}
 			}
-			if ((slab.CullMask & 32u) != 0u && slab.ColorRunCount != 0u)
+			if (!outputOverflow && (slab.CullMask & 32u) != 0u && slab.ColorRunCount != 0u)
 			{
 				const uint runIndex = slab.ColorRunOffset + slab.ColorRunCount - 1u;
 				if (runIndex < gVoxelComputeConstants.ColorRunRecordCount)
 				{
 					const uint color = VoxelComputeColorRuns[runIndex].Color;
 					const int z = zTop + int(slab.ZLength);
-					EmitFace(job, int4(x + 1, x, x + 1, x), int4(y, y, y + 1, y + 1), int4(z, z, z, z), color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
+					outputOverflow = !EmitFace(job, int4(x + 1, x, x + 1, x), int4(y, y, y + 1, y + 1), int4(z, z, z, z), color, 0u, emittedFaces, vertexHash, indexHash, primitiveHash);
 				}
+			}
+			if (outputOverflow)
+			{
+				break;
 			}
 		}
 	}
 	else
 	{
-		for (uint localFace = 0u; localFace < job.ExpectedFaces; ++localFace)
+		for (uint localFace = 0u; localFace < job.ExpectedFaces && !outputOverflow; ++localFace)
 		{
 			const uint faceIndex = job.FaceOffset + localFace;
 			if (faceIndex >= gVoxelComputeConstants.FaceRecordCount)
@@ -203,7 +220,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				break;
 			}
 			const NRIVoxelComputeFaceRecord face = VoxelComputeFaces[faceIndex];
-			EmitFace(job, int4(face.X[0], face.X[1], face.X[2], face.X[3]), int4(face.Y[0], face.Y[1], face.Y[2], face.Y[3]), int4(face.Z[0], face.Z[1], face.Z[2], face.Z[3]), face.Color, face.MaterialIndex, emittedFaces, vertexHash, indexHash, primitiveHash);
+			outputOverflow = !EmitFace(job, int4(face.X[0], face.X[1], face.X[2], face.X[3]), int4(face.Y[0], face.Y[1], face.Y[2], face.Y[3]), int4(face.Z[0], face.Z[1], face.Z[2], face.Z[3]), face.Color, face.MaterialIndex, emittedFaces, vertexHash, indexHash, primitiveHash);
 		}
 	}
 
@@ -219,6 +236,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	result.MismatchMask |= result.IndexCount == job.ExpectedIndices ? 0u : 2u;
 	result.MismatchMask |= result.VertexCountNoDedupe == job.ExpectedVerticesNoDedupe ? 0u : 4u;
 	result.MismatchMask |= result.PrimitiveCount == job.ExpectedFaces * 2u ? 0u : 16u;
+	result.MismatchMask |= outputOverflow ? 32u : 0u;
 	result.JobId = job.JobId;
 	result.Status = result.MismatchMask == 0u ? NRI_VOXEL_COMPUTE_STATUS_EMIT_OK : NRI_VOXEL_COMPUTE_STATUS_EMIT_MISMATCH;
 	result.VertexHash = vertexHash;

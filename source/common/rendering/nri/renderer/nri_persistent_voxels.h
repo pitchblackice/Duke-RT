@@ -140,6 +140,7 @@ struct PersistentVoxelMaterialVariantResource
 enum class PersistentVoxelAdmissionState : uint8_t
 {
 	Pending,
+	DirectComputePending,
 	UploadingVertices,
 	UploadingIndices,
 	UploadingPrimitives,

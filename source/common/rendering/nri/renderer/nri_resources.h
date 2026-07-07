@@ -13,6 +13,7 @@ struct NRIBufferResource
 {
 	nri::Buffer* buffer = nullptr;
 	nri::Descriptor* shaderView = nullptr;
+	nri::Descriptor* storageView = nullptr;
 	uint64_t size = 0;
 	uint64_t memorySize = 0;
 	uint64_t usedSize = 0;
@@ -20,6 +21,7 @@ struct NRIBufferResource
 	uint64_t payloadSize = 0;
 	uint32_t stride = 0;
 	uint32_t payloadStride = 0;
+	nri::BufferUsageBits usage = nri::BufferUsageBits::NONE;
 	nri::MemoryLocation memoryLocation = nri::MemoryLocation::DEVICE;
 };
 
@@ -74,6 +76,12 @@ inline T NRIResourceFlags(T a, T b)
 inline nri::AccessStage NRIResourceComputeShaderResourceAccess()
 {
 	return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER };
+}
+
+inline bool NRIResourceUsageIncludes(nri::BufferUsageBits available, nri::BufferUsageBits required)
+{
+	const uint32_t requiredMask = (uint32_t)required;
+	return ((uint32_t)available & requiredMask) == requiredMask;
 }
 
 inline nri::AccessStage NRIResourceCopySourceAccess()

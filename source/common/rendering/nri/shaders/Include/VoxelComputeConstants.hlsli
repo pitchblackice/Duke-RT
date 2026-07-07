@@ -36,7 +36,10 @@ struct NRIVoxelComputeJob
 	float PivotX;
 	float PivotY;
 	float PivotZ;
-	uint Reserved0;
+	uint MaterialBase;
+	uint VertexCapacity;
+	uint IndexCapacity;
+	uint PrimitiveCapacity;
 };
 
 struct NRIVoxelComputeSlabRecord

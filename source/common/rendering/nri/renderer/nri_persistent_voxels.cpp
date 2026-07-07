@@ -3415,12 +3415,62 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			primitiveBuffer.buffer != nullptr;
 	};
 
+	if (entry.state == PersistentVoxelAdmissionState::DirectComputePending)
+	{
+		NRIVoxelComputeDirectPublishedMesh directMesh = {};
+		if (TakeNRIVoxelComputeDirectPublication(meshResourceKey, entry.directComputeGeneration, directMesh))
+		{
+			if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
+			{
+				Printf("PERF pt voxel compute direct publish NRI: action=ready tex=%d voxel=%d mesh_variant=0x%llx generation=%llu job=%u vertices=%u indices=%u primitives=%u material_base=%u material_count=%u\n",
+					variant.sourcePicnum,
+					variant.resolvedVoxelIndex,
+					(unsigned long long)variant.meshKeyHash,
+					(unsigned long long)directMesh.generation,
+					directMesh.jobId,
+					directMesh.vertices.count,
+					directMesh.indices.count,
+					directMesh.primitives.count,
+					directMesh.materialBase,
+					directMesh.materialCount);
+			}
+			arenaVertexCursor = entry.savedVertexCursor;
+			arenaIndexCursor = entry.savedIndexCursor;
+			arenaPrimitiveCursor = entry.savedPrimitiveCursor;
+			entry.uploadMeshResource = {};
+			entry.directComputeRequested = false;
+			entry.directComputeFailed = true;
+			entry.directComputeFailure = NRIVoxelComputeDirectPublishFailure::None;
+			entry.state = PersistentVoxelAdmissionState::Pending;
+			entry.lastReason = "direct-publish-ready-awaiting-blas";
+		}
+		else if (directMesh.status == NRIVoxelComputeGeneratedGeometryStatus::Failed)
+		{
+			arenaVertexCursor = entry.savedVertexCursor;
+			arenaIndexCursor = entry.savedIndexCursor;
+			arenaPrimitiveCursor = entry.savedPrimitiveCursor;
+			entry.uploadMeshResource = {};
+			entry.directComputeRequested = false;
+			entry.directComputeFailed = true;
+			entry.directComputeFailure = NRIVoxelComputeDirectPublishFailure::StatusFailed;
+			entry.state = PersistentVoxelAdmissionState::Pending;
+			entry.lastReason = "direct-publish-failed";
+		}
+		else
+		{
+			outInProgress = true;
+			entry.lastReason = "direct-publish-pending";
+			return true;
+		}
+	}
+
 	if (!entry.uploadPrepared &&
 		!entry.uploadGeometryFromCompute &&
 		!entry.computeGeometryFailed &&
 		!existingMeshResourceReady() &&
 		entry.runtimeRequested &&
 		ShouldConsumeNRIVoxelComputeMeshing() &&
+		!ShouldDirectPublishNRIVoxelComputeMeshing() &&
 		variant.model != nullptr)
 	{
 		uint32_t computeJobId = 0;
@@ -3610,6 +3660,12 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			entry.uploadGeometryFromCompute = false;
 			entry.computeGeometryFailed = false;
 			entry.computeGeometryJobId = 0;
+			entry.directComputeRequested = false;
+			entry.directComputeFailed = false;
+			entry.directComputeGeneration = 0;
+			entry.directComputeJobId = 0;
+			entry.directComputeOutputKind = NRIVoxelComputeDirectPublishOutputKind::None;
+			entry.directComputeFailure = NRIVoxelComputeDirectPublishFailure::None;
 			if (loadingTraceLevel >= 2 || voxelStatsEnabled)
 			{
 				Printf("NRI PT voxel admission transaction: event=commit reason=already-resident tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=0 step=publish\n",
@@ -3620,6 +3676,104 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 					variant.primitiveCount);
 			}
 			return true;
+		}
+
+		if (entry.runtimeRequested &&
+			ShouldDirectPublishNRIVoxelComputeMeshing() &&
+			!entry.directComputeFailed &&
+			variant.model != nullptr &&
+			variant.primitiveCount != 0)
+		{
+			PersistentVoxelMeshVariantResource& meshResource = entry.uploadMeshResource;
+			const uint32_t directVertexCapacity = variant.primitiveCount * 2u;
+			const uint32_t directIndexCapacity = variant.primitiveCount * 3u;
+			const uint32_t directPrimitiveCapacity = variant.primitiveCount;
+			allocateArenaSlice(directVertexCapacity, arenaVertexCursor, meshResource.vertexOffset, meshResource.vertexCapacity);
+			allocateArenaSlice(directIndexCapacity, arenaIndexCursor, meshResource.indexOffset, meshResource.indexCapacity);
+			allocateArenaSlice(directPrimitiveCapacity, arenaPrimitiveCursor, meshResource.primitiveOffset, meshResource.primitiveCapacity);
+			if (!services.EnsureArenaBuffer(
+					vertexBuffer,
+					(uint64_t)arenaVertexCursor * sizeof(nri_scene::SceneVertex),
+					sizeof(nri_scene::SceneVertex),
+					NRIResourceFlags(NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::SHADER_RESOURCE_STORAGE), nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
+					PersistentVoxelComputeShaderResourceAccess()) ||
+				!services.EnsureArenaBuffer(
+					indexBuffer,
+					(uint64_t)arenaIndexCursor * sizeof(uint32_t),
+					sizeof(uint32_t),
+					NRIResourceFlags(NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::SHADER_RESOURCE_STORAGE), nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
+					PersistentVoxelComputeShaderResourceAccess()) ||
+				!services.EnsureArenaBuffer(
+					primitiveBuffer,
+					(uint64_t)arenaPrimitiveCursor * sizeof(nri_scene::PrimitiveData),
+					sizeof(nri_scene::PrimitiveData),
+					NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::SHADER_RESOURCE_STORAGE),
+					PersistentVoxelComputeShaderResourceAccess()))
+			{
+				arenaVertexCursor = entry.savedVertexCursor;
+				arenaIndexCursor = entry.savedIndexCursor;
+				arenaPrimitiveCursor = entry.savedPrimitiveCursor;
+				entry.uploadMeshResource = {};
+				entry.directComputeFailed = true;
+			}
+			else
+			{
+				const uint64_t generation = ((uint64_t)residencyMapGeneration << 32) | (uint64_t)(entry.retryCount + 1u);
+				NRIVoxelComputeDirectPublishRequest request = {};
+				request.meshResourceKey = meshResourceKey;
+				request.generation = generation != 0 ? generation : 1u;
+				request.model = variant.model;
+				request.outputKind = NRIVoxelComputeDirectPublishOutputKind::PrivateBlasInputsAndSharedArena;
+				request.outputBuffers.vertices = &vertexBuffer;
+				request.outputBuffers.indices = &indexBuffer;
+				request.outputBuffers.primitives = &primitiveBuffer;
+				request.vertices.offset = meshResource.vertexOffset;
+				request.vertices.capacity = meshResource.vertexCapacity;
+				request.indices.offset = meshResource.indexOffset;
+				request.indices.capacity = meshResource.indexCapacity;
+				request.primitives.offset = meshResource.primitiveOffset;
+				request.primitives.capacity = meshResource.primitiveCapacity;
+				request.materialBase = entry.uploadMaterialResource.materialOffset;
+				request.materialCount = entry.uploadMaterialResource.materialCount;
+				const NRIVoxelComputeGeneratedGeometryStatus directStatus = RequestNRIVoxelComputeDirectPublication(request);
+				if (directStatus == NRIVoxelComputeGeneratedGeometryStatus::Queued)
+				{
+					entry.directComputeRequested = true;
+					entry.directComputeFailed = false;
+					entry.directComputeGeneration = request.generation;
+					entry.directComputeOutputKind = request.outputKind;
+					entry.directComputeFailure = NRIVoxelComputeDirectPublishFailure::None;
+					entry.state = PersistentVoxelAdmissionState::DirectComputePending;
+					entry.lastReason = "direct-publish-pending";
+					outInProgress = true;
+					if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
+					{
+						Printf("PERF pt voxel compute direct publish NRI: action=request tex=%d voxel=%d mesh_variant=0x%llx generation=%llu vertex_offset=%u vertex_capacity=%u index_offset=%u index_capacity=%u primitive_offset=%u primitive_capacity=%u material_base=%u material_count=%u\n",
+							variant.sourcePicnum,
+							variant.resolvedVoxelIndex,
+							(unsigned long long)variant.meshKeyHash,
+							(unsigned long long)request.generation,
+							request.vertices.offset,
+							request.vertices.capacity,
+							request.indices.offset,
+							request.indices.capacity,
+							request.primitives.offset,
+							request.primitives.capacity,
+							request.materialBase,
+							request.materialCount);
+					}
+					return true;
+				}
+				arenaVertexCursor = entry.savedVertexCursor;
+				arenaIndexCursor = entry.savedIndexCursor;
+				arenaPrimitiveCursor = entry.savedPrimitiveCursor;
+				entry.uploadMeshResource = {};
+				entry.directComputeFailed = true;
+				entry.directComputeFailure =
+					directStatus == NRIVoxelComputeGeneratedGeometryStatus::Failed ?
+					NRIVoxelComputeDirectPublishFailure::StatusFailed :
+					NRIVoxelComputeDirectPublishFailure::Disabled;
+			}
 		}
 
 		if (!entry.uploadGeometryFromCompute)
@@ -3928,6 +4082,12 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 	entry.uploadGeometryFromCompute = false;
 	entry.computeGeometryFailed = false;
 	entry.computeGeometryJobId = 0;
+	entry.directComputeRequested = false;
+	entry.directComputeFailed = false;
+	entry.directComputeGeneration = 0;
+	entry.directComputeJobId = 0;
+	entry.directComputeOutputKind = NRIVoxelComputeDirectPublishOutputKind::None;
+	entry.directComputeFailure = NRIVoxelComputeDirectPublishFailure::None;
 	entry.vertexBytesUploaded = 0;
 	entry.vertexArenaBytesUploaded = 0;
 	entry.indexBytesUploaded = 0;

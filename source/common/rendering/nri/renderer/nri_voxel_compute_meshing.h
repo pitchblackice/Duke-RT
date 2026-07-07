@@ -6,6 +6,7 @@
 
 class FVoxelModel;
 class NRIRenderer;
+struct NRIBufferResource;
 struct FVoxelRawMeshStats;
 struct FVoxelRawSlabRecord;
 struct FVoxelRawFaceRecord;
@@ -58,12 +59,20 @@ struct NRIVoxelComputeDirectPublishBounds
 	bool valid = false;
 };
 
+struct NRIVoxelComputeDirectPublishOutputBuffers
+{
+	const NRIBufferResource* vertices = nullptr;
+	const NRIBufferResource* indices = nullptr;
+	const NRIBufferResource* primitives = nullptr;
+};
+
 struct NRIVoxelComputeDirectPublishRequest
 {
 	uint64_t meshResourceKey = 0;
 	uint64_t generation = 0;
 	FVoxelModel* model = nullptr;
 	NRIVoxelComputeDirectPublishOutputKind outputKind = NRIVoxelComputeDirectPublishOutputKind::PrivateBlasInputsAndSharedArena;
+	NRIVoxelComputeDirectPublishOutputBuffers outputBuffers;
 	NRIVoxelComputeDirectPublishRange vertices;
 	NRIVoxelComputeDirectPublishRange indices;
 	NRIVoxelComputeDirectPublishRange primitives;

@@ -292,7 +292,10 @@ struct NRIVoxelComputeJob
 	float PivotX = 0.0f;
 	float PivotY = 0.0f;
 	float PivotZ = 0.0f;
-	uint32_t Reserved0 = 0;
+	uint32_t MaterialBase = 0;
+	uint32_t VertexCapacity = 0;
+	uint32_t IndexCapacity = 0;
+	uint32_t PrimitiveCapacity = 0;
 };
 
 struct NRIVoxelComputeSlabRecord
@@ -361,7 +364,7 @@ struct NRIVoxelComputePrimitiveData
 };
 
 static_assert(sizeof(NRIVoxelComputeConstants) == 16, "NRIVoxelComputeConstants must match VoxelComputeConstants.hlsli.");
-static_assert(sizeof(NRIVoxelComputeJob) == 60, "NRIVoxelComputeJob must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputeJob) == 72, "NRIVoxelComputeJob must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeSlabRecord) == 32, "NRIVoxelComputeSlabRecord must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeColorRunRecord) == 16, "NRIVoxelComputeColorRunRecord must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeResult) == 48, "NRIVoxelComputeResult must match VoxelComputeConstants.hlsli.");

@@ -328,6 +328,8 @@ CVAR(Bool, nri_ptvoxelcomputedirectgpu, false, 0)
 
 CVAR(Bool, nri_ptvoxelcomputerawarchive, false, 0)
 
+CVAR(Bool, nri_ptvoxelcomputedirectpublish, false, 0)
+
 CVAR(Bool, nri_ptvoxelcomputevalidatefullreadback, true, 0)
 
 CVAR(Bool, nri_ptvoxelcomputeforcecpu, false, 0)
