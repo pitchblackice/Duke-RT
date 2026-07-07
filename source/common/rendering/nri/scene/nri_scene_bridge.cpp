@@ -5227,17 +5227,6 @@ namespace
 		meshBuildContext.directPublish = ShouldDirectPublishNRIVoxelComputeMeshing();
 		meshBuildContext.rawArchive = (bool)nri_ptvoxelcomputerawarchive;
 		meshBuildContext.hadRetainedSurface = HasLastValidResidentVoxelSurface(cacheLookup);
-		if (nri_ptvoxelcomputedeferdynamic &&
-			meshBuildContext.directPublish &&
-			cacheSurfaceUpdate &&
-			!forceTransientVoxel &&
-			cacheLookup.meshVariantHash != 0 &&
-			meshBuildContext.hadRetainedSurface)
-		{
-			TraceDynamicVoxelMeshBuildEvent("defer", "direct-publish-retained-surface", &meshBuildContext, sprite.voxel->model, 0.0, 0, 0, false);
-			return deferDesiredVariant(VoxelActorPendingReason::MeshDeferred);
-		}
-
 		const FVoxelMeshData* mesh = nullptr;
 		bool meshDeferred = false;
 		{

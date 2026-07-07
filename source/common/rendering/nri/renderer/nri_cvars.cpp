@@ -336,7 +336,7 @@ CVAR(Bool, nri_ptvoxelcomputevalidatefullreadback, true, 0)
 
 CVAR(Bool, nri_ptvoxelcomputeforcecpu, false, 0)
 
-CVAR(Bool, nri_ptvoxelcomputedeferdynamic, true, 0)
+CVAR(Bool, nri_ptvoxelcomputedeferdynamic, false, 0)
 
 CVAR(Bool, nri_ptvoxelcomputerawpreload, false, 0)
 
