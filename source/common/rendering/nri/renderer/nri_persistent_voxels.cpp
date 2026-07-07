@@ -3312,6 +3312,16 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		entry.uploadSubmittedBeforeBlas = false;
 		entry.uploadGeometryFromCompute = false;
 		entry.computeGeometryJobId = 0;
+		if (entry.directComputeRequested)
+		{
+			CancelNRIVoxelComputeDirectPublication(meshResourceKey, entry.directComputeGeneration);
+		}
+		entry.directComputeRequested = false;
+		entry.directComputeFailed = false;
+		entry.directComputeGeneration = 0;
+		entry.directComputeJobId = 0;
+		entry.directComputeOutputKind = NRIVoxelComputeDirectPublishOutputKind::None;
+		entry.directComputeFailure = NRIVoxelComputeDirectPublishFailure::None;
 	};
 
 	auto rollbackAdmission = [&](const char* reason, const char* step) -> bool
@@ -6565,6 +6575,10 @@ void NRIPersistentVoxelResidency::ReconcileResidency(
 
 void NRIPersistentVoxelResidency::DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services)
 {
+	if (entry.directComputeRequested)
+	{
+		CancelNRIVoxelComputeDirectPublication(BuildPersistentVoxelVariantMeshResourceKey(entry.variant), entry.directComputeGeneration);
+	}
 	services.RetireBuffer(entry.uploadMeshResource.vertexBuffer);
 	services.RetireBuffer(entry.uploadMeshResource.indexBuffer);
 	services.RetireAccelerationStructure(entry.uploadMeshResource.accelerationStructure);
@@ -6590,6 +6604,12 @@ void NRIPersistentVoxelResidency::DiscardAdmissionEntry(PersistentVoxelAdmission
 	entry.uploadGeometryFromCompute = false;
 	entry.computeGeometryFailed = false;
 	entry.computeGeometryJobId = 0;
+	entry.directComputeRequested = false;
+	entry.directComputeFailed = false;
+	entry.directComputeGeneration = 0;
+	entry.directComputeJobId = 0;
+	entry.directComputeOutputKind = NRIVoxelComputeDirectPublishOutputKind::None;
+	entry.directComputeFailure = NRIVoxelComputeDirectPublishFailure::None;
 }
 
 bool NRIPersistentVoxelResidency::EnqueueAdmission(

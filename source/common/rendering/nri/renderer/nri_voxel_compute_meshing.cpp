@@ -191,6 +191,18 @@ namespace
 		}
 	}
 
+	const char* DirectPublishOutputKindName(NRIVoxelComputeDirectPublishOutputKind kind)
+	{
+		switch (kind)
+		{
+		case NRIVoxelComputeDirectPublishOutputKind::None: return "none";
+		case NRIVoxelComputeDirectPublishOutputKind::SharedPersistentArena: return "shared_persistent_arena";
+		case NRIVoxelComputeDirectPublishOutputKind::PrivateBlasInputsAndSharedArena: return "private_blas_inputs_and_shared_arena";
+		case NRIVoxelComputeDirectPublishOutputKind::PrivateBuffers: return "private_buffers";
+		default: return "unknown";
+		}
+	}
+
 	uint32_t HashBytes(const void* data, uint64_t size)
 	{
 		const uint8_t* bytes = static_cast<const uint8_t*>(data);
@@ -794,6 +806,15 @@ bool ShouldConsumeNRIVoxelComputeMeshing()
 	return IsConsumptionEnabled() && !(bool)nri_ptvoxelcomputeforcecpu;
 }
 
+bool ShouldDirectPublishNRIVoxelComputeMeshing()
+{
+	return
+		ShouldConsumeNRIVoxelComputeMeshing() &&
+		IsDirectGpuPublicationEnabled() &&
+		IsRawSourceArchiveEnabled() &&
+		!IsFullGeneratedReadbackEnabled();
+}
+
 NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeGeneratedGeometry(uint64_t requestKey, FVoxelModel* model)
 {
 	constexpr uint32_t MaxConsumptionPrimitives = 8192;
@@ -905,6 +926,76 @@ bool TakeNRIVoxelComputeGeneratedGeometry(uint64_t requestKey, nri_scene::Geomet
 	outGeometry = std::move(found->second.geometry);
 	state.readyGeneratedGeometry.erase(found);
 	return true;
+}
+
+NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeDirectPublication(const NRIVoxelComputeDirectPublishRequest& request)
+{
+	if (!ShouldDirectPublishNRIVoxelComputeMeshing())
+	{
+		return NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
+	}
+	if (request.meshResourceKey == 0 || request.generation == 0 || request.model == nullptr ||
+		request.outputKind == NRIVoxelComputeDirectPublishOutputKind::None)
+	{
+		if (IsTraceEnabled())
+		{
+			Printf(
+				"PERF pt voxel compute direct publish NRI: action=reject reason=invalid_request mesh_resource=0x%llx generation=%llu output=%s\n",
+				(unsigned long long)request.meshResourceKey,
+				(unsigned long long)request.generation,
+				DirectPublishOutputKindName(request.outputKind));
+		}
+		return NRIVoxelComputeGeneratedGeometryStatus::Failed;
+	}
+	if (request.outputKind != NRIVoxelComputeDirectPublishOutputKind::PrivateBlasInputsAndSharedArena)
+	{
+		if (IsTraceEnabled())
+		{
+			Printf(
+				"PERF pt voxel compute direct publish NRI: action=reject reason=unsupported_output mesh_resource=0x%llx generation=%llu output=%s\n",
+				(unsigned long long)request.meshResourceKey,
+				(unsigned long long)request.generation,
+				DirectPublishOutputKindName(request.outputKind));
+		}
+		return NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
+	}
+	if (IsTraceEnabled())
+	{
+		Printf(
+			"PERF pt voxel compute direct publish NRI: action=defer reason=output_writer_unimplemented mesh_resource=0x%llx generation=%llu output=%s vertex_offset=%u vertex_capacity=%u index_offset=%u index_capacity=%u primitive_offset=%u primitive_capacity=%u material_base=%u material_count=%u\n",
+			(unsigned long long)request.meshResourceKey,
+			(unsigned long long)request.generation,
+			DirectPublishOutputKindName(request.outputKind),
+			request.vertices.offset,
+			request.vertices.capacity,
+			request.indices.offset,
+			request.indices.capacity,
+			request.primitives.offset,
+			request.primitives.capacity,
+			request.materialBase,
+			request.materialCount);
+	}
+	return NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
+}
+
+bool TakeNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t generation, NRIVoxelComputeDirectPublishedMesh& outMesh)
+{
+	outMesh = {};
+	outMesh.meshResourceKey = meshResourceKey;
+	outMesh.generation = generation;
+	outMesh.status = NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
+	return false;
+}
+
+void CancelNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t generation)
+{
+	if (IsTraceEnabled() && meshResourceKey != 0)
+	{
+		Printf(
+			"PERF pt voxel compute direct publish NRI: action=cancel mesh_resource=0x%llx generation=%llu\n",
+			(unsigned long long)meshResourceKey,
+			(unsigned long long)generation);
+	}
 }
 
 void QueueNRIVoxelComputeCountJob(

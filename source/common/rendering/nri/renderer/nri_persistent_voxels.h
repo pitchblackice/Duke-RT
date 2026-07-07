@@ -6,6 +6,7 @@
 #include "nri_resources.h"
 #include "nri_runtime_mutation.h"
 #include "nri_scene_lights.h"
+#include "nri_voxel_compute_meshing.h"
 
 #include "../scene/nri_geometry_bridge.h"
 #include "../scene/nri_material_bridge.h"
@@ -84,11 +85,18 @@ struct PersistentVoxelMeshVariantResource
 	uint32_t lastDesiredMapGeneration = 0;
 	uint32_t lastUsedMapGeneration = 0;
 	uint32_t lastUsedFrame = 0;
+	uint64_t directComputeGeneration = 0;
+	uint64_t directComputeSourceArchiveSerial = 0;
+	uint32_t directComputeJobId = 0;
+	uint32_t directComputeReadyFrame = 0;
 	uint32_t sourceBits = 0;
 	uint32_t activeActorReferences = 0;
 	int32_t priority = 0;
 	uint64_t residentBytes = 0;
 	bool tlasPublished = false;
+	bool directComputePublished = false;
+	NRIVoxelComputeDirectPublishOutputKind directComputeOutputKind = NRIVoxelComputeDirectPublishOutputKind::None;
+	NRIVoxelComputeDirectPublishFailure directComputeFailure = NRIVoxelComputeDirectPublishFailure::None;
 	bool cold = false;
 	bool gpuForce = false;
 	bool gpuPrefer = false;
@@ -173,6 +181,12 @@ struct PersistentVoxelAdmissionEntry
 	bool uploadGeometryFromCompute = false;
 	bool computeGeometryFailed = false;
 	uint32_t computeGeometryJobId = 0;
+	bool directComputeRequested = false;
+	bool directComputeFailed = false;
+	uint64_t directComputeGeneration = 0;
+	uint32_t directComputeJobId = 0;
+	NRIVoxelComputeDirectPublishOutputKind directComputeOutputKind = NRIVoxelComputeDirectPublishOutputKind::None;
+	NRIVoxelComputeDirectPublishFailure directComputeFailure = NRIVoxelComputeDirectPublishFailure::None;
 	nri_scene::GeometryData uploadGeometry;
 	std::vector<uint32_t> uploadGpuIndices;
 	std::vector<nri_scene::PrimitiveData> uploadGpuPrimitives;
