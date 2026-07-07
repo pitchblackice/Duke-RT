@@ -725,6 +725,15 @@ namespace
 		}
 		uint32_t okCount = 0;
 		uint32_t mismatchCount = 0;
+		uint32_t directStatusJobs = 0;
+		uint32_t directStatusReady = 0;
+		uint32_t directStatusFailed = 0;
+		const uint64_t fullGeometryReadbackBytes =
+			state.pendingEmit && state.pendingFullGeneratedReadback ?
+			(uint64_t)state.pendingVertexCount * sizeof(NRIVoxelComputeSceneVertex) +
+				(uint64_t)state.pendingIndexCount * sizeof(uint32_t) +
+				(uint64_t)state.pendingPrimitiveCount * sizeof(NRIVoxelComputePrimitiveData) :
+			0ull;
 		for (size_t i = 0; i < state.pendingReadbackJobs.size(); ++i)
 		{
 			PendingReadbackJob& job = state.pendingReadbackJobs[i];
@@ -759,6 +768,9 @@ namespace
 			}
 			if (job.directPublication)
 			{
+				directStatusJobs++;
+				directStatusReady += ok ? 1u : 0u;
+				directStatusFailed += ok ? 0u : 1u;
 				const bool stillPending = state.pendingDirectKeys.erase(job.directKey) != 0;
 				if (ok && state.pendingEmit && stillPending)
 				{
@@ -789,7 +801,7 @@ namespace
 				if (IsTraceEnabled())
 				{
 					Printf(
-						"PERF pt voxel compute direct publish NRI: action=status frame=%llu job=%u generation=%llu status=%s mismatch=%u vertices=%u indices=%u primitives=%u source_serial=%llu\n",
+						"PERF pt voxel compute direct publish NRI: action=status frame=%llu job=%u generation=%llu status=%s mismatch=%u vertices=%u indices=%u primitives=%u source_serial=%llu status_readback_bytes=%u full_geometry_readback_bytes=%llu\n",
 						(unsigned long long)state.pendingFrame,
 						job.jobId,
 						(unsigned long long)job.directGeneration,
@@ -798,7 +810,9 @@ namespace
 						result.VertexCountNoDedupe,
 						result.IndexCount,
 						result.PrimitiveCount,
-						(unsigned long long)job.sourceArchiveSerial);
+						(unsigned long long)job.sourceArchiveSerial,
+						(uint32_t)sizeof(NRIVoxelComputeResult),
+						(unsigned long long)fullGeometryReadbackBytes);
 				}
 			}
 			TraceAdmission(state.pendingFrame, job, job.admissionState, state.pendingEmit ? "readback_emit" : "readback_count");
@@ -860,6 +874,18 @@ namespace
 				HashReadbackBuffer(services.context, state.vertexReadbackBuffer, vertexBytes),
 				HashReadbackBuffer(services.context, state.indexReadbackBuffer, indexBytes),
 				HashReadbackBuffer(services.context, state.primitiveReadbackBuffer, primitiveBytes));
+		}
+		if (directStatusJobs != 0 && IsTraceEnabled())
+		{
+			Printf(
+				"PERF pt voxel compute direct readback NRI: frame=%llu jobs=%u ready=%u failed=%u status_readback_bytes=%llu full_geometry_readback_bytes=%llu production_guard_ok=%u\n",
+				(unsigned long long)state.pendingFrame,
+				directStatusJobs,
+				directStatusReady,
+				directStatusFailed,
+				(unsigned long long)((uint64_t)directStatusJobs * sizeof(NRIVoxelComputeResult)),
+				(unsigned long long)fullGeometryReadbackBytes,
+				fullGeometryReadbackBytes == 0 ? 1u : 0u);
 		}
 
 		if (IsTraceEnabled())

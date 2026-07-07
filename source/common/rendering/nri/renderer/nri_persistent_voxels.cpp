@@ -478,7 +478,8 @@ bool NRIPersistentVoxelAdmissionServices::AdmitVariantResource(
 	bool& outReusedMaterial,
 	bool& outInProgress,
 	bool isolateBlasBuild,
-	const char*& outFailureReason) const
+	const char*& outFailureReason,
+	PersistentVoxelAdmissionStats* outStats) const
 {
 	if (admitVariantResource == nullptr)
 	{
@@ -495,7 +496,8 @@ bool NRIPersistentVoxelAdmissionServices::AdmitVariantResource(
 		outReusedMaterial,
 		outInProgress,
 		isolateBlasBuild,
-		outFailureReason);
+		outFailureReason,
+		outStats);
 }
 
 bool NRIPersistentVoxelAdmissionServices::SubmitWaitAndRestart(const char* reason) const
@@ -1326,6 +1328,9 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 	uint64_t persistentVoxelTlasInstancePrimitiveCount = 0;
 	uint64_t persistentVoxelTlasUniquePrimitiveCount = 0;
 	uint64_t persistentVoxelTlasMaxRetainedFrameAge = 0;
+	uint32_t persistentVoxelTlasDirectPublishedCount = 0;
+	uint64_t persistentVoxelTlasDirectLatencyFrames = 0;
+	uint32_t persistentVoxelTlasDirectMaxLatencyFrames = 0;
 	const int32_t persistentVoxelExcludeIndex0 = settings.excludeIndices[0];
 	const int32_t persistentVoxelExcludeIndex1 = settings.excludeIndices[1];
 	const int32_t persistentVoxelExcludeIndex2 = settings.excludeIndices[2];
@@ -2111,6 +2116,17 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			persistentVoxelTlasNewInstanceCount++;
 			persistentVoxelTlasNewInstancePrimitiveCount += actor.primitiveCount;
 		}
+		if (meshResourceIt->second.directComputePublished)
+		{
+			const uint32_t directReadyFrame = meshResourceIt->second.directComputeReadyFrame;
+			const uint32_t directLatency =
+				directReadyFrame != 0 && frameIndex >= directReadyFrame ?
+				frameIndex - directReadyFrame :
+				0u;
+			persistentVoxelTlasDirectPublishedCount++;
+			persistentVoxelTlasDirectLatencyFrames += directLatency;
+			persistentVoxelTlasDirectMaxLatencyFrames = std::max(persistentVoxelTlasDirectMaxLatencyFrames, directLatency);
+		}
 		const bool traceDirectGeneratedTlas =
 			meshResourceIt->second.directComputePublished &&
 			(int)nri_ptvoxelcomputetrace > 0;
@@ -2206,7 +2222,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 		{
 			persistentVoxelTlasUniquePrimitiveCount += groupPair.second.primitiveCount;
 		}
-		Printf("PERF pt voxel tlas summary NRI: frame=%u candidates=%u published=%u skipped=%u captured=%u retained=%u unique_meshes=%u instance_prims=%llu unique_prims=%llu max_retained_age=%llu actors=%u active=%u\n",
+		Printf("PERF pt voxel tlas summary NRI: frame=%u candidates=%u published=%u skipped=%u captured=%u retained=%u unique_meshes=%u instance_prims=%llu unique_prims=%llu direct_published=%u direct_latency_sum=%llu direct_latency_max=%u max_retained_age=%llu actors=%u active=%u\n",
 			frameIndex,
 			persistentVoxelTlasCandidateCount,
 			persistentVoxelTlasPublishedCount,
@@ -2216,6 +2232,9 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			(uint32_t)persistentVoxelTlasMeshResources.size(),
 			(unsigned long long)persistentVoxelTlasInstancePrimitiveCount,
 			(unsigned long long)persistentVoxelTlasUniquePrimitiveCount,
+			persistentVoxelTlasDirectPublishedCount,
+			(unsigned long long)persistentVoxelTlasDirectLatencyFrames,
+			persistentVoxelTlasDirectMaxLatencyFrames,
 			(unsigned long long)persistentVoxelTlasMaxRetainedFrameAge,
 			(uint32_t)batch.actors.size(),
 			batch.activeActorCount);
@@ -3077,7 +3096,7 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		const bool isolateBlasBuild =
 			isolateBlasPrimitiveThreshold > 0 &&
 			entry->variant.primitiveCount >= (uint32_t)isolateBlasPrimitiveThreshold;
-		if (!admissionServices.AdmitVariantResource(*entry, remainingByteBudget, blasBudgetRemaining, uploadBytes, reusedMesh, reusedMaterial, inProgress, isolateBlasBuild, failureReason))
+		if (!admissionServices.AdmitVariantResource(*entry, remainingByteBudget, blasBudgetRemaining, uploadBytes, reusedMesh, reusedMaterial, inProgress, isolateBlasBuild, failureReason, &stats))
 		{
 			if (admissionServices.IsSubmitBudgetHit())
 			{
@@ -3211,7 +3230,7 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		uint32_t optionalPending = 0;
 		uint32_t failed = 0;
 		CountAdmissionWork(requiredPending, requiredReady, optionalPending, failed);
-		Printf("NRI PT voxel admission summary: phase=%s queued=%u ready=%u deferred=%u failed=%u uploaded=%u skipped_budget=%u bytes_pending=%llu bytes_uploaded=%llu force=%u prefer=%u runtime=%u required_pending=%u required_ready=%u optional_pending=%u grace_active=%u grace_end=%u grace_variants=%u grace_skipped_optional=%u required_admitted=%u optional_admitted=%u variants_budget=%u bytes_budget=%llu ms_budget=%.3f ms_used=%.3f blas_budget=%u blas_used=%u stop=%s\n",
+		Printf("NRI PT voxel admission summary: phase=%s queued=%u ready=%u deferred=%u failed=%u uploaded=%u skipped_budget=%u bytes_pending=%llu bytes_uploaded=%llu force=%u prefer=%u runtime=%u direct_requests=%u direct_ready=%u direct_pending=%u direct_failures=%u direct_rejected=%u direct_stale_drops=%u cpu_geometry_avoided=%u cpu_geometry_fallback=%u material_builds=%u material_reuses=%u material_bytes=%llu required_pending=%u required_ready=%u optional_pending=%u grace_active=%u grace_end=%u grace_variants=%u grace_skipped_optional=%u required_admitted=%u optional_admitted=%u variants_budget=%u bytes_budget=%llu ms_budget=%.3f ms_used=%.3f blas_budget=%u blas_used=%u stop=%s\n",
 			phase != nullptr ? phase : "unknown",
 			stats.queued,
 			stats.ready,
@@ -3224,6 +3243,17 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 			stats.force,
 			stats.prefer,
 			stats.runtime,
+			stats.directRequests,
+			stats.directReady,
+			stats.directPending,
+			stats.directFailures,
+			stats.directRejected,
+			stats.directStaleDrops,
+			stats.cpuGeometryAvoided,
+			stats.cpuGeometryFallback,
+			stats.materialPayloadBuilds,
+			stats.materialPayloadReuses,
+			(unsigned long long)stats.materialPayloadBytes,
 			requiredPending,
 			requiredReady,
 			optionalPending,
@@ -3289,6 +3319,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 	bool& outInProgress,
 	bool isolateBlasBuild,
 	const char*& outFailureReason,
+	PersistentVoxelAdmissionStats* outStats,
 	uint32_t frameIndex,
 	int loadingTraceLevel,
 	bool voxelStatsEnabled,
@@ -3448,6 +3479,10 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		}
 		if (TakeNRIVoxelComputeDirectPublication(meshResourceKey, entry.directComputeGeneration, directMesh))
 		{
+			if (outStats != nullptr)
+			{
+				outStats->directReady++;
+			}
 			if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
 			{
 				Printf("PERF pt voxel compute direct publish NRI: action=ready tex=%d voxel=%d mesh_variant=0x%llx generation=%llu job=%u vertices=%u indices=%u primitives=%u material_base=%u material_count=%u\n",
@@ -3478,6 +3513,10 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				primitiveBuffer.buffer != nullptr;
 			if (!directRangeValid)
 			{
+				if (outStats != nullptr)
+				{
+					outStats->directFailures++;
+				}
 				arenaVertexCursor = entry.savedVertexCursor;
 				arenaIndexCursor = entry.savedIndexCursor;
 				arenaPrimitiveCursor = entry.savedPrimitiveCursor;
@@ -3594,6 +3633,10 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				entry.indexArenaBytesUploaded = 0;
 				entry.primitiveBytesUploaded = 0;
 				entry.state = PersistentVoxelAdmissionState::Ready;
+				if (outStats != nullptr)
+				{
+					outStats->cpuGeometryAvoided++;
+				}
 				entry.directComputeRequested = false;
 				entry.directComputeFailed = false;
 				entry.directComputeGeneration = 0;
@@ -3606,6 +3649,10 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		}
 		else if (directMesh.status == NRIVoxelComputeGeneratedGeometryStatus::Failed)
 		{
+			if (outStats != nullptr)
+			{
+				outStats->directFailures++;
+			}
 			arenaVertexCursor = entry.savedVertexCursor;
 			arenaIndexCursor = entry.savedIndexCursor;
 			arenaPrimitiveCursor = entry.savedPrimitiveCursor;
@@ -3618,6 +3665,10 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		}
 		else
 		{
+			if (outStats != nullptr)
+			{
+				outStats->directPending++;
+			}
 			outInProgress = true;
 			entry.lastReason = "direct-publish-pending";
 			return true;
@@ -3738,6 +3789,10 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			variant.materialVariantHash != 0 ? variant.materialVariantHash : variant.materialKeyHash;
 		if (materialReady)
 		{
+			if (outStats != nullptr)
+			{
+				outStats->materialPayloadReuses++;
+			}
 			if (entry.uploadMaterialResource.materialPayloadHash == 0)
 			{
 				entry.uploadMaterialResource.materialPayloadHash =
@@ -3761,6 +3816,12 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			entry.uploadMaterialResource.materialPayloadHash =
 				HashPersistentVoxelMaterialPayloadData(entry.uploadMaterialResource.materialBridge);
 			entry.uploadMaterialResource.materialUploadHash = 0;
+			if (outStats != nullptr)
+			{
+				outStats->materialPayloadBuilds++;
+				outStats->materialPayloadBytes +=
+					(uint64_t)entry.uploadMaterialResource.materialBridge.materials.size() * (uint64_t)sizeof(nri_scene::MaterialData);
+			}
 		}
 		entry.uploadMaterialResource.lastDesiredMapGeneration = residencyMapGeneration;
 		entry.uploadMaterialResource.lastUsedMapGeneration = residencyMapGeneration;
@@ -3878,6 +3939,10 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				arenaPrimitiveCursor = entry.savedPrimitiveCursor;
 				entry.uploadMeshResource = {};
 				entry.directComputeFailed = true;
+				if (outStats != nullptr)
+				{
+					outStats->directFailures++;
+				}
 			}
 			else
 			{
@@ -3901,6 +3966,11 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				const NRIVoxelComputeGeneratedGeometryStatus directStatus = RequestNRIVoxelComputeDirectPublication(request);
 				if (directStatus == NRIVoxelComputeGeneratedGeometryStatus::Queued)
 				{
+					if (outStats != nullptr)
+					{
+						outStats->directRequests++;
+						outStats->directPending++;
+					}
 					entry.directComputeRequested = true;
 					entry.directComputeFailed = false;
 					entry.directComputeGeneration = request.generation;
@@ -3936,11 +4006,22 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 					directStatus == NRIVoxelComputeGeneratedGeometryStatus::Failed ?
 					NRIVoxelComputeDirectPublishFailure::StatusFailed :
 					NRIVoxelComputeDirectPublishFailure::Disabled;
+				if (outStats != nullptr)
+				{
+					outStats->directRejected++;
+				}
 			}
 		}
 
 		if (!entry.uploadGeometryFromCompute)
 		{
+			if (outStats != nullptr &&
+				entry.runtimeRequested &&
+				ShouldDirectPublishNRIVoxelComputeMeshing() &&
+				variant.model != nullptr)
+			{
+				outStats->cpuGeometryFallback++;
+			}
 			nri_scene::BuildGeometry(variantSceneView, entry.uploadGeometry);
 			services.AssignGeometryPortalIndices(entry.uploadGeometry);
 		}

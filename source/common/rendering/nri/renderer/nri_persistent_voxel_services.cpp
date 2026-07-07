@@ -43,7 +43,8 @@ public:
 			bool& outReusedMaterial,
 			bool& outInProgress,
 			bool isolateBlasBuild,
-			const char*& outFailureReason) -> bool
+			const char*& outFailureReason,
+			PersistentVoxelAdmissionStats* outStats) -> bool
 		{
 			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
 			return renderer->mPersistentVoxels.AdmitVariantResource(
@@ -56,6 +57,7 @@ public:
 				outInProgress,
 				isolateBlasBuild,
 				outFailureReason,
+				outStats,
 				renderer->mFrameIndex,
 				(int)nri_ptloadingtrace,
 				(bool)nri_voxelstats,

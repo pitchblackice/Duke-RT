@@ -236,8 +236,19 @@ struct PersistentVoxelAdmissionStats
 	uint32_t runtime = 0;
 	uint32_t skippedBudget = 0;
 	uint32_t failedThisPump = 0;
+	uint32_t directRequests = 0;
+	uint32_t directReady = 0;
+	uint32_t directPending = 0;
+	uint32_t directFailures = 0;
+	uint32_t directRejected = 0;
+	uint32_t directStaleDrops = 0;
+	uint32_t cpuGeometryAvoided = 0;
+	uint32_t cpuGeometryFallback = 0;
+	uint32_t materialPayloadBuilds = 0;
+	uint32_t materialPayloadReuses = 0;
 	uint64_t bytesPending = 0;
 	uint64_t bytesUploaded = 0;
+	uint64_t materialPayloadBytes = 0;
 };
 
 struct PersistentVoxelInstanceRecord
@@ -310,7 +321,8 @@ struct NRIPersistentVoxelAdmissionServices
 		bool& outReusedMaterial,
 		bool& outInProgress,
 		bool isolateBlasBuild,
-		const char*& outFailureReason);
+		const char*& outFailureReason,
+		PersistentVoxelAdmissionStats* outStats);
 	using SubmitWaitAndRestartFn = bool (*)(void* user, const char* reason);
 	using IsSubmitBudgetHitFn = bool (*)(void* user);
 	using RetireBufferFn = void (*)(void* user, NRIBufferResource& resource);
@@ -361,7 +373,8 @@ struct NRIPersistentVoxelAdmissionServices
 		bool& outReusedMaterial,
 		bool& outInProgress,
 		bool isolateBlasBuild,
-		const char*& outFailureReason) const;
+		const char*& outFailureReason,
+		PersistentVoxelAdmissionStats* outStats) const;
 	bool SubmitWaitAndRestart(const char* reason) const;
 	bool IsSubmitBudgetHit() const;
 	void RetireBuffer(NRIBufferResource& resource) const;
@@ -791,6 +804,7 @@ public:
 		bool& outInProgress,
 		bool isolateBlasBuild,
 		const char*& outFailureReason,
+		PersistentVoxelAdmissionStats* outStats,
 		uint32_t frameIndex,
 		int loadingTraceLevel,
 		bool voxelStatsEnabled,
