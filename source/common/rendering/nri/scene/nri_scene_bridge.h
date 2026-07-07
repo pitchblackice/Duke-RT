@@ -363,6 +363,7 @@ void ResetPersistentVoxelActorCache(const char* reason);
 void SetPersistentVoxelActorStartupTransientMode(bool active, const char* reason);
 bool PrecacheVoxelModelCpuMesh(FVoxelModel* model, VoxelMeshPrecacheStats* stats = nullptr);
 bool PrecacheVoxelTextureCpuMesh(FTextureID texid, VoxelMeshPrecacheStats* stats = nullptr);
+void PreloadLiveActorVoxelRawSources();
 void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats = nullptr);
 void PrintAndResetLoadingWarmupStats(const char* phase);
 }

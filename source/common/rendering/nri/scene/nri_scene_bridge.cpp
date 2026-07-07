@@ -210,6 +210,23 @@ namespace
 		SurfaceRef lightSurface;
 	};
 
+	struct VoxelActorCacheLookup;
+
+	struct VoxelMeshBuildContext
+	{
+		const HWSprite* sprite = nullptr;
+		const VoxelActorCacheLookup* lookup = nullptr;
+		uint64_t meshVariantHash = 0;
+		uint64_t materialVariantHash = 0;
+		int32_t sourcePicnum = -1;
+		int32_t resolvedVoxelIndex = -1;
+		bool cacheSurfaceUpdate = false;
+		bool forceTransient = false;
+		bool directPublish = false;
+		bool rawArchive = false;
+		bool hadRetainedSurface = false;
+	};
+
 	std::unordered_map<uint64_t, VoxelActorCacheEntry> gVoxelActorCache;
 
 	enum class LoadingVoxelRequestPriority : uint8_t
@@ -4532,7 +4549,59 @@ namespace
 		return buildBudget <= 0 || gVoxelMeshBuildsThisFrame < (uint32_t)buildBudget;
 	}
 
-	const FVoxelMeshData* GetCachedVoxelMesh(FVoxelModel* model, bool& outDeferred)
+	void TraceDynamicVoxelMeshBuildEvent(const char* action, const char* reason, const VoxelMeshBuildContext* context, FVoxelModel* model, double buildMs, uint32_t vertices, uint32_t indices, bool valid)
+	{
+		if (!ShouldTraceNRIVoxelComputeMeshing() && (int)nri_ptvoxelcomputetrace <= 0)
+		{
+			return;
+		}
+
+		const HWSprite* sprite = context != nullptr ? context->sprite : nullptr;
+		const VoxelActorCacheLookup* lookup = context != nullptr ? context->lookup : nullptr;
+		const int32_t actorIndex =
+			lookup != nullptr && lookup->actorIndex >= 0 ? lookup->actorIndex :
+			sprite != nullptr && sprite->Sprite != nullptr && sprite->Sprite->ownerActor != nullptr ? (int32_t)sprite->Sprite->ownerActor->GetIndex() :
+			-1;
+		const int32_t statnum = sprite != nullptr && sprite->Sprite != nullptr ? sprite->Sprite->statnum : -1;
+		const int32_t sourcePicnum =
+			context != nullptr && context->sourcePicnum >= 0 ? context->sourcePicnum :
+			lookup != nullptr ? lookup->sourcePicnum :
+			-1;
+		const int32_t resolvedVoxelIndex =
+			context != nullptr ? context->resolvedVoxelIndex :
+			lookup != nullptr ? lookup->resolvedVoxelIndex :
+			-1;
+		const uint64_t meshVariantHash =
+			context != nullptr && context->meshVariantHash != 0 ? context->meshVariantHash :
+			lookup != nullptr ? lookup->meshVariantHash :
+			0;
+		const uint64_t materialVariantHash =
+			context != nullptr && context->materialVariantHash != 0 ? context->materialVariantHash :
+			lookup != nullptr ? lookup->materialVariantHash :
+			0;
+		Printf("PERF pt voxel dynamic mesh miss NRI: action=%s reason=%s actor=%d stat=%d model=%p pic=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx vertices=%u indices=%u prims=%u valid=%u build_ms=%.3f cache_update=%u retained_surface=%u forced_transient=%u direct_publish=%u raw_archive=%u\n",
+			action != nullptr ? action : "unknown",
+			reason != nullptr ? reason : "unknown",
+			actorIndex,
+			statnum,
+			(void*)model,
+			sourcePicnum,
+			resolvedVoxelIndex,
+			(unsigned long long)meshVariantHash,
+			(unsigned long long)materialVariantHash,
+			vertices,
+			indices,
+			indices / 3u,
+			valid ? 1u : 0u,
+			buildMs,
+			context != nullptr && context->cacheSurfaceUpdate ? 1u : 0u,
+			context != nullptr && context->hadRetainedSurface ? 1u : 0u,
+			context != nullptr && context->forceTransient ? 1u : 0u,
+			context != nullptr && context->directPublish ? 1u : 0u,
+			context != nullptr && context->rawArchive ? 1u : 0u);
+	}
+
+	const FVoxelMeshData* GetCachedVoxelMesh(FVoxelModel* model, bool& outDeferred, const VoxelMeshBuildContext* context = nullptr)
 	{
 		outDeferred = false;
 		if (model == nullptr)
@@ -4549,14 +4618,17 @@ namespace
 				outDeferred = true;
 				gDynamicCapturePerfStats.voxelMeshCacheDeferred++;
 				gDynamicCapturePerfStats.modelBudgetTruncations++;
+				TraceDynamicVoxelMeshBuildEvent("defer", "mesh-build-budget", context, model, 0.0, 0, 0, false);
 				return nullptr;
 			}
 
 			VoxelMeshCacheEntry entry = {};
+			const auto buildStart = std::chrono::steady_clock::now();
 			{
 				ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelMeshBuildMs);
 				model->BuildCpuMesh(entry.mesh);
 			}
+			const double buildMs = DurationMs(buildStart, std::chrono::steady_clock::now());
 			if (ShouldTraceNRIVoxelComputeMeshing() || ShouldRunNRIVoxelComputeMeshing())
 			{
 				FVoxelRawMeshStats rawStats = {};
@@ -4601,6 +4673,15 @@ namespace
 			}
 			entry.built = true;
 			entry.valid = entry.mesh.vertices.Size() > 0 && entry.mesh.indices.Size() >= 3;
+			TraceDynamicVoxelMeshBuildEvent(
+				"build",
+				entry.valid ? "cache-miss" : "invalid-mesh",
+				context,
+				model,
+				buildMs,
+				(uint32_t)entry.mesh.vertices.Size(),
+				(uint32_t)entry.mesh.indices.Size(),
+				entry.valid);
 			gVoxelMeshBuildsThisFrame++;
 			gDynamicCapturePerfStats.voxelMeshCacheBuilds++;
 			if (!entry.valid)
@@ -5134,11 +5215,34 @@ namespace
 			return deferDesiredVariant(VoxelActorPendingReason::MeshDeferred);
 		}
 
+		VoxelMeshBuildContext meshBuildContext = {};
+		meshBuildContext.sprite = &sprite;
+		meshBuildContext.lookup = &cacheLookup;
+		meshBuildContext.meshVariantHash = cacheLookup.meshVariantHash;
+		meshBuildContext.materialVariantHash = cacheLookup.materialVariantHash;
+		meshBuildContext.sourcePicnum = cacheLookup.sourcePicnum;
+		meshBuildContext.resolvedVoxelIndex = cacheLookup.resolvedVoxelIndex;
+		meshBuildContext.cacheSurfaceUpdate = cacheSurfaceUpdate;
+		meshBuildContext.forceTransient = forceTransientVoxel;
+		meshBuildContext.directPublish = ShouldDirectPublishNRIVoxelComputeMeshing();
+		meshBuildContext.rawArchive = (bool)nri_ptvoxelcomputerawarchive;
+		meshBuildContext.hadRetainedSurface = HasLastValidResidentVoxelSurface(cacheLookup);
+		if (nri_ptvoxelcomputedeferdynamic &&
+			meshBuildContext.directPublish &&
+			cacheSurfaceUpdate &&
+			!forceTransientVoxel &&
+			cacheLookup.meshVariantHash != 0 &&
+			meshBuildContext.hadRetainedSurface)
+		{
+			TraceDynamicVoxelMeshBuildEvent("defer", "direct-publish-retained-surface", &meshBuildContext, sprite.voxel->model, 0.0, 0, 0, false);
+			return deferDesiredVariant(VoxelActorPendingReason::MeshDeferred);
+		}
+
 		const FVoxelMeshData* mesh = nullptr;
 		bool meshDeferred = false;
 		{
 			ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelMeshMs);
-			mesh = GetCachedVoxelMesh(sprite.voxel->model, meshDeferred);
+			mesh = GetCachedVoxelMesh(sprite.voxel->model, meshDeferred, &meshBuildContext);
 		}
 		if (meshDeferred)
 		{
@@ -5600,6 +5704,93 @@ bool PrecacheVoxelTextureCpuMesh(FTextureID texid, VoxelMeshPrecacheStats* stats
 	}
 	RecordVoxelMeshPrecacheStats(variantDelta, stats);
 	return meshReady;
+}
+
+void PreloadLiveActorVoxelRawSources()
+{
+	if (!r_voxels || !nri_ptvoxelcomputerawpreload || (int)nri_ptloadingvoxelactors <= 0)
+	{
+		if ((int)nri_ptloadingtrace >= 1 && nri_ptvoxelcomputerawpreload)
+		{
+			Printf("NRI PT loading voxel raw source preload: discovered=0 unique=0 selected=0 recorded=0 resident=0 skipped=0 failed=0 slabs=0 color_runs=0 raw_bytes=0 upload_bytes=0 ms=0.000 reason=%s\n",
+				!r_voxels ? "voxels-disabled" : "loading-disabled");
+		}
+		return;
+	}
+
+	LoadingVoxelPreloadRequestGraph graph;
+	BuildLiveActorVoxelPreloadRequestGraph(graph);
+	const uint32_t sourceLimit =
+		(int)nri_ptvoxelcomputerawpreloadmaxsources <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxelcomputerawpreloadmaxsources;
+	const uint64_t byteLimit =
+		(int)nri_ptvoxelcomputerawpreloadmaxbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxelcomputerawpreloadmaxbytes;
+	uint32_t selected = 0;
+	uint32_t duplicateSkipped = 0;
+	uint32_t budgetSkipped = 0;
+	uint64_t uploadBytes = 0;
+	std::unordered_set<FVoxelModel*> seenModels;
+	NRIVoxelComputeRawSourcePreloadStats stats = {};
+	const auto start = std::chrono::steady_clock::now();
+	for (const LoadingVoxelPreloadRequest& request : graph.requests)
+	{
+		if (request.model == nullptr)
+		{
+			continue;
+		}
+		if (!seenModels.insert(request.model).second)
+		{
+			duplicateSkipped++;
+			continue;
+		}
+		if (selected >= sourceLimit)
+		{
+			budgetSkipped++;
+			continue;
+		}
+		if (byteLimit != 0 && uploadBytes >= byteLimit)
+		{
+			budgetSkipped++;
+			continue;
+		}
+
+		NRIVoxelComputeRawSourcePreloadStats delta = {};
+		if (PreloadNRIVoxelComputeRawSource(request.model, &delta))
+		{
+			++selected;
+			uploadBytes += delta.uploadBytes;
+		}
+		stats.requested += delta.requested;
+		stats.recorded += delta.recorded;
+		stats.alreadyResident += delta.alreadyResident;
+		stats.skipped += delta.skipped;
+		stats.failed += delta.failed;
+		stats.slabRecords += delta.slabRecords;
+		stats.colorRunRecords += delta.colorRunRecords;
+		stats.rawBytes += delta.rawBytes;
+		stats.uploadBytes += delta.uploadBytes;
+		stats.buildMs += delta.buildMs;
+	}
+
+	if ((int)nri_ptloadingtrace >= 1 || ShouldTraceNRIVoxelComputeMeshing())
+	{
+		Printf("NRI PT loading voxel raw source preload: discovered=%u unique=%u selected=%u recorded=%u resident=%u skipped=%u duplicate_skipped=%u budget_skipped=%u failed=%u slabs=%u color_runs=%u raw_bytes=%llu upload_bytes=%llu ms=%.3f source_limit=%u byte_limit=%llu\n",
+			graph.discovered,
+			(uint32_t)seenModels.size(),
+			selected,
+			stats.recorded,
+			stats.alreadyResident,
+			stats.skipped,
+			duplicateSkipped,
+			budgetSkipped,
+			stats.failed,
+			stats.slabRecords,
+			stats.colorRunRecords,
+			(unsigned long long)stats.rawBytes,
+			(unsigned long long)stats.uploadBytes,
+			DurationMs(start, std::chrono::steady_clock::now()),
+			sourceLimit,
+			(unsigned long long)byteLimit);
+	}
 }
 
 void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)

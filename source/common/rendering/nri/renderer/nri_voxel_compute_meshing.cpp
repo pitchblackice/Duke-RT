@@ -10,6 +10,7 @@
 #include "printf.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <unordered_map>
 #include <unordered_set>
@@ -17,6 +18,11 @@
 
 namespace
 {
+	double DurationMs(std::chrono::steady_clock::time_point start, std::chrono::steady_clock::time_point end)
+	{
+		return std::chrono::duration<double, std::milli>(end - start).count();
+	}
+
 	enum class VoxelComputeAdmissionState : uint32_t
 	{
 		Queued = 0,
@@ -72,6 +78,7 @@ namespace
 		bool uploadQueued = false;
 		bool uploaded = false;
 		bool failed = false;
+		bool preloadRecorded = false;
 	};
 
 	struct PendingReadbackJob
@@ -130,6 +137,8 @@ namespace
 		uint64_t rawSourceArchiveMisses = 0;
 		uint64_t rawSourceArchiveRecords = 0;
 		uint64_t rawSourceArchiveUploadBytes = 0;
+		uint64_t rawSourceArchivePreloadUploadBytes = 0;
+		uint64_t rawSourceArchiveRuntimeUploadBytes = 0;
 		uint64_t rawSourceArchiveUploadFailures = 0;
 		std::unordered_set<uint64_t> queuedConsumeKeys;
 		std::unordered_set<uint64_t> pendingConsumeKeys;
@@ -323,7 +332,8 @@ namespace
 		const FVoxelRawMeshStats& stats,
 		const TArray<FVoxelRawSlabRecord>& slabs,
 		const TArray<FVoxelRawFaceRecord>* faces,
-		const TArray<FVoxelRawColorRunRecord>* colorRuns)
+		const TArray<FVoxelRawColorRunRecord>* colorRuns,
+		bool preloadRecorded = false)
 	{
 		if (!IsRawSourceArchiveEnabled() || model == nullptr || stats.slabCount == 0 || slabs.Size() != stats.slabCount ||
 			colorRuns == nullptr || colorRuns->Size() == 0)
@@ -336,6 +346,7 @@ namespace
 		if (found != state.rawSourceArchive.end())
 		{
 			state.rawSourceArchiveHits++;
+			found->second.preloadRecorded = found->second.preloadRecorded || preloadRecorded;
 			return &found->second;
 		}
 
@@ -352,6 +363,7 @@ namespace
 		entry.faceBytes = (uint64_t)entry.faces.size() * sizeof(NRIVoxelComputeFaceRecord);
 		entry.colorRunBytes = (uint64_t)entry.colorRuns.size() * sizeof(NRIVoxelComputeColorRunRecord);
 		entry.uploadQueued = true;
+		entry.preloadRecorded = preloadRecorded;
 		state.rawSourceArchiveMisses++;
 		state.rawSourceArchiveRecords++;
 		auto inserted = state.rawSourceArchive.emplace(model, std::move(entry));
@@ -359,7 +371,8 @@ namespace
 		if (IsTraceEnabled())
 		{
 			Printf(
-				"PERF pt voxel raw source archive NRI: event=record model=%p serial=%llu raw_bytes=%llu slab_upload_bytes=%llu color_run_bytes=%llu transient_face_bytes=%llu slabs=%u color_runs=%u faces=%u voxels=%u\n",
+				"PERF pt voxel raw source archive NRI: event=record phase=%s model=%p serial=%llu raw_bytes=%llu slab_upload_bytes=%llu color_run_bytes=%llu transient_face_bytes=%llu slabs=%u color_runs=%u faces=%u voxels=%u\n",
+				preloadRecorded ? "preload" : "runtime",
 				(void*)model,
 				(unsigned long long)archived.recordSerial,
 				(unsigned long long)archived.stats.rawByteCount,
@@ -604,7 +617,11 @@ namespace
 
 		uint32_t uploads = 0;
 		uint32_t failures = 0;
+		uint32_t preloadUploads = 0;
+		uint32_t runtimeUploads = 0;
 		uint64_t uploadedBytes = 0;
+		uint64_t preloadBytes = 0;
+		uint64_t runtimeBytes = 0;
 		for (auto& archivePair : state.rawSourceArchive)
 		{
 			RawVoxelSourceArchiveEntry& entry = archivePair.second;
@@ -664,23 +681,41 @@ namespace
 			entry.uploadQueued = false;
 			uploads++;
 			uploadedBytes += entry.slabBytes + entry.colorRunBytes;
+			if (entry.preloadRecorded)
+			{
+				preloadUploads++;
+				preloadBytes += entry.slabBytes + entry.colorRunBytes;
+			}
+			else
+			{
+				runtimeUploads++;
+				runtimeBytes += entry.slabBytes + entry.colorRunBytes;
+			}
 		}
 
 		if (uploads != 0 || failures != 0)
 		{
 			state.rawSourceArchiveUploadBytes += uploadedBytes;
+			state.rawSourceArchivePreloadUploadBytes += preloadBytes;
+			state.rawSourceArchiveRuntimeUploadBytes += runtimeBytes;
 			if (IsTraceEnabled())
 			{
 				Printf(
-					"PERF pt voxel raw source upload NRI: frame=%llu uploads=%u failures=%u bytes=%llu records=%llu hits=%llu misses=%llu total_upload_bytes=%llu total_failures=%llu\n",
+					"PERF pt voxel raw source upload NRI: frame=%llu uploads=%u preload_uploads=%u runtime_uploads=%u failures=%u bytes=%llu preload_bytes=%llu runtime_bytes=%llu records=%llu hits=%llu misses=%llu total_upload_bytes=%llu total_preload_bytes=%llu total_runtime_bytes=%llu total_failures=%llu\n",
 					(unsigned long long)frameNumber,
 					uploads,
+					preloadUploads,
+					runtimeUploads,
 					failures,
 					(unsigned long long)uploadedBytes,
+					(unsigned long long)preloadBytes,
+					(unsigned long long)runtimeBytes,
 					(unsigned long long)state.rawSourceArchiveRecords,
 					(unsigned long long)state.rawSourceArchiveHits,
 					(unsigned long long)state.rawSourceArchiveMisses,
 					(unsigned long long)state.rawSourceArchiveUploadBytes,
+					(unsigned long long)state.rawSourceArchivePreloadUploadBytes,
+					(unsigned long long)state.rawSourceArchiveRuntimeUploadBytes,
 					(unsigned long long)state.rawSourceArchiveUploadFailures);
 			}
 		}
@@ -1226,6 +1261,66 @@ void CancelNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t g
 			(unsigned long long)meshResourceKey,
 			(unsigned long long)generation);
 	}
+}
+
+bool PreloadNRIVoxelComputeRawSource(FVoxelModel* model, NRIVoxelComputeRawSourcePreloadStats* outStats)
+{
+	if (outStats != nullptr)
+	{
+		outStats->requested++;
+	}
+	if (!IsRawSourceArchiveEnabled() || model == nullptr)
+	{
+		if (outStats != nullptr)
+		{
+			outStats->skipped++;
+		}
+		return false;
+	}
+
+	VoxelComputeState& state = gVoxelComputeState;
+	auto found = state.rawSourceArchive.find(model);
+	if (found != state.rawSourceArchive.end())
+	{
+		found->second.preloadRecorded = true;
+		if (outStats != nullptr)
+		{
+			outStats->alreadyResident++;
+			outStats->rawBytes += found->second.stats.rawByteCount;
+			outStats->uploadBytes += found->second.slabBytes + found->second.colorRunBytes;
+			outStats->slabRecords += found->second.stats.slabCount;
+			outStats->colorRunRecords += (uint32_t)found->second.colorRuns.size();
+		}
+		return true;
+	}
+
+	FVoxelRawMeshStats rawStats = {};
+	TArray<FVoxelRawSlabRecord> rawSlabs;
+	TArray<FVoxelRawColorRunRecord> rawColorRuns;
+	const auto start = std::chrono::steady_clock::now();
+	model->BuildRawMeshStats(rawStats, &rawSlabs, nullptr, &rawColorRuns);
+	const double buildMs = DurationMs(start, std::chrono::steady_clock::now());
+	RawVoxelSourceArchiveEntry* archivedSource = RecordRawSourceArchive(model, rawStats, rawSlabs, nullptr, &rawColorRuns, true);
+	if (archivedSource == nullptr)
+	{
+		if (outStats != nullptr)
+		{
+			outStats->failed++;
+			outStats->buildMs += buildMs;
+		}
+		return false;
+	}
+
+	if (outStats != nullptr)
+	{
+		outStats->recorded++;
+		outStats->rawBytes += rawStats.rawByteCount;
+		outStats->uploadBytes += archivedSource->slabBytes + archivedSource->colorRunBytes;
+		outStats->slabRecords += rawStats.slabCount;
+		outStats->colorRunRecords += (uint32_t)archivedSource->colorRuns.size();
+		outStats->buildMs += buildMs;
+	}
+	return true;
 }
 
 void QueueNRIVoxelComputeCountJob(
@@ -1851,6 +1946,8 @@ void DestroyNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer)
 	state.rawSourceArchiveMisses = 0;
 	state.rawSourceArchiveRecords = 0;
 	state.rawSourceArchiveUploadBytes = 0;
+	state.rawSourceArchivePreloadUploadBytes = 0;
+	state.rawSourceArchiveRuntimeUploadBytes = 0;
 	state.rawSourceArchiveUploadFailures = 0;
 	state.queuedConsumeKeys.clear();
 	state.pendingConsumeKeys.clear();

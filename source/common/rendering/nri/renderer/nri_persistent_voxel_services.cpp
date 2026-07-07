@@ -225,6 +225,7 @@ public:
 		std::vector<nri_scene::PersistentVoxelCacheEntryView> cacheEntries;
 		const bool gpuLoadingEnabled = (bool)nri_ptloadingvoxelgpu;
 		bool hasCacheEntries = false;
+		nri_scene::PreloadLiveActorVoxelRawSources();
 		if (gpuLoadingEnabled)
 		{
 			nri_scene::BuildPrecachedVoxelVariantViews(variants);

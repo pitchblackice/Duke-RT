@@ -99,6 +99,20 @@ struct NRIVoxelComputeDirectPublishedMesh
 	NRIVoxelComputeDirectPublishBounds bounds;
 };
 
+struct NRIVoxelComputeRawSourcePreloadStats
+{
+	uint32_t requested = 0;
+	uint32_t recorded = 0;
+	uint32_t alreadyResident = 0;
+	uint32_t skipped = 0;
+	uint32_t failed = 0;
+	uint32_t slabRecords = 0;
+	uint32_t colorRunRecords = 0;
+	uint64_t rawBytes = 0;
+	uint64_t uploadBytes = 0;
+	double buildMs = 0.0;
+};
+
 bool ShouldTraceNRIVoxelComputeMeshing();
 bool ShouldRunNRIVoxelComputeMeshing();
 bool ShouldEmitNRIVoxelComputeMeshing();
@@ -116,5 +130,6 @@ bool TakeNRIVoxelComputeGeneratedGeometry(uint64_t requestKey, nri_scene::Geomet
 NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeDirectPublication(const NRIVoxelComputeDirectPublishRequest& request);
 bool TakeNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t generation, NRIVoxelComputeDirectPublishedMesh& outMesh);
 void CancelNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t generation);
+bool PreloadNRIVoxelComputeRawSource(FVoxelModel* model, NRIVoxelComputeRawSourcePreloadStats* outStats = nullptr);
 void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t frameNumber);
 void DestroyNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer);
