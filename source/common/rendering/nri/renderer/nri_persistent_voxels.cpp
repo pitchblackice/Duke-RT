@@ -73,7 +73,15 @@ uint64_t EstimatePersistentVoxelActorUploadBytes(const nri_scene::PersistentVoxe
 {
 	if (cacheEntry.surface == nullptr)
 	{
-		return 0;
+		if (!cacheEntry.directOnlyAdmission || cacheEntry.primitiveCount == 0)
+		{
+			return 0;
+		}
+		const uint64_t vertexBytes = (uint64_t)cacheEntry.primitiveCount * 2ull * sizeof(nri_scene::SceneVertex);
+		const uint64_t indexBytes = (uint64_t)cacheEntry.primitiveCount * 3ull * sizeof(uint32_t);
+		const uint64_t primitiveBytes = (uint64_t)cacheEntry.primitiveCount * sizeof(nri_scene::PrimitiveData);
+		const uint64_t materialBytes = sizeof(nri_scene::MaterialData);
+		return vertexBytes + indexBytes + primitiveBytes + materialBytes;
 	}
 
 	const uint64_t vertexBytes = (uint64_t)cacheEntry.surface->vertices.size() * sizeof(nri_scene::SceneVertex);
@@ -3332,7 +3340,11 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 	outFailureReason = "none";
 	const nri_scene::PrecachedVoxelVariantView& variant = entry.variant;
 	const uint64_t meshResourceKey = BuildPersistentVoxelVariantMeshResourceKey(variant);
-	if (variant.surface == nullptr || variant.meshKeyHash == 0 || meshResourceKey == 0 || variant.materialKeyHash == 0)
+	const bool directOnlyAdmission = variant.directOnlyAdmission && entry.runtimeRequested && ShouldDirectPublishNRIVoxelComputeMeshing();
+	if ((!directOnlyAdmission && variant.surface == nullptr) ||
+		variant.meshKeyHash == 0 ||
+		meshResourceKey == 0 ||
+		variant.materialKeyHash == 0)
 	{
 		outFailureReason = "invalid-variant";
 		return false;
@@ -3766,7 +3778,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				(unsigned long long)entry.estimatedBytes);
 		}
 
-		nri_scene::SurfaceRef surface = *variant.surface;
+		nri_scene::SurfaceRef surface = directOnlyAdmission ? variant.materialSurface : *variant.surface;
 		surface.material = variant.material;
 		nri_scene::SceneView variantSceneView = {};
 		variantSceneView.opaqueSprites.push_back(std::move(surface));
@@ -4039,6 +4051,14 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 					outStats->directRejected++;
 				}
 			}
+		}
+
+		if (directOnlyAdmission)
+		{
+			entry.state = PersistentVoxelAdmissionState::Pending;
+			entry.lastReason = "direct-only-no-cpu-fallback";
+			outInProgress = true;
+			return true;
 		}
 
 		if (!entry.uploadGeometryFromCompute)
@@ -4700,7 +4720,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 		{
 			*outDeferredReason = PersistentVoxelActorDeferredReason::None;
 		}
-		if (cacheEntry.surface == nullptr)
+		if (cacheEntry.surface == nullptr && !cacheEntry.directOnlyAdmission)
 		{
 			if (existingActor != nullptr)
 			{
@@ -4799,8 +4819,11 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				nri_scene::MaterialBridgeData builtMaterials;
 				{
 					Clocker materialClock(NriPTMaterialBuild);
+					const nri_scene::SurfaceRef* materialSurface =
+						cacheEntry.lightSurface != nullptr ? cacheEntry.lightSurface :
+						(cacheEntry.surface != nullptr ? cacheEntry.surface : &cacheEntry.materialSurface);
 					nri_scene::SceneView materialSceneView = buildSingleVoxelSceneView(
-						cacheEntry.lightSurface != nullptr ? *cacheEntry.lightSurface : *cacheEntry.surface);
+						*materialSurface);
 					batchServices.BuildMaterials(materialSceneView, builtMaterials, "persistent_voxel_material_variant");
 				}
 				if (builtMaterials.materials.empty())
@@ -4980,7 +5003,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 		auto rebuildPersistentVoxelActorLightRecords = [&](PersistentVoxelBatch::ActorEntry& actor, PersistentVoxelMeshVariantResource& meshResource)
 		{
 			actor.lightRecords.clear();
-			if (!persistentVoxelMaterialNeedsSurfaceRecord(actor.materialBridge))
+			if (!persistentVoxelMaterialNeedsSurfaceRecord(actor.materialBridge) || cacheEntry.surface == nullptr)
 			{
 				return;
 			}
@@ -5144,7 +5167,11 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				admissionVariant.gpuForce = loadingWarmupActive;
 				admissionVariant.model = cacheEntry.model;
 				admissionVariant.surface = cacheEntry.surface;
-				admissionVariant.material = cacheEntry.lightSurface != nullptr ? cacheEntry.lightSurface->material : cacheEntry.surface->material;
+				admissionVariant.materialSurface = cacheEntry.materialSurface;
+				admissionVariant.directOnlyAdmission = cacheEntry.directOnlyAdmission;
+				admissionVariant.material =
+					cacheEntry.lightSurface != nullptr ? cacheEntry.lightSurface->material :
+					(cacheEntry.surface != nullptr ? cacheEntry.surface->material : cacheEntry.materialSurface.material);
 				EnqueueAdmission(
 					admissionVariant,
 					!loadingWarmupActive,
@@ -6688,10 +6715,16 @@ void NRIPersistentVoxelResidency::ReconcileResidency(
 	desiredMeshes.reserve(variants.size() + cacheEntries.size());
 	desiredMaterials.reserve(variants.size() + cacheEntries.size());
 
-	auto estimateUploadBytes = [](const nri_scene::SurfaceRef* surface, uint32_t primitiveCount) -> uint64_t
+	auto estimateUploadBytes = [](const nri_scene::SurfaceRef* surface, uint32_t primitiveCount, bool directOnlyAdmission = false) -> uint64_t
 	{
 		if (surface == nullptr)
 		{
+			if (directOnlyAdmission && primitiveCount != 0)
+			{
+				return (uint64_t)primitiveCount * 2ull * (uint64_t)sizeof(nri_scene::SceneVertex) +
+					(uint64_t)primitiveCount * 3ull * (uint64_t)sizeof(uint32_t) +
+					(uint64_t)primitiveCount * (uint64_t)sizeof(nri_scene::PrimitiveData);
+			}
 			return 0;
 		}
 		return (uint64_t)surface->vertices.size() * (uint64_t)sizeof(nri_scene::SceneVertex) +
@@ -6746,12 +6779,12 @@ void NRIPersistentVoxelResidency::ReconcileResidency(
 			variant.sourcePicnum,
 			variant.resolvedVoxelIndex,
 			variant.primitiveCount,
-			estimateUploadBytes(variant.surface, variant.primitiveCount),
+			estimateUploadBytes(variant.surface, variant.primitiveCount, variant.directOnlyAdmission),
 			true,
 			false,
 			variant.gpuForce,
 			variant.gpuPrefer,
-			variant.surface != nullptr && variant.primitiveCount != 0);
+			(variant.surface != nullptr || variant.directOnlyAdmission) && variant.primitiveCount != 0);
 	}
 
 	for (const nri_scene::PersistentVoxelCacheEntryView& cacheEntry : cacheEntries)
@@ -6764,12 +6797,12 @@ void NRIPersistentVoxelResidency::ReconcileResidency(
 			cacheEntry.sourcePicnum,
 			cacheEntry.resolvedVoxelIndex,
 			cacheEntry.primitiveCount,
-			estimateUploadBytes(cacheEntry.surface, cacheEntry.primitiveCount),
+			estimateUploadBytes(cacheEntry.surface, cacheEntry.primitiveCount, cacheEntry.directOnlyAdmission),
 			false,
 			true,
 			false,
 			false,
-			cacheEntry.surface != nullptr && cacheEntry.primitiveCount != 0);
+			(cacheEntry.surface != nullptr || cacheEntry.directOnlyAdmission) && cacheEntry.primitiveCount != 0);
 	}
 
 	for (auto it = admissionQueue.begin(); it != admissionQueue.end(); )
@@ -7107,7 +7140,10 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 	const NRIPersistentVoxelResetServices& services)
 {
 	const uint64_t meshResourceKey = BuildPersistentVoxelVariantMeshResourceKey(variant);
-	if (variant.surface == nullptr || variant.meshKeyHash == 0 || meshResourceKey == 0 || variant.materialKeyHash == 0)
+	if ((!variant.directOnlyAdmission && variant.surface == nullptr) ||
+		variant.meshKeyHash == 0 ||
+		meshResourceKey == 0 ||
+		variant.materialKeyHash == 0)
 	{
 		return false;
 	}
@@ -7119,10 +7155,13 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 		services);
 
 	const uint64_t pairKey = nri_scene::HashCombine64(meshResourceKey, variant.materialKeyHash);
-	const uint64_t estimatedBytes =
-		(uint64_t)variant.surface->vertices.size() * (uint64_t)sizeof(nri_scene::SceneVertex) +
-		(uint64_t)variant.surface->indices.size() * (uint64_t)sizeof(uint32_t) +
-		(uint64_t)variant.primitiveCount * (uint64_t)sizeof(nri_scene::PrimitiveData);
+	const uint64_t estimatedBytes = variant.directOnlyAdmission ?
+		((uint64_t)variant.primitiveCount * 2ull * (uint64_t)sizeof(nri_scene::SceneVertex) +
+		 (uint64_t)variant.primitiveCount * 3ull * (uint64_t)sizeof(uint32_t) +
+		 (uint64_t)variant.primitiveCount * (uint64_t)sizeof(nri_scene::PrimitiveData)) :
+		((uint64_t)variant.surface->vertices.size() * (uint64_t)sizeof(nri_scene::SceneVertex) +
+		 (uint64_t)variant.surface->indices.size() * (uint64_t)sizeof(uint32_t) +
+		 (uint64_t)variant.primitiveCount * (uint64_t)sizeof(nri_scene::PrimitiveData));
 	const int32_t variantAdmissionRank =
 		variant.admissionRank != 0 || variant.priority <= 0 ? variant.admissionRank : variant.priority * 10000 + 9900;
 	const uint32_t maxBlasPrimitives = settings.admitMaxBlasPrimitives;

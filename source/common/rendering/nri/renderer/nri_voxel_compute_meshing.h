@@ -130,6 +130,7 @@ bool TakeNRIVoxelComputeGeneratedGeometry(uint64_t requestKey, nri_scene::Geomet
 NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeDirectPublication(const NRIVoxelComputeDirectPublishRequest& request);
 bool TakeNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t generation, NRIVoxelComputeDirectPublishedMesh& outMesh);
 void CancelNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t generation);
+bool QueryNRIVoxelComputeRawSourceStats(FVoxelModel* model, FVoxelRawMeshStats& outStats);
 bool PreloadNRIVoxelComputeRawSource(FVoxelModel* model, NRIVoxelComputeRawSourcePreloadStats* outStats = nullptr);
 void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t frameNumber);
 void DestroyNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer);

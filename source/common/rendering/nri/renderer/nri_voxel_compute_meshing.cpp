@@ -1263,6 +1263,29 @@ void CancelNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t g
 	}
 }
 
+bool QueryNRIVoxelComputeRawSourceStats(FVoxelModel* model, FVoxelRawMeshStats& outStats)
+{
+	outStats = {};
+	if (model == nullptr)
+	{
+		return false;
+	}
+
+	VoxelComputeState& state = gVoxelComputeState;
+	auto archived = state.rawSourceArchive.find(model);
+	if (archived != state.rawSourceArchive.end() &&
+		!archived->second.failed &&
+		archived->second.stats.slabCount != 0 &&
+		archived->second.stats.coalescedFaceCount != 0)
+	{
+		outStats = archived->second.stats;
+		return true;
+	}
+
+	model->BuildRawMeshStats(outStats, nullptr, nullptr, nullptr);
+	return outStats.slabCount != 0 && outStats.coalescedFaceCount != 0;
+}
+
 bool PreloadNRIVoxelComputeRawSource(FVoxelModel* model, NRIVoxelComputeRawSourcePreloadStats* outStats)
 {
 	if (outStats != nullptr)

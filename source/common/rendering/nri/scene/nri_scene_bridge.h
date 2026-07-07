@@ -300,7 +300,10 @@ struct PersistentVoxelCacheEntryView
 	FVoxelModel* model = nullptr;
 	const SurfaceRef* surface = nullptr;
 	const SurfaceRef* lightSurface = nullptr;
+	SurfaceRef materialSurface;
 	bool sharedVariantSurface = false;
+	bool desiredPending = false;
+	bool directOnlyAdmission = false;
 };
 
 struct PersistentVoxelActorCacheStats
@@ -332,7 +335,9 @@ struct PrecachedVoxelVariantView
 	bool gpuPrefer = false;
 	FVoxelModel* model = nullptr;
 	const SurfaceRef* surface = nullptr;
+	SurfaceRef materialSurface;
 	MaterialRef material;
+	bool directOnlyAdmission = false;
 };
 
 static constexpr uint32_t PrecachedVoxelSourceBit_MountedVoxelPreload = 1u << 3;
