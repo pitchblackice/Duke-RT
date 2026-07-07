@@ -322,7 +322,7 @@ CVAR(Int, nri_ptvoxelcomputemode, 0, 0)
 
 CVAR(Int, nri_ptvoxelcomputemaxjobs, 32, 0)
 
-CVAR(Int, nri_ptvoxelcomputedirectmaxprimitives, 262144, 0)
+CVAR(Int, nri_ptvoxelcomputedirectmaxprimitives, 0, 0)
 
 CVAR(Int, nri_ptvoxelcomputetrace, 0, 0)
 

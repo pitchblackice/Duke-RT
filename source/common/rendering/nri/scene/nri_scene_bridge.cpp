@@ -2187,6 +2187,20 @@ namespace
 		return hash;
 	}
 
+	uint64_t BuildVoxelDirectMaterialPayloadKey(uint64_t baseKey, const SurfaceProvenance& provenance)
+	{
+		if (baseKey == 0 || provenance.actorIndex < 0)
+		{
+			return baseKey;
+		}
+
+		uint64_t hash = HashCombine64(baseKey, 0xD151EC7A11A17E5Bull);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)provenance.actorIndex);
+		hash = HashCombine64(hash, (uint64_t)provenance.materialFlags);
+		return hash;
+	}
+
 	const char* GetVoxelActorPendingReasonName(VoxelActorPendingReason reason)
 	{
 		switch (reason)
@@ -2615,6 +2629,9 @@ namespace
 		if (material != nullptr && provenance != nullptr)
 		{
 			StoreVoxelActorDesiredMaterialSurface(entry, lookup, *material, *provenance);
+			entry.desiredMaterialKeyHash = BuildVoxelDirectMaterialPayloadKey(entry.desiredMaterialKeyHash, *provenance);
+			entry.desiredMaterialVariantHash = BuildVoxelDirectMaterialPayloadKey(entry.desiredMaterialVariantHash, *provenance);
+			entry.desiredSignature = BuildVoxelActorSignature(entry.desiredMeshVariantHash, entry.desiredMaterialVariantHash);
 		}
 		if (transformChanged || material != nullptr)
 		{
@@ -5235,10 +5252,6 @@ namespace
 			}
 
 			TraceVoxelActorFirstUseFallback(sprite, cacheLookup, reason);
-			if (!forceTransientVoxel)
-			{
-				CaptureVoxelProxySprite(sprite, drawListType, voxelTexture, outSprites);
-			}
 			return true;
 		};
 		if (cacheUpdateConsumesActorBudget && !TrySpendVoxelCacheUpdateBudget(budget))
