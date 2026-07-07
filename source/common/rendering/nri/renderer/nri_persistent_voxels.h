@@ -205,6 +205,7 @@ struct PersistentVoxelReadinessStatus
 	bool meshKeyMatches = false;
 	bool meshCountsValid = false;
 	bool meshPrivateBuffersReady = false;
+	bool meshDirectBuffersReady = false;
 	bool meshArenaBuffersReady = false;
 	bool blasReady = false;
 	bool materialPresent = false;

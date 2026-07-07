@@ -1908,8 +1908,9 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 		{
 			tlasSkipReason = "missing-blas";
 		}
-		else if (meshResourceIt->second.indexBuffer.shaderView == nullptr ||
-			meshResourceIt->second.vertexBuffer.shaderView == nullptr)
+		else if (!meshResourceIt->second.directComputePublished &&
+			(meshResourceIt->second.indexBuffer.shaderView == nullptr ||
+			 meshResourceIt->second.vertexBuffer.shaderView == nullptr))
 		{
 			tlasSkipReason = "missing-mesh-view";
 		}
@@ -2110,10 +2111,13 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			persistentVoxelTlasNewInstanceCount++;
 			persistentVoxelTlasNewInstancePrimitiveCount += actor.primitiveCount;
 		}
+		const bool traceDirectGeneratedTlas =
+			meshResourceIt->second.directComputePublished &&
+			(int)nri_ptvoxelcomputetrace > 0;
 		meshResourceIt->second.tlasPublished = true;
-		if (voxelStatsEnabled)
+		if (voxelStatsEnabled || traceDirectGeneratedTlas)
 		{
-			Printf("PERF pt voxel tlas NRI: frame=%u action=publish reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx instance_id=%u primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u blas=1 shared_route=%u tlas_ready=%u tlas_published=1 first_publish=%u new_this_frame=%u ready=1\n",
+			Printf("PERF pt voxel tlas NRI: frame=%u action=publish reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx instance_id=%u primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u blas=1 shared_route=%u direct_generated=%u tlas_ready=%u tlas_published=1 first_publish=%u new_this_frame=%u ready=1\n",
 				frameIndex,
 				(unsigned long long)actor.identityKey,
 				(unsigned long long)actor.meshResourceKey,
@@ -2125,6 +2129,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 				actor.materialOffset,
 				actor.materialCount,
 				routedThroughSharedBlas ? 1u : 0u,
+				meshResourceIt->second.directComputePublished ? 1u : 0u,
 				meshResourceIt->second.tlasReadyFrame,
 				meshResourceFirstPublish ? 1u : 0u,
 				meshResourceNewThisFrame ? 1u : 0u);
@@ -3523,8 +3528,8 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				if (!services.BuildBottomLevel(
 					vertexBuffer,
 					indexBuffer,
-					meshResource.vertexOffset,
-					meshResource.vertexCount,
+					0u,
+					meshResource.vertexOffset + meshResource.vertexCount,
 					meshResource.indexOffset,
 					meshResource.indexCount,
 					meshResource.primitiveCount,
@@ -4965,8 +4970,9 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				reusableMeshResourceIt->second.vertexCount != 0 &&
 				reusableMeshResourceIt->second.indexCount != 0 &&
 				reusableMeshResourceIt->second.primitiveCount != 0 &&
-				reusableMeshResourceIt->second.vertexBuffer.buffer != nullptr &&
-				reusableMeshResourceIt->second.indexBuffer.buffer != nullptr &&
+				((reusableMeshResourceIt->second.vertexBuffer.buffer != nullptr &&
+				  reusableMeshResourceIt->second.indexBuffer.buffer != nullptr) ||
+				 reusableMeshResourceIt->second.directComputePublished) &&
 				vertexBuffer.buffer != nullptr &&
 				indexBuffer.buffer != nullptr &&
 				primitiveBuffer.buffer != nullptr)
@@ -5340,7 +5346,8 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 					meshResource.tlasReadyFrame,
 					meshResource.tlasPublished ? 1u : 0u,
 					(unsigned long long)uploadBytes,
-					meshResource.vertexBuffer.buffer != nullptr && meshResource.indexBuffer.buffer != nullptr ? 1u : 0u);
+					(meshResource.vertexBuffer.buffer != nullptr && meshResource.indexBuffer.buffer != nullptr) ||
+						meshResource.directComputePublished ? 1u : 0u);
 			}
 		}
 
@@ -5496,8 +5503,9 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			meshResourceIt->second.vertexCount != 0 &&
 			meshResourceIt->second.indexCount != 0 &&
 			meshResourceIt->second.primitiveCount != 0 &&
-			meshResourceIt->second.vertexBuffer.buffer != nullptr &&
-			meshResourceIt->second.indexBuffer.buffer != nullptr &&
+			((meshResourceIt->second.vertexBuffer.buffer != nullptr &&
+			  meshResourceIt->second.indexBuffer.buffer != nullptr) ||
+			 meshResourceIt->second.directComputePublished) &&
 			vertexBuffer.buffer != nullptr &&
 			indexBuffer.buffer != nullptr &&
 			primitiveBuffer.buffer != nullptr;
@@ -6059,6 +6067,51 @@ bool NRIPersistentVoxelResidency::BuildAccelerationStructures(
 			continue;
 		}
 		PersistentVoxelMeshVariantResource& meshResource = meshResourceIt->second;
+		if (meshResource.directComputePublished)
+		{
+			const bool directReady =
+				meshResource.accelerationStructure.accelerationStructure != nullptr &&
+				vertexBuffer.buffer != nullptr &&
+				indexBuffer.buffer != nullptr &&
+				primitiveBuffer.buffer != nullptr;
+			if (directReady)
+			{
+				if (!meshResource.tlasPublished && meshResource.tlasReadyFrame == 0)
+				{
+					meshResource.tlasReadyFrame = loadingWarmupActive ? frameIndex : frameIndex + 1u;
+				}
+				if (voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
+				{
+					Printf("PERF pt voxel blas NRI: frame=%u action=reuse reason=direct-generated actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u blas=1 tlas_ready=%u tlas_published=%u ready=1\n",
+						frameIndex,
+						(unsigned long long)actor.identityKey,
+						(unsigned long long)actor.meshResourceKey,
+						(unsigned long long)actor.meshKeyHash,
+						countActiveActorsUsingMeshResource(actor.meshResourceKey),
+						meshResource.primitiveCount,
+						meshResource.vertexCount,
+						meshResource.indexCount,
+						meshResource.tlasReadyFrame,
+						meshResource.tlasPublished ? 1u : 0u);
+				}
+			}
+			else if (voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
+			{
+				Printf("PERF pt voxel blas NRI: frame=%u action=skip reason=direct-generated-incomplete actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u blas=%u tlas_ready=%u tlas_published=%u ready=0\n",
+					frameIndex,
+					(unsigned long long)actor.identityKey,
+					(unsigned long long)actor.meshResourceKey,
+					(unsigned long long)actor.meshKeyHash,
+					countActiveActorsUsingMeshResource(actor.meshResourceKey),
+					meshResource.primitiveCount,
+					meshResource.vertexCount,
+					meshResource.indexCount,
+					meshResource.accelerationStructure.accelerationStructure != nullptr ? 1u : 0u,
+					meshResource.tlasReadyFrame,
+					meshResource.tlasPublished ? 1u : 0u);
+			}
+			continue;
+		}
 		const bool needsBuild =
 			meshResource.accelerationStructure.accelerationStructure == nullptr ||
 			meshResource.vertexBuffer.buffer == nullptr ||
@@ -6653,8 +6706,9 @@ void NRIPersistentVoxelResidency::ReconcileResidency(
 			resource.vertexCount != 0 &&
 			resource.indexCount != 0 &&
 			resource.primitiveCount != 0 &&
-			resource.vertexBuffer.buffer != nullptr &&
-			resource.indexBuffer.buffer != nullptr &&
+			((resource.vertexBuffer.buffer != nullptr &&
+			  resource.indexBuffer.buffer != nullptr) ||
+			 resource.directComputePublished) &&
 			vertexBuffer.buffer != nullptr &&
 			indexBuffer.buffer != nullptr &&
 			primitiveBuffer.buffer != nullptr;
@@ -7535,12 +7589,13 @@ PersistentVoxelReadinessStatus NRIPersistentVoxelResidency::GetSharedVariantRead
 	status.meshPrivateBuffersReady =
 		meshResource.vertexBuffer.buffer != nullptr &&
 		meshResource.indexBuffer.buffer != nullptr;
+	status.meshDirectBuffersReady = meshResource.directComputePublished;
 	status.meshArenaBuffersReady =
 		vertexBuffer.buffer != nullptr &&
 		indexBuffer.buffer != nullptr &&
 		primitiveBuffer.buffer != nullptr;
 	status.blasReady = meshResource.accelerationStructure.accelerationStructure != nullptr;
-	if (!status.meshKeyMatches || !status.meshCountsValid || !status.meshPrivateBuffersReady)
+	if (!status.meshKeyMatches || !status.meshCountsValid || (!status.meshPrivateBuffersReady && !status.meshDirectBuffersReady))
 	{
 		status.reason = "mesh-invalid";
 		return status;
@@ -7666,7 +7721,7 @@ void NRIPersistentVoxelResidency::TraceReadiness(
 		}
 	};
 
-	Printf("NRI PT voxel readiness: event=%s phase=%s reason=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx queue_state=%s published_mesh=%u published_material=%u generation=%u mesh_present=%u mesh_resource=0x%llx mesh_key_match=%u mesh_counts=%u mesh_private=%u arena=%u blas=%u material_present=%u material_key_match=%u material_count=%u material_bridge=%u vertices=%u indices=%u prims=%u material_count_value=%u material_bridge_count=%u\n",
+	Printf("NRI PT voxel readiness: event=%s phase=%s reason=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx queue_state=%s published_mesh=%u published_material=%u generation=%u mesh_present=%u mesh_resource=0x%llx mesh_key_match=%u mesh_counts=%u mesh_private=%u mesh_direct=%u arena=%u blas=%u material_present=%u material_key_match=%u material_count=%u material_bridge=%u vertices=%u indices=%u prims=%u material_count_value=%u material_bridge_count=%u\n",
 		event != nullptr ? event : "unknown",
 		phase != nullptr ? phase : "unknown",
 		status.reason != nullptr ? status.reason : "unknown",
@@ -7689,6 +7744,7 @@ void NRIPersistentVoxelResidency::TraceReadiness(
 		status.meshKeyMatches ? 1u : 0u,
 		status.meshCountsValid ? 1u : 0u,
 		status.meshPrivateBuffersReady ? 1u : 0u,
+		status.meshDirectBuffersReady ? 1u : 0u,
 		status.meshArenaBuffersReady ? 1u : 0u,
 		status.blasReady ? 1u : 0u,
 		status.materialPresent ? 1u : 0u,
