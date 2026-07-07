@@ -3060,7 +3060,7 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 			stopReason = entry->lastReason;
 			continue;
 		}
-		if (postLoadGraceActive && !requiredAdmission && !uploadState && optionalAdmitted >= settings.admissionGraceVariants)
+		if (postLoadGraceActive && !entry->runtimeRequested && !requiredAdmission && !uploadState && optionalAdmitted >= settings.admissionGraceVariants)
 		{
 			stats.skippedBudget++;
 			optionalSkippedGrace++;
