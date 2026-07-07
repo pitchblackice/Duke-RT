@@ -297,6 +297,7 @@ struct PersistentVoxelCacheEntryView
 	float instanceTransform[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 	float currentTranslation[3] = {};
 	float bakedTranslation[3] = {};
+	FVoxelModel* model = nullptr;
 	const SurfaceRef* surface = nullptr;
 	const SurfaceRef* lightSurface = nullptr;
 	bool sharedVariantSurface = false;

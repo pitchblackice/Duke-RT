@@ -6175,6 +6175,7 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.bakedTranslation[0] = entry.second->bakedTranslation[0];
 		view.bakedTranslation[1] = entry.second->bakedTranslation[1];
 		view.bakedTranslation[2] = entry.second->bakedTranslation[2];
+		view.model = reinterpret_cast<FVoxelModel*>(entry.second->voxelModelPtr);
 		view.sharedVariantSurface = entry.second->sharedVariantSurface;
 		view.surface = entry.second->sharedVariantSurface ?
 			GetReadyVoxelMeshVariantSurface(entry.second->meshVariantHash) :

@@ -1304,7 +1304,7 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	for (size_t queuedIndex = 0; queuedIndex < jobsToProcess; ++queuedIndex)
 	{
 		PendingVoxelComputeJob& queued = state.queuedJobs[queuedIndex];
-		if (emit && queued.faces.size() != queued.stats.coalescedFaceCount)
+		if (emit && !queued.directPublication && queued.faces.size() != queued.stats.coalescedFaceCount)
 		{
 			if (queued.consumeKey != 0)
 			{

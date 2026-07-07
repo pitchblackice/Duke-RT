@@ -4868,6 +4868,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				admissionVariant.priority = loadingWarmupActive ? 0 : 1;
 				admissionVariant.admissionRank = admissionVariant.priority * 10000 + 9900;
 				admissionVariant.gpuForce = loadingWarmupActive;
+				admissionVariant.model = cacheEntry.model;
 				admissionVariant.surface = cacheEntry.surface;
 				admissionVariant.material = cacheEntry.lightSurface != nullptr ? cacheEntry.lightSurface->material : cacheEntry.surface->material;
 				EnqueueAdmission(
