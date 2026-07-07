@@ -1055,7 +1055,6 @@ bool TakeNRIVoxelComputeGeneratedGeometry(uint64_t requestKey, nri_scene::Geomet
 
 NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeDirectPublication(const NRIVoxelComputeDirectPublishRequest& request)
 {
-	constexpr uint32_t MaxDirectPublishPrimitives = 8192;
 	VoxelComputeState& state = gVoxelComputeState;
 	const uint64_t directKey = BuildDirectPublishKey(request.meshResourceKey, request.generation);
 	if (!ShouldDirectPublishNRIVoxelComputeMeshing())
@@ -1116,9 +1115,11 @@ NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeDirectPublication(c
 	request.model->BuildRawMeshStats(rawStats, &rawSlabs, nullptr, &rawColorRuns);
 	RawVoxelSourceArchiveEntry* archivedSource = RecordRawSourceArchive(request.model, rawStats, rawSlabs, nullptr, &rawColorRuns);
 	const uint32_t expectedPrimitives = rawStats.coalescedFaceCount * 2u;
+	const uint32_t maxDirectPublishPrimitives = std::max(0, (int)nri_ptvoxelcomputedirectmaxprimitives);
+	const bool overPrimitiveBudget = maxDirectPublishPrimitives != 0 && expectedPrimitives > maxDirectPublishPrimitives;
 	if (rawStats.slabCount == 0 ||
 		rawStats.coalescedFaceCount == 0 ||
-		rawStats.coalescedFaceCount > MaxDirectPublishPrimitives / 2u ||
+		overPrimitiveBudget ||
 		rawStats.noDedupeVertexCount > request.vertices.capacity ||
 		rawStats.indexCount > request.indices.capacity ||
 		expectedPrimitives > request.primitives.capacity)
@@ -1128,7 +1129,7 @@ NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeDirectPublication(c
 		{
 			Printf(
 				"PERF pt voxel compute direct publish NRI: action=reject reason=%s mesh_resource=0x%llx generation=%llu faces=%u vertices=%u/%u indices=%u/%u primitives=%u/%u max_primitives=%u\n",
-				rawStats.coalescedFaceCount > MaxDirectPublishPrimitives / 2u ? "primitive_budget" : "capacity_or_raw",
+				overPrimitiveBudget ? "primitive_budget" : "capacity_or_raw",
 				(unsigned long long)request.meshResourceKey,
 				(unsigned long long)request.generation,
 				rawStats.coalescedFaceCount,
@@ -1138,7 +1139,7 @@ NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeDirectPublication(c
 				request.indices.capacity,
 				expectedPrimitives,
 				request.primitives.capacity,
-				MaxDirectPublishPrimitives);
+				maxDirectPublishPrimitives);
 		}
 		return NRIVoxelComputeGeneratedGeometryStatus::Failed;
 	}

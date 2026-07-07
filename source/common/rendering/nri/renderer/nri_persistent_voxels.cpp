@@ -3997,6 +3997,34 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 					}
 					return true;
 				}
+				if (directStatus == NRIVoxelComputeGeneratedGeometryStatus::Unavailable &&
+					std::max(0, (int)nri_ptvoxelcomputemaxjobs) > 0)
+				{
+					arenaVertexCursor = entry.savedVertexCursor;
+					arenaIndexCursor = entry.savedIndexCursor;
+					arenaPrimitiveCursor = entry.savedPrimitiveCursor;
+					entry.uploadMeshResource = {};
+					entry.directComputeRequested = false;
+					entry.directComputeFailed = false;
+					entry.directComputeFailure = NRIVoxelComputeDirectPublishFailure::QueueFull;
+					entry.state = PersistentVoxelAdmissionState::Pending;
+					entry.lastReason = "direct-publish-queue-full";
+					outInProgress = true;
+					if (outStats != nullptr)
+					{
+						outStats->directPending++;
+					}
+					if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
+					{
+						Printf("PERF pt voxel compute direct publish NRI: action=defer reason=queue_full tex=%d voxel=%d mesh_variant=0x%llx generation=%llu max_jobs=%u\n",
+							variant.sourcePicnum,
+							variant.resolvedVoxelIndex,
+							(unsigned long long)variant.meshKeyHash,
+							(unsigned long long)request.generation,
+							(uint32_t)std::max(0, (int)nri_ptvoxelcomputemaxjobs));
+					}
+					return true;
+				}
 				arenaVertexCursor = entry.savedVertexCursor;
 				arenaIndexCursor = entry.savedIndexCursor;
 				arenaPrimitiveCursor = entry.savedPrimitiveCursor;
