@@ -416,6 +416,7 @@ void NRIRenderer::DestroyAccelerationStructureResource(NRIAccelerationStructureR
 	resource.buildScratchSize = 0;
 	resource.buildVertexBuffer = nullptr;
 	resource.buildIndexBuffer = nullptr;
+	resource.buildVertexOffset = 0;
 	resource.buildVertexCount = 0;
 	resource.buildIndexOffset = 0;
 	resource.buildIndexCount = 0;

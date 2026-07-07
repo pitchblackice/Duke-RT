@@ -204,6 +204,7 @@ bool NRIRenderer::BuildDynamicOverlayBlasRoute(
 		if (!BuildBottomLevelAccelerationStructure(
 			asset->vertexBuffer,
 			asset->indexBuffer,
+			0u,
 			span.vertexCount,
 			0u,
 			span.indexCount,

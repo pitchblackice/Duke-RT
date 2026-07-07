@@ -155,6 +155,7 @@ public:
 			void* user,
 			const NRIBufferResource& vertexBuffer,
 			const NRIBufferResource& indexBuffer,
+			uint32_t vertexOffset,
 			uint32_t vertexCount,
 			uint32_t indexOffset,
 			uint32_t indexCount,
@@ -164,6 +165,7 @@ public:
 			return static_cast<NRIRenderer*>(user)->BuildBottomLevelAccelerationStructure(
 				vertexBuffer,
 				indexBuffer,
+				vertexOffset,
 				vertexCount,
 				indexOffset,
 				indexCount,
@@ -174,6 +176,10 @@ public:
 		services.barrierBuildInputs = [](void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) -> bool
 		{
 			return BarrierBuildInputs(static_cast<NRIRenderer&>(*static_cast<NRIRenderer*>(user)), vertexBuffer, indexBuffer);
+		};
+		services.barrierComputeToBuildInputs = [](void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) -> bool
+		{
+			return BarrierComputeToBuildInputs(static_cast<NRIRenderer&>(*static_cast<NRIRenderer*>(user)), vertexBuffer, indexBuffer);
 		};
 		return services;
 	}
@@ -186,6 +192,7 @@ public:
 			void* user,
 			const NRIBufferResource& vertexBuffer,
 			const NRIBufferResource& indexBuffer,
+			uint32_t vertexOffset,
 			uint32_t vertexCount,
 			uint32_t indexOffset,
 			uint32_t indexCount,
@@ -195,6 +202,7 @@ public:
 			return static_cast<NRIRenderer*>(user)->BuildBottomLevelAccelerationStructure(
 				vertexBuffer,
 				indexBuffer,
+				vertexOffset,
 				vertexCount,
 				indexOffset,
 				indexCount,
@@ -448,6 +456,26 @@ private:
 		inputBarriers[1].buffer = indexBuffer.buffer;
 		inputBarriers[1].before = NRIResourceAccelerationStructureBuildInputAccess();
 		inputBarriers[1].after = NRIResourceComputeShaderResourceAccess();
+		nri::BarrierDesc inputBarrierDesc = {};
+		inputBarrierDesc.buffers = inputBarriers;
+		inputBarrierDesc.bufferNum = 2;
+		renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, inputBarrierDesc);
+		return true;
+	}
+
+	static bool BarrierComputeToBuildInputs(NRIRenderer& renderer, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer)
+	{
+		if (renderer.mFrameBuffer == nullptr || renderer.mFrameBuffer->mCommandBuffer == nullptr)
+		{
+			return false;
+		}
+		nri::BufferBarrierDesc inputBarriers[2] = {};
+		inputBarriers[0].buffer = vertexBuffer.buffer;
+		inputBarriers[0].before = NRIResourceComputeShaderResourceAccess();
+		inputBarriers[0].after = NRIResourceAccelerationStructureBuildInputAccess();
+		inputBarriers[1].buffer = indexBuffer.buffer;
+		inputBarriers[1].before = NRIResourceComputeShaderResourceAccess();
+		inputBarriers[1].after = NRIResourceAccelerationStructureBuildInputAccess();
 		nri::BarrierDesc inputBarrierDesc = {};
 		inputBarrierDesc.buffers = inputBarriers;
 		inputBarrierDesc.bufferNum = 2;

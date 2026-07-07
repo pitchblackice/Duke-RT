@@ -1684,6 +1684,7 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		const bool blasOk = renderer.BuildBottomLevelAccelerationStructure(
 			state.vertexBuffer,
 			state.indexBuffer,
+			0u,
 			vertexOffset,
 			0,
 			indexOffset,

@@ -60,6 +60,7 @@ struct NRIAccelerationStructureResource
 	uint64_t buildScratchSize = 0;
 	nri::Buffer* buildVertexBuffer = nullptr;
 	nri::Buffer* buildIndexBuffer = nullptr;
+	uint32_t buildVertexOffset = 0;
 	uint32_t buildVertexCount = 0;
 	uint32_t buildIndexOffset = 0;
 	uint32_t buildIndexCount = 0;

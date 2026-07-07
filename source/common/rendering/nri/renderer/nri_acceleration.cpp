@@ -124,6 +124,7 @@ bool NRIAccelerationStructureManager::BuildDynamic(
 		renderer,
 		renderer.GetCurrentDynamicVertexBuffer(),
 		renderer.GetCurrentDynamicIndexBuffer(),
+		0u,
 		(uint32_t)geometry.vertices.size(),
 		indexOffset,
 		indexCount,
@@ -136,6 +137,7 @@ bool NRIAccelerationStructureManager::BuildBottomLevel(
 	NRIRenderer& renderer,
 	const NRIBufferResource& vertexBuffer,
 	const NRIBufferResource& indexBuffer,
+	uint32_t vertexOffset,
 	uint32_t vertexCount,
 	uint32_t indexOffset,
 	uint32_t indexCount,
@@ -163,7 +165,7 @@ bool NRIAccelerationStructureManager::BuildBottomLevel(
 		dynamicGeometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
 		dynamicGeometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
 		dynamicGeometryDesc.triangles.vertexBuffer = vertexBuffer.buffer;
-		dynamicGeometryDesc.triangles.vertexOffset = 0;
+		dynamicGeometryDesc.triangles.vertexOffset = (uint64_t)vertexOffset * sizeof(nri_scene::SceneVertex);
 		dynamicGeometryDesc.triangles.vertexNum = vertexCount;
 		dynamicGeometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
 		dynamicGeometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
@@ -177,6 +179,7 @@ bool NRIAccelerationStructureManager::BuildBottomLevel(
 			outAccelerationStructure.accelerationStructure != nullptr &&
 			outAccelerationStructure.buildVertexBuffer == vertexBuffer.buffer &&
 			outAccelerationStructure.buildIndexBuffer == indexBuffer.buffer &&
+			outAccelerationStructure.buildVertexOffset == vertexOffset &&
 			outAccelerationStructure.buildVertexCount == vertexCount &&
 			outAccelerationStructure.buildIndexOffset == indexOffset &&
 			outAccelerationStructure.buildIndexCount == indexCount &&
@@ -287,15 +290,16 @@ bool NRIAccelerationStructureManager::BuildBottomLevel(
 		renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, barrierDesc);
 	}
 	renderer.mBuiltDynamicSceneASLastFrame = true;
+	outAccelerationStructure.buildVertexBuffer = vertexBuffer.buffer;
+	outAccelerationStructure.buildIndexBuffer = indexBuffer.buffer;
+	outAccelerationStructure.buildVertexOffset = vertexOffset;
+	outAccelerationStructure.buildVertexCount = vertexCount;
+	outAccelerationStructure.buildIndexOffset = indexOffset;
+	outAccelerationStructure.buildIndexCount = indexCount;
+	outAccelerationStructure.buildPrimitiveCount = primitiveCount;
+	outAccelerationStructure.buildScratchSize = requiredScratchSize;
 	if (updateDynamicPerfStats)
 	{
-		outAccelerationStructure.buildVertexBuffer = vertexBuffer.buffer;
-		outAccelerationStructure.buildIndexBuffer = indexBuffer.buffer;
-		outAccelerationStructure.buildVertexCount = vertexCount;
-		outAccelerationStructure.buildIndexOffset = indexOffset;
-		outAccelerationStructure.buildIndexCount = indexCount;
-		outAccelerationStructure.buildPrimitiveCount = primitiveCount;
-		outAccelerationStructure.buildScratchSize = requiredScratchSize;
 		renderer.mDynamicSceneLastFrame.asBuildCount++;
 	}
 	return true;
@@ -884,6 +888,7 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(
 bool NRIRenderer::BuildBottomLevelAccelerationStructure(
 	const NRIBufferResource& vertexBuffer,
 	const NRIBufferResource& indexBuffer,
+	uint32_t vertexOffset,
 	uint32_t vertexCount,
 	uint32_t indexOffset,
 	uint32_t indexCount,
@@ -895,6 +900,7 @@ bool NRIRenderer::BuildBottomLevelAccelerationStructure(
 		*this,
 		vertexBuffer,
 		indexBuffer,
+		vertexOffset,
 		vertexCount,
 		indexOffset,
 		indexCount,

@@ -325,12 +325,14 @@ struct NRIPersistentVoxelAdmissionServices
 		void* user,
 		const NRIBufferResource& vertexBuffer,
 		const NRIBufferResource& indexBuffer,
+		uint32_t vertexOffset,
 		uint32_t vertexCount,
 		uint32_t indexOffset,
 		uint32_t indexCount,
 		uint32_t primitiveCount,
 		NRIAccelerationStructureResource& outAccelerationStructure);
 	using BarrierBuildInputsFn = bool (*)(void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer);
+	using BarrierComputeToBuildInputsFn = bool (*)(void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer);
 
 	void* user = nullptr;
 	AdmitVariantResourceFn admitVariantResource = nullptr;
@@ -347,6 +349,7 @@ struct NRIPersistentVoxelAdmissionServices
 	NoteBufferUploadFn noteBufferUpload = nullptr;
 	BuildBottomLevelFn buildBottomLevel = nullptr;
 	BarrierBuildInputsFn barrierBuildInputs = nullptr;
+	BarrierComputeToBuildInputsFn barrierComputeToBuildInputs = nullptr;
 
 	bool AdmitVariantResource(
 		PersistentVoxelAdmissionEntry& entry,
@@ -372,12 +375,14 @@ struct NRIPersistentVoxelAdmissionServices
 	bool BuildBottomLevel(
 		const NRIBufferResource& vertexBuffer,
 		const NRIBufferResource& indexBuffer,
+		uint32_t vertexOffset,
 		uint32_t vertexCount,
 		uint32_t indexOffset,
 		uint32_t indexCount,
 		uint32_t primitiveCount,
 		NRIAccelerationStructureResource& outAccelerationStructure) const;
 	bool BarrierBuildInputs(const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) const;
+	bool BarrierComputeToBuildInputs(const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) const;
 };
 
 struct NRIPersistentVoxelAccelerationBuildStats
@@ -394,6 +399,7 @@ struct NRIPersistentVoxelAccelerationServices
 		void* user,
 		const NRIBufferResource& vertexBuffer,
 		const NRIBufferResource& indexBuffer,
+		uint32_t vertexOffset,
 		uint32_t vertexCount,
 		uint32_t indexOffset,
 		uint32_t indexCount,
@@ -408,6 +414,7 @@ struct NRIPersistentVoxelAccelerationServices
 	bool BuildBottomLevel(
 		const NRIBufferResource& vertexBuffer,
 		const NRIBufferResource& indexBuffer,
+		uint32_t vertexOffset,
 		uint32_t vertexCount,
 		uint32_t indexOffset,
 		uint32_t indexCount,
