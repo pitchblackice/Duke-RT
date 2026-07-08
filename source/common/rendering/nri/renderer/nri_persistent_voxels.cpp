@@ -2988,6 +2988,12 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		{
 			return left->runtimeRequested;
 		}
+		const bool leftDirectPending = left->state == PersistentVoxelAdmissionState::DirectComputePending;
+		const bool rightDirectPending = right->state == PersistentVoxelAdmissionState::DirectComputePending;
+		if (leftDirectPending != rightDirectPending)
+		{
+			return leftDirectPending;
+		}
 		if (left->admissionRank != right->admissionRank)
 		{
 			return left->admissionRank < right->admissionRank;
@@ -3098,7 +3104,12 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		bool reusedMaterial = false;
 		bool inProgress = false;
 		const char* failureReason = "none";
-		const uint64_t remainingByteBudget = byteBudget == 0 ? 0ull : byteBudget - stats.bytesUploaded;
+		const bool exclusiveRuntimeAdmission =
+			!loadingPhase &&
+			entry->runtimeRequested &&
+			byteBudget != 0 &&
+			entry->estimatedBytes > byteBudget;
+		const uint64_t remainingByteBudget = exclusiveRuntimeAdmission ? 0ull : (byteBudget == 0 ? 0ull : byteBudget - stats.bytesUploaded);
 		const uint32_t blasBefore = blasBudgetRemaining;
 		const int isolateBlasPrimitiveThreshold = settings.admitIsolateBlasPrimitives;
 		const bool isolateBlasBuild =
@@ -3141,7 +3152,14 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		stats.bytesUploaded += uploadBytes;
 		if (inProgress)
 		{
-			entry->lastReason = entry->state == PersistentVoxelAdmissionState::BuildingBlas && blasBudgetRemaining == 0 ? "blas-budget" : "uploading";
+			if (entry->state == PersistentVoxelAdmissionState::BuildingBlas && blasBudgetRemaining == 0)
+			{
+				entry->lastReason = "blas-budget";
+			}
+			else if (entry->lastReason == nullptr || std::strcmp(entry->lastReason, "none") == 0)
+			{
+				entry->lastReason = "uploading";
+			}
 			stopReason = entry->lastReason;
 			if (traceLevel2)
 			{
@@ -3164,6 +3182,11 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 					entry->lastReason);
 			}
 			break;
+		}
+		if (entry->state == PersistentVoxelAdmissionState::Deferred)
+		{
+			stats.skippedBudget++;
+			continue;
 		}
 
 		entry->state = PersistentVoxelAdmissionState::Ready;
@@ -3479,6 +3502,26 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			existingPrivateBuffersReady ||
 			existingDirectBuffersReady;
 	};
+	auto directPublishOwnerPending = [&]() -> bool
+	{
+		for (const auto& pair : admissionQueue)
+		{
+			const PersistentVoxelAdmissionEntry& candidate = pair.second;
+			if (&candidate == &entry ||
+				candidate.mapGeneration != residencyMapGeneration ||
+				candidate.state != PersistentVoxelAdmissionState::DirectComputePending ||
+				!candidate.directComputeRequested ||
+				candidate.directComputeFailed)
+			{
+				continue;
+			}
+			if (BuildPersistentVoxelVariantMeshResourceKey(candidate.variant) == meshResourceKey)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
 
 	if (entry.state == PersistentVoxelAdmissionState::DirectComputePending)
 	{
@@ -3514,12 +3557,6 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				directMesh.vertices.count != 0 &&
 				directMesh.indices.count != 0 &&
 				directMesh.primitives.count != 0 &&
-				directMesh.vertices.count <= meshResource.vertexCapacity &&
-				directMesh.indices.count <= meshResource.indexCapacity &&
-				directMesh.primitives.count <= meshResource.primitiveCapacity &&
-				directMesh.vertices.offset == meshResource.vertexOffset &&
-				directMesh.indices.offset == meshResource.indexOffset &&
-				directMesh.primitives.offset == meshResource.primitiveOffset &&
 				vertexBuffer.buffer != nullptr &&
 				indexBuffer.buffer != nullptr &&
 				primitiveBuffer.buffer != nullptr;
@@ -3548,6 +3585,12 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				meshResource.renderPrimitiveHash = variant.renderPrimitiveHash;
 				meshResource.transformBasisSignature = 0;
 				meshResource.meshBakeSpace = nri_scene::VoxelMeshBakeSpace::LocalSpace;
+				meshResource.vertexOffset = directMesh.vertices.offset;
+				meshResource.vertexCapacity = directMesh.vertices.count;
+				meshResource.indexOffset = directMesh.indices.offset;
+				meshResource.indexCapacity = directMesh.indices.count;
+				meshResource.primitiveOffset = directMesh.primitives.offset;
+				meshResource.primitiveCapacity = directMesh.primitives.count;
 				meshResource.vertexCount = directMesh.vertices.count;
 				meshResource.indexCount = directMesh.indices.count;
 				meshResource.primitiveCount = directMesh.primitives.count;
@@ -3920,6 +3963,12 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			variant.model != nullptr &&
 			variant.primitiveCount != 0)
 		{
+			if (directPublishOwnerPending())
+			{
+				entry.state = PersistentVoxelAdmissionState::Deferred;
+				entry.lastReason = "direct-publish-shared-pending";
+				return true;
+			}
 			PersistentVoxelMeshVariantResource& meshResource = entry.uploadMeshResource;
 			const uint32_t directVertexCapacity = variant.primitiveCount * 2u;
 			const uint32_t directIndexCapacity = variant.primitiveCount * 3u;
@@ -4006,6 +4055,26 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 							request.primitives.capacity,
 							request.materialBase,
 							request.materialCount);
+					}
+					return true;
+				}
+				if (directStatus == NRIVoxelComputeGeneratedGeometryStatus::Ready)
+				{
+					arenaVertexCursor = entry.savedVertexCursor;
+					arenaIndexCursor = entry.savedIndexCursor;
+					arenaPrimitiveCursor = entry.savedPrimitiveCursor;
+					entry.uploadMeshResource = {};
+					entry.directComputeRequested = true;
+					entry.directComputeFailed = false;
+					entry.directComputeGeneration = request.generation;
+					entry.directComputeOutputKind = request.outputKind;
+					entry.directComputeFailure = NRIVoxelComputeDirectPublishFailure::None;
+					entry.state = PersistentVoxelAdmissionState::DirectComputePending;
+					entry.lastReason = "direct-publish-ready";
+					outInProgress = true;
+					if (outStats != nullptr)
+					{
+						outStats->directPending++;
 					}
 					return true;
 				}
@@ -7163,13 +7232,21 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 		services);
 
 	const uint64_t pairKey = nri_scene::HashCombine64(meshResourceKey, variant.materialKeyHash);
-	const uint64_t estimatedBytes = variant.directOnlyAdmission ?
-		((uint64_t)variant.primitiveCount * 2ull * (uint64_t)sizeof(nri_scene::SceneVertex) +
-		 (uint64_t)variant.primitiveCount * 3ull * (uint64_t)sizeof(uint32_t) +
-		 (uint64_t)variant.primitiveCount * (uint64_t)sizeof(nri_scene::PrimitiveData)) :
-		((uint64_t)variant.surface->vertices.size() * (uint64_t)sizeof(nri_scene::SceneVertex) +
-		 (uint64_t)variant.surface->indices.size() * (uint64_t)sizeof(uint32_t) +
-		 (uint64_t)variant.primitiveCount * (uint64_t)sizeof(nri_scene::PrimitiveData));
+	auto estimateAdmissionBytes = [](const nri_scene::PrecachedVoxelVariantView& admissionVariant) -> uint64_t
+	{
+		if (admissionVariant.directOnlyAdmission || admissionVariant.surface == nullptr)
+		{
+			return
+				(uint64_t)admissionVariant.primitiveCount * 2ull * (uint64_t)sizeof(nri_scene::SceneVertex) +
+				(uint64_t)admissionVariant.primitiveCount * 3ull * (uint64_t)sizeof(uint32_t) +
+				(uint64_t)admissionVariant.primitiveCount * (uint64_t)sizeof(nri_scene::PrimitiveData);
+		}
+		return
+			(uint64_t)admissionVariant.surface->vertices.size() * (uint64_t)sizeof(nri_scene::SceneVertex) +
+			(uint64_t)admissionVariant.surface->indices.size() * (uint64_t)sizeof(uint32_t) +
+			(uint64_t)admissionVariant.primitiveCount * (uint64_t)sizeof(nri_scene::PrimitiveData);
+	};
+	const uint64_t estimatedBytes = estimateAdmissionBytes(variant);
 	const int32_t variantAdmissionRank =
 		variant.admissionRank != 0 || variant.priority <= 0 ? variant.admissionRank : variant.priority * 10000 + 9900;
 	const uint32_t maxBlasPrimitives = settings.admitMaxBlasPrimitives;
@@ -7219,6 +7296,47 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 			DiscardAdmissionEntry(entry, services);
 			admissionQueue.erase(found);
 			return false;
+		}
+		const bool runtimeDirectCandidate =
+			runtimeRequested &&
+			ShouldDirectPublishNRIVoxelComputeMeshing() &&
+			variant.model != nullptr &&
+			variant.primitiveCount != 0 &&
+			entry.state != PersistentVoxelAdmissionState::DirectComputePending;
+		const bool shouldPromoteRuntimeVariant =
+			!resourcesReady &&
+			runtimeDirectCandidate &&
+			(!entry.runtimeRequested ||
+			 entry.variant.model == nullptr ||
+			 (variant.directOnlyAdmission && !entry.variant.directOnlyAdmission) ||
+			 entry.directComputeFailed ||
+			 entry.uploadPrepared ||
+			 entry.state == PersistentVoxelAdmissionState::UploadingVertices ||
+			 entry.state == PersistentVoxelAdmissionState::UploadingIndices ||
+			 entry.state == PersistentVoxelAdmissionState::UploadingPrimitives ||
+			 entry.state == PersistentVoxelAdmissionState::BuildingBlas);
+		if (shouldPromoteRuntimeVariant)
+		{
+			nri_scene::PrecachedVoxelVariantView promotedVariant = variant;
+			if (promotedVariant.surface == nullptr && entry.variant.surface != nullptr)
+			{
+				promotedVariant.surface = entry.variant.surface;
+				promotedVariant.directOnlyAdmission = false;
+				if (promotedVariant.geometryContentHash == 0)
+				{
+					promotedVariant.geometryContentHash = entry.variant.geometryContentHash;
+				}
+				if (promotedVariant.renderPrimitiveHash == 0)
+				{
+					promotedVariant.renderPrimitiveHash = entry.variant.renderPrimitiveHash;
+				}
+			}
+			DiscardAdmissionEntry(entry, services);
+			entry.variant = promotedVariant;
+			entry.state = PersistentVoxelAdmissionState::Pending;
+			entry.retryCount = 0;
+			entry.estimatedBytes = estimateAdmissionBytes(entry.variant);
+			entry.lastReason = "runtime-direct-promote";
 		}
 		entry.sourceBits |= variant.sourceBits;
 		entry.priority = std::min(entry.priority, variant.priority);
@@ -7866,6 +7984,7 @@ void NRIPersistentVoxelResidency::TraceReadiness(
 		switch (state)
 		{
 		case PersistentVoxelAdmissionState::Pending: return "pending";
+		case PersistentVoxelAdmissionState::DirectComputePending: return "direct-compute-pending";
 		case PersistentVoxelAdmissionState::UploadingVertices: return "uploading-vertices";
 		case PersistentVoxelAdmissionState::UploadingIndices: return "uploading-indices";
 		case PersistentVoxelAdmissionState::UploadingPrimitives: return "uploading-primitives";

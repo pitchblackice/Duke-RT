@@ -1234,7 +1234,6 @@ bool TakeNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t gen
 		return false;
 	}
 	outMesh = found->second;
-	state.readyDirectPublishedMeshes.erase(found);
 	return true;
 }
 
