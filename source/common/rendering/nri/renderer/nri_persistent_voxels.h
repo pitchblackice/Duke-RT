@@ -968,6 +968,7 @@ void CopyPersistentVoxelInstanceTransform(const float source[12], std::array<flo
 bool SamePersistentVoxelInstanceTransform(const std::array<float, 12>& left, const float right[12]);
 void FillPersistentVoxelInstanceTransform(const float currentTranslation[3], const float bakedTranslation[3], std::array<float, 12>& target);
 void FillPersistentVoxelActorInstanceTransform(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, const PersistentVoxelMeshVariantResource& meshResource, std::array<float, 12>& target);
+uint64_t BuildPersistentVoxelVariantMeshResourceKey(const nri_scene::PrecachedVoxelVariantView& variant);
 uint64_t EstimatePersistentVoxelActorUploadBytes(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry);
 bool IsPersistentVoxelMeshResourceTransformKeyed(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, const NRIPersistentVoxelSettings& settings);
 uint64_t BuildPersistentVoxelMeshResourceKey(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, const NRIPersistentVoxelSettings& settings);

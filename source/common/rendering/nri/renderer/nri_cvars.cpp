@@ -344,6 +344,28 @@ CVAR(Int, nri_ptvoxelcomputerawpreloadmaxsources, 256, 0)
 
 CVAR(Int, nri_ptvoxelcomputerawpreloadmaxbytes, 64 * 1024 * 1024, 0)
 
+CVAR(Bool, nri_ptvoxelcomputepreload, false, 0)
+
+CVAR(Bool, nri_ptvoxelcomputepreloaddryrun, true, 0)
+
+CVAR(Int, nri_ptvoxelcomputepreloadtrace, 0, 0)
+
+CVAR(Bool, nri_ptvoxelcomputepreloadrequired, true, 0)
+
+CVAR(Bool, nri_ptvoxelcomputepreloadoptional, false, 0)
+
+CVAR(Bool, nri_ptvoxelcomputepreloadmaterials, false, 0)
+
+CVAR(Int, nri_ptvoxelcomputepreloadmaxms, 0, 0)
+
+CVAR(Int, nri_ptvoxelcomputepreloadmaxjobs, 0, 0)
+
+CVAR(Int, nri_ptvoxelcomputepreloadmaxblas, 0, 0)
+
+CVAR(Int, nri_ptvoxelcomputepreloadmaxbytes, 0, 0)
+
+CVAR(Int, nri_ptvoxelcomputepreloadmaxmaterialrows, 0, 0)
+
 CVAR(Int, nri_ptloadingtrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptpreloadmaxsubmitspertick, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

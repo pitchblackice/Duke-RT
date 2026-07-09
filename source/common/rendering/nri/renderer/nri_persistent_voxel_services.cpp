@@ -2,6 +2,7 @@
 #include "nri_renderer.h"
 #include "nri_cvars.h"
 #include "nri_render_geometry_helpers.h"
+#include "nri_voxel_compute_preload.h"
 #include "../system/nri_renderdevice.h"
 #include "hw_voxels.h"
 #include "../../hwrenderer/data/hw_clock.h"
@@ -230,6 +231,23 @@ public:
 		{
 			nri_scene::BuildPrecachedVoxelVariantViews(variants);
 			hasCacheEntries = nri_scene::BuildPersistentVoxelCacheEntries(cacheEntries);
+		}
+
+		const NRIVoxelComputePreloadSettings computePreloadSettings = BuildNRIVoxelComputePreloadSettingsFromCVars();
+		static uint64_t sLastComputePreloadPlanBuildSerial = 0;
+		const bool shouldPlanComputePreload =
+			(computePreloadSettings.enabled || computePreloadSettings.traceLevel >= 1) &&
+			(computePreloadSettings.traceLevel >= 2 || sLastComputePreloadPlanBuildSerial != renderer.mMapWorld.buildSerial);
+		if (shouldPlanComputePreload)
+		{
+			PlanNRIVoxelComputePreload(
+				variants,
+				renderer.mPersistentVoxels,
+				computePreloadSettings,
+				renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : nullptr,
+				renderer.mMapWorld.buildSerial,
+				renderer.mFrameIndex);
+			sLastComputePreloadPlanBuildSerial = renderer.mMapWorld.buildSerial;
 		}
 
 		const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
