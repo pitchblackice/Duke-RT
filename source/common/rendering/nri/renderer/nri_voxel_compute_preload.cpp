@@ -182,11 +182,19 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 	std::unordered_set<uint64_t> selectedMaterials;
 	std::unordered_set<uint64_t> rawUniqueMeshes;
 	std::unordered_set<uint64_t> rawUniqueMaterials;
+	std::unordered_set<uint64_t> rawRequiredMaterials;
+	std::unordered_set<uint64_t> rawOptionalMaterials;
+	std::unordered_set<uint64_t> rawSelectedMaterials;
+	std::unordered_set<uint64_t> rawActorScopedMaterials;
 	uniqueMeshes.reserve(variants.size());
 	uniqueMaterials.reserve(variants.size());
 	selectedMaterials.reserve(variants.size());
 	rawUniqueMeshes.reserve(rawVariants.size());
 	rawUniqueMaterials.reserve(rawVariants.size());
+	rawRequiredMaterials.reserve(rawVariants.size());
+	rawOptionalMaterials.reserve(rawVariants.size());
+	rawSelectedMaterials.reserve(rawVariants.size());
+	rawActorScopedMaterials.reserve(rawVariants.size());
 
 	for (const nri_scene::PrecachedVoxelVariantView& variant : variants)
 	{
@@ -320,6 +328,22 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 		if (variant.materialKeyHash != 0)
 		{
 			rawUniqueMaterials.insert(variant.materialKeyHash);
+			if (required)
+			{
+				rawRequiredMaterials.insert(variant.materialKeyHash);
+			}
+			else
+			{
+				rawOptionalMaterials.insert(variant.materialKeyHash);
+			}
+			if (variant.materialVariantHash != 0 && variant.materialVariantHash != variant.materialKeyHash)
+			{
+				rawActorScopedMaterials.insert(variant.materialKeyHash);
+			}
+		}
+		if (variant.material.texture != nullptr)
+		{
+			stats.rawMaterialTextureRefs++;
 		}
 		if (variant.rawSourceResident)
 		{
@@ -390,6 +414,10 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 
 		stats.rawSelected++;
 		stats.rawSelectedGeometryBytes += estimatedBytes;
+		if (variant.materialKeyHash != 0)
+		{
+			rawSelectedMaterials.insert(variant.materialKeyHash);
+		}
 		if (required)
 		{
 			stats.rawSelectedRequired++;
@@ -404,6 +432,10 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 	stats.uniqueMaterials = (uint32_t)uniqueMaterials.size();
 	stats.rawUniqueMeshes = (uint32_t)rawUniqueMeshes.size();
 	stats.rawUniqueMaterials = (uint32_t)rawUniqueMaterials.size();
+	stats.rawMaterialRequiredKeys = (uint32_t)rawRequiredMaterials.size();
+	stats.rawMaterialOptionalKeys = (uint32_t)rawOptionalMaterials.size();
+	stats.rawMaterialSelectedKeys = (uint32_t)rawSelectedMaterials.size();
+	stats.rawMaterialActorScopedKeys = (uint32_t)rawActorScopedMaterials.size();
 	const NRIPersistentVoxelMemoryUsage memoryUsage = residency.GetMemoryUsage();
 	stats.residentSceneBytes = memoryUsage.sceneBufferBytes;
 	stats.residentAsBytes = memoryUsage.accelerationStructureBytes;
@@ -413,7 +445,7 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 	if (ShouldEmitPreloadTrace(settings))
 	{
 		stats.emitted = true;
-		Printf("NRI PT voxel compute preload: event=plan stage=%s level=%s build_serial=%llu frame=%u enabled=%u dry_run=%u action=%s variants=%u required=%u optional=%u selected=%u selected_required=%u selected_optional=%u unique_meshes=%u unique_materials=%u surface_ready=%u direct_only=%u source_ready=%u material_context=%u mesh_resident=%u material_resident=%u blas_ready=%u ready=%u not_ready=%u material_rows_planned=%u estimated_bytes=%llu selected_bytes=%llu resident_scene_bytes=%llu resident_as_bytes=%llu skipped_disabled=%u skipped_required_off=%u skipped_optional_off=%u skipped_byte_budget=%u skipped_job_budget=%u skipped_material_budget=%u raw_variants=%u raw_required=%u raw_optional=%u raw_selected=%u raw_selected_required=%u raw_selected_optional=%u raw_unique_meshes=%u raw_unique_materials=%u raw_source_resident=%u raw_source_missing=%u raw_material_context=%u raw_material_missing=%u raw_cpu_surface_ready=%u raw_legacy_gpu_candidate=%u raw_legacy_gpu_source_skipped=%u raw_estimated_bytes=%llu raw_selected_bytes=%llu raw_skipped_disabled=%u raw_skipped_required_off=%u raw_skipped_optional_off=%u raw_skipped_source_missing=%u raw_skipped_material_missing=%u raw_skipped_byte_budget=%u raw_skipped_job_budget=%u manifest_sources=%u manifest_lines=%u manifest_requests=%u manifest_discovered=%u manifest_unique=%u manifest_skipped_inactive=%u manifest_skipped_syntax=%u manifest_skipped_actor=%u manifest_skipped_unsupported=%u manifest_skipped_invalid=%u manifest_skipped_duplicate=%u max_ms=%u max_jobs=%u max_blas=%u max_bytes=%llu max_material_rows=%u ms=%.3f\n",
+		Printf("NRI PT voxel compute preload: event=plan stage=%s level=%s build_serial=%llu frame=%u enabled=%u dry_run=%u action=%s variants=%u required=%u optional=%u selected=%u selected_required=%u selected_optional=%u unique_meshes=%u unique_materials=%u surface_ready=%u direct_only=%u source_ready=%u material_context=%u mesh_resident=%u material_resident=%u blas_ready=%u ready=%u not_ready=%u material_rows_planned=%u estimated_bytes=%llu selected_bytes=%llu resident_scene_bytes=%llu resident_as_bytes=%llu skipped_disabled=%u skipped_required_off=%u skipped_optional_off=%u skipped_byte_budget=%u skipped_job_budget=%u skipped_material_budget=%u raw_variants=%u raw_required=%u raw_optional=%u raw_selected=%u raw_selected_required=%u raw_selected_optional=%u raw_unique_meshes=%u raw_unique_materials=%u raw_material_required_keys=%u raw_material_optional_keys=%u raw_material_selected_keys=%u raw_material_actor_scoped_keys=%u raw_material_texture_refs=%u raw_source_resident=%u raw_source_missing=%u raw_material_context=%u raw_material_missing=%u raw_cpu_surface_ready=%u raw_legacy_gpu_candidate=%u raw_legacy_gpu_source_skipped=%u raw_estimated_bytes=%llu raw_selected_bytes=%llu raw_skipped_disabled=%u raw_skipped_required_off=%u raw_skipped_optional_off=%u raw_skipped_source_missing=%u raw_skipped_material_missing=%u raw_skipped_byte_budget=%u raw_skipped_job_budget=%u manifest_sources=%u manifest_lines=%u manifest_requests=%u manifest_discovered=%u manifest_unique=%u manifest_skipped_inactive=%u manifest_skipped_syntax=%u manifest_skipped_actor=%u manifest_skipped_unsupported=%u manifest_skipped_invalid=%u manifest_skipped_duplicate=%u max_ms=%u max_jobs=%u max_blas=%u max_bytes=%llu max_material_rows=%u ms=%.3f\n",
 			timelineStage != nullptr ? timelineStage : "snapshot",
 			levelName != nullptr ? levelName : "unknown",
 			(unsigned long long)buildSerial,
@@ -457,6 +489,11 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 			stats.rawSelectedOptional,
 			stats.rawUniqueMeshes,
 			stats.rawUniqueMaterials,
+			stats.rawMaterialRequiredKeys,
+			stats.rawMaterialOptionalKeys,
+			stats.rawMaterialSelectedKeys,
+			stats.rawMaterialActorScopedKeys,
+			stats.rawMaterialTextureRefs,
 			stats.rawSourceResident,
 			stats.rawSourceMissing,
 			stats.rawMaterialContextReady,
@@ -490,7 +527,7 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 			(unsigned long long)settings.maxBytes,
 			settings.maxMaterialRows,
 			stats.planMs);
-		Printf("PERF pt voxel preload summary NRI: frame=%u enabled=%u dry_run=%u variants=%u required=%u optional=%u selected=%u selected_required=%u selected_optional=%u unique_meshes=%u unique_materials=%u surface_ready=%u direct_only=%u source_ready=%u material_context=%u mesh_resident=%u material_resident=%u blas_ready=%u ready=%u not_ready=%u material_rows_planned=%u estimated_bytes=%llu selected_bytes=%llu resident_scene_bytes=%llu resident_as_bytes=%llu skipped_disabled=%u skipped_required_off=%u skipped_optional_off=%u skipped_byte_budget=%u skipped_job_budget=%u skipped_material_budget=%u raw_variants=%u raw_required=%u raw_optional=%u raw_selected=%u raw_selected_required=%u raw_selected_optional=%u raw_unique_meshes=%u raw_unique_materials=%u raw_source_resident=%u raw_source_missing=%u raw_material_context=%u raw_material_missing=%u raw_cpu_surface_ready=%u raw_legacy_gpu_candidate=%u raw_legacy_gpu_source_skipped=%u raw_estimated_bytes=%llu raw_selected_bytes=%llu raw_skipped_disabled=%u raw_skipped_required_off=%u raw_skipped_optional_off=%u raw_skipped_source_missing=%u raw_skipped_material_missing=%u raw_skipped_byte_budget=%u raw_skipped_job_budget=%u manifest_sources=%u manifest_lines=%u manifest_requests=%u manifest_discovered=%u manifest_unique=%u manifest_skipped_inactive=%u manifest_skipped_syntax=%u manifest_skipped_actor=%u manifest_skipped_unsupported=%u manifest_skipped_invalid=%u manifest_skipped_duplicate=%u max_ms=%u max_jobs=%u max_blas=%u max_bytes=%llu max_material_rows=%u plan_ms=%.3f\n",
+		Printf("PERF pt voxel preload summary NRI: frame=%u enabled=%u dry_run=%u variants=%u required=%u optional=%u selected=%u selected_required=%u selected_optional=%u unique_meshes=%u unique_materials=%u surface_ready=%u direct_only=%u source_ready=%u material_context=%u mesh_resident=%u material_resident=%u blas_ready=%u ready=%u not_ready=%u material_rows_planned=%u estimated_bytes=%llu selected_bytes=%llu resident_scene_bytes=%llu resident_as_bytes=%llu skipped_disabled=%u skipped_required_off=%u skipped_optional_off=%u skipped_byte_budget=%u skipped_job_budget=%u skipped_material_budget=%u raw_variants=%u raw_required=%u raw_optional=%u raw_selected=%u raw_selected_required=%u raw_selected_optional=%u raw_unique_meshes=%u raw_unique_materials=%u raw_material_required_keys=%u raw_material_optional_keys=%u raw_material_selected_keys=%u raw_material_actor_scoped_keys=%u raw_material_texture_refs=%u raw_source_resident=%u raw_source_missing=%u raw_material_context=%u raw_material_missing=%u raw_cpu_surface_ready=%u raw_legacy_gpu_candidate=%u raw_legacy_gpu_source_skipped=%u raw_estimated_bytes=%llu raw_selected_bytes=%llu raw_skipped_disabled=%u raw_skipped_required_off=%u raw_skipped_optional_off=%u raw_skipped_source_missing=%u raw_skipped_material_missing=%u raw_skipped_byte_budget=%u raw_skipped_job_budget=%u manifest_sources=%u manifest_lines=%u manifest_requests=%u manifest_discovered=%u manifest_unique=%u manifest_skipped_inactive=%u manifest_skipped_syntax=%u manifest_skipped_actor=%u manifest_skipped_unsupported=%u manifest_skipped_invalid=%u manifest_skipped_duplicate=%u max_ms=%u max_jobs=%u max_blas=%u max_bytes=%llu max_material_rows=%u plan_ms=%.3f\n",
 			frameIndex,
 			settings.enabled ? 1u : 0u,
 			settings.dryRun ? 1u : 0u,
@@ -530,6 +567,11 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 			stats.rawSelectedOptional,
 			stats.rawUniqueMeshes,
 			stats.rawUniqueMaterials,
+			stats.rawMaterialRequiredKeys,
+			stats.rawMaterialOptionalKeys,
+			stats.rawMaterialSelectedKeys,
+			stats.rawMaterialActorScopedKeys,
+			stats.rawMaterialTextureRefs,
 			stats.rawSourceResident,
 			stats.rawSourceMissing,
 			stats.rawMaterialContextReady,

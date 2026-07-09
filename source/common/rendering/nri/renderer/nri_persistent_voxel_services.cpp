@@ -370,11 +370,37 @@ public:
 			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
 			return renderer->mFrameBuffer != nullptr && renderer->mFrameBuffer->IsPreloadSubmitBudgetHit();
 		};
+		preloadServices.buildMaterials = [](void* user, nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label)
+		{
+			Clocker materialClock(NriPTMaterialBuild);
+			static_cast<NRIRenderer*>(user)->BuildMaterialsWithActorOverrides(sceneView, materials, label);
+		};
+		preloadServices.prewarmTexture = [](void* user, const nri_scene::TextureUpload& upload) -> bool
+		{
+			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			if (upload.width == 0 || upload.height == 0)
+			{
+				return true;
+			}
+			if (renderer->mFrameBuffer != nullptr &&
+				renderer->mFrameBuffer->mActiveCanvasSourceTexture != nullptr &&
+				upload.sourceTexture == renderer->mFrameBuffer->mActiveCanvasSourceTexture)
+			{
+				return true;
+			}
+			if (upload.sourceTexture != nullptr && upload.sourceTexture->isHardwareCanvas())
+			{
+				return true;
+			}
+			return renderer->EnsureSceneTextureCacheEntry(upload);
+		};
 		return renderer.mPersistentVoxels.PreloadResources(
 			variants,
 			cacheEntries,
 			hasCacheEntries,
 			gpuLoadingEnabled,
+			computePreloadSettings.enabled && !computePreloadSettings.dryRun && computePreloadSettings.preloadMaterials,
+			computePreloadSettings.maxMaterialRows,
 			renderer.mMapWorld.buildSerial,
 			renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : nullptr,
 			renderer.mFrameIndex,

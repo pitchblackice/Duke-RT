@@ -69,6 +69,11 @@ struct NRIVoxelComputePreloadStats
 	uint32_t rawSourceMissing = 0;
 	uint32_t rawMaterialContextReady = 0;
 	uint32_t rawMaterialContextMissing = 0;
+	uint32_t rawMaterialRequiredKeys = 0;
+	uint32_t rawMaterialOptionalKeys = 0;
+	uint32_t rawMaterialSelectedKeys = 0;
+	uint32_t rawMaterialActorScopedKeys = 0;
+	uint32_t rawMaterialTextureRefs = 0;
 	uint32_t rawCpuSurfaceReady = 0;
 	uint32_t rawLegacyGpuCandidate = 0;
 	uint32_t rawLegacyGpuSourceSkipped = 0;

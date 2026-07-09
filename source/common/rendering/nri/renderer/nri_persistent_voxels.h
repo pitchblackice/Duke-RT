@@ -315,6 +315,8 @@ struct NRIPersistentVoxelPreloadServices
 	using EnsureBatchFn = bool (*)(void* user, NRIPersistentVoxelBatchStats* outStats);
 	using WarmSharedBlasFn = bool (*)(void* user, const std::vector<nri_scene::PrecachedVoxelVariantView>& variants, uint32_t frameIndex);
 	using IsSubmitBudgetHitFn = bool (*)(void* user);
+	using BuildMaterialsFn = void (*)(void* user, nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label);
+	using PrewarmTextureFn = bool (*)(void* user, const nri_scene::TextureUpload& upload);
 
 	void* user = nullptr;
 	PumpAdmissionQueueFn pumpAdmissionQueue = nullptr;
@@ -322,12 +324,16 @@ struct NRIPersistentVoxelPreloadServices
 	EnsureBatchFn ensureBatch = nullptr;
 	WarmSharedBlasFn warmSharedBlas = nullptr;
 	IsSubmitBudgetHitFn isSubmitBudgetHit = nullptr;
+	BuildMaterialsFn buildMaterials = nullptr;
+	PrewarmTextureFn prewarmTexture = nullptr;
 
 	bool PumpAdmissionQueue(const char* phase) const;
 	void PumpComputeJobs(uint32_t frameIndex) const;
 	bool EnsureBatch(NRIPersistentVoxelBatchStats* outStats = nullptr) const;
 	bool WarmSharedBlas(const std::vector<nri_scene::PrecachedVoxelVariantView>& variants, uint32_t frameIndex) const;
 	bool IsSubmitBudgetHit() const;
+	void BuildMaterials(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label) const;
+	bool PrewarmTexture(const nri_scene::TextureUpload& upload) const;
 };
 
 struct NRIPersistentVoxelAdmissionServices
@@ -598,6 +604,27 @@ struct NRIPersistentVoxelMaterialUploadStats
 	uint32_t domainHashMisses = 0;
 };
 
+struct NRIPersistentVoxelMaterialPreloadStats
+{
+	bool attempted = false;
+	uint32_t variants = 0;
+	uint32_t directOnlyVariants = 0;
+	uint32_t candidates = 0;
+	uint32_t uniqueMaterials = 0;
+	uint32_t selected = 0;
+	uint32_t reused = 0;
+	uint32_t built = 0;
+	uint32_t failed = 0;
+	uint32_t skippedInvalid = 0;
+	uint32_t skippedMaterialBudget = 0;
+	uint32_t actorScopedMaterials = 0;
+	uint32_t materialRows = 0;
+	uint32_t textureRequests = 0;
+	uint64_t materialBytes = 0;
+	uint64_t textureBytes = 0;
+	double buildMs = 0.0;
+};
+
 struct NRIPersistentVoxelBatchStats
 {
 	double persistentVoxelBatchCacheEntryMs = 0.0;
@@ -788,6 +815,8 @@ public:
 		const std::vector<nri_scene::PersistentVoxelCacheEntryView>& cacheEntries,
 		bool hasCacheEntries,
 		bool gpuLoadingEnabled,
+		bool preloadMaterialPayloads,
+		uint32_t preloadMaterialMaxRows,
 		uint64_t buildSerial,
 		const char* levelName,
 		uint32_t frameIndex,
@@ -855,6 +884,16 @@ public:
 		bool voxelStatsEnabled,
 		const NRIPersistentVoxelResetServices& resetServices,
 		const NRIPersistentVoxelAccelerationServices& accelerationServices);
+	bool PreloadMaterialPayloads(
+		const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
+		uint64_t buildSerial,
+		const char* levelName,
+		uint32_t frameIndex,
+		uint32_t maxMaterialRows,
+		int loadingTraceLevel,
+		bool voxelStatsEnabled,
+		const NRIPersistentVoxelPreloadServices& preloadServices,
+		NRIPersistentVoxelMaterialPreloadStats& outStats);
 	NRIPersistentVoxelDescriptorSnapshot BuildDescriptorSnapshot(
 		const NRIBufferResource& fallbackVertexBuffer,
 		const NRIBufferResource& fallbackIndexBuffer,

@@ -485,6 +485,22 @@ bool NRIPersistentVoxelPreloadServices::IsSubmitBudgetHit() const
 	return isSubmitBudgetHit != nullptr && isSubmitBudgetHit(user);
 }
 
+void NRIPersistentVoxelPreloadServices::BuildMaterials(
+	nri_scene::SceneView& sceneView,
+	nri_scene::MaterialBridgeData& materials,
+	const char* label) const
+{
+	if (buildMaterials != nullptr)
+	{
+		buildMaterials(user, sceneView, materials, label);
+	}
+}
+
+bool NRIPersistentVoxelPreloadServices::PrewarmTexture(const nri_scene::TextureUpload& upload) const
+{
+	return prewarmTexture == nullptr || prewarmTexture(user, upload);
+}
+
 bool NRIPersistentVoxelAdmissionServices::AdmitVariantResource(
 	PersistentVoxelAdmissionEntry& entry,
 	uint64_t byteBudget,
@@ -7756,11 +7772,215 @@ bool NRIPersistentVoxelResidency::PreloadVariantResources(
 	return ok;
 }
 
+bool NRIPersistentVoxelResidency::PreloadMaterialPayloads(
+	const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
+	uint64_t buildSerial,
+	const char* levelName,
+	uint32_t frameIndex,
+	uint32_t maxMaterialRows,
+	int loadingTraceLevel,
+	bool voxelStatsEnabled,
+	const NRIPersistentVoxelPreloadServices& preloadServices,
+	NRIPersistentVoxelMaterialPreloadStats& outStats)
+{
+	const auto start = std::chrono::steady_clock::now();
+	outStats = {};
+	outStats.attempted = true;
+	outStats.variants = (uint32_t)variants.size();
+
+	std::unordered_set<uint64_t> seenMaterials;
+	seenMaterials.reserve(variants.size());
+	bool ok = true;
+	for (const nri_scene::PrecachedVoxelVariantView& variant : variants)
+	{
+		if (!variant.directOnlyAdmission)
+		{
+			continue;
+		}
+		outStats.directOnlyVariants++;
+		if (variant.materialKeyHash == 0 ||
+			variant.material.texture == nullptr ||
+			variant.materialSurface.material.texture == nullptr)
+		{
+			outStats.skippedInvalid++;
+			continue;
+		}
+		if (!seenMaterials.insert(variant.materialKeyHash).second)
+		{
+			continue;
+		}
+
+		outStats.candidates++;
+		if (variant.materialVariantHash != 0 && variant.materialVariantHash != variant.materialKeyHash)
+		{
+			outStats.actorScopedMaterials++;
+		}
+
+		auto existingIt = materialVariantResources.find(variant.materialKeyHash);
+		const bool existingReady =
+			existingIt != materialVariantResources.end() &&
+			existingIt->second.materialKeyHash == variant.materialKeyHash &&
+			existingIt->second.materialCount != 0 &&
+			!existingIt->second.materialBridge.materials.empty();
+		if (existingReady)
+		{
+			PersistentVoxelMaterialVariantResource& resource = existingIt->second;
+			resource.lastDesiredMapGeneration = residencyMapGeneration;
+			resource.lastUsedMapGeneration = residencyMapGeneration;
+			resource.lastUsedFrame = frameIndex;
+			resource.sourceBits |= variant.sourceBits;
+			resource.priority = std::min(resource.priority, variant.priority);
+			resource.gpuForce = resource.gpuForce || variant.gpuForce;
+			resource.gpuPrefer = resource.gpuPrefer || variant.gpuPrefer;
+			resource.cold = false;
+			outStats.reused++;
+			outStats.materialRows += resource.materialCount;
+			outStats.materialBytes +=
+				(uint64_t)resource.materialBridge.materials.size() * (uint64_t)sizeof(nri_scene::MaterialData);
+			outStats.textureRequests += (uint32_t)resource.materialBridge.textures.size();
+			for (const nri_scene::TextureUpload& upload : resource.materialBridge.textures)
+			{
+				outStats.textureBytes += (uint64_t)upload.width * (uint64_t)upload.height * 4ull;
+			}
+			continue;
+		}
+
+		nri_scene::SurfaceRef surface = variant.materialSurface;
+		surface.material = variant.material;
+		nri_scene::SceneView variantSceneView = {};
+		variantSceneView.opaqueSprites.push_back(std::move(surface));
+		variantSceneView.stats.spriteDrawItems = 1;
+		variantSceneView.stats.modelDrawItems = 1;
+		variantSceneView.stats.voxelProxyDrawItems = 1;
+		variantSceneView.stats.totalDrawItems = 1;
+		variantSceneView.stats.materialRefs = 1;
+		variantSceneView.stats.triangleEstimate = variant.primitiveCount;
+		variantSceneView.stats.voxelCachePrimitives = variant.primitiveCount;
+
+		nri_scene::MaterialBridgeData builtMaterials;
+		preloadServices.BuildMaterials(variantSceneView, builtMaterials, "persistent_voxel_preload_material");
+		if (builtMaterials.materials.empty())
+		{
+			outStats.failed++;
+			ok = false;
+			continue;
+		}
+		if (maxMaterialRows != 0 && outStats.materialRows + (uint32_t)builtMaterials.materials.size() > maxMaterialRows)
+		{
+			outStats.skippedMaterialBudget++;
+			continue;
+		}
+
+		bool texturesReady = true;
+		for (const nri_scene::TextureUpload& upload : builtMaterials.textures)
+		{
+			if (upload.width == 0 || upload.height == 0)
+			{
+				continue;
+			}
+			outStats.textureRequests++;
+			outStats.textureBytes += (uint64_t)upload.width * (uint64_t)upload.height * 4ull;
+			if (!preloadServices.PrewarmTexture(upload))
+			{
+				texturesReady = false;
+			}
+		}
+		if (!texturesReady)
+		{
+			outStats.failed++;
+			ok = false;
+			continue;
+		}
+
+		PersistentVoxelMaterialVariantResource resource = {};
+		resource.materialKeyHash = variant.materialKeyHash;
+		resource.materialSignature = variant.materialVariantHash != 0 ? variant.materialVariantHash : variant.materialKeyHash;
+		resource.materialBridge = std::move(builtMaterials);
+		resource.materialCount = (uint32_t)resource.materialBridge.materials.size();
+		resource.materialCapacity = resource.materialCount;
+		resource.materialOffset = arenaMaterialCursor;
+		arenaMaterialCursor += resource.materialCapacity;
+		resource.lastDesiredMapGeneration = residencyMapGeneration;
+		resource.lastUsedMapGeneration = residencyMapGeneration;
+		resource.lastUsedFrame = frameIndex;
+		resource.sourceBits |= variant.sourceBits;
+		resource.priority = variant.priority;
+		resource.gpuForce = variant.gpuForce;
+		resource.gpuPrefer = variant.gpuPrefer;
+		resource.materialPayloadHash = HashPersistentVoxelMaterialPayloadData(resource.materialBridge);
+		resource.materialUploadHash = 0;
+		resource.residentBytes =
+			(uint64_t)resource.materialBridge.materials.size() * (uint64_t)sizeof(nri_scene::MaterialData);
+		resource.cold = false;
+
+		outStats.selected++;
+		outStats.built++;
+		outStats.materialRows += resource.materialCount;
+		outStats.materialBytes += resource.residentBytes;
+		materialVariantResources[variant.materialKeyHash] = std::move(resource);
+		publishedMaterialKeys.insert(variant.materialKeyHash);
+	}
+
+	outStats.uniqueMaterials = (uint32_t)seenMaterials.size();
+	if (batch.valid)
+	{
+		RebuildBatchMaterialBridge(batch);
+		RecomputeBatchState(batch);
+	}
+	outStats.buildMs = PersistentVoxelDurationMs(start, std::chrono::steady_clock::now());
+	if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
+	{
+		Printf("NRI PT voxel preload material: level=%s build_serial=%llu frame=%u variants=%u direct=%u candidates=%u unique=%u selected=%u built=%u reused=%u failed=%u skipped_invalid=%u skipped_material_budget=%u actor_scoped=%u material_rows=%u material_bytes=%llu texture_requests=%u texture_bytes=%llu ms=%.3f\n",
+			levelName != nullptr ? levelName : "unknown",
+			(unsigned long long)buildSerial,
+			frameIndex,
+			outStats.variants,
+			outStats.directOnlyVariants,
+			outStats.candidates,
+			outStats.uniqueMaterials,
+			outStats.selected,
+			outStats.built,
+			outStats.reused,
+			outStats.failed,
+			outStats.skippedInvalid,
+			outStats.skippedMaterialBudget,
+			outStats.actorScopedMaterials,
+			outStats.materialRows,
+			(unsigned long long)outStats.materialBytes,
+			outStats.textureRequests,
+			(unsigned long long)outStats.textureBytes,
+			outStats.buildMs);
+		Printf("PERF pt voxel preload material NRI: level=%s build_serial=%llu frame=%u variants=%u direct=%u candidates=%u unique=%u selected=%u built=%u reused=%u failed=%u skipped_invalid=%u skipped_material_budget=%u actor_scoped=%u material_rows=%u material_bytes=%llu texture_requests=%u texture_bytes=%llu ms=%.3f\n",
+			levelName != nullptr ? levelName : "unknown",
+			(unsigned long long)buildSerial,
+			frameIndex,
+			outStats.variants,
+			outStats.directOnlyVariants,
+			outStats.candidates,
+			outStats.uniqueMaterials,
+			outStats.selected,
+			outStats.built,
+			outStats.reused,
+			outStats.failed,
+			outStats.skippedInvalid,
+			outStats.skippedMaterialBudget,
+			outStats.actorScopedMaterials,
+			outStats.materialRows,
+			(unsigned long long)outStats.materialBytes,
+			outStats.textureRequests,
+			(unsigned long long)outStats.textureBytes,
+			outStats.buildMs);
+	}
+	return ok;
+}
+
 bool NRIPersistentVoxelResidency::PreloadResources(
 	const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
 	const std::vector<nri_scene::PersistentVoxelCacheEntryView>& cacheEntries,
 	bool hasCacheEntries,
 	bool gpuLoadingEnabled,
+	bool preloadMaterialPayloads,
+	uint32_t preloadMaterialMaxRows,
 	uint64_t buildSerial,
 	const char* levelName,
 	uint32_t frameIndex,
@@ -7809,6 +8029,21 @@ bool NRIPersistentVoxelResidency::PreloadResources(
 		settings,
 		loadingTraceLevel,
 		resetServices);
+
+	if (preloadMaterialPayloads)
+	{
+		NRIPersistentVoxelMaterialPreloadStats materialPreloadStats = {};
+		PreloadMaterialPayloads(
+			variants,
+			buildSerial,
+			levelName,
+			frameIndex,
+			preloadMaterialMaxRows,
+			loadingTraceLevel,
+			voxelStatsEnabled,
+			preloadServices,
+			materialPreloadStats);
+	}
 
 	if (!PreloadVariantResources(
 		variants,
