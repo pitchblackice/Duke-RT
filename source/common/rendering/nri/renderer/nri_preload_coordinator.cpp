@@ -381,7 +381,10 @@ bool NRIPreloadCoordinator::Finish(NRIRenderer& renderer, const Context& context
 		renderer.mStaticMapScene.accelerationResident &&
 		(!renderer.mMapWorld.valid || renderer.mStaticMapScene.buildSerial == renderer.mMapWorld.buildSerial);
 	const NRIPersistentVoxelPreloadStatus voxelStatus = renderer.mPersistentVoxels.BuildPreloadStatusSnapshot();
+	const NRIPersistentVoxelStatusSnapshot voxelSnapshot = renderer.mPersistentVoxels.BuildStatusSnapshot();
+	const NRIPersistentVoxelMemoryUsage voxelMemory = renderer.mPersistentVoxels.GetMemoryUsage();
 	const NRIRenderer::PreloadMaterialStatus& materialStatus = renderer.GetPreloadMaterialStatus();
+	const double preloadMs = DurationMs(context.start, std::chrono::steady_clock::now());
 	Printf("NRI PT loading summary: static_ready=%u startup_correction_pending=%u required_voxel_pending=%u required_voxel_ready=%u optional_voxel_pending=%u voxel_batch_ready=%u voxel_batch_pending=%u deferred_texture_prewarm=%u deferred_onboarding=%u material_pending=%u material_static_ready=%u material_static_pending=%u material_static_realized=%u material_static_bytes=%llu material_voxel_ready=%u material_voxel_pending=%u material_voxel_realized=%u material_voxel_bytes=%llu preload_submits=%u preload_submit_limit=%u submit_budget_hit=%u ms_budget_hit=%u frame_target_used=%u standalone_context_used=%u gpu_voxel_loading=%u static_light_refresh=%u\n",
 		staticReady ? 1u : 0u,
 		renderer.mAllowStartupMapWorldCorrection ? 1u : 0u,
@@ -409,6 +412,31 @@ bool NRIPreloadCoordinator::Finish(NRIRenderer& renderer, const Context& context
 		context.standaloneContextUsed ? 1u : 0u,
 		voxelStatus.gpuLoadingEnabled ? 1u : 0u,
 		context.staticLightRefreshReady ? 1u : 0u);
+	Printf("PERF pt preload ready NRI: level=%s build_serial=%llu preload_ms=%.3f static_chunks=%u static_tris=%u static_materials=%u required_voxel_pending=%u required_voxel_ready=%u optional_voxel_pending=%u voxel_batch_ready=%u voxel_batch_pending=%u mesh_resources=%u material_resources=%u admission_queue=%u active_instances=%u pv_scene_bytes=%llu pv_as_bytes=%llu pv_total_bytes=%llu material_static_bytes=%llu material_voxel_bytes=%llu preload_submits=%u submit_budget_hit=%u ms_budget_hit=%u gpu_voxel_loading=%u\n",
+		renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : "(none)",
+		(unsigned long long)renderer.mMapWorld.buildSerial,
+		preloadMs,
+		(uint32_t)renderer.mStaticMapScene.chunks.size(),
+		(uint32_t)renderer.mStaticMapScene.geometry.primitives.size(),
+		(uint32_t)renderer.mStaticMapScene.gpuMaterials.size(),
+		voxelStatus.requiredPending,
+		voxelStatus.requiredReady,
+		voxelStatus.optionalPending,
+		voxelStatus.batchReady ? 1u : 0u,
+		voxelStatus.batchPendingActors,
+		voxelSnapshot.meshVariantResourceCount,
+		voxelSnapshot.materialVariantResourceCount,
+		voxelSnapshot.admissionQueueCount,
+		voxelSnapshot.activeInstanceCount,
+		(unsigned long long)voxelMemory.sceneBufferBytes,
+		(unsigned long long)voxelMemory.accelerationStructureBytes,
+		(unsigned long long)(voxelMemory.sceneBufferBytes + voxelMemory.accelerationStructureBytes),
+		(unsigned long long)materialStatus.staticUploadBytes,
+		(unsigned long long)materialStatus.voxelUploadBytes,
+		materialStatus.preloadSubmits,
+		materialStatus.submitBudgetHit ? 1u : 0u,
+		materialStatus.msBudgetHit ? 1u : 0u,
+		voxelStatus.gpuLoadingEnabled ? 1u : 0u);
 	Printf("NRI PT preload ready: level=%s build_serial=%llu chunks=%u tris=%u materials=%u\n",
 		renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : "(none)",
 		(unsigned long long)renderer.mMapWorld.buildSerial,
@@ -427,7 +455,7 @@ bool NRIPreloadCoordinator::Finish(NRIRenderer& renderer, const Context& context
 	{
 		Printf("NRI PT loading gate: event=renderer-preload result=ready reason=complete static_light_refresh=%u ms=%.3f\n",
 			context.staticLightRefreshReady ? 1u : 0u,
-			DurationMs(context.start, std::chrono::steady_clock::now()));
+			preloadMs);
 	}
 	return true;
 }
