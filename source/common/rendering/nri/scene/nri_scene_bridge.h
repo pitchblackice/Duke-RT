@@ -360,6 +360,8 @@ struct PrecachedVoxelRawManifestView
 {
 	uint64_t meshKeyHash = 0;
 	uint64_t materialKeyHash = 0;
+	uint64_t geometryContentHash = 0;
+	uint64_t renderPrimitiveHash = 0;
 	uint64_t meshVariantHash = 0;
 	uint64_t materialVariantHash = 0;
 	uint32_t sourceBits = 0;

@@ -295,7 +295,11 @@ public:
 						(uint32_t)directPreloadVariants.size(),
 						(uint32_t)variants.size());
 				}
-				variants.insert(variants.end(), directPreloadVariants.begin(), directPreloadVariants.end());
+				std::vector<nri_scene::PrecachedVoxelVariantView> mergedVariants;
+				mergedVariants.reserve(directPreloadVariants.size() + variants.size());
+				mergedVariants.insert(mergedVariants.end(), directPreloadVariants.begin(), directPreloadVariants.end());
+				mergedVariants.insert(mergedVariants.end(), variants.begin(), variants.end());
+				variants = std::move(mergedVariants);
 			}
 		}
 

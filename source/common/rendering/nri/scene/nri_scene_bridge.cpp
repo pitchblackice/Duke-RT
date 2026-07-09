@@ -6424,7 +6424,14 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.materialKeyHash = desiredDirectPending ? entry.second->desiredMaterialKeyHash : entry.second->materialKeyHash;
 		uint64_t geometryContentHash = desiredDirectPending ? 0ull : entry.second->geometryContentHash;
 		uint64_t renderPrimitiveHash = desiredDirectPending ? 0ull : entry.second->renderPrimitiveHash;
-		if (!desiredDirectPending && (geometryContentHash == 0 || renderPrimitiveHash == 0) && entry.second->sharedVariantSurface)
+		if (desiredDirectPending)
+		{
+			GetReadyVoxelMeshVariantContentHashes(
+				entry.second->desiredMeshVariantHash,
+				geometryContentHash,
+				renderPrimitiveHash);
+		}
+		else if ((geometryContentHash == 0 || renderPrimitiveHash == 0) && entry.second->sharedVariantSurface)
 		{
 			uint64_t cachedGeometryContentHash = 0;
 			uint64_t cachedRenderPrimitiveHash = 0;
@@ -6842,6 +6849,9 @@ bool BuildPrecachedVoxelRawManifestViews(std::vector<PrecachedVoxelRawManifestVi
 			(request.gpuForce || request.gpuPrefer);
 		const bool forcedGpu = explicitGpu && request.gpuForce;
 		const bool preferredGpu = explicitGpu && request.gpuPrefer && !request.gpuForce;
+		uint64_t geometryContentHash = 0;
+		uint64_t renderPrimitiveHash = 0;
+		GetReadyVoxelMeshVariantContentHashes(request.meshVariantHash, geometryContentHash, renderPrimitiveHash);
 
 		FGameTexture* voxelTexture = TexMan.GetGameTexture(request.model->GetPaletteTexture());
 		if (voxelTexture != nullptr && !voxelTexture->isValid())
@@ -6888,6 +6898,8 @@ bool BuildPrecachedVoxelRawManifestViews(std::vector<PrecachedVoxelRawManifestVi
 			PrecachedVoxelRawManifestView view = {};
 			view.meshKeyHash = request.meshVariantHash;
 			view.materialKeyHash = materialVariantHash;
+			view.geometryContentHash = geometryContentHash;
+			view.renderPrimitiveHash = renderPrimitiveHash;
 			view.meshVariantHash = request.meshVariantHash;
 			view.materialVariantHash = materialVariantHash;
 			view.sourceBits = request.sourceBits | context.sourceBits;

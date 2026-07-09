@@ -3944,7 +3944,8 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				(unsigned long long)entry.estimatedBytes);
 		}
 
-		nri_scene::SurfaceRef surface = directOnlyAdmission ? variant.materialSurface : *variant.surface;
+		nri_scene::SurfaceRef surface =
+			(directOnlyAdmission && variant.surface == nullptr) ? variant.materialSurface : *variant.surface;
 		surface.material = variant.material;
 		nri_scene::SceneView variantSceneView = {};
 		variantSceneView.opaqueSprites.push_back(std::move(surface));
@@ -4249,7 +4250,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			}
 		}
 
-		if (directOnlyAdmission)
+		if (directOnlyAdmission && variant.surface == nullptr)
 		{
 			entry.state = PersistentVoxelAdmissionState::Pending;
 			entry.lastReason = "direct-only-no-cpu-fallback";
@@ -7432,6 +7433,13 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 			variant.model != nullptr &&
 			variant.primitiveCount != 0 &&
 			entry.state != PersistentVoxelAdmissionState::DirectComputePending;
+		const bool preloadDirectCandidate =
+			!runtimeRequested &&
+			variant.directOnlyAdmission &&
+			ShouldDirectPublishNRIVoxelComputeMeshing() &&
+			variant.model != nullptr &&
+			variant.primitiveCount != 0 &&
+			entry.state != PersistentVoxelAdmissionState::DirectComputePending;
 		const bool shouldPromoteRuntimeVariant =
 			!resourcesReady &&
 			runtimeDirectCandidate &&
@@ -7444,13 +7452,21 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 			 entry.state == PersistentVoxelAdmissionState::UploadingIndices ||
 			 entry.state == PersistentVoxelAdmissionState::UploadingPrimitives ||
 			 entry.state == PersistentVoxelAdmissionState::BuildingBlas);
-		if (shouldPromoteRuntimeVariant)
+		const bool shouldPromotePreloadDirectVariant =
+			!resourcesReady &&
+			preloadDirectCandidate &&
+			!entry.variant.directOnlyAdmission &&
+			!entry.uploadPrepared &&
+			entry.state != PersistentVoxelAdmissionState::UploadingVertices &&
+			entry.state != PersistentVoxelAdmissionState::UploadingIndices &&
+			entry.state != PersistentVoxelAdmissionState::UploadingPrimitives &&
+			entry.state != PersistentVoxelAdmissionState::BuildingBlas;
+		if (shouldPromoteRuntimeVariant || shouldPromotePreloadDirectVariant)
 		{
 			nri_scene::PrecachedVoxelVariantView promotedVariant = variant;
 			if (promotedVariant.surface == nullptr && entry.variant.surface != nullptr)
 			{
 				promotedVariant.surface = entry.variant.surface;
-				promotedVariant.directOnlyAdmission = false;
 				if (promotedVariant.geometryContentHash == 0)
 				{
 					promotedVariant.geometryContentHash = entry.variant.geometryContentHash;
@@ -7465,7 +7481,26 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 			entry.state = PersistentVoxelAdmissionState::Pending;
 			entry.retryCount = 0;
 			entry.estimatedBytes = estimateAdmissionBytes(entry.variant);
-			entry.lastReason = "runtime-direct-promote";
+			entry.lastReason = shouldPromotePreloadDirectVariant ? "preload-direct-promote" : "runtime-direct-promote";
+		}
+		else if (!resourcesReady &&
+			entry.variant.directOnlyAdmission &&
+			entry.variant.surface == nullptr &&
+			variant.surface != nullptr)
+		{
+			entry.variant.surface = variant.surface;
+			if (entry.variant.geometryContentHash == 0)
+			{
+				entry.variant.geometryContentHash = variant.geometryContentHash;
+			}
+			if (entry.variant.renderPrimitiveHash == 0)
+			{
+				entry.variant.renderPrimitiveHash = variant.renderPrimitiveHash;
+			}
+			if (entry.lastReason == nullptr || std::strcmp(entry.lastReason, "queued") == 0)
+			{
+				entry.lastReason = "direct-fallback-surface";
+			}
 		}
 		entry.sourceBits |= variant.sourceBits;
 		entry.priority = std::min(entry.priority, variant.priority);

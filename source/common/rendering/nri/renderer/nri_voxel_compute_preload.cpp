@@ -126,6 +126,8 @@ void BuildNRIVoxelComputePreloadDirectVariants(
 		variant.meshKeyHash = rawVariant.meshKeyHash;
 		variant.materialKeyHash = rawVariant.materialKeyHash;
 		variant.geometrySignature = rawVariant.meshVariantHash != 0 ? rawVariant.meshVariantHash : rawVariant.meshKeyHash;
+		variant.geometryContentHash = rawVariant.geometryContentHash;
+		variant.renderPrimitiveHash = rawVariant.renderPrimitiveHash;
 		variant.meshVariantHash = rawVariant.meshVariantHash;
 		variant.materialVariantHash = rawVariant.materialVariantHash;
 		variant.sourceBits = rawVariant.sourceBits;
