@@ -3,10 +3,13 @@
 #include "nri_cvars.h"
 #include "nri_render_geometry_helpers.h"
 #include "nri_voxel_compute_preload.h"
+#include "nri_voxel_compute_meshing.h"
 #include "../system/nri_renderdevice.h"
 #include "hw_voxels.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "mapinfo.h"
+
+#include <algorithm>
 
 class NRIPersistentVoxelServiceFactory
 {
@@ -223,31 +226,77 @@ public:
 	static bool PreloadResources(NRIRenderer& renderer)
 	{
 		std::vector<nri_scene::PrecachedVoxelVariantView> variants;
+		std::vector<nri_scene::PrecachedVoxelRawManifestView> rawVariants;
+		nri_scene::PrecachedVoxelRawManifestStats rawManifestStats = {};
 		std::vector<nri_scene::PersistentVoxelCacheEntryView> cacheEntries;
 		const bool gpuLoadingEnabled = (bool)nri_ptloadingvoxelgpu;
 		bool hasCacheEntries = false;
 		nri_scene::PreloadLiveActorVoxelRawSources();
+		const NRIVoxelComputePreloadSettings computePreloadSettings = BuildNRIVoxelComputePreloadSettingsFromCVars();
+		const bool computePreloadPlanningEnabled =
+			computePreloadSettings.enabled || computePreloadSettings.traceLevel >= 1 || (int)nri_ptloadingtrace >= 1;
+		if (computePreloadPlanningEnabled)
+		{
+			nri_scene::BuildPrecachedVoxelRawManifestViews(rawVariants, &rawManifestStats);
+		}
 		if (gpuLoadingEnabled)
 		{
 			nri_scene::BuildPrecachedVoxelVariantViews(variants);
 			hasCacheEntries = nri_scene::BuildPersistentVoxelCacheEntries(cacheEntries);
 		}
 
-		const NRIVoxelComputePreloadSettings computePreloadSettings = BuildNRIVoxelComputePreloadSettingsFromCVars();
-		static uint64_t sLastComputePreloadPlanBuildSerial = 0;
+		struct ComputePreloadTimeline
+		{
+			uint64_t buildSerial = 0;
+			uint32_t maxRawVariants = 0;
+			uint32_t maxLegacyVariants = 0;
+		};
+		static ComputePreloadTimeline sComputePreloadTimeline = {};
+		const bool newTimeline = sComputePreloadTimeline.buildSerial != renderer.mMapWorld.buildSerial;
+		if (newTimeline)
+		{
+			sComputePreloadTimeline = {};
+			sComputePreloadTimeline.buildSerial = renderer.mMapWorld.buildSerial;
+		}
+		const bool improvedTimeline =
+			(uint32_t)rawVariants.size() > sComputePreloadTimeline.maxRawVariants ||
+			(uint32_t)variants.size() > sComputePreloadTimeline.maxLegacyVariants;
 		const bool shouldPlanComputePreload =
-			(computePreloadSettings.enabled || computePreloadSettings.traceLevel >= 1) &&
-			(computePreloadSettings.traceLevel >= 2 || sLastComputePreloadPlanBuildSerial != renderer.mMapWorld.buildSerial);
+			computePreloadPlanningEnabled &&
+			(newTimeline || improvedTimeline || computePreloadSettings.traceLevel >= 2);
 		if (shouldPlanComputePreload)
 		{
+			const char* timelineStage = newTimeline ? "first" : (improvedTimeline ? "max" : "progress");
 			PlanNRIVoxelComputePreload(
 				variants,
+				rawVariants,
+				rawManifestStats,
 				renderer.mPersistentVoxels,
 				computePreloadSettings,
 				renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : nullptr,
 				renderer.mMapWorld.buildSerial,
-				renderer.mFrameIndex);
-			sLastComputePreloadPlanBuildSerial = renderer.mMapWorld.buildSerial;
+				renderer.mFrameIndex,
+				timelineStage);
+			sComputePreloadTimeline.maxRawVariants = std::max(sComputePreloadTimeline.maxRawVariants, (uint32_t)rawVariants.size());
+			sComputePreloadTimeline.maxLegacyVariants = std::max(sComputePreloadTimeline.maxLegacyVariants, (uint32_t)variants.size());
+		}
+		if (computePreloadSettings.enabled && !computePreloadSettings.dryRun)
+		{
+			std::vector<nri_scene::PrecachedVoxelVariantView> directPreloadVariants;
+			BuildNRIVoxelComputePreloadDirectVariants(rawVariants, computePreloadSettings, directPreloadVariants);
+			if (!directPreloadVariants.empty())
+			{
+				if ((int)nri_ptloadingtrace >= 1 || computePreloadSettings.traceLevel >= 1 || (int)nri_ptvoxelcomputetrace >= 1)
+				{
+					Printf("NRI PT voxel compute preload: event=admit-source level=%s build_serial=%llu frame=%u direct_variants=%u legacy_variants=%u dry_run=0\n",
+						renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : "unknown",
+						(unsigned long long)renderer.mMapWorld.buildSerial,
+						renderer.mFrameIndex,
+						(uint32_t)directPreloadVariants.size(),
+						(uint32_t)variants.size());
+				}
+				variants.insert(variants.end(), directPreloadVariants.begin(), directPreloadVariants.end());
+			}
 		}
 
 		const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
@@ -273,6 +322,10 @@ public:
 				(bool)nri_voxelstats,
 				BuildResetServices(*renderer),
 				BuildAdmissionServices(*renderer));
+		};
+		preloadServices.pumpComputeJobs = [](void* user, uint32_t frameIndex) -> void
+		{
+			DispatchNRIVoxelComputeMeshingDiagnostics(*static_cast<NRIRenderer*>(user), frameIndex);
 		};
 		preloadServices.ensureBatch = [](void* user, NRIPersistentVoxelBatchStats* outStats) -> bool
 		{

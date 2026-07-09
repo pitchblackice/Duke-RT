@@ -462,6 +462,14 @@ bool NRIPersistentVoxelPreloadServices::PumpAdmissionQueue(const char* phase) co
 	return pumpAdmissionQueue(user, phase);
 }
 
+void NRIPersistentVoxelPreloadServices::PumpComputeJobs(uint32_t frameIndex) const
+{
+	if (pumpComputeJobs != nullptr)
+	{
+		pumpComputeJobs(user, frameIndex);
+	}
+}
+
 bool NRIPersistentVoxelPreloadServices::EnsureBatch(NRIPersistentVoxelBatchStats* outStats) const
 {
 	return ensureBatch != nullptr && ensureBatch(user, outStats);
@@ -3440,7 +3448,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 	outFailureReason = "none";
 	const nri_scene::PrecachedVoxelVariantView& variant = entry.variant;
 	const uint64_t meshResourceKey = BuildPersistentVoxelVariantMeshResourceKey(variant);
-	const bool directOnlyAdmission = variant.directOnlyAdmission && entry.runtimeRequested && ShouldDirectPublishNRIVoxelComputeMeshing();
+	const bool directOnlyAdmission = variant.directOnlyAdmission && ShouldDirectPublishNRIVoxelComputeMeshing();
 	if ((!directOnlyAdmission && variant.surface == nullptr) ||
 		variant.meshKeyHash == 0 ||
 		meshResourceKey == 0 ||
@@ -4057,7 +4065,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			return true;
 		}
 
-		if (entry.runtimeRequested &&
+		if ((entry.runtimeRequested || variant.directOnlyAdmission) &&
 			ShouldDirectPublishNRIVoxelComputeMeshing() &&
 			!entry.directComputeFailed &&
 			variant.model != nullptr &&
@@ -7550,6 +7558,7 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 bool NRIPersistentVoxelResidency::PreloadVariantResources(
 	const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
 	uint64_t buildSerial,
+	uint32_t frameIndex,
 	const NRIPersistentVoxelSettings& settings,
 	int loadingTraceLevel,
 	bool voxelStatsEnabled,
@@ -7654,7 +7663,9 @@ bool NRIPersistentVoxelResidency::PreloadVariantResources(
 			break;
 		}
 
+		preloadServices.PumpComputeJobs(frameIndex);
 		ok = preloadServices.PumpAdmissionQueue("loading") && ok;
+		preloadServices.PumpComputeJobs(frameIndex);
 
 		uint32_t requiredPendingAfter = 0;
 		uint32_t requiredReadyAfter = 0;
@@ -7802,6 +7813,7 @@ bool NRIPersistentVoxelResidency::PreloadResources(
 	if (!PreloadVariantResources(
 		variants,
 		buildSerial,
+		frameIndex,
 		settings,
 		loadingTraceLevel,
 		voxelStatsEnabled,

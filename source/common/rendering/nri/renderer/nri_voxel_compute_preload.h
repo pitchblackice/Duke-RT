@@ -57,14 +57,57 @@ struct NRIVoxelComputePreloadStats
 	uint64_t residentSceneBytes = 0;
 	uint64_t residentAsBytes = 0;
 	double planMs = 0.0;
+	uint32_t rawVariants = 0;
+	uint32_t rawRequired = 0;
+	uint32_t rawOptional = 0;
+	uint32_t rawSelected = 0;
+	uint32_t rawSelectedRequired = 0;
+	uint32_t rawSelectedOptional = 0;
+	uint32_t rawUniqueMeshes = 0;
+	uint32_t rawUniqueMaterials = 0;
+	uint32_t rawSourceResident = 0;
+	uint32_t rawSourceMissing = 0;
+	uint32_t rawMaterialContextReady = 0;
+	uint32_t rawMaterialContextMissing = 0;
+	uint32_t rawCpuSurfaceReady = 0;
+	uint32_t rawLegacyGpuCandidate = 0;
+	uint32_t rawLegacyGpuSourceSkipped = 0;
+	uint32_t rawSkippedDisabled = 0;
+	uint32_t rawSkippedRequiredOff = 0;
+	uint32_t rawSkippedOptionalOff = 0;
+	uint32_t rawSkippedSourceMissing = 0;
+	uint32_t rawSkippedMaterialMissing = 0;
+	uint32_t rawSkippedByteBudget = 0;
+	uint32_t rawSkippedJobBudget = 0;
+	uint64_t rawEstimatedGeometryBytes = 0;
+	uint64_t rawSelectedGeometryBytes = 0;
+	uint32_t manifestSources = 0;
+	uint32_t manifestLines = 0;
+	uint32_t manifestRequests = 0;
+	uint32_t manifestSkippedInactive = 0;
+	uint32_t manifestSkippedSyntax = 0;
+	uint32_t manifestSkippedActor = 0;
+	uint32_t manifestSkippedUnsupported = 0;
+	uint32_t manifestDiscovered = 0;
+	uint32_t manifestUniqueRequests = 0;
+	uint32_t manifestSkippedInvalid = 0;
+	uint32_t manifestSkippedDuplicate = 0;
 };
 
 NRIVoxelComputePreloadSettings BuildNRIVoxelComputePreloadSettingsFromCVars();
 
+void BuildNRIVoxelComputePreloadDirectVariants(
+	const std::vector<nri_scene::PrecachedVoxelRawManifestView>& rawVariants,
+	const NRIVoxelComputePreloadSettings& settings,
+	std::vector<nri_scene::PrecachedVoxelVariantView>& outVariants);
+
 NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 	const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
+	const std::vector<nri_scene::PrecachedVoxelRawManifestView>& rawVariants,
+	const nri_scene::PrecachedVoxelRawManifestStats& rawManifestStats,
 	const NRIPersistentVoxelResidency& residency,
 	const NRIVoxelComputePreloadSettings& settings,
 	const char* levelName,
 	uint64_t buildSerial,
-	uint32_t frameIndex);
+	uint32_t frameIndex,
+	const char* timelineStage);

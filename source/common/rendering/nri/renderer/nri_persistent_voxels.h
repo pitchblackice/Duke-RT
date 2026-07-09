@@ -311,17 +311,20 @@ struct NRIPersistentVoxelBatchStats;
 struct NRIPersistentVoxelPreloadServices
 {
 	using PumpAdmissionQueueFn = bool (*)(void* user, const char* phase);
+	using PumpComputeJobsFn = void (*)(void* user, uint32_t frameIndex);
 	using EnsureBatchFn = bool (*)(void* user, NRIPersistentVoxelBatchStats* outStats);
 	using WarmSharedBlasFn = bool (*)(void* user, const std::vector<nri_scene::PrecachedVoxelVariantView>& variants, uint32_t frameIndex);
 	using IsSubmitBudgetHitFn = bool (*)(void* user);
 
 	void* user = nullptr;
 	PumpAdmissionQueueFn pumpAdmissionQueue = nullptr;
+	PumpComputeJobsFn pumpComputeJobs = nullptr;
 	EnsureBatchFn ensureBatch = nullptr;
 	WarmSharedBlasFn warmSharedBlas = nullptr;
 	IsSubmitBudgetHitFn isSubmitBudgetHit = nullptr;
 
 	bool PumpAdmissionQueue(const char* phase) const;
+	void PumpComputeJobs(uint32_t frameIndex) const;
 	bool EnsureBatch(NRIPersistentVoxelBatchStats* outStats = nullptr) const;
 	bool WarmSharedBlas(const std::vector<nri_scene::PrecachedVoxelVariantView>& variants, uint32_t frameIndex) const;
 	bool IsSubmitBudgetHit() const;
@@ -774,6 +777,7 @@ public:
 	bool PreloadVariantResources(
 		const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
 		uint64_t buildSerial,
+		uint32_t frameIndex,
 		const NRIPersistentVoxelSettings& settings,
 		int loadingTraceLevel,
 		bool voxelStatsEnabled,

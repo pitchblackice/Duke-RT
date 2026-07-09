@@ -340,6 +340,48 @@ struct PrecachedVoxelVariantView
 	bool directOnlyAdmission = false;
 };
 
+struct PrecachedVoxelRawManifestStats
+{
+	uint32_t discovered = 0;
+	uint32_t uniqueRequests = 0;
+	uint32_t actorCandidates = 0;
+	uint32_t skippedInvalid = 0;
+	uint32_t skippedDuplicate = 0;
+	uint32_t manifestSources = 0;
+	uint32_t manifestLines = 0;
+	uint32_t manifestRequests = 0;
+	uint32_t manifestSkippedInactive = 0;
+	uint32_t manifestSkippedSyntax = 0;
+	uint32_t manifestSkippedActor = 0;
+	uint32_t manifestSkippedUnsupported = 0;
+};
+
+struct PrecachedVoxelRawManifestView
+{
+	uint64_t meshKeyHash = 0;
+	uint64_t materialKeyHash = 0;
+	uint64_t meshVariantHash = 0;
+	uint64_t materialVariantHash = 0;
+	uint32_t sourceBits = 0;
+	int32_t priority = 0;
+	int32_t admissionRank = 0;
+	int32_t sourcePicnum = -1;
+	int32_t resolvedVoxelIndex = -1;
+	uint32_t primitiveCount = 0;
+	uint32_t rawSlabCount = 0;
+	uint32_t rawColorRunCount = 0;
+	uint64_t rawBytes = 0;
+	bool gpuForce = false;
+	bool gpuPrefer = false;
+	bool legacyGpuCandidate = false;
+	bool rawSourceResident = false;
+	bool rawStatsReady = false;
+	bool materialContextReady = false;
+	bool cpuSurfaceReady = false;
+	FVoxelModel* model = nullptr;
+	MaterialRef material;
+};
+
 static constexpr uint32_t PrecachedVoxelSourceBit_MountedVoxelPreload = 1u << 3;
 static constexpr uint32_t PrecachedVoxelSourceBit_MountedPreloadMap = 1u << 6;
 
@@ -363,6 +405,7 @@ bool BuildPersistentVoxelCacheSceneView(SceneView& outView);
 bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>& outEntries);
 PersistentVoxelActorCacheStats GetPersistentVoxelActorCacheStats();
 bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& outEntries);
+bool BuildPrecachedVoxelRawManifestViews(std::vector<PrecachedVoxelRawManifestView>& outEntries, PrecachedVoxelRawManifestStats* outStats = nullptr);
 uint64_t GetPersistentVoxelCacheSerial();
 void ResetPersistentVoxelActorCache(const char* reason);
 void SetPersistentVoxelActorStartupTransientMode(bool active, const char* reason);

@@ -6793,6 +6793,128 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 	return !outEntries.empty();
 }
 
+bool BuildPrecachedVoxelRawManifestViews(std::vector<PrecachedVoxelRawManifestView>& outEntries, PrecachedVoxelRawManifestStats* outStats)
+{
+	outEntries.clear();
+	if (outStats != nullptr)
+	{
+		*outStats = {};
+	}
+	if (!r_voxels || (int)nri_ptloadingvoxelactors <= 0)
+	{
+		return false;
+	}
+
+	LoadingVoxelPreloadRequestGraph graph;
+	BuildLiveActorVoxelPreloadRequestGraph(graph);
+	if (outStats != nullptr)
+	{
+		outStats->discovered = graph.discovered;
+		outStats->uniqueRequests = (uint32_t)graph.requests.size();
+		outStats->actorCandidates = graph.actorCandidates;
+		outStats->skippedInvalid = graph.skippedInvalid;
+		outStats->skippedDuplicate = graph.skippedDuplicate;
+		outStats->manifestSources = graph.manifestSources;
+		outStats->manifestLines = graph.manifestLines;
+		outStats->manifestRequests = graph.manifestRequests;
+		outStats->manifestSkippedInactive = graph.manifestSkippedInactive;
+		outStats->manifestSkippedSyntax = graph.manifestSkippedSyntax;
+		outStats->manifestSkippedActor = graph.manifestSkippedActor;
+		outStats->manifestSkippedUnsupported = graph.manifestSkippedUnsupported;
+	}
+
+	std::unordered_set<uint64_t> seenVariantPairs;
+	seenVariantPairs.reserve(graph.requests.size());
+	for (const LoadingVoxelPreloadRequest& request : graph.requests)
+	{
+		if (request.model == nullptr || request.meshVariantHash == 0)
+		{
+			continue;
+		}
+
+		FVoxelRawMeshStats rawStats = {};
+		const bool rawStatsReady = QueryNRIVoxelComputeRawSourceArchiveStats(request.model, rawStats);
+		const uint32_t primitiveCount = rawStatsReady ? rawStats.coalescedFaceCount * 2u : request.primitiveCount;
+		const bool cpuSurfaceReady = IsVoxelMeshVariantSurfaceReady(request.meshVariantHash);
+		const bool legacyGpuCandidate = IsLoadingVoxelRequestGpuCandidate(request);
+		const bool explicitGpu =
+			(request.sourceBits & LoadingVoxelRequestSource_MountedVoxelPreload) != 0 &&
+			(request.gpuForce || request.gpuPrefer);
+		const bool forcedGpu = explicitGpu && request.gpuForce;
+		const bool preferredGpu = explicitGpu && request.gpuPrefer && !request.gpuForce;
+
+		FGameTexture* voxelTexture = TexMan.GetGameTexture(request.model->GetPaletteTexture());
+		if (voxelTexture != nullptr && !voxelTexture->isValid())
+		{
+			voxelTexture = nullptr;
+		}
+
+		std::vector<LoadingVoxelMaterialContext> contexts = request.materialContexts;
+		if (contexts.empty())
+		{
+			LoadingVoxelMaterialContext fallbackContext = {};
+			fallbackContext.texid = request.texid;
+			fallbackContext.actor = request.actor;
+			fallbackContext.actorIndex = request.actorIndex;
+			fallbackContext.sourceBits = request.sourceBits;
+			fallbackContext.priority = request.priority;
+			fallbackContext.gpuForce = request.gpuForce;
+			fallbackContext.gpuPrefer = request.gpuPrefer;
+			contexts.push_back(fallbackContext);
+		}
+
+		for (const LoadingVoxelMaterialContext& context : contexts)
+		{
+			FGameTexture* emissiveSourceTexture = TexMan.GetGameTexture(context.texid);
+			if (emissiveSourceTexture != nullptr && !emissiveSourceTexture->isValid())
+			{
+				emissiveSourceTexture = nullptr;
+			}
+			const int palette = context.actor != nullptr ? context.actor->spr.pal : 0;
+			const int shade = context.actor != nullptr ? context.actor->spr.shade : 0;
+			const float alpha = context.actor != nullptr ? GetLoadingActorAlpha(context.actor) : 1.0f;
+			const MaterialRef material = voxelTexture != nullptr ?
+				MakeVoxelPaletteMaterialRef(voxelTexture, emissiveSourceTexture, palette, shade, alpha, MaterialFlag_Sprite) :
+				MaterialRef{};
+			const uint64_t materialVariantHash = voxelTexture != nullptr ?
+				BuildVoxelMaterialVariantKeyHash(BuildVoxelMaterialVariantKey(voxelTexture, material)) :
+				0ull;
+			const uint64_t pairHash = HashCombine64(request.meshVariantHash, materialVariantHash);
+			if (materialVariantHash != 0 && !seenVariantPairs.insert(pairHash).second)
+			{
+				continue;
+			}
+
+			PrecachedVoxelRawManifestView view = {};
+			view.meshKeyHash = request.meshVariantHash;
+			view.materialKeyHash = materialVariantHash;
+			view.meshVariantHash = request.meshVariantHash;
+			view.materialVariantHash = materialVariantHash;
+			view.sourceBits = request.sourceBits | context.sourceBits;
+			view.priority = (int32_t)request.priority;
+			view.admissionRank = LoadingVoxelAdmissionRank(request);
+			view.sourcePicnum = context.texid.GetIndex();
+			view.resolvedVoxelIndex = request.resolvedVoxelIndex;
+			view.primitiveCount = primitiveCount;
+			view.rawSlabCount = rawStatsReady ? rawStats.slabCount : 0u;
+			view.rawColorRunCount = 0u;
+			view.rawBytes = rawStatsReady ? rawStats.rawByteCount : 0ull;
+			view.gpuForce = forcedGpu;
+			view.gpuPrefer = preferredGpu;
+			view.legacyGpuCandidate = legacyGpuCandidate;
+			view.rawSourceResident = rawStatsReady;
+			view.rawStatsReady = rawStatsReady;
+			view.materialContextReady = materialVariantHash != 0;
+			view.cpuSurfaceReady = cpuSurfaceReady;
+			view.model = request.model;
+			view.material = material;
+			outEntries.push_back(std::move(view));
+		}
+	}
+
+	return !outEntries.empty();
+}
+
 bool CaptureScene(HWDrawInfo& di, SceneView& outView)
 {
 	outView = {};
