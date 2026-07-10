@@ -228,6 +228,16 @@ namespace
 		bool directPublish = false;
 		bool rawArchive = false;
 		bool hadRetainedSurface = false;
+		const char* cpuMeshClassification = "unsupported";
+		const char* cpuMeshReason = "unclassified";
+	};
+
+	struct DynamicVoxelCaptureRouting
+	{
+		const char* cpuMeshClassification = "unsupported";
+		const char* reason = "unclassified";
+		uint32_t primitiveCount = 0;
+		bool directOnlyAdmission = false;
 	};
 
 	std::unordered_map<uint64_t, VoxelActorCacheEntry> gVoxelActorCache;
@@ -2541,23 +2551,15 @@ namespace
 
 	void StoreVoxelActorDesiredMaterialSurface(
 		VoxelActorCacheEntry& entry,
-		const VoxelActorCacheLookup& lookup,
 		const MaterialRef& material,
-		const SurfaceProvenance& provenance)
+		const SurfaceProvenance& provenance,
+		uint32_t primitiveCount)
 	{
 		entry.desiredMaterialSurface = {};
 		entry.desiredMaterialSurface.material = material;
 		entry.desiredMaterialSurface.provenance = provenance;
 		entry.hasDesiredMaterialSurface = true;
-		entry.desiredPrimitiveCount = 0;
-		if (lookup.voxelModelPtr != 0)
-		{
-			FVoxelRawMeshStats rawStats = {};
-			if (QueryNRIVoxelComputeRawSourceStats(reinterpret_cast<FVoxelModel*>(lookup.voxelModelPtr), rawStats))
-			{
-				entry.desiredPrimitiveCount = rawStats.coalescedFaceCount * 2u;
-			}
-		}
+		entry.desiredPrimitiveCount = primitiveCount;
 	}
 
 	bool HasLastValidResidentVoxelSurface(const VoxelActorCacheLookup& lookup)
@@ -2575,30 +2577,80 @@ namespace
 			IsVoxelMeshVariantSurfaceReady(entry.meshVariantHash);
 	}
 
-	bool CanDeferVoxelActorToDirectCompute(FVoxelModel* model, uint32_t* outPrimitiveCount = nullptr)
+	DynamicVoxelCaptureRouting ClassifyDynamicVoxelCaptureRouting(
+		DynamicVoxelCaptureMode captureMode,
+		bool forceTransient,
+		bool cacheSurfaceUpdate,
+		bool directPublish,
+		const VoxelActorCacheLookup& lookup,
+		FVoxelModel* model)
 	{
-		if (outPrimitiveCount != nullptr)
+		DynamicVoxelCaptureRouting routing = {};
+		if (forceTransient)
 		{
-			*outPrimitiveCount = 0;
+			routing.cpuMeshClassification = "transient";
+			routing.reason = "camera-special";
+			return routing;
+		}
+		if (captureMode != DynamicVoxelCaptureMode::Authoritative)
+		{
+			routing.cpuMeshClassification = "transient";
+			routing.reason = "transient-capture";
+			return routing;
+		}
+		if (!cacheSurfaceUpdate)
+		{
+			routing.reason = "not-variant-update";
+			return routing;
+		}
+		if (!directPublish)
+		{
+			routing.reason = "direct-publish-disabled";
+			return routing;
+		}
+		if (!(bool)nri_ptvoxelcomputerawarchive)
+		{
+			routing.reason = "raw-archive-disabled";
+			return routing;
+		}
+		if (lookup.identityKey == 0 || lookup.meshVariantHash == 0)
+		{
+			routing.reason = "missing-stable-key";
+			return routing;
 		}
 		if (model == nullptr)
 		{
-			return false;
+			routing.cpuMeshClassification = "failure";
+			routing.reason = "null-model";
+			return routing;
 		}
 		FVoxelRawMeshStats rawStats = {};
-		if (!QueryNRIVoxelComputeRawSourceStats(model, rawStats))
+		if (!QueryNRIVoxelComputeRawSourceArchiveStats(model, rawStats))
 		{
-			return false;
+			routing.cpuMeshClassification = "failure";
+			routing.reason = "raw-source-unavailable";
+			return routing;
 		}
 		const uint32_t primitiveCount = rawStats.coalescedFaceCount * 2u;
-		if (outPrimitiveCount != nullptr)
+		if (primitiveCount == 0)
 		{
-			*outPrimitiveCount = primitiveCount;
+			routing.cpuMeshClassification = "failure";
+			routing.reason = "empty-raw-source";
+			return routing;
 		}
 		const int configuredMaxPrimitives = (int)nri_ptvoxelcomputedirectmaxprimitives;
 		const uint32_t maxDirectPublishPrimitives = configuredMaxPrimitives > 0 ? (uint32_t)configuredMaxPrimitives : 0u;
-		return primitiveCount != 0 &&
-			(maxDirectPublishPrimitives == 0 || primitiveCount <= maxDirectPublishPrimitives);
+		if (maxDirectPublishPrimitives != 0 && primitiveCount > maxDirectPublishPrimitives)
+		{
+			routing.reason = "primitive-limit";
+			return routing;
+		}
+
+		routing.cpuMeshClassification = "supported";
+		routing.reason = "direct-only-admission";
+		routing.primitiveCount = primitiveCount;
+		routing.directOnlyAdmission = true;
+		return routing;
 	}
 
 	bool CanPromoteVoxelActorCacheEntry(const VoxelActorCacheEntry& entry)
@@ -2625,7 +2677,8 @@ namespace
 		const VoxelActorCacheLookup& lookup,
 		VoxelActorPendingReason reason,
 		const MaterialRef* material = nullptr,
-		const SurfaceProvenance* provenance = nullptr)
+		const SurfaceProvenance* provenance = nullptr,
+		uint32_t primitiveCount = 0)
 	{
 		if (lookup.identityKey == 0)
 		{
@@ -2646,7 +2699,7 @@ namespace
 		const bool transformChanged = UpdateVoxelActorCacheEntryInstanceTransform(entry, lookup);
 		if (material != nullptr && provenance != nullptr)
 		{
-			StoreVoxelActorDesiredMaterialSurface(entry, lookup, *material, *provenance);
+			StoreVoxelActorDesiredMaterialSurface(entry, *material, *provenance, primitiveCount);
 			entry.desiredMaterialKeyHash = BuildVoxelDirectMaterialPayloadKey(entry.desiredMaterialKeyHash, *provenance);
 			entry.desiredMaterialVariantHash = BuildVoxelDirectMaterialPayloadKey(entry.desiredMaterialVariantHash, *provenance);
 			entry.desiredSignature = BuildVoxelActorSignature(entry.desiredMeshVariantHash, entry.desiredMaterialVariantHash);
@@ -4677,9 +4730,11 @@ namespace
 			context != nullptr && context->materialVariantHash != 0 ? context->materialVariantHash :
 			lookup != nullptr ? lookup->materialVariantHash :
 			0;
-		Printf("PERF pt voxel dynamic mesh miss NRI: action=%s reason=%s actor=%d stat=%d model=%p pic=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx vertices=%u indices=%u prims=%u valid=%u build_ms=%.3f cache_update=%u retained_surface=%u forced_transient=%u direct_publish=%u raw_archive=%u\n",
+		Printf("PERF pt voxel dynamic mesh miss NRI: action=%s reason=%s cpu_mesh_class=%s class_reason=%s actor=%d stat=%d model=%p pic=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx vertices=%u indices=%u prims=%u valid=%u build_ms=%.3f cache_update=%u retained_surface=%u forced_transient=%u direct_publish=%u raw_archive=%u\n",
 			action != nullptr ? action : "unknown",
 			reason != nullptr ? reason : "unknown",
+			context != nullptr ? context->cpuMeshClassification : "unsupported",
+			context != nullptr ? context->cpuMeshReason : "unclassified",
 			actorIndex,
 			statnum,
 			(void*)model,
@@ -5249,17 +5304,31 @@ namespace
 			cacheSurfaceUpdate &&
 			cacheLookup.meshVariantHash != 0 &&
 			IsVoxelMeshVariantSurfaceReady(cacheLookup.meshVariantHash);
+		const bool directPublish = ShouldDirectPublishNRIVoxelComputeMeshing();
+		const DynamicVoxelCaptureRouting routing = ClassifyDynamicVoxelCaptureRouting(
+			captureMode,
+			forceTransientVoxel,
+			cacheSurfaceUpdate,
+			directPublish,
+			cacheLookup,
+			sprite.voxel->model);
 		const bool cacheUpdateConsumesActorBudget =
 			cacheSurfaceUpdate &&
 			!transformRebakeAlreadyResident &&
-			!sharedVariantSurfaceReadyForUpdate;
+			!sharedVariantSurfaceReadyForUpdate &&
+			!routing.directOnlyAdmission;
 		const SurfaceProvenance voxelMaterialProvenance =
 			MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, voxelMaterial.flags);
 		auto deferDesiredVariant = [&](VoxelActorPendingReason reason) -> bool
 		{
 			if (cacheSurfaceUpdate)
 			{
-				MarkVoxelActorVariantPending(cacheLookup, reason, &voxelMaterial, &voxelMaterialProvenance);
+				MarkVoxelActorVariantPending(
+					cacheLookup,
+					reason,
+					&voxelMaterial,
+					&voxelMaterialProvenance,
+					routing.primitiveCount);
 				stats.voxelCacheDeferred++;
 				gDynamicCapturePerfStats.voxelCacheDeferred++;
 				if (HasLastValidResidentVoxelSurface(cacheLookup))
@@ -5314,6 +5383,10 @@ namespace
 		{
 			return deferDesiredVariant(VoxelActorPendingReason::MeshDeferred);
 		}
+		if (routing.directOnlyAdmission)
+		{
+			return deferDesiredVariant(VoxelActorPendingReason::MeshDeferred);
+		}
 
 		VoxelMeshBuildContext meshBuildContext = {};
 		meshBuildContext.sprite = &sprite;
@@ -5324,18 +5397,11 @@ namespace
 		meshBuildContext.resolvedVoxelIndex = cacheLookup.resolvedVoxelIndex;
 		meshBuildContext.cacheSurfaceUpdate = cacheSurfaceUpdate;
 		meshBuildContext.forceTransient = forceTransientVoxel;
-		meshBuildContext.directPublish = ShouldDirectPublishNRIVoxelComputeMeshing();
+		meshBuildContext.directPublish = directPublish;
 		meshBuildContext.rawArchive = (bool)nri_ptvoxelcomputerawarchive;
 		meshBuildContext.hadRetainedSurface = HasLastValidResidentVoxelSurface(cacheLookup);
-		if ((bool)nri_ptvoxelcomputedeferdynamic &&
-			meshBuildContext.directPublish &&
-			cacheSurfaceUpdate &&
-			!forceTransientVoxel &&
-			cacheLookup.meshVariantHash != 0 &&
-			CanDeferVoxelActorToDirectCompute(sprite.voxel->model))
-		{
-			return deferDesiredVariant(VoxelActorPendingReason::MeshDeferred);
-		}
+		meshBuildContext.cpuMeshClassification = routing.cpuMeshClassification;
+		meshBuildContext.cpuMeshReason = routing.reason;
 		const FVoxelMeshData* mesh = nullptr;
 		bool meshDeferred = false;
 		{
