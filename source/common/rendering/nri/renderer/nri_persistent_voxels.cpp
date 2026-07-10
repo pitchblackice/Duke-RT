@@ -2469,17 +2469,47 @@ NRIPersistentVoxelMemoryUsage NRIPersistentVoxelResidency::GetMemoryUsage() cons
 		total += resource.memorySize;
 	};
 
+	usage.arenaVertexCommittedBytes = vertexBuffer.memorySize;
+	usage.arenaIndexCommittedBytes = indexBuffer.memorySize;
+	usage.arenaPrimitiveCommittedBytes = primitiveBuffer.memorySize;
+	usage.arenaMaterialCommittedBytes = materialBuffer.memorySize;
+	usage.arenaVertexUsedBytes = (uint64_t)arenaVertexCursor * sizeof(nri_scene::SceneVertex);
+	usage.arenaIndexUsedBytes = (uint64_t)arenaIndexCursor * sizeof(uint32_t);
+	usage.arenaPrimitiveUsedBytes = (uint64_t)arenaPrimitiveCursor * sizeof(nri_scene::PrimitiveData);
+	usage.arenaMaterialUsedBytes = (uint64_t)arenaMaterialCursor * sizeof(nri_scene::MaterialData);
 	accumulateBuffer(vertexBuffer, usage.sceneBufferBytes);
 	accumulateBuffer(indexBuffer, usage.sceneBufferBytes);
 	accumulateBuffer(primitiveBuffer, usage.sceneBufferBytes);
 	accumulateBuffer(materialBuffer, usage.sceneBufferBytes);
 	for (const auto& pair : meshVariantResources)
 	{
+		usage.privateVertexBytes += pair.second.vertexBuffer.memorySize;
+		usage.privateIndexBytes += pair.second.indexBuffer.memorySize;
+		usage.directBlasBytes += pair.second.accelerationStructure.memorySize;
 		accumulateBuffer(pair.second.vertexBuffer, usage.sceneBufferBytes);
 		accumulateBuffer(pair.second.indexBuffer, usage.sceneBufferBytes);
 		accumulateAs(pair.second.accelerationStructure, usage.accelerationStructureBytes);
 	}
+	for (const auto& pair : materialVariantResources)
+	{
+		usage.materialLogicalBytes += pair.second.residentBytes;
+	}
+	for (const auto& pair : admissionQueue)
+	{
+		const PersistentVoxelAdmissionEntry& entry = pair.second;
+		usage.admissionTransientBufferBytes +=
+			entry.uploadMeshResource.vertexBuffer.memorySize +
+			entry.uploadMeshResource.indexBuffer.memorySize;
+		usage.admissionTransientAsBytes += entry.uploadMeshResource.accelerationStructure.memorySize;
+		usage.admissionCpuGeometryBytes +=
+			(uint64_t)entry.uploadGeometry.vertices.capacity() * sizeof(nri_scene::SceneVertex) +
+			(uint64_t)entry.uploadGeometry.indices.capacity() * sizeof(uint32_t) +
+			(uint64_t)entry.uploadGeometry.primitives.capacity() * sizeof(nri_scene::PrimitiveData) +
+			(uint64_t)entry.uploadGpuIndices.capacity() * sizeof(uint32_t) +
+			(uint64_t)entry.uploadGpuPrimitives.capacity() * sizeof(nri_scene::PrimitiveData);
+	}
 	const NRIPersistentVoxelSharedBlasFrameStats& sharedStats = sharedBlasCache.LastFrameStats();
+	usage.sharedBlasBytes = sharedStats.residentBytes;
 	usage.accelerationStructureBytes += sharedStats.residentBytes;
 	return usage;
 }
@@ -2509,6 +2539,20 @@ void NRIPersistentVoxelResidency::FillResourceStatusSnapshot(NRIPersistentVoxelS
 		snapshot.requiredAdmissionReadyCount,
 		snapshot.optionalAdmissionPendingCount,
 		snapshot.failedAdmissionCount);
+	for (const auto& pair : admissionQueue)
+	{
+		const PersistentVoxelAdmissionEntry& entry = pair.second;
+		if (entry.mapGeneration != residencyMapGeneration)
+		{
+			continue;
+		}
+		snapshot.computeInFlightCount += entry.state == PersistentVoxelAdmissionState::DirectComputePending ? 1u : 0u;
+		snapshot.blasInFlightCount += entry.state == PersistentVoxelAdmissionState::BuildingBlas ? 1u : 0u;
+	}
+	snapshot.cpuGeometryBuildCount = cumulativeCpuGeometryBuildCount;
+	snapshot.cpuGeometryUploadCount = cumulativeCpuGeometryUploadCount;
+	snapshot.cpuGeometryUploadBytes = cumulativeCpuGeometryUploadBytes;
+	snapshot.cpuGeometryFallbackCount = cumulativeCpuGeometryFallbackCount;
 	snapshot.residencyGeneration = residencyMapGeneration;
 	snapshot.residencyBuildSerial = residencyLastBuildSerial;
 	snapshot.lastDesiredResidencyCount = lastDesiredResidencyCount;
@@ -3228,6 +3272,15 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		blasUsed += blasBuiltThisEntry;
 		entry->bytesUploaded += uploadBytes;
 		stats.bytesUploaded += uploadBytes;
+		if (uploadBytes != 0 && !entry->uploadGeometryFromCompute)
+		{
+			cumulativeCpuGeometryUploadBytes += uploadBytes;
+			if (!entry->cpuGeometryUploadCounted)
+			{
+				entry->cpuGeometryUploadCounted = true;
+				cumulativeCpuGeometryUploadCount++;
+			}
+		}
 		if (inProgress)
 		{
 			if (entry->state == PersistentVoxelAdmissionState::BuildingBlas && blasBudgetRemaining == 0)
@@ -4260,12 +4313,18 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 
 		if (!entry.uploadGeometryFromCompute)
 		{
+			if (!entry.cpuGeometryBuildCounted)
+			{
+				entry.cpuGeometryBuildCounted = true;
+				cumulativeCpuGeometryBuildCount++;
+			}
 			if (outStats != nullptr &&
 				entry.runtimeRequested &&
 				ShouldDirectPublishNRIVoxelComputeMeshing() &&
 				variant.model != nullptr)
 			{
 				outStats->cpuGeometryFallback++;
+				cumulativeCpuGeometryFallbackCount++;
 			}
 			nri_scene::BuildGeometry(variantSceneView, entry.uploadGeometry);
 			services.AssignGeometryPortalIndices(entry.uploadGeometry);
@@ -6750,6 +6809,10 @@ void NRIPersistentVoxelResidency::Reset(
 	lastColdPrimitiveCount = 0;
 	lastForcedCount = 0;
 	lastPreferredCount = 0;
+	cumulativeCpuGeometryBuildCount = 0;
+	cumulativeCpuGeometryUploadCount = 0;
+	cumulativeCpuGeometryUploadBytes = 0;
+	cumulativeCpuGeometryFallbackCount = 0;
 	postLoadAdmissionGraceEndFrame = 0;
 	postLoadAdmissionGraceMapGeneration = 0;
 	services.InvalidateSceneDataDescriptors();
@@ -6841,6 +6904,10 @@ void NRIPersistentVoxelResidency::ResetLevelSchedulingState(
 	lastColdPrimitiveCount = 0;
 	lastForcedCount = 0;
 	lastPreferredCount = 0;
+	cumulativeCpuGeometryBuildCount = 0;
+	cumulativeCpuGeometryUploadCount = 0;
+	cumulativeCpuGeometryUploadBytes = 0;
+	cumulativeCpuGeometryFallbackCount = 0;
 	services.InvalidateSceneDataDescriptors();
 }
 

@@ -140,6 +140,8 @@ namespace
 		uint64_t rawSourceArchivePreloadUploadBytes = 0;
 		uint64_t rawSourceArchiveRuntimeUploadBytes = 0;
 		uint64_t rawSourceArchiveUploadFailures = 0;
+		uint64_t totalStatusReadbackBytes = 0;
+		uint64_t totalFullGeometryReadbackBytes = 0;
 		std::unordered_set<uint64_t> queuedConsumeKeys;
 		std::unordered_set<uint64_t> pendingConsumeKeys;
 		std::unordered_set<uint64_t> failedConsumeKeys;
@@ -769,6 +771,8 @@ namespace
 				(uint64_t)state.pendingIndexCount * sizeof(uint32_t) +
 				(uint64_t)state.pendingPrimitiveCount * sizeof(NRIVoxelComputePrimitiveData) :
 			0ull;
+		state.totalStatusReadbackBytes += resultByteSize;
+		state.totalFullGeometryReadbackBytes += fullGeometryReadbackBytes;
 		for (size_t i = 0; i < state.pendingReadbackJobs.size(); ++i)
 		{
 			PendingReadbackJob& job = state.pendingReadbackJobs[i];
@@ -1365,6 +1369,57 @@ bool PreloadNRIVoxelComputeRawSource(FVoxelModel* model, NRIVoxelComputeRawSourc
 		outStats->buildMs += buildMs;
 	}
 	return true;
+}
+
+NRIVoxelComputeMemoryUsage GetNRIVoxelComputeMemoryUsage()
+{
+	const VoxelComputeState& state = gVoxelComputeState;
+	NRIVoxelComputeMemoryUsage usage = {};
+	const auto bufferBytes = [](const NRIBufferResource& resource) -> uint64_t
+	{
+		return resource.memorySize;
+	};
+
+	usage.rawSourceCount = (uint32_t)state.rawSourceArchive.size();
+	for (const auto& archivePair : state.rawSourceArchive)
+	{
+		const RawVoxelSourceArchiveEntry& entry = archivePair.second;
+		usage.rawSourceUploadedCount += entry.uploaded ? 1u : 0u;
+		usage.rawCpuBytes +=
+			(uint64_t)entry.slabs.capacity() * sizeof(NRIVoxelComputeSlabRecord) +
+			(uint64_t)entry.faces.capacity() * sizeof(NRIVoxelComputeFaceRecord) +
+			(uint64_t)entry.colorRuns.capacity() * sizeof(NRIVoxelComputeColorRunRecord);
+		usage.rawDeviceBytes += bufferBytes(entry.slabBuffer) + bufferBytes(entry.colorRunBuffer);
+		usage.rawUploadBytes += bufferBytes(entry.slabUploadBuffer) + bufferBytes(entry.colorRunUploadBuffer);
+	}
+
+	usage.queuedJobCount = (uint32_t)state.queuedJobs.size();
+	usage.pendingJobCount = (uint32_t)state.pendingReadbackJobs.size();
+	usage.readyDirectMeshCount = (uint32_t)state.readyDirectPublishedMeshes.size();
+	usage.transientInputUploadBytes =
+		bufferBytes(state.jobUploadBuffer) +
+		bufferBytes(state.slabUploadBuffer) +
+		bufferBytes(state.faceUploadBuffer) +
+		bufferBytes(state.colorRunUploadBuffer);
+	usage.transientInputDeviceBytes =
+		bufferBytes(state.jobBuffer) +
+		bufferBytes(state.slabBuffer) +
+		bufferBytes(state.faceBuffer) +
+		bufferBytes(state.colorRunBuffer) +
+		bufferBytes(state.resultBuffer);
+	usage.transientGeneratedBytes =
+		bufferBytes(state.vertexBuffer) +
+		bufferBytes(state.indexBuffer) +
+		bufferBytes(state.primitiveBuffer);
+	usage.statusReadbackBytes = bufferBytes(state.readbackBuffer);
+	usage.geometryReadbackBufferBytes =
+		bufferBytes(state.vertexReadbackBuffer) +
+		bufferBytes(state.indexReadbackBuffer) +
+		bufferBytes(state.primitiveReadbackBuffer);
+	usage.diagnosticAsBytes = state.diagnosticBlas.memorySize;
+	usage.totalStatusReadbackBytes = state.totalStatusReadbackBytes;
+	usage.totalFullGeometryReadbackBytes = state.totalFullGeometryReadbackBytes;
+	return usage;
 }
 
 void QueueNRIVoxelComputeCountJob(
@@ -1993,6 +2048,8 @@ void DestroyNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer)
 	state.rawSourceArchivePreloadUploadBytes = 0;
 	state.rawSourceArchiveRuntimeUploadBytes = 0;
 	state.rawSourceArchiveUploadFailures = 0;
+	state.totalStatusReadbackBytes = 0;
+	state.totalFullGeometryReadbackBytes = 0;
 	state.queuedConsumeKeys.clear();
 	state.pendingConsumeKeys.clear();
 	state.failedConsumeKeys.clear();

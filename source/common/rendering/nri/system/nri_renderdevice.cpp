@@ -6069,6 +6069,7 @@ void NRIRenderDevice::NotifyPathTracingLevelFirstFrameRelease()
 		mRenderer->OnLevelFirstFrameRelease();
 	}
 	LogLevelTransitionSnapshot("first-frame-release", mCurrentLevelTransition, mPathTracingLevelPreloadPending, 0);
+	TraceVoxelPreloadLifecycle("first-frame-release", mCurrentLevelTransition);
 }
 
 void NRIRenderDevice::NotifyPathTracingLevelPreloadFinalCheckRelease()
@@ -6078,6 +6079,35 @@ void NRIRenderDevice::NotifyPathTracingLevelPreloadFinalCheckRelease()
 		mRenderer->TraceStartupMutationProbe("final-check-release");
 	}
 	LogLevelTransitionSnapshot("final-check-release", mCurrentLevelTransition, mPathTracingLevelPreloadPending, 0);
+	TraceVoxelPreloadLifecycle("final-check-release", mCurrentLevelTransition);
+}
+
+void NRIRenderDevice::TraceVoxelPreloadLifecycle(const char* stage, const LevelTransitionInfo& info) const
+{
+	if ((int)nri_ptloadingtrace < 1)
+	{
+		return;
+	}
+
+	const auto now = std::chrono::steady_clock::now();
+	const double elapsedMs =
+		mLevelTransitionTimelineSerial == info.serial && mLevelTransitionAcceptedTime.time_since_epoch().count() != 0 ?
+		std::chrono::duration<double, std::milli>(now - mLevelTransitionAcceptedTime).count() : 0.0;
+	const NRIRenderer::MemoryTelemetry rendererMemory =
+		mRenderer != nullptr ? mRenderer->GetMemoryTelemetry() : NRIRenderer::MemoryTelemetry{};
+	const NRIAdapterMemoryTelemetry adapterMemory = GetAdapterMemoryTelemetry();
+	Printf("PERF pt voxel preload lifecycle NRI: stage=%s transition_serial=%llu old=%s new=%s elapsed_ms=%.3f tracked_bytes=%llu local_usage_bytes=%llu local_budget_bytes=%llu nonlocal_usage_bytes=%llu nonlocal_budget_bytes=%llu live_usage_available=%u\n",
+		stage != nullptr ? stage : "unknown",
+		(unsigned long long)info.serial,
+		info.oldLevelName.IsNotEmpty() ? info.oldLevelName.GetChars() : "(none)",
+		info.newLevelName.IsNotEmpty() ? info.newLevelName.GetChars() : "(none)",
+		elapsedMs,
+		(unsigned long long)rendererMemory.totalTrackedBytes,
+		(unsigned long long)adapterMemory.localUsageBytes,
+		(unsigned long long)adapterMemory.localBudgetBytes,
+		(unsigned long long)adapterMemory.nonLocalUsageBytes,
+		(unsigned long long)adapterMemory.nonLocalBudgetBytes,
+		adapterMemory.liveUsageAvailable ? 1u : 0u);
 }
 
 void NRIRenderDevice::LogLevelTransitionSnapshot(const char* phase, const LevelTransitionInfo& info, bool preloadPending, uint32_t clearedWeaponLightEvents) const
@@ -6192,6 +6222,9 @@ void NRIRenderDevice::NotifyLevelUnloadBegin(const LevelTransitionInfo& info)
 {
 	mCurrentLevelTransition = info;
 	mLevelTransitionInProgress = true;
+	mLevelTransitionAcceptedTime = std::chrono::steady_clock::now();
+	mLevelTransitionTimelineSerial = info.serial;
+	TraceVoxelPreloadLifecycle("map-command-accepted", info);
 
 	const bool hadPendingPreload = mPathTracingLevelPreloadPending;
 	CancelPathTracingLevelPreload();
@@ -6208,6 +6241,7 @@ void NRIRenderDevice::NotifyLevelUnloadBegin(const LevelTransitionInfo& info)
 		mRenderer->OnLevelUnloadBegin(info);
 	}
 	LogLevelTransitionSnapshot("unload-begin", info, hadPendingPreload, clearedWeaponLightEvents);
+	TraceVoxelPreloadLifecycle("unload-begin", info);
 }
 
 void NRIRenderDevice::NotifyLevelUnloadComplete(const LevelTransitionInfo& info)
@@ -6220,6 +6254,7 @@ void NRIRenderDevice::NotifyLevelUnloadComplete(const LevelTransitionInfo& info)
 		mRenderer->OnLevelUnloadComplete(info);
 	}
 	LogLevelTransitionSnapshot("unload-complete", info, mPathTracingLevelPreloadPending, 0);
+	TraceVoxelPreloadLifecycle("unload-complete", info);
 }
 
 void NRIRenderDevice::NotifyLevelLoadBegin(const LevelTransitionInfo& info)
@@ -6234,6 +6269,7 @@ void NRIRenderDevice::NotifyLevelLoadBegin(const LevelTransitionInfo& info)
 	mNextPathTracingWeaponLightEventSerial = 1;
 	mPathTracingWeaponLightEventsEnqueuedThisFrame = 0;
 	LogLevelTransitionSnapshot("load-begin", info, mPathTracingLevelPreloadPending, 0);
+	TraceVoxelPreloadLifecycle("level-load-begin", info);
 }
 
 bool NRIRenderDevice::ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const
@@ -7114,6 +7150,41 @@ void NRIRenderDevice::Print2DTextureStatus() const
 		(unsigned long long)stats.totalResourceRecreates);
 }
 
+NRIAdapterMemoryTelemetry NRIRenderDevice::GetAdapterMemoryTelemetry() const
+{
+	NRIAdapterMemoryTelemetry telemetry = {};
+	telemetry.localBudgetBytes = mAdapterLocalBudgetBytes;
+	telemetry.nonLocalBudgetBytes = mAdapterNonLocalBudgetBytes;
+#ifdef _WIN32
+	if (GetLiveAPI() == nri::GraphicsAPI::D3D12 && mNativeD3D12Device != nullptr)
+	{
+		IDXGIFactory4* factory = nullptr;
+		if (SUCCEEDED(CreateDxgiFactoryForTelemetry(&factory)) && factory != nullptr)
+		{
+			IDXGIAdapter3* adapter = nullptr;
+			const LUID adapterLuid = mNativeD3D12Device->GetAdapterLuid();
+			if (SUCCEEDED(factory->EnumAdapterByLuid(adapterLuid, IID_PPV_ARGS(&adapter))) && adapter != nullptr)
+			{
+				DXGI_QUERY_VIDEO_MEMORY_INFO localInfo = {};
+				DXGI_QUERY_VIDEO_MEMORY_INFO nonLocalInfo = {};
+				if (SUCCEEDED(adapter->QueryVideoMemoryInfo(0u, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &localInfo)) &&
+					SUCCEEDED(adapter->QueryVideoMemoryInfo(0u, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &nonLocalInfo)))
+				{
+					telemetry.localBudgetBytes = localInfo.Budget;
+					telemetry.localUsageBytes = localInfo.CurrentUsage;
+					telemetry.nonLocalBudgetBytes = nonLocalInfo.Budget;
+					telemetry.nonLocalUsageBytes = nonLocalInfo.CurrentUsage;
+					telemetry.liveUsageAvailable = true;
+				}
+				adapter->Release();
+			}
+			factory->Release();
+		}
+	}
+#endif
+	return telemetry;
+}
+
 void NRIRenderDevice::PrintVramTelemetryStatus() const
 {
 	const NRIRenderer::MemoryTelemetry rendererMemory = mRenderer != nullptr ? mRenderer->GetMemoryTelemetry() : NRIRenderer::MemoryTelemetry{};
@@ -7133,39 +7204,12 @@ void NRIRenderDevice::PrintVramTelemetryStatus() const
 		rendererMemory.outputHeight >= 2160 ||
 		rendererMemory.renderWidth >= 3840 ||
 		rendererMemory.renderHeight >= 2160;
-	uint64_t liveLocalBudgetBytes = 0;
-	uint64_t liveLocalUsageBytes = 0;
-	uint64_t liveNonLocalBudgetBytes = 0;
-	uint64_t liveNonLocalUsageBytes = 0;
-	bool hasLiveDxgiTelemetry = false;
-
-#ifdef _WIN32
-	if (GetLiveAPI() == nri::GraphicsAPI::D3D12 && mNativeD3D12Device != nullptr)
-	{
-		IDXGIFactory4* factory = nullptr;
-		if (SUCCEEDED(CreateDxgiFactoryForTelemetry(&factory)) && factory != nullptr)
-		{
-			IDXGIAdapter3* adapter = nullptr;
-			const LUID adapterLuid = mNativeD3D12Device->GetAdapterLuid();
-			if (SUCCEEDED(factory->EnumAdapterByLuid(adapterLuid, IID_PPV_ARGS(&adapter))) && adapter != nullptr)
-			{
-				DXGI_QUERY_VIDEO_MEMORY_INFO localInfo = {};
-				DXGI_QUERY_VIDEO_MEMORY_INFO nonLocalInfo = {};
-				if (SUCCEEDED(adapter->QueryVideoMemoryInfo(0u, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &localInfo)) &&
-					SUCCEEDED(adapter->QueryVideoMemoryInfo(0u, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &nonLocalInfo)))
-				{
-					liveLocalBudgetBytes = localInfo.Budget;
-					liveLocalUsageBytes = localInfo.CurrentUsage;
-					liveNonLocalBudgetBytes = nonLocalInfo.Budget;
-					liveNonLocalUsageBytes = nonLocalInfo.CurrentUsage;
-					hasLiveDxgiTelemetry = true;
-				}
-				adapter->Release();
-			}
-			factory->Release();
-		}
-	}
-#endif
+	const NRIAdapterMemoryTelemetry adapterMemory = GetAdapterMemoryTelemetry();
+	const uint64_t liveLocalBudgetBytes = adapterMemory.localBudgetBytes;
+	const uint64_t liveLocalUsageBytes = adapterMemory.localUsageBytes;
+	const uint64_t liveNonLocalBudgetBytes = adapterMemory.nonLocalBudgetBytes;
+	const uint64_t liveNonLocalUsageBytes = adapterMemory.nonLocalUsageBytes;
+	const bool hasLiveDxgiTelemetry = adapterMemory.liveUsageAvailable;
 
 	if (hasLiveDxgiTelemetry && liveLocalBudgetBytes > 0)
 	{

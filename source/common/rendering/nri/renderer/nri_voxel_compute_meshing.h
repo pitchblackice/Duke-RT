@@ -113,6 +113,26 @@ struct NRIVoxelComputeRawSourcePreloadStats
 	double buildMs = 0.0;
 };
 
+struct NRIVoxelComputeMemoryUsage
+{
+	uint32_t rawSourceCount = 0;
+	uint32_t rawSourceUploadedCount = 0;
+	uint32_t queuedJobCount = 0;
+	uint32_t pendingJobCount = 0;
+	uint32_t readyDirectMeshCount = 0;
+	uint64_t rawCpuBytes = 0;
+	uint64_t rawDeviceBytes = 0;
+	uint64_t rawUploadBytes = 0;
+	uint64_t transientInputDeviceBytes = 0;
+	uint64_t transientInputUploadBytes = 0;
+	uint64_t transientGeneratedBytes = 0;
+	uint64_t statusReadbackBytes = 0;
+	uint64_t geometryReadbackBufferBytes = 0;
+	uint64_t diagnosticAsBytes = 0;
+	uint64_t totalStatusReadbackBytes = 0;
+	uint64_t totalFullGeometryReadbackBytes = 0;
+};
+
 bool ShouldTraceNRIVoxelComputeMeshing();
 bool ShouldRunNRIVoxelComputeMeshing();
 bool ShouldEmitNRIVoxelComputeMeshing();
@@ -133,5 +153,6 @@ void CancelNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t g
 bool QueryNRIVoxelComputeRawSourceArchiveStats(FVoxelModel* model, FVoxelRawMeshStats& outStats);
 bool QueryNRIVoxelComputeRawSourceStats(FVoxelModel* model, FVoxelRawMeshStats& outStats);
 bool PreloadNRIVoxelComputeRawSource(FVoxelModel* model, NRIVoxelComputeRawSourcePreloadStats* outStats = nullptr);
+NRIVoxelComputeMemoryUsage GetNRIVoxelComputeMemoryUsage();
 void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t frameNumber);
 void DestroyNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer);

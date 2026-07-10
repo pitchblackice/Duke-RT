@@ -15,11 +15,15 @@ struct NRIVoxelComputePreloadSettings
 	bool includeRequired = true;
 	bool includeOptional = false;
 	bool preloadMaterials = false;
+	bool strict = false;
 	uint32_t maxMilliseconds = 0;
 	uint32_t maxJobs = 0;
 	uint32_t maxBlasBuilds = 0;
 	uint64_t maxBytes = 0;
 	uint32_t maxMaterialRows = 0;
+	uint32_t watchdogMilliseconds = 0;
+	uint32_t peakEstimatePercent = 175;
+	uint64_t minimumLocalMemoryReserveBytes = 0;
 };
 
 struct NRIVoxelComputePreloadStats
@@ -86,6 +90,23 @@ struct NRIVoxelComputePreloadStats
 	uint32_t rawSkippedJobBudget = 0;
 	uint64_t rawEstimatedGeometryBytes = 0;
 	uint64_t rawSelectedGeometryBytes = 0;
+	uint32_t rawCandidateBindings = 0;
+	uint32_t rawCapSkippedBindings = 0;
+	uint32_t rawFailedBindings = 0;
+	uint32_t rawSelectedUniqueSources = 0;
+	uint32_t rawSelectedUniqueMeshes = 0;
+	uint32_t rawSelectedUniqueMaterials = 0;
+	uint32_t rawSelectedUniqueTextures = 0;
+	uint64_t rawSelectedUniqueGeometryBytes = 0;
+	uint64_t rawSelectedUniqueSourceBytes = 0;
+	uint64_t currentTrackedBytes = 0;
+	uint64_t localMemoryBudgetBytes = 0;
+	uint64_t minimumLocalMemoryReserveBytes = 0;
+	uint64_t estimatedPeakAdditionalBytes = 0;
+	uint64_t estimatedPeakTotalBytes = 0;
+	uint64_t manifestHash = 0;
+	bool memoryGuardAvailable = false;
+	bool memoryGuardHit = false;
 	uint32_t manifestSources = 0;
 	uint32_t manifestLines = 0;
 	uint32_t manifestRequests = 0;
@@ -97,6 +118,41 @@ struct NRIVoxelComputePreloadStats
 	uint32_t manifestUniqueRequests = 0;
 	uint32_t manifestSkippedInvalid = 0;
 	uint32_t manifestSkippedDuplicate = 0;
+};
+
+struct NRIVoxelComputePreloadClosureStats
+{
+	bool valid = false;
+	bool strictRequested = false;
+	bool dryRun = false;
+	bool memoryGuardHit = false;
+	uint64_t sequence = 0;
+	uint64_t buildSerial = 0;
+	uint64_t manifestHash = 0;
+	uint32_t selectedBindings = 0;
+	uint32_t admittedBindings = 0;
+	uint32_t readyBindings = 0;
+	uint32_t reusedBindings = 0;
+	uint32_t failedBindings = 0;
+	uint32_t capSkippedBindings = 0;
+	uint32_t staleCancelledBindings = 0;
+	uint32_t pendingBindings = 0;
+	uint32_t selectedUniqueSources = 0;
+	uint32_t selectedUniqueMeshes = 0;
+	uint32_t readyUniqueMeshes = 0;
+	uint32_t selectedUniqueMaterials = 0;
+	uint32_t readyUniqueMaterials = 0;
+	uint32_t selectedUniqueTextures = 0;
+	uint32_t readyUniqueTextures = 0;
+	uint32_t admissionQueueCount = 0;
+	uint32_t computeInFlightCount = 0;
+	uint32_t blasInFlightCount = 0;
+	uint64_t cpuGeometryBuilds = 0;
+	uint64_t cpuGeometryUploads = 0;
+	uint64_t cpuGeometryUploadBytes = 0;
+	uint64_t cpuGeometryFallback = 0;
+	uint64_t fullGeometryReadbackBytes = 0;
+	const char* outcome = "invalid";
 };
 
 NRIVoxelComputePreloadSettings BuildNRIVoxelComputePreloadSettingsFromCVars();
@@ -115,4 +171,11 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 	const char* levelName,
 	uint64_t buildSerial,
 	uint32_t frameIndex,
-	const char* timelineStage);
+	const char* timelineStage,
+	uint64_t currentTrackedBytes = 0,
+	uint64_t localMemoryBudgetBytes = 0);
+
+const NRIVoxelComputePreloadStats& GetLastNRIVoxelComputePreloadStats();
+NRIVoxelComputePreloadClosureStats BuildNRIVoxelComputePreloadClosure(
+	const NRIPersistentVoxelResidency& residency,
+	uint64_t buildSerial);

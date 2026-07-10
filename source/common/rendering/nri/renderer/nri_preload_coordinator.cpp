@@ -4,10 +4,14 @@
 #include "nri_frame_resources.h"
 #include "nri_renderer_settings.h"
 #include "nri_sky_environment.h"
+#include "nri_voxel_compute_meshing.h"
+#include "nri_voxel_compute_preload.h"
 #include "../system/nri_renderdevice.h"
 
 #include "mapinfo.h"
 #include "printf.h"
+
+#include <cstring>
 
 namespace
 {
@@ -37,6 +41,94 @@ namespace
 		double* mTarget = nullptr;
 		std::chrono::steady_clock::time_point mStart = {};
 	};
+
+	struct VoxelPreloadTimeline
+	{
+		uint64_t buildSerial = 0;
+		std::chrono::steady_clock::time_point firstSeen = {};
+		uint64_t peakTrackedBytes = 0;
+		uint64_t lastLoggedPeakBytes = 0;
+	};
+
+	VoxelPreloadTimeline gVoxelPreloadTimeline;
+
+	void UpdateVoxelPreloadTimeline(
+		NRIRenderer& renderer,
+		uint64_t buildSerial,
+		const NRIAdapterMemoryTelemetry& adapterMemory,
+		const char* stage)
+	{
+		const auto now = std::chrono::steady_clock::now();
+		if (gVoxelPreloadTimeline.buildSerial != buildSerial)
+		{
+			gVoxelPreloadTimeline = {};
+			gVoxelPreloadTimeline.buildSerial = buildSerial;
+			gVoxelPreloadTimeline.firstSeen = now;
+		}
+		const NRIRenderer::MemoryTelemetry memory = renderer.GetMemoryTelemetry();
+		static constexpr uint64_t PeakTraceStepBytes = 64ull * 1024ull * 1024ull;
+		const bool newPeak =
+			gVoxelPreloadTimeline.lastLoggedPeakBytes == 0 ||
+			memory.totalTrackedBytes >= gVoxelPreloadTimeline.lastLoggedPeakBytes + PeakTraceStepBytes;
+		gVoxelPreloadTimeline.peakTrackedBytes = std::max(gVoxelPreloadTimeline.peakTrackedBytes, memory.totalTrackedBytes);
+		if ((int)nri_ptloadingtrace >= 1 && (newPeak || std::strcmp(stage, "gate-release") == 0))
+		{
+			gVoxelPreloadTimeline.lastLoggedPeakBytes = gVoxelPreloadTimeline.peakTrackedBytes;
+			Printf("PERF pt voxel preload timeline NRI: stage=%s build_serial=%llu elapsed_ms=%.3f tracked_bytes=%llu peak_tracked_bytes=%llu local_usage_bytes=%llu local_budget_bytes=%llu nonlocal_usage_bytes=%llu nonlocal_budget_bytes=%llu live_usage_available=%u\n",
+				stage,
+				(unsigned long long)buildSerial,
+				DurationMs(gVoxelPreloadTimeline.firstSeen, now),
+				(unsigned long long)memory.totalTrackedBytes,
+				(unsigned long long)gVoxelPreloadTimeline.peakTrackedBytes,
+				(unsigned long long)adapterMemory.localUsageBytes,
+				(unsigned long long)adapterMemory.localBudgetBytes,
+				(unsigned long long)adapterMemory.nonLocalUsageBytes,
+				(unsigned long long)adapterMemory.nonLocalBudgetBytes,
+				adapterMemory.liveUsageAvailable ? 1u : 0u);
+		}
+	}
+
+	void PrintVoxelPreloadClosure(
+		const char* levelName,
+		const NRIVoxelComputePreloadClosureStats& closure,
+		const char* forcedOutcome = nullptr)
+	{
+		const char* outcome = forcedOutcome != nullptr ? forcedOutcome : closure.outcome;
+		const bool final = forcedOutcome != nullptr || !closure.strictRequested || std::strcmp(outcome, "incomplete") != 0;
+		Printf("PERF pt voxel preload closure NRI: level=%s build_serial=%llu manifest_hash=0x%llx sequence=%llu final=%u outcome=%s strict=%u dry_run=%u memory_guard_hit=%u selected_bindings=%u admitted_bindings=%u ready_bindings=%u reused_bindings=%u failed=%u cap_skipped=%u stale_cancelled=%u pending=%u unique_sources=%u unique_meshes=%u ready_meshes=%u unique_materials=%u ready_materials=%u unique_textures=%u ready_textures=%u admission_queue=%u compute_inflight=%u blas_inflight=%u cpu_geometry_builds=%llu cpu_geometry_uploads=%llu cpu_geometry_upload_bytes=%llu cpu_fallback=%llu full_geometry_readback_bytes=%llu\n",
+			levelName != nullptr ? levelName : "(none)",
+			(unsigned long long)closure.buildSerial,
+			(unsigned long long)closure.manifestHash,
+			(unsigned long long)closure.sequence,
+			final ? 1u : 0u,
+			outcome,
+			closure.strictRequested ? 1u : 0u,
+			closure.dryRun ? 1u : 0u,
+			closure.memoryGuardHit ? 1u : 0u,
+			closure.selectedBindings,
+			closure.admittedBindings,
+			closure.readyBindings,
+			closure.reusedBindings,
+			closure.failedBindings,
+			closure.capSkippedBindings,
+			closure.staleCancelledBindings,
+			closure.pendingBindings,
+			closure.selectedUniqueSources,
+			closure.selectedUniqueMeshes,
+			closure.readyUniqueMeshes,
+			closure.selectedUniqueMaterials,
+			closure.readyUniqueMaterials,
+			closure.selectedUniqueTextures,
+			closure.readyUniqueTextures,
+			closure.admissionQueueCount,
+			closure.computeInFlightCount,
+			closure.blasInFlightCount,
+			(unsigned long long)closure.cpuGeometryBuilds,
+			(unsigned long long)closure.cpuGeometryUploads,
+			(unsigned long long)closure.cpuGeometryUploadBytes,
+			(unsigned long long)closure.cpuGeometryFallback,
+			(unsigned long long)closure.fullGeometryReadbackBytes);
+	}
 }
 
 bool NRIPreloadCoordinator::HasFrameTarget(NRIRenderer& renderer, const Context& context)
@@ -383,8 +475,78 @@ bool NRIPreloadCoordinator::Finish(NRIRenderer& renderer, const Context& context
 	const NRIPersistentVoxelPreloadStatus voxelStatus = renderer.mPersistentVoxels.BuildPreloadStatusSnapshot();
 	const NRIPersistentVoxelStatusSnapshot voxelSnapshot = renderer.mPersistentVoxels.BuildStatusSnapshot();
 	const NRIPersistentVoxelMemoryUsage voxelMemory = renderer.mPersistentVoxels.GetMemoryUsage();
+	const NRIVoxelComputeMemoryUsage computeMemory = GetNRIVoxelComputeMemoryUsage();
+	const NRIRenderer::MemoryTelemetry rendererMemory = renderer.GetMemoryTelemetry();
 	const NRIRenderer::PreloadMaterialStatus& materialStatus = renderer.GetPreloadMaterialStatus();
 	const double preloadMs = DurationMs(context.start, std::chrono::steady_clock::now());
+	const NRIAdapterMemoryTelemetry adapterMemory = renderer.mFrameBuffer != nullptr ? renderer.mFrameBuffer->GetAdapterMemoryTelemetry() : NRIAdapterMemoryTelemetry{};
+	const uint64_t localBudgetBytes = adapterMemory.localBudgetBytes;
+	UpdateVoxelPreloadTimeline(renderer, renderer.mMapWorld.buildSerial, adapterMemory, "gate-release");
+	const NRIVoxelComputePreloadClosureStats closure = BuildNRIVoxelComputePreloadClosure(
+		renderer.mPersistentVoxels,
+		renderer.mMapWorld.buildSerial);
+	if (closure.valid)
+	{
+		Printf("PERF pt voxel preload memory NRI: level=%s build_serial=%llu pv_scene_bytes=%llu pv_as_bytes=%llu arena_vertex_committed=%llu arena_index_committed=%llu arena_primitive_committed=%llu arena_material_committed=%llu arena_vertex_used=%llu arena_index_used=%llu arena_primitive_used=%llu arena_material_used=%llu private_vertex_bytes=%llu private_index_bytes=%llu direct_blas_bytes=%llu shared_blas_bytes=%llu material_logical_bytes=%llu admission_transient_buffer_bytes=%llu admission_transient_as_bytes=%llu admission_cpu_geometry_bytes=%llu raw_sources=%u raw_uploaded=%u raw_cpu_bytes=%llu raw_device_bytes=%llu raw_upload_bytes=%llu compute_input_device_bytes=%llu compute_input_upload_bytes=%llu compute_generated_bytes=%llu status_readback_buffer_bytes=%llu geometry_readback_buffer_bytes=%llu diagnostic_as_bytes=%llu renderer_tracked_bytes=%llu renderer_scene_texture_bytes=%llu renderer_buffer_bytes=%llu renderer_as_bytes=%llu local_usage_bytes=%llu local_budget_bytes=%llu nonlocal_usage_bytes=%llu nonlocal_budget_bytes=%llu live_usage_available=%u peak_tracked_bytes=%llu retired_voxel_attribution_available=0 texture_voxel_attribution_available=0\n",
+			renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : "(none)",
+			(unsigned long long)renderer.mMapWorld.buildSerial,
+			(unsigned long long)voxelMemory.sceneBufferBytes,
+			(unsigned long long)voxelMemory.accelerationStructureBytes,
+			(unsigned long long)voxelMemory.arenaVertexCommittedBytes,
+			(unsigned long long)voxelMemory.arenaIndexCommittedBytes,
+			(unsigned long long)voxelMemory.arenaPrimitiveCommittedBytes,
+			(unsigned long long)voxelMemory.arenaMaterialCommittedBytes,
+			(unsigned long long)voxelMemory.arenaVertexUsedBytes,
+			(unsigned long long)voxelMemory.arenaIndexUsedBytes,
+			(unsigned long long)voxelMemory.arenaPrimitiveUsedBytes,
+			(unsigned long long)voxelMemory.arenaMaterialUsedBytes,
+			(unsigned long long)voxelMemory.privateVertexBytes,
+			(unsigned long long)voxelMemory.privateIndexBytes,
+			(unsigned long long)voxelMemory.directBlasBytes,
+			(unsigned long long)voxelMemory.sharedBlasBytes,
+			(unsigned long long)voxelMemory.materialLogicalBytes,
+			(unsigned long long)voxelMemory.admissionTransientBufferBytes,
+			(unsigned long long)voxelMemory.admissionTransientAsBytes,
+			(unsigned long long)voxelMemory.admissionCpuGeometryBytes,
+			computeMemory.rawSourceCount,
+			computeMemory.rawSourceUploadedCount,
+			(unsigned long long)computeMemory.rawCpuBytes,
+			(unsigned long long)computeMemory.rawDeviceBytes,
+			(unsigned long long)computeMemory.rawUploadBytes,
+			(unsigned long long)computeMemory.transientInputDeviceBytes,
+			(unsigned long long)computeMemory.transientInputUploadBytes,
+			(unsigned long long)computeMemory.transientGeneratedBytes,
+			(unsigned long long)computeMemory.statusReadbackBytes,
+			(unsigned long long)computeMemory.geometryReadbackBufferBytes,
+			(unsigned long long)computeMemory.diagnosticAsBytes,
+			(unsigned long long)rendererMemory.totalTrackedBytes,
+			(unsigned long long)rendererMemory.sceneTextureBytes,
+			(unsigned long long)rendererMemory.sceneBufferBytes,
+			(unsigned long long)rendererMemory.accelerationStructureBytes,
+			(unsigned long long)adapterMemory.localUsageBytes,
+			(unsigned long long)localBudgetBytes,
+			(unsigned long long)adapterMemory.nonLocalUsageBytes,
+			(unsigned long long)adapterMemory.nonLocalBudgetBytes,
+			adapterMemory.liveUsageAvailable ? 1u : 0u,
+			(unsigned long long)gVoxelPreloadTimeline.peakTrackedBytes);
+		PrintVoxelPreloadClosure(
+			renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : nullptr,
+			closure);
+		if (closure.strictRequested && std::strcmp(closure.outcome, "incomplete") == 0)
+		{
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				Printf("NRI PT loading gate: event=renderer-preload result=wait reason=strict-voxel-incomplete sequence=%llu pending=%u admission_queue=%u compute_inflight=%u blas_inflight=%u ms=%.3f\n",
+					(unsigned long long)closure.sequence,
+					closure.pendingBindings,
+					closure.admissionQueueCount,
+					closure.computeInFlightCount,
+					closure.blasInFlightCount,
+					preloadMs);
+			}
+			return false;
+		}
+	}
 	Printf("NRI PT loading summary: static_ready=%u startup_correction_pending=%u required_voxel_pending=%u required_voxel_ready=%u optional_voxel_pending=%u voxel_batch_ready=%u voxel_batch_pending=%u deferred_texture_prewarm=%u deferred_onboarding=%u material_pending=%u material_static_ready=%u material_static_pending=%u material_static_realized=%u material_static_bytes=%llu material_voxel_ready=%u material_voxel_pending=%u material_voxel_realized=%u material_voxel_bytes=%llu preload_submits=%u preload_submit_limit=%u submit_budget_hit=%u ms_budget_hit=%u frame_target_used=%u standalone_context_used=%u gpu_voxel_loading=%u static_light_refresh=%u\n",
 		staticReady ? 1u : 0u,
 		renderer.mAllowStartupMapWorldCorrection ? 1u : 0u,
@@ -491,6 +653,36 @@ bool NRIPreloadCoordinator::Run(NRIRenderer& renderer, const NRIPreloadLevelScen
 	if (staticSceneResult != StepResult::Continue)
 	{
 		return staticSceneResult != StepResult::Wait;
+	}
+	const NRIVoxelComputePreloadSettings computePreloadSettings = BuildNRIVoxelComputePreloadSettingsFromCVars();
+	NRIAdapterMemoryTelemetry adapterMemory = {};
+	if (renderer.mFrameBuffer != nullptr)
+	{
+		adapterMemory.localBudgetBytes = renderer.mFrameBuffer->GetAdapterLocalBudgetBytes();
+		if (computePreloadSettings.strict)
+		{
+			adapterMemory = renderer.mFrameBuffer->GetAdapterMemoryTelemetry();
+		}
+	}
+	UpdateVoxelPreloadTimeline(renderer, renderer.mMapWorld.buildSerial, adapterMemory, "preload-tick");
+	if (computePreloadSettings.strict &&
+		computePreloadSettings.watchdogMilliseconds != 0 &&
+		DurationMs(gVoxelPreloadTimeline.firstSeen, std::chrono::steady_clock::now()) >= computePreloadSettings.watchdogMilliseconds)
+	{
+		const NRIVoxelComputePreloadClosureStats closure = BuildNRIVoxelComputePreloadClosure(
+			renderer.mPersistentVoxels,
+			renderer.mMapWorld.buildSerial);
+		if (closure.valid)
+		{
+			PrintVoxelPreloadClosure(
+				renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : nullptr,
+				closure,
+				"watchdog");
+			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=strict-watchdog elapsed_ms=%.3f watchdog_ms=%u\n",
+				DurationMs(gVoxelPreloadTimeline.firstSeen, std::chrono::steady_clock::now()),
+				computePreloadSettings.watchdogMilliseconds);
+			return true;
+		}
 	}
 
 	if ((bool)nri_ptloadingmutationbaseline &&

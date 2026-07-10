@@ -2,9 +2,11 @@
 
 #include "nri_cvars.h"
 #include "nri_persistent_voxels.h"
+#include "nri_voxel_compute_meshing.h"
 
 #include <algorithm>
 #include <chrono>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace
@@ -60,68 +62,16 @@ namespace
 	{
 		return settings.traceLevel >= 1 || (int)nri_ptloadingtrace >= 1 || (int)nri_ptvoxelcomputetrace >= 1;
 	}
-}
 
-NRIVoxelComputePreloadSettings BuildNRIVoxelComputePreloadSettingsFromCVars()
-{
-	NRIVoxelComputePreloadSettings settings = {};
-	settings.enabled = (bool)nri_ptvoxelcomputepreload;
-	settings.dryRun = (bool)nri_ptvoxelcomputepreloaddryrun;
-	settings.traceLevel = std::max(0, (int)nri_ptvoxelcomputepreloadtrace);
-	settings.includeRequired = (bool)nri_ptvoxelcomputepreloadrequired;
-	settings.includeOptional = (bool)nri_ptvoxelcomputepreloadoptional;
-	settings.preloadMaterials = (bool)nri_ptvoxelcomputepreloadmaterials;
-	settings.maxMilliseconds = std::max(0, (int)nri_ptvoxelcomputepreloadmaxms);
-	settings.maxJobs = std::max(0, (int)nri_ptvoxelcomputepreloadmaxjobs);
-	settings.maxBlasBuilds = std::max(0, (int)nri_ptvoxelcomputepreloadmaxblas);
-	settings.maxBytes = (int)nri_ptvoxelcomputepreloadmaxbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxelcomputepreloadmaxbytes;
-	settings.maxMaterialRows = std::max(0, (int)nri_ptvoxelcomputepreloadmaxmaterialrows);
-	return settings;
-}
-
-void BuildNRIVoxelComputePreloadDirectVariants(
-	const std::vector<nri_scene::PrecachedVoxelRawManifestView>& rawVariants,
-	const NRIVoxelComputePreloadSettings& settings,
-	std::vector<nri_scene::PrecachedVoxelVariantView>& outVariants)
-{
-	outVariants.clear();
-	if (!settings.enabled || settings.dryRun)
+	uint64_t HashValue(uint64_t hash, uint64_t value)
 	{
-		return;
+		hash ^= value;
+		hash *= 1099511628211ull;
+		return hash;
 	}
 
-	uint64_t selectedBytes = 0;
-	for (const nri_scene::PrecachedVoxelRawManifestView& rawVariant : rawVariants)
+	nri_scene::PrecachedVoxelVariantView BuildDirectVariant(const nri_scene::PrecachedVoxelRawManifestView& rawVariant)
 	{
-		const bool required = IsRequiredComputePreloadRawVariant(rawVariant);
-		if (required && !settings.includeRequired)
-		{
-			continue;
-		}
-		if (!required && !settings.includeOptional)
-		{
-			continue;
-		}
-		if (!rawVariant.rawSourceResident ||
-			!rawVariant.materialContextReady ||
-			rawVariant.primitiveCount == 0 ||
-			rawVariant.meshKeyHash == 0 ||
-			rawVariant.materialKeyHash == 0 ||
-			rawVariant.model == nullptr)
-		{
-			continue;
-		}
-
-		const uint64_t estimatedBytes = EstimateRawVariantGeometryBytes(rawVariant);
-		if (settings.maxJobs != 0 && outVariants.size() >= settings.maxJobs)
-		{
-			continue;
-		}
-		if (settings.maxBytes != 0 && selectedBytes + estimatedBytes > settings.maxBytes)
-		{
-			continue;
-		}
-
 		nri_scene::PrecachedVoxelVariantView variant = {};
 		variant.meshKeyHash = rawVariant.meshKeyHash;
 		variant.materialKeyHash = rawVariant.materialKeyHash;
@@ -145,9 +95,198 @@ void BuildNRIVoxelComputePreloadDirectVariants(
 		variant.materialSurface.provenance.sourceType = nri_scene::SurfaceSourceType::VoxelProxySprite;
 		variant.materialSurface.provenance.materialFlags = rawVariant.material.flags;
 		variant.directOnlyAdmission = true;
-		outVariants.push_back(std::move(variant));
-		selectedBytes += estimatedBytes;
+		return variant;
 	}
+
+	enum class PlannedBindingDisposition : uint8_t
+	{
+		Admitted,
+		Failed,
+		CapSkipped,
+	};
+
+	struct PlannedBinding
+	{
+		uint64_t meshResourceKey = 0;
+		uint64_t materialKey = 0;
+		uint64_t sourceKey = 0;
+		uint64_t textureKey = 0;
+		PlannedBindingDisposition disposition = PlannedBindingDisposition::Failed;
+	};
+
+	struct RawPlanResult
+	{
+		std::vector<nri_scene::PrecachedVoxelVariantView> directVariants;
+		std::vector<PlannedBinding> bindings;
+		uint32_t candidateBindings = 0;
+		uint32_t admittedBindings = 0;
+		uint32_t admittedRequired = 0;
+		uint32_t admittedOptional = 0;
+		uint32_t capSkippedBindings = 0;
+		uint32_t failedBindings = 0;
+		uint32_t skippedSourceMissing = 0;
+		uint32_t skippedMaterialMissing = 0;
+		uint32_t skippedJobBudget = 0;
+		uint32_t skippedByteBudget = 0;
+		uint32_t skippedMaterialBudget = 0;
+		uint64_t admittedPairGeometryBytes = 0;
+		uint64_t uniqueGeometryBytes = 0;
+		uint64_t uniqueSourceBytes = 0;
+		uint64_t manifestHash = 1469598103934665603ull;
+		std::unordered_set<uint64_t> uniqueSources;
+		std::unordered_set<uint64_t> uniqueMeshes;
+		std::unordered_set<uint64_t> uniqueMaterials;
+		std::unordered_set<uint64_t> uniqueTextures;
+	};
+
+	RawPlanResult BuildRawPlan(
+		const std::vector<nri_scene::PrecachedVoxelRawManifestView>& rawVariants,
+		const NRIVoxelComputePreloadSettings& settings)
+	{
+		RawPlanResult result = {};
+		result.directVariants.reserve(rawVariants.size());
+		result.bindings.reserve(rawVariants.size());
+		std::unordered_set<uint64_t> selectedMaterialRows;
+
+		uint64_t selectedPairBytes = 0;
+		for (const nri_scene::PrecachedVoxelRawManifestView& rawVariant : rawVariants)
+		{
+			const bool required = IsRequiredComputePreloadRawVariant(rawVariant);
+			if ((required && !settings.includeRequired) || (!required && !settings.includeOptional))
+			{
+				continue;
+			}
+
+			result.candidateBindings++;
+			result.manifestHash = HashValue(result.manifestHash, rawVariant.meshKeyHash);
+			result.manifestHash = HashValue(result.manifestHash, rawVariant.materialKeyHash);
+			result.manifestHash = HashValue(result.manifestHash, rawVariant.geometryContentHash);
+			result.manifestHash = HashValue(result.manifestHash, (uint32_t)rawVariant.sourcePicnum);
+			result.manifestHash = HashValue(result.manifestHash, (uint32_t)rawVariant.resolvedVoxelIndex);
+
+			nri_scene::PrecachedVoxelVariantView directVariant = BuildDirectVariant(rawVariant);
+			PlannedBinding binding = {};
+			binding.meshResourceKey = BuildPersistentVoxelVariantMeshResourceKey(directVariant);
+			binding.materialKey = rawVariant.materialKeyHash;
+			binding.sourceKey = rawVariant.resolvedVoxelIndex >= 0 ?
+				(uint64_t)(uint32_t)rawVariant.resolvedVoxelIndex + 1ull :
+				(rawVariant.geometryContentHash != 0 ? rawVariant.geometryContentHash : rawVariant.meshKeyHash);
+			binding.textureKey = rawVariant.sourcePicnum >= 0 ? (uint64_t)(uint32_t)rawVariant.sourcePicnum + 1ull : rawVariant.materialKeyHash;
+
+			if (!rawVariant.rawSourceResident || rawVariant.primitiveCount == 0 || rawVariant.meshKeyHash == 0 || rawVariant.model == nullptr)
+			{
+				result.failedBindings++;
+				result.skippedSourceMissing++;
+				binding.disposition = PlannedBindingDisposition::Failed;
+				result.bindings.push_back(binding);
+				continue;
+			}
+			if (!rawVariant.materialContextReady || rawVariant.materialKeyHash == 0)
+			{
+				result.failedBindings++;
+				result.skippedMaterialMissing++;
+				binding.disposition = PlannedBindingDisposition::Failed;
+				result.bindings.push_back(binding);
+				continue;
+			}
+
+			const uint64_t estimatedBytes = EstimateRawVariantGeometryBytes(rawVariant);
+			bool capSkipped = false;
+			if (settings.maxJobs != 0 && result.admittedBindings >= settings.maxJobs)
+			{
+				result.skippedJobBudget++;
+				capSkipped = true;
+			}
+			else if (settings.maxBytes != 0 && selectedPairBytes + estimatedBytes > settings.maxBytes)
+			{
+				result.skippedByteBudget++;
+				capSkipped = true;
+			}
+			else if (settings.preloadMaterials &&
+				selectedMaterialRows.find(rawVariant.materialKeyHash) == selectedMaterialRows.end() &&
+				settings.maxMaterialRows != 0 &&
+				selectedMaterialRows.size() >= settings.maxMaterialRows)
+			{
+				result.skippedMaterialBudget++;
+				capSkipped = true;
+			}
+			if (capSkipped)
+			{
+				result.capSkippedBindings++;
+				binding.disposition = PlannedBindingDisposition::CapSkipped;
+				result.bindings.push_back(binding);
+				continue;
+			}
+
+			binding.disposition = PlannedBindingDisposition::Admitted;
+			result.bindings.push_back(binding);
+			result.directVariants.push_back(std::move(directVariant));
+			result.admittedBindings++;
+			result.admittedRequired += required ? 1u : 0u;
+			result.admittedOptional += required ? 0u : 1u;
+			selectedPairBytes += estimatedBytes;
+			result.admittedPairGeometryBytes += estimatedBytes;
+			selectedMaterialRows.insert(rawVariant.materialKeyHash);
+			if (result.uniqueMeshes.insert(binding.meshResourceKey).second)
+			{
+				result.uniqueGeometryBytes += estimatedBytes;
+			}
+			if (result.uniqueSources.insert(binding.sourceKey).second)
+			{
+				result.uniqueSourceBytes += rawVariant.rawBytes;
+			}
+			result.uniqueMaterials.insert(binding.materialKey);
+			result.uniqueTextures.insert(binding.textureKey);
+		}
+		return result;
+	}
+
+	struct PreloadPlanState
+	{
+		uint64_t buildSerial = 0;
+		uint64_t closureSequence = 0;
+		NRIVoxelComputePreloadSettings settings = {};
+		NRIVoxelComputePreloadStats stats = {};
+		std::vector<PlannedBinding> bindings;
+	};
+
+	PreloadPlanState gPreloadPlanState;
+}
+
+NRIVoxelComputePreloadSettings BuildNRIVoxelComputePreloadSettingsFromCVars()
+{
+	NRIVoxelComputePreloadSettings settings = {};
+	settings.enabled = (bool)nri_ptvoxelcomputepreload;
+	settings.dryRun = (bool)nri_ptvoxelcomputepreloaddryrun;
+	settings.traceLevel = std::max(0, (int)nri_ptvoxelcomputepreloadtrace);
+	settings.includeRequired = (bool)nri_ptvoxelcomputepreloadrequired;
+	settings.includeOptional = (bool)nri_ptvoxelcomputepreloadoptional;
+	settings.preloadMaterials = (bool)nri_ptvoxelcomputepreloadmaterials;
+	settings.strict = (bool)nri_ptvoxelcomputepreloadstrict;
+	settings.maxMilliseconds = std::max(0, (int)nri_ptvoxelcomputepreloadmaxms);
+	settings.maxJobs = std::max(0, (int)nri_ptvoxelcomputepreloadmaxjobs);
+	settings.maxBlasBuilds = std::max(0, (int)nri_ptvoxelcomputepreloadmaxblas);
+	settings.maxBytes = (int)nri_ptvoxelcomputepreloadmaxbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxelcomputepreloadmaxbytes;
+	settings.maxMaterialRows = std::max(0, (int)nri_ptvoxelcomputepreloadmaxmaterialrows);
+	settings.watchdogMilliseconds = std::max(0, (int)nri_ptvoxelcomputepreloadwatchdogms);
+	settings.peakEstimatePercent = (uint32_t)std::max(100, (int)nri_ptvoxelcomputepreloadpeakpercent);
+	settings.minimumLocalMemoryReserveBytes = (uint64_t)std::max(0, (int)nri_ptvoxelcomputepreloadminreservemb) * 1024ull * 1024ull;
+	return settings;
+}
+
+void BuildNRIVoxelComputePreloadDirectVariants(
+	const std::vector<nri_scene::PrecachedVoxelRawManifestView>& rawVariants,
+	const NRIVoxelComputePreloadSettings& settings,
+	std::vector<nri_scene::PrecachedVoxelVariantView>& outVariants)
+{
+	outVariants.clear();
+	if (!settings.enabled || settings.dryRun)
+	{
+		return;
+	}
+
+	RawPlanResult result = BuildRawPlan(rawVariants, settings);
+	outVariants = std::move(result.directVariants);
 }
 
 NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
@@ -159,7 +298,9 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 	const char* levelName,
 	uint64_t buildSerial,
 	uint32_t frameIndex,
-	const char* timelineStage)
+	const char* timelineStage,
+	uint64_t currentTrackedBytes,
+	uint64_t localMemoryBudgetBytes)
 {
 	const auto start = std::chrono::steady_clock::now();
 	NRIVoxelComputePreloadStats stats = {};
@@ -430,23 +571,91 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 		}
 	}
 
+	RawPlanResult rawPlan = BuildRawPlan(rawVariants, settings);
+	stats.rawSelected = rawPlan.admittedBindings;
+	stats.rawSelectedRequired = rawPlan.admittedRequired;
+	stats.rawSelectedOptional = rawPlan.admittedOptional;
+	stats.rawSelectedGeometryBytes = rawPlan.admittedPairGeometryBytes;
+	stats.rawSkippedSourceMissing = rawPlan.skippedSourceMissing;
+	stats.rawSkippedMaterialMissing = rawPlan.skippedMaterialMissing;
+	stats.rawSkippedJobBudget = rawPlan.skippedJobBudget;
+	stats.rawSkippedByteBudget = rawPlan.skippedByteBudget;
+	stats.rawCandidateBindings = rawPlan.candidateBindings;
+	stats.rawCapSkippedBindings = rawPlan.capSkippedBindings;
+	stats.rawFailedBindings = rawPlan.failedBindings;
+	stats.rawSelectedUniqueSources = (uint32_t)rawPlan.uniqueSources.size();
+	stats.rawSelectedUniqueMeshes = (uint32_t)rawPlan.uniqueMeshes.size();
+	stats.rawSelectedUniqueMaterials = (uint32_t)rawPlan.uniqueMaterials.size();
+	stats.rawSelectedUniqueTextures = (uint32_t)rawPlan.uniqueTextures.size();
+	stats.rawSelectedUniqueGeometryBytes = rawPlan.uniqueGeometryBytes;
+	stats.rawSelectedUniqueSourceBytes = rawPlan.uniqueSourceBytes;
+	stats.manifestHash = rawPlan.manifestHash;
+	stats.currentTrackedBytes = currentTrackedBytes;
+	stats.localMemoryBudgetBytes = localMemoryBudgetBytes;
+	stats.minimumLocalMemoryReserveBytes = settings.minimumLocalMemoryReserveBytes;
+	stats.estimatedPeakAdditionalBytes =
+		(rawPlan.uniqueGeometryBytes * (uint64_t)settings.peakEstimatePercent + 99ull) / 100ull +
+		rawPlan.uniqueSourceBytes;
+	stats.estimatedPeakTotalBytes = currentTrackedBytes + stats.estimatedPeakAdditionalBytes;
+	stats.memoryGuardAvailable = localMemoryBudgetBytes != 0;
+	stats.memoryGuardHit =
+		stats.memoryGuardAvailable &&
+		(stats.estimatedPeakTotalBytes > localMemoryBudgetBytes ||
+		 settings.minimumLocalMemoryReserveBytes > localMemoryBudgetBytes - std::min(localMemoryBudgetBytes, stats.estimatedPeakTotalBytes));
+
 	stats.uniqueMeshes = (uint32_t)uniqueMeshes.size();
 	stats.uniqueMaterials = (uint32_t)uniqueMaterials.size();
 	stats.rawUniqueMeshes = (uint32_t)rawUniqueMeshes.size();
 	stats.rawUniqueMaterials = (uint32_t)rawUniqueMaterials.size();
 	stats.rawMaterialRequiredKeys = (uint32_t)rawRequiredMaterials.size();
 	stats.rawMaterialOptionalKeys = (uint32_t)rawOptionalMaterials.size();
-	stats.rawMaterialSelectedKeys = (uint32_t)rawSelectedMaterials.size();
+	stats.rawMaterialSelectedKeys = rawPlan.admittedBindings != 0 ? (uint32_t)rawPlan.uniqueMaterials.size() : (uint32_t)rawSelectedMaterials.size();
 	stats.rawMaterialActorScopedKeys = (uint32_t)rawActorScopedMaterials.size();
 	const NRIPersistentVoxelMemoryUsage memoryUsage = residency.GetMemoryUsage();
 	stats.residentSceneBytes = memoryUsage.sceneBufferBytes;
 	stats.residentAsBytes = memoryUsage.accelerationStructureBytes;
-	stats.actionReady = settings.enabled && settings.dryRun;
+	stats.actionReady = settings.enabled && (settings.dryRun || !stats.memoryGuardHit);
 	stats.planMs = DurationMs(start, std::chrono::steady_clock::now());
+	if (buildSerial != 0 &&
+		(gPreloadPlanState.buildSerial != buildSerial || rawPlan.candidateBindings >= gPreloadPlanState.stats.rawCandidateBindings))
+	{
+		const uint64_t previousSequence = gPreloadPlanState.buildSerial == buildSerial ? gPreloadPlanState.closureSequence : 0;
+		gPreloadPlanState = {};
+		gPreloadPlanState.buildSerial = buildSerial;
+		gPreloadPlanState.closureSequence = previousSequence;
+		gPreloadPlanState.settings = settings;
+		gPreloadPlanState.stats = stats;
+		gPreloadPlanState.bindings = std::move(rawPlan.bindings);
+	}
 
 	if (ShouldEmitPreloadTrace(settings))
 	{
 		stats.emitted = true;
+		Printf("PERF pt voxel preload accounting NRI: level=%s build_serial=%llu frame=%u manifest_hash=0x%llx strict=%u candidate_bindings=%u admitted_bindings=%u cap_skipped_bindings=%u failed_bindings=%u unique_sources=%u unique_meshes=%u unique_materials=%u unique_textures=%u logical_pair_geometry_bytes=%llu unique_geometry_bytes=%llu unique_source_bytes=%llu current_tracked_bytes=%llu local_budget_bytes=%llu minimum_reserve_bytes=%llu estimated_peak_additional_bytes=%llu estimated_peak_total_bytes=%llu memory_guard_available=%u memory_guard_hit=%u peak_percent=%u\n",
+			levelName != nullptr ? levelName : "unknown",
+			(unsigned long long)buildSerial,
+			frameIndex,
+			(unsigned long long)stats.manifestHash,
+			settings.strict ? 1u : 0u,
+			stats.rawCandidateBindings,
+			stats.rawSelected,
+			stats.rawCapSkippedBindings,
+			stats.rawFailedBindings,
+			stats.rawSelectedUniqueSources,
+			stats.rawSelectedUniqueMeshes,
+			stats.rawSelectedUniqueMaterials,
+			stats.rawSelectedUniqueTextures,
+			(unsigned long long)stats.rawSelectedGeometryBytes,
+			(unsigned long long)stats.rawSelectedUniqueGeometryBytes,
+			(unsigned long long)stats.rawSelectedUniqueSourceBytes,
+			(unsigned long long)stats.currentTrackedBytes,
+			(unsigned long long)stats.localMemoryBudgetBytes,
+			(unsigned long long)stats.minimumLocalMemoryReserveBytes,
+			(unsigned long long)stats.estimatedPeakAdditionalBytes,
+			(unsigned long long)stats.estimatedPeakTotalBytes,
+			stats.memoryGuardAvailable ? 1u : 0u,
+			stats.memoryGuardHit ? 1u : 0u,
+			settings.peakEstimatePercent);
 		Printf("NRI PT voxel compute preload: event=plan stage=%s level=%s build_serial=%llu frame=%u enabled=%u dry_run=%u action=%s variants=%u required=%u optional=%u selected=%u selected_required=%u selected_optional=%u unique_meshes=%u unique_materials=%u surface_ready=%u direct_only=%u source_ready=%u material_context=%u mesh_resident=%u material_resident=%u blas_ready=%u ready=%u not_ready=%u material_rows_planned=%u estimated_bytes=%llu selected_bytes=%llu resident_scene_bytes=%llu resident_as_bytes=%llu skipped_disabled=%u skipped_required_off=%u skipped_optional_off=%u skipped_byte_budget=%u skipped_job_budget=%u skipped_material_budget=%u raw_variants=%u raw_required=%u raw_optional=%u raw_selected=%u raw_selected_required=%u raw_selected_optional=%u raw_unique_meshes=%u raw_unique_materials=%u raw_material_required_keys=%u raw_material_optional_keys=%u raw_material_selected_keys=%u raw_material_actor_scoped_keys=%u raw_material_texture_refs=%u raw_source_resident=%u raw_source_missing=%u raw_material_context=%u raw_material_missing=%u raw_cpu_surface_ready=%u raw_legacy_gpu_candidate=%u raw_legacy_gpu_source_skipped=%u raw_estimated_bytes=%llu raw_selected_bytes=%llu raw_skipped_disabled=%u raw_skipped_required_off=%u raw_skipped_optional_off=%u raw_skipped_source_missing=%u raw_skipped_material_missing=%u raw_skipped_byte_budget=%u raw_skipped_job_budget=%u manifest_sources=%u manifest_lines=%u manifest_requests=%u manifest_discovered=%u manifest_unique=%u manifest_skipped_inactive=%u manifest_skipped_syntax=%u manifest_skipped_actor=%u manifest_skipped_unsupported=%u manifest_skipped_invalid=%u manifest_skipped_duplicate=%u max_ms=%u max_jobs=%u max_blas=%u max_bytes=%llu max_material_rows=%u ms=%.3f\n",
 			timelineStage != nullptr ? timelineStage : "snapshot",
 			levelName != nullptr ? levelName : "unknown",
@@ -610,4 +819,134 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 	}
 
 	return stats;
+}
+
+const NRIVoxelComputePreloadStats& GetLastNRIVoxelComputePreloadStats()
+{
+	return gPreloadPlanState.stats;
+}
+
+NRIVoxelComputePreloadClosureStats BuildNRIVoxelComputePreloadClosure(
+	const NRIPersistentVoxelResidency& residency,
+	uint64_t buildSerial)
+{
+	NRIVoxelComputePreloadClosureStats closure = {};
+	closure.buildSerial = buildSerial;
+	if (buildSerial == 0 || gPreloadPlanState.buildSerial != buildSerial)
+	{
+		return closure;
+	}
+
+	closure.valid = true;
+	closure.strictRequested = gPreloadPlanState.settings.strict;
+	closure.dryRun = gPreloadPlanState.settings.dryRun;
+	closure.memoryGuardHit = gPreloadPlanState.stats.memoryGuardHit;
+	closure.sequence = ++gPreloadPlanState.closureSequence;
+	closure.manifestHash = gPreloadPlanState.stats.manifestHash;
+	closure.selectedBindings = gPreloadPlanState.stats.rawCandidateBindings;
+	closure.admittedBindings = gPreloadPlanState.stats.rawSelected;
+	closure.selectedUniqueSources = gPreloadPlanState.stats.rawSelectedUniqueSources;
+	closure.selectedUniqueMeshes = gPreloadPlanState.stats.rawSelectedUniqueMeshes;
+	closure.selectedUniqueMaterials = gPreloadPlanState.stats.rawSelectedUniqueMaterials;
+	closure.selectedUniqueTextures = gPreloadPlanState.stats.rawSelectedUniqueTextures;
+
+	std::unordered_set<uint64_t> readyPairs;
+	std::unordered_set<uint64_t> readyMeshes;
+	std::unordered_set<uint64_t> readyMaterials;
+	std::unordered_set<uint64_t> readyTextures;
+	for (const PlannedBinding& binding : gPreloadPlanState.bindings)
+	{
+		if (binding.disposition == PlannedBindingDisposition::Failed)
+		{
+			closure.failedBindings++;
+			continue;
+		}
+		if (binding.disposition == PlannedBindingDisposition::CapSkipped)
+		{
+			closure.capSkippedBindings++;
+			continue;
+		}
+
+		const PersistentVoxelReadinessStatus readiness = residency.GetSharedVariantReadiness(binding.meshResourceKey, binding.materialKey);
+		if (!readiness.ready)
+		{
+			closure.pendingBindings++;
+			continue;
+		}
+
+		const uint64_t pairKey = HashValue(HashValue(1469598103934665603ull, binding.meshResourceKey), binding.materialKey);
+		if (readyPairs.insert(pairKey).second)
+		{
+			closure.readyBindings++;
+		}
+		else
+		{
+			closure.reusedBindings++;
+		}
+		readyMeshes.insert(binding.meshResourceKey);
+		readyMaterials.insert(binding.materialKey);
+		readyTextures.insert(binding.textureKey);
+	}
+
+	const NRIPersistentVoxelStatusSnapshot residencyStatus = residency.BuildStatusSnapshot();
+	const uint32_t failedAdmissions = std::min(closure.pendingBindings, residencyStatus.failedAdmissionCount);
+	closure.pendingBindings -= failedAdmissions;
+	closure.failedBindings += failedAdmissions;
+	closure.readyUniqueMeshes = (uint32_t)readyMeshes.size();
+	closure.readyUniqueMaterials = (uint32_t)readyMaterials.size();
+	closure.readyUniqueTextures = (uint32_t)readyTextures.size();
+	closure.admissionQueueCount =
+		residencyStatus.requiredAdmissionPendingCount +
+		residencyStatus.optionalAdmissionPendingCount;
+	const NRIVoxelComputeMemoryUsage computeMemory = GetNRIVoxelComputeMemoryUsage();
+	closure.computeInFlightCount =
+		residencyStatus.computeInFlightCount +
+		computeMemory.queuedJobCount +
+		computeMemory.pendingJobCount;
+	closure.blasInFlightCount = residencyStatus.blasInFlightCount;
+	closure.cpuGeometryBuilds = residencyStatus.cpuGeometryBuildCount;
+	closure.cpuGeometryUploads = residencyStatus.cpuGeometryUploadCount;
+	closure.cpuGeometryUploadBytes = residencyStatus.cpuGeometryUploadBytes;
+	closure.cpuGeometryFallback = residencyStatus.cpuGeometryFallbackCount;
+	closure.fullGeometryReadbackBytes = computeMemory.totalFullGeometryReadbackBytes;
+
+	const bool reconciled =
+		closure.selectedBindings ==
+		closure.readyBindings +
+		closure.reusedBindings +
+		closure.failedBindings +
+		closure.capSkippedBindings +
+		closure.staleCancelledBindings +
+		closure.pendingBindings;
+	const bool complete =
+		reconciled &&
+		closure.selectedBindings != 0 &&
+		closure.readyBindings + closure.reusedBindings == closure.selectedBindings &&
+		closure.readyUniqueMeshes == closure.selectedUniqueMeshes &&
+		closure.readyUniqueMaterials == closure.selectedUniqueMaterials &&
+		closure.readyUniqueTextures == closure.selectedUniqueTextures &&
+		closure.admissionQueueCount == 0 &&
+		closure.computeInFlightCount == 0 &&
+		closure.blasInFlightCount == 0 &&
+		closure.cpuGeometryBuilds == 0 &&
+		closure.cpuGeometryUploads == 0 &&
+		closure.cpuGeometryFallback == 0 &&
+		closure.fullGeometryReadbackBytes == 0;
+	if (closure.dryRun)
+	{
+		closure.outcome = "dry-run";
+	}
+	else if (closure.memoryGuardHit)
+	{
+		closure.outcome = "memory-abort";
+	}
+	else if (!closure.strictRequested)
+	{
+		closure.outcome = "bounded";
+	}
+	else
+	{
+		closure.outcome = complete ? "complete" : "incomplete";
+	}
+	return closure;
 }

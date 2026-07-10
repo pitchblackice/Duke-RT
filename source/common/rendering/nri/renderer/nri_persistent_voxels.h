@@ -183,6 +183,8 @@ struct PersistentVoxelAdmissionEntry
 	bool uploadSubmittedBeforeBlas = false;
 	bool uploadGeometryFromCompute = false;
 	bool computeGeometryFailed = false;
+	bool cpuGeometryBuildCounted = false;
+	bool cpuGeometryUploadCounted = false;
 	uint32_t computeGeometryJobId = 0;
 	bool directComputeRequested = false;
 	bool directComputeFailed = false;
@@ -496,6 +498,22 @@ struct NRIPersistentVoxelMemoryUsage
 {
 	uint64_t sceneBufferBytes = 0;
 	uint64_t accelerationStructureBytes = 0;
+	uint64_t arenaVertexCommittedBytes = 0;
+	uint64_t arenaIndexCommittedBytes = 0;
+	uint64_t arenaPrimitiveCommittedBytes = 0;
+	uint64_t arenaMaterialCommittedBytes = 0;
+	uint64_t arenaVertexUsedBytes = 0;
+	uint64_t arenaIndexUsedBytes = 0;
+	uint64_t arenaPrimitiveUsedBytes = 0;
+	uint64_t arenaMaterialUsedBytes = 0;
+	uint64_t privateVertexBytes = 0;
+	uint64_t privateIndexBytes = 0;
+	uint64_t directBlasBytes = 0;
+	uint64_t sharedBlasBytes = 0;
+	uint64_t materialLogicalBytes = 0;
+	uint64_t admissionTransientBufferBytes = 0;
+	uint64_t admissionTransientAsBytes = 0;
+	uint64_t admissionCpuGeometryBytes = 0;
 };
 
 struct NRIPersistentVoxelStatusSnapshot
@@ -519,6 +537,12 @@ struct NRIPersistentVoxelStatusSnapshot
 	uint32_t requiredAdmissionReadyCount = 0;
 	uint32_t optionalAdmissionPendingCount = 0;
 	uint32_t failedAdmissionCount = 0;
+	uint32_t computeInFlightCount = 0;
+	uint32_t blasInFlightCount = 0;
+	uint64_t cpuGeometryBuildCount = 0;
+	uint64_t cpuGeometryUploadCount = 0;
+	uint64_t cpuGeometryUploadBytes = 0;
+	uint64_t cpuGeometryFallbackCount = 0;
 	uint32_t residencyGeneration = 0;
 	uint64_t residencyBuildSerial = 0;
 	uint32_t lastDesiredResidencyCount = 0;
@@ -1004,6 +1028,10 @@ public:
 	uint32_t postLoadAdmissionGraceEndFrame = 0;
 	uint32_t postLoadAdmissionGraceMapGeneration = 0;
 	NRIPersistentVoxelPreloadStatus lastPreloadStatus = {};
+	uint64_t cumulativeCpuGeometryBuildCount = 0;
+	uint64_t cumulativeCpuGeometryUploadCount = 0;
+	uint64_t cumulativeCpuGeometryUploadBytes = 0;
+	uint64_t cumulativeCpuGeometryFallbackCount = 0;
 };
 
 const char* GetPersistentVoxelBakeSpaceName(nri_scene::VoxelMeshBakeSpace bakeSpace);

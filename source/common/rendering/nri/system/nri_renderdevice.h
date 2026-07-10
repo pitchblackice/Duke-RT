@@ -7,6 +7,7 @@
 #include "nri_local.h"
 #include "Extensions/NRIWrapperD3D12.h"
 
+#include <chrono>
 #include <memory>
 #include <vector>
 
@@ -49,6 +50,15 @@ struct NRIBackendCapabilities
 	bool lowLatencySwapChainEnabled = false;
 	bool waitableSwapChainAvailable = false;
 	bool dredRequested = false;
+};
+
+struct NRIAdapterMemoryTelemetry
+{
+	bool liveUsageAvailable = false;
+	uint64_t localBudgetBytes = 0;
+	uint64_t localUsageBytes = 0;
+	uint64_t nonLocalBudgetBytes = 0;
+	uint64_t nonLocalUsageBytes = 0;
 };
 
 class NRIRenderDevice : public SystemBaseFrameBuffer
@@ -160,6 +170,7 @@ public:
 	bool IsFrameGenerationPresentPathActive() const { return !mFrameGenerationPresentImages.empty() && mFrameGeneration.ShouldUsePresentBridge(); }
 #endif
 	uint64_t GetAdapterLocalBudgetBytes() const { return mAdapterLocalBudgetBytes; }
+	NRIAdapterMemoryTelemetry GetAdapterMemoryTelemetry() const;
 	uint64_t GetAdapterNonLocalBudgetBytes() const { return mAdapterNonLocalBudgetBytes; }
 	NRIBackendCapabilities BuildBackendCapabilities() const;
 
@@ -317,6 +328,7 @@ private:
 	void ResetLevelTransitionShellState();
 	uint32_t ClearPendingPathTracingWeaponLightEvents();
 	void LogLevelTransitionSnapshot(const char* phase, const LevelTransitionInfo& info, bool preloadPending, uint32_t clearedWeaponLightEvents) const;
+	void TraceVoxelPreloadLifecycle(const char* stage, const LevelTransitionInfo& info) const;
 
 	friend class NRIHardwareTexture;
 	friend class NRIRenderState;
@@ -444,4 +456,6 @@ private:
 	bool mPathTracingEditorPointLightActive = false;
 	bool mLevelTransitionInProgress = false;
 	LevelTransitionInfo mCurrentLevelTransition = {};
+	std::chrono::steady_clock::time_point mLevelTransitionAcceptedTime = {};
+	uint64_t mLevelTransitionTimelineSerial = 0;
 };

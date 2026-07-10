@@ -264,10 +264,14 @@ public:
 		const bool shouldPlanComputePreload =
 			computePreloadPlanningEnabled &&
 			(newTimeline || improvedTimeline || computePreloadSettings.traceLevel >= 2);
+		NRIVoxelComputePreloadStats computePreloadStats = GetLastNRIVoxelComputePreloadStats();
 		if (shouldPlanComputePreload)
 		{
 			const char* timelineStage = newTimeline ? "first" : (improvedTimeline ? "max" : "progress");
-			PlanNRIVoxelComputePreload(
+			const NRIRenderer::MemoryTelemetry memoryTelemetry = renderer.GetMemoryTelemetry();
+			const NRIAdapterMemoryTelemetry adapterMemory = renderer.mFrameBuffer != nullptr ?
+				renderer.mFrameBuffer->GetAdapterMemoryTelemetry() : NRIAdapterMemoryTelemetry{};
+			computePreloadStats = PlanNRIVoxelComputePreload(
 				variants,
 				rawVariants,
 				rawManifestStats,
@@ -276,11 +280,13 @@ public:
 				renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : nullptr,
 				renderer.mMapWorld.buildSerial,
 				renderer.mFrameIndex,
-				timelineStage);
+				timelineStage,
+				std::max(memoryTelemetry.totalTrackedBytes, adapterMemory.localUsageBytes),
+				adapterMemory.localBudgetBytes);
 			sComputePreloadTimeline.maxRawVariants = std::max(sComputePreloadTimeline.maxRawVariants, (uint32_t)rawVariants.size());
 			sComputePreloadTimeline.maxLegacyVariants = std::max(sComputePreloadTimeline.maxLegacyVariants, (uint32_t)variants.size());
 		}
-		if (computePreloadSettings.enabled && !computePreloadSettings.dryRun)
+		if (computePreloadSettings.enabled && !computePreloadSettings.dryRun && !computePreloadStats.memoryGuardHit)
 		{
 			std::vector<nri_scene::PrecachedVoxelVariantView> directPreloadVariants;
 			BuildNRIVoxelComputePreloadDirectVariants(rawVariants, computePreloadSettings, directPreloadVariants);
@@ -301,6 +307,21 @@ public:
 				mergedVariants.insert(mergedVariants.end(), variants.begin(), variants.end());
 				variants = std::move(mergedVariants);
 			}
+		}
+		else if (computePreloadSettings.enabled && !computePreloadSettings.dryRun && computePreloadStats.memoryGuardHit)
+		{
+			if ((int)nri_ptloadingtrace >= 1 || computePreloadSettings.traceLevel >= 1)
+			{
+				Printf("NRI PT voxel compute preload: event=memory-guard result=abort level=%s build_serial=%llu estimated_peak_total_bytes=%llu local_budget_bytes=%llu minimum_reserve_bytes=%llu\n",
+					renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : "unknown",
+					(unsigned long long)renderer.mMapWorld.buildSerial,
+					(unsigned long long)computePreloadStats.estimatedPeakTotalBytes,
+					(unsigned long long)computePreloadStats.localMemoryBudgetBytes,
+					(unsigned long long)computePreloadStats.minimumLocalMemoryReserveBytes);
+			}
+			variants.clear();
+			cacheEntries.clear();
+			hasCacheEntries = false;
 		}
 
 		const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
