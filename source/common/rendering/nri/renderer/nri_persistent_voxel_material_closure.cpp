@@ -196,6 +196,14 @@ NRIPersistentVoxelMaterialClosureResult BuildNRIPersistentVoxelMaterialClosureRe
 	return result;
 }
 
+bool NRIPersistentVoxelMaterialTextureLayoutPreservesPrefix(
+	const std::vector<uint64_t>& uploadedTextureKeys,
+	const std::vector<uint64_t>& rebuiltTextureKeys)
+{
+	return rebuiltTextureKeys.size() >= uploadedTextureKeys.size() &&
+		std::equal(uploadedTextureKeys.begin(), uploadedTextureKeys.end(), rebuiltTextureKeys.begin());
+}
+
 size_t NRIPersistentVoxelMaterialClosureRegistry::BindingIdentityHash::operator()(const BindingIdentity& identity) const
 {
 	uint64_t hash = FnvOffset;

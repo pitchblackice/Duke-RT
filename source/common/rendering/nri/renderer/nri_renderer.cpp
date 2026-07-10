@@ -3229,6 +3229,14 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 	auto& persistentVoxelDomain =
 		mLastPerfShellTraceStats.sceneSelectBufferUploadDomains[(size_t)SceneBufferUploadDomain::PersistentVoxelMaterial];
 	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialRequestedBytes += uploadStats.requestedBytes;
+	if (uploadStats.layoutInvalidatedResources != 0 && ((int)nri_ptvoxelcomputetrace > 0 || (int)perf_looptraceframes > 0))
+	{
+		Printf("PERF pt voxel material layout NRI: frame=%u action=republish reason=texture-table-relayout resources=%u requested_bytes=%llu uploaded_bytes=%llu\n",
+			mFrameIndex,
+			uploadStats.layoutInvalidatedResources,
+			(unsigned long long)uploadStats.requestedBytes,
+			(unsigned long long)uploadStats.uploadedBytes);
+	}
 	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialUploads += uploadStats.uploads;
 	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialDirtyBytes += uploadStats.dirtyBytes;
 	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchRejects += uploadStats.batchRejects;

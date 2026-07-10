@@ -677,6 +677,7 @@ struct NRIPersistentVoxelMaterialWarmupServices
 struct NRIPersistentVoxelMaterialUploadStats
 {
 	uint32_t uploads = 0;
+	uint32_t layoutInvalidatedResources = 0;
 	uint32_t batchRejects = 0;
 	uint64_t requestedBytes = 0;
 	uint64_t dirtyBytes = 0;
@@ -1070,6 +1071,8 @@ public:
 	uint64_t materialResourceGeneration = 1;
 	uint64_t batchMaterialResourceGeneration = 0;
 	uint64_t uploadedMaterialResourceGeneration = 0;
+	uint32_t pendingMaterialLayoutInvalidatedResources = 0;
+	std::vector<uint64_t> uploadedMaterialTextureKeys;
 	uint32_t residencyMapGeneration = 0;
 	uint64_t residencyLastBuildSerial = 0;
 	uint32_t lastDesiredResidencyCount = 0;

@@ -169,6 +169,9 @@ uint64_t HashNRIPersistentVoxelMaterialSeed(const NRIPersistentVoxelMaterialSeed
 NRIPersistentVoxelMaterialClosureResult BuildNRIPersistentVoxelMaterialClosureResult(
 	const NRIPersistentVoxelMaterialSeed& seed,
 	bool reusedSeed = false);
+bool NRIPersistentVoxelMaterialTextureLayoutPreservesPrefix(
+	const std::vector<uint64_t>& uploadedTextureKeys,
+	const std::vector<uint64_t>& rebuiltTextureKeys);
 
 class NRIPersistentVoxelMaterialClosureRegistry
 {
