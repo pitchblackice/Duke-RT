@@ -7100,6 +7100,10 @@ void NRIPersistentVoxelResidency::ResetLevelSchedulingState(
 	instances.clear();
 	actorRejectedSignatures.clear();
 	preloadPending = false;
+	preloadMaterialClosureCached = false;
+	preloadMaterialClosureBuildSerial = 0;
+	preloadMaterialClosureSignature = 0;
+	preloadMaterialClosureCacheHits = 0;
 	lastPreloadStatus = {};
 	postLoadAdmissionGraceEndFrame = 0;
 	postLoadAdmissionGraceMapGeneration = 0;
@@ -8135,6 +8139,47 @@ bool NRIPersistentVoxelResidency::PreloadMaterialPayloads(
 	outStats = {};
 	outStats.attempted = true;
 	outStats.variants = (uint32_t)variants.size();
+	std::vector<std::pair<uint64_t, uint64_t>> closureKeys;
+	closureKeys.reserve(variants.size());
+	for (const nri_scene::PrecachedVoxelVariantView& variant : variants)
+	{
+		if (!variant.directOnlyAdmission)
+		{
+			continue;
+		}
+		outStats.directOnlyVariants++;
+		const uint64_t validatedMaterialSignature =
+			variant.materialVariantHash != 0 ? variant.materialVariantHash : variant.materialKeyHash;
+		closureKeys.emplace_back(variant.materialKeyHash, validatedMaterialSignature);
+	}
+	std::sort(closureKeys.begin(), closureKeys.end());
+	closureKeys.erase(std::unique(closureKeys.begin(), closureKeys.end()), closureKeys.end());
+	uint64_t closureSignature = nri_scene::HashCombine64(0x50564d4154434831ull, maxMaterialRows); // PVMATCH1
+	for (const auto& key : closureKeys)
+	{
+		closureSignature = nri_scene::HashCombine64(closureSignature, key.first);
+		closureSignature = nri_scene::HashCombine64(closureSignature, key.second);
+	}
+	if (preloadMaterialClosureCached &&
+		preloadMaterialClosureBuildSerial == buildSerial &&
+		preloadMaterialClosureSignature == closureSignature)
+	{
+		preloadMaterialClosureCacheHits++;
+		if ((loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0) &&
+			(preloadMaterialClosureCacheHits == 1 ||
+				(preloadMaterialClosureCacheHits & (preloadMaterialClosureCacheHits - 1u)) == 0))
+		{
+			Printf("NRI PT voxel preload material cache: level=%s build_serial=%llu frame=%u signature=0x%llx direct=%u resources=%u hits=%llu\n",
+				levelName != nullptr ? levelName : "unknown",
+				(unsigned long long)buildSerial,
+				frameIndex,
+				(unsigned long long)closureSignature,
+				outStats.directOnlyVariants,
+				(uint32_t)materialVariantResources.size(),
+				(unsigned long long)preloadMaterialClosureCacheHits);
+		}
+		return true;
+	}
 
 	std::unordered_set<uint64_t> seenMaterials;
 	seenMaterials.reserve(variants.size());
@@ -8145,7 +8190,6 @@ bool NRIPersistentVoxelResidency::PreloadMaterialPayloads(
 		{
 			continue;
 		}
-		outStats.directOnlyVariants++;
 		if (variant.materialKeyHash == 0 ||
 			variant.material.texture == nullptr ||
 			variant.materialSurface.material.texture == nullptr)
@@ -8289,6 +8333,13 @@ bool NRIPersistentVoxelResidency::PreloadMaterialPayloads(
 		RecomputeBatchState(batch);
 	}
 	outStats.buildMs = PersistentVoxelDurationMs(start, std::chrono::steady_clock::now());
+	if (ok)
+	{
+		preloadMaterialClosureCached = true;
+		preloadMaterialClosureBuildSerial = buildSerial;
+		preloadMaterialClosureSignature = closureSignature;
+		preloadMaterialClosureCacheHits = 0;
+	}
 	if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
 	{
 		Printf("NRI PT voxel preload material: level=%s build_serial=%llu frame=%u variants=%u direct=%u candidates=%u unique=%u selected=%u built=%u reused=%u failed=%u skipped_invalid=%u skipped_material_budget=%u actor_scoped=%u material_rows=%u material_bytes=%llu texture_requests=%u texture_bytes=%llu ms=%.3f\n",

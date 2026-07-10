@@ -1071,6 +1071,10 @@ public:
 	uint32_t lastPreferredCount = 0;
 	bool loadingWarmupActive = false;
 	bool preloadPending = false;
+	bool preloadMaterialClosureCached = false;
+	uint64_t preloadMaterialClosureBuildSerial = 0;
+	uint64_t preloadMaterialClosureSignature = 0;
+	uint64_t preloadMaterialClosureCacheHits = 0;
 	uint32_t postLoadAdmissionGraceEndFrame = 0;
 	uint32_t postLoadAdmissionGraceMapGeneration = 0;
 	NRIPersistentVoxelPreloadStatus lastPreloadStatus = {};
