@@ -65,6 +65,9 @@ struct NRIAccelerationStructureResource
 	uint32_t buildIndexOffset = 0;
 	uint32_t buildIndexCount = 0;
 	uint32_t buildPrimitiveCount = 0;
+	nri::AccelerationStructureBits buildFlags = nri::AccelerationStructureBits::NONE;
+	uint64_t uncompactedMemorySize = 0;
+	bool compacted = false;
 	nri::MemoryLocation memoryLocation = nri::MemoryLocation::DEVICE;
 };
 

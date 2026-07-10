@@ -144,7 +144,8 @@ bool NRIAccelerationStructureManager::BuildBottomLevel(
 	uint32_t primitiveCount,
 	NRIAccelerationStructureResource& outAccelerationStructure,
 	bool updateDynamicPerfStats,
-	NRIBufferResource* buildScratchBuffer)
+	NRIBufferResource* buildScratchBuffer,
+	nri::AccelerationStructureBits buildFlags)
 {
 	Clocker clock(NriPTAcceleration);
 	ScopedPtPerfTimer perfTimer(renderer.mLastPerfShellTraceStats.dynamicAsMs);
@@ -201,7 +202,7 @@ bool NRIAccelerationStructureManager::BuildBottomLevel(
 
 	nri::AccelerationStructureDesc blasDesc = {};
 	blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
-	blasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_BUILD;
+	blasDesc.flags = buildFlags;
 	blasDesc.geometryOrInstanceNum = 1;
 	blasDesc.geometries = &dynamicGeometryDesc;
 	const bool createdAs = reuseAccelerationStructure || [&]()
@@ -307,6 +308,9 @@ bool NRIAccelerationStructureManager::BuildBottomLevel(
 	outAccelerationStructure.buildIndexCount = indexCount;
 	outAccelerationStructure.buildPrimitiveCount = primitiveCount;
 	outAccelerationStructure.buildScratchSize = requiredScratchSize;
+	outAccelerationStructure.buildFlags = buildFlags;
+	outAccelerationStructure.uncompactedMemorySize = outAccelerationStructure.memorySize;
+	outAccelerationStructure.compacted = false;
 	if (updateDynamicPerfStats)
 	{
 		renderer.mDynamicSceneLastFrame.asBuildCount++;
@@ -904,7 +908,8 @@ bool NRIRenderer::BuildBottomLevelAccelerationStructure(
 	uint32_t primitiveCount,
 	NRIAccelerationStructureResource& outAccelerationStructure,
 	bool updateDynamicPerfStats,
-	NRIBufferResource* buildScratchBuffer)
+	NRIBufferResource* buildScratchBuffer,
+	nri::AccelerationStructureBits buildFlags)
 {
 	return NRIAccelerationStructureManager::BuildBottomLevel(
 		*this,
@@ -917,7 +922,8 @@ bool NRIRenderer::BuildBottomLevelAccelerationStructure(
 		primitiveCount,
 		outAccelerationStructure,
 		updateDynamicPerfStats,
-		buildScratchBuffer);
+		buildScratchBuffer,
+		buildFlags);
 }
 
 bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()

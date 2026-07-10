@@ -1978,6 +1978,30 @@ private:
 	friend NRIRuntimeMutationResidentApplyServices BuildNRIRuntimeMutationResidentApplyServices(NRIRenderer& renderer);
 	friend NRIRuntimeMutationResidentSceneRefreshServices BuildNRIRuntimeMutationResidentSceneRefreshServices(NRIRenderer& renderer);
 	friend bool EnsureNRIRendererAutoExposureResources(NRIRenderer& renderer, const NRIAutoExposureSettings& settings);
+	bool PumpPersistentVoxelBlasCompaction(uint64_t buildSerial);
+	void ResetPersistentVoxelBlasCompaction();
+	struct PersistentVoxelBlasCompactionState
+	{
+		enum class Stage : uint8_t
+		{
+			Idle,
+			QueryPending,
+			CopyPending,
+			Complete,
+			Failed
+		};
+		Stage stage = Stage::Idle;
+		uint64_t buildSerial = 0;
+		uint64_t queryFence = 0;
+		uint64_t copyFence = 0;
+		uint64_t originalBytes = 0;
+		uint64_t compactedBytes = 0;
+		nri::QueryPool* queryPool = nullptr;
+		NRIBufferResource readbackBuffer;
+		std::vector<NRIAccelerationStructureResource*> sources;
+		std::vector<NRIAccelerationStructureResource> destinations;
+	};
+	PersistentVoxelBlasCompactionState mPersistentVoxelBlasCompaction;
 	friend void DestroyNRIRendererAutoExposureResources(NRIRenderer& renderer);
 	friend bool UpdateNRIRendererAutoExposureDescriptorSets(NRIRenderer& renderer, uint32_t sourceSlot);
 	friend bool DispatchNRIRendererAutoExposure(NRIRenderer& renderer, uint32_t sourceSlot);
@@ -2239,7 +2263,8 @@ private:
 		uint32_t primitiveCount,
 		NRIAccelerationStructureResource& outAccelerationStructure,
 		bool updateDynamicPerfStats,
-		NRIBufferResource* buildScratchBuffer = nullptr);
+		NRIBufferResource* buildScratchBuffer = nullptr,
+		nri::AccelerationStructureBits buildFlags = nri::AccelerationStructureBits::PREFER_FAST_BUILD);
 	bool PreloadStaticMapResources();
 	bool PreloadPersistentVoxelResources();
 	bool PreloadMaterialResources();

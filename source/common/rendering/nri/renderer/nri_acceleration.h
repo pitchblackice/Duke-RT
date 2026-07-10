@@ -31,7 +31,8 @@ public:
 		uint32_t primitiveCount,
 		NRIAccelerationStructureResource& outAccelerationStructure,
 		bool updateDynamicPerfStats,
-		NRIBufferResource* buildScratchBuffer = nullptr);
+		NRIBufferResource* buildScratchBuffer = nullptr,
+		nri::AccelerationStructureBits buildFlags = nri::AccelerationStructureBits::PREFER_FAST_BUILD);
 	static bool BuildEmissiveTopLevel(NRIRenderer& renderer);
 	static bool BuildTopLevel(NRIRenderer& renderer, const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask);
 	static bool BuildTopLevel(

@@ -198,6 +198,7 @@ void NRIRenderer::DestroyCachedTextures()
 
 void NRIRenderer::DestroySceneBuffers()
 {
+	ResetPersistentVoxelBlasCompaction();
 	mStaticMapScene.buffersResident = false;
 	nri_static_scene_geometry::ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
 	ResetResidentMapChunkRegistry();
@@ -426,5 +427,8 @@ void NRIRenderer::DestroyAccelerationStructureResource(NRIAccelerationStructureR
 	resource.buildIndexOffset = 0;
 	resource.buildIndexCount = 0;
 	resource.buildPrimitiveCount = 0;
+	resource.buildFlags = nri::AccelerationStructureBits::NONE;
+	resource.uncompactedMemorySize = 0;
+	resource.compacted = false;
 	resource.memoryLocation = nri::MemoryLocation::DEVICE;
 }

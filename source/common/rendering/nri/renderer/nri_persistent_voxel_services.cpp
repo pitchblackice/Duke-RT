@@ -17,6 +17,28 @@
 
 namespace
 {
+	nri::AccelerationStructureBits GetPersistentVoxelBlasBuildFlags()
+	{
+		nri::AccelerationStructureBits flags = nri::AccelerationStructureBits::PREFER_FAST_BUILD;
+		switch (std::clamp((int)nri_ptvoxelblaspolicy, 0, 3))
+		{
+		case 1:
+			flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
+			break;
+		case 2:
+			flags = nri::AccelerationStructureBits::MINIMIZE_MEMORY;
+			break;
+		case 3:
+			flags = NRIResourceFlags(
+				nri::AccelerationStructureBits::PREFER_FAST_TRACE,
+				nri::AccelerationStructureBits::MINIMIZE_MEMORY);
+			break;
+		default:
+			break;
+		}
+		return (bool)nri_ptvoxelblascompact && (bool)nri_ptvoxelcomputepreloadstrict ?
+			NRIResourceFlags(flags, nri::AccelerationStructureBits::ALLOW_COMPACTION) : flags;
+	}
 	struct PersistentVoxelPalettePayload
 	{
 		uint32_t width = 0;
@@ -733,7 +755,8 @@ public:
 				primitiveCount,
 				outAccelerationStructure,
 				false,
-				buildScratchBuffer);
+				buildScratchBuffer,
+				GetPersistentVoxelBlasBuildFlags());
 		};
 		services.barrierBuildInputs = [](void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) -> bool
 		{
@@ -770,7 +793,9 @@ public:
 				indexCount,
 				primitiveCount,
 				outAccelerationStructure,
-				false);
+				false,
+				nullptr,
+				GetPersistentVoxelBlasBuildFlags());
 		};
 		services.barrierBuildInputs = [](void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) -> bool
 		{
@@ -845,6 +870,30 @@ public:
 		}
 		if (computePreloadSettings.enabled && !computePreloadSettings.dryRun && !computePreloadStats.memoryGuardHit)
 		{
+			if (renderer.mPersistentVoxels.blasPolicyTraceBuildSerial != renderer.mMapWorld.buildSerial &&
+				((int)nri_ptloadingtrace >= 1 || (int)nri_ptvoxelcomputetrace > 0))
+			{
+				renderer.mPersistentVoxels.blasPolicyTraceBuildSerial = renderer.mMapWorld.buildSerial;
+				Printf("PERF pt voxel blas policy NRI: build_serial=%llu policy=%d compact=%d strict=%d flags=%u\n",
+					(unsigned long long)renderer.mMapWorld.buildSerial,
+					std::clamp((int)nri_ptvoxelblaspolicy, 0, 3),
+					(bool)nri_ptvoxelblascompact ? 1 : 0,
+					computePreloadSettings.strict ? 1 : 0,
+					(uint32_t)GetPersistentVoxelBlasBuildFlags());
+			}
+			if ((bool)nri_ptvoxelarenapresize && computePreloadSettings.strict &&
+				!renderer.mPersistentVoxels.PreSizeDirectGeometryArenas(
+					renderer.mMapWorld.buildSerial,
+					computePreloadStats.rawSelectedUniqueGeometryBytes,
+					(int)nri_ptloadingtrace,
+					BuildAdmissionServices(renderer)))
+			{
+				Printf(TEXTCOLOR_RED "NRI PT voxel arena presize failed: level=%s build_serial=%llu bytes=%llu.\n",
+					renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : "unknown",
+					(unsigned long long)renderer.mMapWorld.buildSerial,
+					(unsigned long long)computePreloadStats.rawSelectedUniqueGeometryBytes);
+				return false;
+			}
 			std::vector<nri_scene::PrecachedVoxelVariantView> directPreloadVariants;
 			BuildNRIVoxelComputePreloadDirectVariants(rawVariants, computePreloadSettings, directPreloadVariants);
 			if (!directPreloadVariants.empty())

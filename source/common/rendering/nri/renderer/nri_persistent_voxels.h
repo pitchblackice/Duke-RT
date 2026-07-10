@@ -900,6 +900,11 @@ public:
 		bool voxelStatsEnabled,
 		const NRIPersistentVoxelResetServices& resetServices,
 		const NRIPersistentVoxelPreloadServices& preloadServices);
+	bool PreSizeDirectGeometryArenas(
+		uint64_t buildSerial,
+		uint64_t uniqueGeometryBytes,
+		int loadingTraceLevel,
+		const NRIPersistentVoxelAdmissionServices& services);
 	bool PreloadResources(
 		const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
 		const std::vector<nri_scene::PersistentVoxelCacheEntryView>& cacheEntries,
@@ -994,6 +999,7 @@ public:
 	void DestroyArenaBuffers(const NRIPersistentVoxelDestroyServices& services);
 	NRIPersistentVoxelLightAppendStats AppendSceneLights(SceneLightSystem& sceneLights, uint32_t frameIndex, bool voxelStatsEnabled) const;
 	NRIPersistentVoxelMemoryUsage GetMemoryUsage() const;
+	void CollectResidentAccelerationStructures(std::vector<NRIAccelerationStructureResource*>& outResources);
 	const NRIPersistentVoxelSharedBlasFrameStats& GetSharedBlasFrameStats() const;
 	NRIPersistentVoxelStatusSnapshot BuildStatusSnapshot() const;
 	void FillResourceStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const;
@@ -1074,6 +1080,8 @@ public:
 	uint32_t arenaIndexCursor = 0;
 	uint32_t arenaPrimitiveCursor = 0;
 	uint32_t arenaMaterialCursor = 0;
+	uint64_t arenaPresizeBuildSerial = 0;
+	uint64_t blasPolicyTraceBuildSerial = 0;
 	uint64_t materialResourceGeneration = 1;
 	uint64_t batchMaterialResourceGeneration = 0;
 	uint64_t uploadedMaterialResourceGeneration = 0;

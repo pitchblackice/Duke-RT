@@ -511,6 +511,21 @@ NRIPreloadCoordinator::StepResult NRIPreloadCoordinator::PreloadResidentSceneRes
 bool NRIPreloadCoordinator::Finish(NRIRenderer& renderer, const Context& context)
 {
 	renderer.PrepareSceneTextureInputsForCompute();
+	const NRIVoxelComputePreloadClosureStats preliminaryClosure = BuildNRIVoxelComputePreloadClosure(
+		renderer.mPersistentVoxels,
+		renderer.mMapWorld.buildSerial);
+	if (preliminaryClosure.valid && preliminaryClosure.strictRequested &&
+		std::strcmp(preliminaryClosure.outcome, "complete") == 0 &&
+		!renderer.PumpPersistentVoxelBlasCompaction(renderer.mMapWorld.buildSerial))
+	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=renderer-preload result=wait reason=voxel-blas-compaction build_serial=%llu ms=%.3f\n",
+				(unsigned long long)renderer.mMapWorld.buildSerial,
+				DurationMs(context.start, std::chrono::steady_clock::now()));
+		}
+		return false;
+	}
 	const bool staticReady =
 		renderer.mStaticMapScene.valid &&
 		renderer.mStaticMapScene.texturesResident &&
