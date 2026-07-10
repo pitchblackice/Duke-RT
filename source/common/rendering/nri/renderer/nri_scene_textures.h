@@ -17,6 +17,7 @@ namespace nri_scene
 struct NRISceneCachedTexture
 {
 	uint64_t key = 0;
+	uint64_t uploadFenceValue = 0;
 	NRITextureResource resource;
 };
 
@@ -143,11 +144,13 @@ public:
 
 	uint32_t CacheCount() const { return (uint32_t)mTextureCache.size(); }
 	uint32_t FindCacheIndex(uint64_t key) const;
+	uint32_t FindReadyCacheIndex(uint64_t key) const;
 	uint32_t AddCachedTexture(NRISceneCachedTexture&& texture);
 
 	bool EnsurePaletteTexture(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials);
 	bool EnsureCacheEntry(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, double* outRealizeMs = nullptr);
 	bool EnsurePreloadClosure(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, NRISceneTextureClosureResult& outResult);
+	bool EnsureRuntimeClosure(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, NRISceneTextureClosureResult& outResult);
 	bool QueryPreloadClosure(uint64_t key, NRISceneTextureClosureResult& outResult) const;
 	bool WarmMaterialTextures(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials, NRIMaterialTextureWarmupResult& outResult);
 	bool WarmMaterialTexturesBudgeted(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials, const NRIMaterialTextureWarmupOptions& options, NRIMaterialTextureWarmupCursor& cursor, NRIMaterialTextureWarmupResult& outResult);
@@ -161,6 +164,20 @@ public:
 	void ClearCachedTextures();
 
 private:
+	enum class CachedTextureReadiness : uint8_t
+	{
+		Ready,
+		Pending,
+		Abandoned,
+		Failed,
+	};
+
+	CachedTextureReadiness PollCachedTexture(
+		NRIRenderDevice& device,
+		uint32_t cacheIndex,
+		NRISceneTextureClosureResult& outResult);
+	void InvalidateCachedTexture(NRIRenderDevice& device, uint32_t cacheIndex);
+
 	NRITextureResource mPaletteTexture;
 	std::vector<NRISceneCachedTexture> mTextureCache;
 	std::unordered_map<uint64_t, uint32_t> mTextureCacheKeyIndex;

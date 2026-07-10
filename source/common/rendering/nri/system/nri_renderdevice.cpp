@@ -3270,7 +3270,26 @@ bool NRIRenderDevice::IsCommandFenceValueComplete(uint64_t fenceValue) const
 	{
 		return true;
 	}
+	if (IsCommandFenceValueAbandoned(fenceValue))
+	{
+		return false;
+	}
 	return mCommandCompletionFence != nullptr && mCore.GetFenceValue(*mCommandCompletionFence) >= fenceValue;
+}
+
+bool NRIRenderDevice::IsCommandFenceValueAbandoned(uint64_t fenceValue) const
+{
+	return fenceValue != 0 && mAbandonedCommandFenceValues.find(fenceValue) != mAbandonedCommandFenceValues.end();
+}
+
+void NRIRenderDevice::AbandonRecordingCommandFenceValue()
+{
+	if (mRecordingCommandFenceValue == 0)
+	{
+		return;
+	}
+	mAbandonedCommandFenceValues.insert(mRecordingCommandFenceValue);
+	mRecordingCommandFenceValue = 0;
 }
 
 bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
@@ -3289,6 +3308,7 @@ bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 	const nri::Result fenceResult = mCore.CreateFence(*mDevice, 0, submitFence);
 	if (fenceResult != nri::Result::SUCCESS)
 	{
+		AbandonRecordingCommandFenceValue();
 		mLastSubmitAndWaitResult = fenceResult;
 		if (mCreatedDeviceApi == nri::GraphicsAPI::D3D12 &&
 			mNativeD3D12Device != nullptr &&
@@ -3314,7 +3334,14 @@ bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 	submitDesc.signalFences = signalFences;
 	submitDesc.signalFenceNum = signalFenceCount;
 	const nri::Result submitResult = mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
-	mRecordingCommandFenceValue = 0;
+	if (submitResult == nri::Result::SUCCESS)
+	{
+		mRecordingCommandFenceValue = 0;
+	}
+	else
+	{
+		AbandonRecordingCommandFenceValue();
+	}
 	mLastSubmitAndWaitResult = submitResult;
 	if (submitResult == nri::Result::SUCCESS)
 	{
@@ -9134,7 +9161,14 @@ void NRIRenderDevice::EndFrameAndPresent()
 		submitResult = mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
 		submitCallMs = I_msTimeF() - stageStartMs;
 	}
-	mRecordingCommandFenceValue = 0;
+	if (submitResult == nri::Result::SUCCESS)
+	{
+		mRecordingCommandFenceValue = 0;
+	}
+	else
+	{
+		AbandonRecordingCommandFenceValue();
+	}
 	mFrameGeneration.OnRenderSubmitEnd(*this);
 	if (submitResult != nri::Result::SUCCESS)
 	{
@@ -9872,6 +9906,53 @@ bool NRIRenderDevice::UploadTextureData(NRITextureResource& resource, const void
 	return UploadTextureSubresources(resource, &subresource, 1, width, height);
 }
 
+bool NRIRenderDevice::UploadTextureDataAsync(
+	NRITextureResource& resource,
+	const void* data,
+	uint32_t width,
+	uint32_t height,
+	uint32_t rowPitch,
+	uint64_t& outFenceValue)
+{
+	outFenceValue = 0;
+	if (data == nullptr || width == 0 || height == 0 || rowPitch == 0 ||
+		resource.texture == nullptr || !mFrameBegun || !mCommandBufferOpen ||
+		mCommandBuffer == nullptr || mStreamerInstance == nullptr)
+	{
+		return false;
+	}
+	const uint64_t recordingFenceValue = GetRecordingCommandFenceValue();
+	if (recordingFenceValue == 0)
+	{
+		return false;
+	}
+
+	nri::TextureRegionDesc region = {};
+	region.width = width;
+	region.height = height;
+	region.depth = 1;
+	region.planes = nri::PlaneBits::COLOR;
+	nri::StreamTextureDataDesc streamDesc = {};
+	streamDesc.data = data;
+	streamDesc.dataRowPitch = rowPitch;
+	streamDesc.dataSlicePitch = rowPitch * height;
+	streamDesc.dstTexture = resource.texture;
+	streamDesc.dstRegion = region;
+
+	const nri::BufferOffset streamed = mStreamer.StreamTextureData(*mStreamerInstance, streamDesc);
+	if (streamed.buffer == nullptr)
+	{
+		return false;
+	}
+	TransitionTexture(resource, NRICopyDestinationState());
+	mStreamer.CmdCopyStreamedData(*mCommandBuffer, *mStreamerInstance);
+	TransitionTexture(resource, NRIShaderResourceState());
+	resource.width = width;
+	resource.height = height;
+	outFenceValue = recordingFenceValue;
+	return true;
+}
+
 bool NRIRenderDevice::UploadTextureSubresources(NRITextureResource& resource, const nri::TextureSubresourceUploadDesc* subresources, uint32_t subresourceNum, uint32_t width, uint32_t height)
 {
 	if (subresources == nullptr || subresourceNum == 0 || width == 0 || height == 0)
@@ -9934,6 +10015,7 @@ bool NRIRenderDevice::CopyTextureToTexture(NRITextureResource& destination, NRIT
 	nri::Fence* copyFence = nullptr;
 	if (mCore.CreateFence(*mDevice, 0, copyFence) != nri::Result::SUCCESS)
 	{
+		AbandonRecordingCommandFenceValue();
 		return false;
 	}
 	nri::FenceSubmitDesc frameFence = {};
@@ -9945,10 +10027,18 @@ bool NRIRenderDevice::CopyTextureToTexture(NRITextureResource& destination, NRIT
 	submitDesc.commandBufferNum = 1;
 	submitDesc.signalFences = &frameFence;
 	submitDesc.signalFenceNum = 1;
-	mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
-	mCore.Wait(*copyFence, frameFence.value);
+	const nri::Result submitResult = mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
+	if (submitResult == nri::Result::SUCCESS)
+	{
+		mCore.Wait(*copyFence, frameFence.value);
+		mRecordingCommandFenceValue = 0;
+	}
+	else
+	{
+		AbandonRecordingCommandFenceValue();
+	}
 	mCore.DestroyFence(copyFence);
-	return true;
+	return submitResult == nri::Result::SUCCESS;
 }
 
 bool NRIRenderDevice::CopyCurrentTargetToTexture(NRITextureResource& destination)
@@ -10138,6 +10228,10 @@ void NRIRenderDevice::ResetFrameTracking(bool presentedAcquiredImage)
 		NoteSwapChainAbandon(mCurrentSwapChainImage);
 	}
 
+	if (mCommandBufferOpen)
+	{
+		AbandonRecordingCommandFenceValue();
+	}
 	mFrameBegun = false;
 	mCommandBufferOpen = false;
 	mCurrentPresentTarget = nullptr;

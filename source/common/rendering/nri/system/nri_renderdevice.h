@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <memory>
+#include <unordered_set>
 #include <vector>
 
 class NRIRenderState;
@@ -95,6 +96,7 @@ public:
 	bool IsPreloadCommandContextActive() const { return mPreloadCommandContextActive; }
 	uint64_t GetRecordingCommandFenceValue() const { return mCommandBufferOpen ? mRecordingCommandFenceValue : 0; }
 	bool IsCommandFenceValueComplete(uint64_t fenceValue) const;
+	bool IsCommandFenceValueAbandoned(uint64_t fenceValue) const;
 	nri::CoreInterface* GetCoreInterface() { return &mCore; }
 	nri::Device* GetDevice() const { return mDevice; }
 	nri::CommandBuffer* GetCurrentCommandBuffer() const { return mCommandBuffer; }
@@ -241,6 +243,7 @@ private:
 	bool CreateRenderResources();
 	void DestroyRenderResources();
 	bool BeginCommandList(const char* reason, bool waitForSlotReuse = false);
+	void AbandonRecordingCommandFenceValue();
 	bool SubmitWaitAndRestartCommandList(const char* reason);
 	void MarkTerminalDeviceLoss(const char* context);
 	[[noreturn]] void FatalTerminalDeviceLoss(const char* context);
@@ -262,6 +265,7 @@ private:
 	bool CreateTextureViews(NRITextureResource& resource);
 	bool CreateOwnedTexture(NRITextureResource& resource, uint32_t width, uint32_t height, nri::Format format, nri::TextureUsageBits usage, nri::TextureType type = nri::TextureType::TEXTURE_2D, uint32_t layerNum = 1, nri::TextureView shaderViewType = nri::TextureView::TEXTURE);
 	bool UploadTextureData(NRITextureResource& resource, const void* data, uint32_t width, uint32_t height, uint32_t rowPitch);
+	bool UploadTextureDataAsync(NRITextureResource& resource, const void* data, uint32_t width, uint32_t height, uint32_t rowPitch, uint64_t& outFenceValue);
 	bool UploadTextureSubresources(NRITextureResource& resource, const nri::TextureSubresourceUploadDesc* subresources, uint32_t subresourceNum, uint32_t width, uint32_t height);
 	bool CopyCurrentTargetToTexture(NRITextureResource& destination);
 	bool LoadShaderBlob(const char* fileName, std::vector<uint8_t>& outBlob);
@@ -419,6 +423,7 @@ private:
 	uint64_t mSubmittedFenceValue = 0;
 	uint64_t mRecordingCommandFenceValue = 0;
 	uint64_t mNextCommandFenceValue = 1;
+	std::unordered_set<uint64_t> mAbandonedCommandFenceValues;
 	bool mFrameBegun = false;
 	bool mUsingSaveTarget = false;
 	bool mStandaloneSavePicFrame = false;
