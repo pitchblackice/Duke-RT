@@ -16,6 +16,7 @@ enum class NRIVoxelComputeCompletionOutcome : uint8_t
 {
 	Completed,
 	Stale,
+	Abandoned,
 	Failed,
 };
 
@@ -34,6 +35,7 @@ struct NRIVoxelComputeCompletionRingState
 	uint64_t backpressureCount = 0;
 	uint64_t completedCount = 0;
 	uint64_t staleCount = 0;
+	uint64_t abandonedCount = 0;
 	uint64_t failedCount = 0;
 	uint32_t cursor = 0;
 	uint32_t occupancy = 0;
@@ -101,6 +103,7 @@ struct NRIVoxelComputeCompletionRingState
 		{
 		case NRIVoxelComputeCompletionOutcome::Completed: completedCount++; break;
 		case NRIVoxelComputeCompletionOutcome::Stale: staleCount++; break;
+		case NRIVoxelComputeCompletionOutcome::Abandoned: abandonedCount++; break;
 		case NRIVoxelComputeCompletionOutcome::Failed: failedCount++; break;
 		}
 	}

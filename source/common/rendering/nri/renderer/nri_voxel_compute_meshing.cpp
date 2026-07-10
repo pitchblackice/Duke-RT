@@ -282,12 +282,26 @@ namespace
 		NRIVoxelComputeCompletionRingState* ring = nullptr;
 		uint32_t slotIndex = 0;
 		bool submitted = false;
+		uint64_t frameNumber = 0;
+		const char* abortReason = "recording-incomplete";
+		NRIVoxelComputeCompletionOutcome abortOutcome = NRIVoxelComputeCompletionOutcome::Abandoned;
 
 		~CompletionSlotRecordingGuard()
 		{
 			if (ring != nullptr && !submitted)
 			{
-				ring->Release(slotIndex, NRIVoxelComputeCompletionOutcome::Failed);
+				const NRIVoxelComputeCompletionSlotToken token = ring->slots[slotIndex];
+				ring->Release(slotIndex, abortOutcome);
+				if ((int)nri_ptvoxelcomputetrace > 0)
+				{
+					Printf(
+						"PERF pt voxel compute completion NRI: action=recording-abort submission=%llu slot=%u level_generation=%llu frame=%llu reason=%s occupancy=%u high_water=%u abandoned_attempts=%llu failed_attempts=%llu host_waits=0\n",
+						(unsigned long long)token.submissionId, slotIndex,
+						(unsigned long long)token.levelGeneration, (unsigned long long)frameNumber,
+						abortReason != nullptr ? abortReason : "unknown", ring->occupancy, ring->highWater,
+						(unsigned long long)ring->abandonedCount,
+						(unsigned long long)ring->failedCount);
+				}
 			}
 		}
 	};
@@ -1122,7 +1136,7 @@ namespace
 		if (IsTraceEnabled())
 		{
 			Printf(
-				"PERF pt voxel compute completion NRI: action=retire submission=%llu slot=%u fence=%llu level_generation=%llu archive_generation=%llu dispatch_frame=%llu observed_frame=%llu jobs=%u ready=%u failed_jobs=%u stale_bindings=%u status=%s occupancy=%u high_water=%u backpressure=%llu completed=%llu stale=%llu failed=%llu status_bytes=%llu full_geometry_bytes=%llu host_waits=%llu\n",
+				"PERF pt voxel compute completion NRI: action=retire submission=%llu slot=%u fence=%llu level_generation=%llu archive_generation=%llu dispatch_frame=%llu observed_frame=%llu jobs=%u ready=%u failed_jobs=%u stale_bindings=%u status=%s occupancy=%u high_water=%u backpressure=%llu completed=%llu stale=%llu abandoned=%llu failed=%llu status_bytes=%llu full_geometry_bytes=%llu host_waits=%llu\n",
 				(unsigned long long)token.submissionId, slotIndex, (unsigned long long)token.fenceValue,
 				(unsigned long long)token.levelGeneration, (unsigned long long)slot.rawArchiveGeneration,
 				(unsigned long long)slot.dispatchFrame, (unsigned long long)observedFrame,
@@ -1133,6 +1147,7 @@ namespace
 				(unsigned long long)state.completionRing.backpressureCount,
 				(unsigned long long)state.completionRing.completedCount,
 				(unsigned long long)state.completionRing.staleCount,
+				(unsigned long long)state.completionRing.abandonedCount,
 				(unsigned long long)state.completionRing.failedCount,
 				(unsigned long long)resultByteSize, (unsigned long long)slot.fullGeometryBytes,
 				(unsigned long long)state.completionHostWaits);
@@ -2016,7 +2031,7 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	ResetCompletionSlotMetadata(slot);
 	slot.inputSet = renderer.mVoxelComputeInputSets[slotIndex];
 	slot.outputSet = renderer.mVoxelComputeOutputSets[slotIndex];
-	CompletionSlotRecordingGuard recordingGuard = { &state.completionRing, slotIndex, false };
+	CompletionSlotRecordingGuard recordingGuard = { &state.completionRing, slotIndex, false, frameNumber };
 	for (size_t queuedIndex = 0; queuedIndex < jobsToProcess; ++queuedIndex)
 	{
 		PendingVoxelComputeJob& queued = state.queuedJobs[queuedIndex];
@@ -2035,6 +2050,7 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 			jobArchive = FindUploadedRawSourceArchive(queued.model);
 			if (jobArchive == nullptr)
 			{
+				recordingGuard.abortReason = "raw-source-not-uploaded";
 				return;
 			}
 		}
@@ -2088,20 +2104,12 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		pending.directBindings = queued.directBindings;
 		pending.admissionState = emit ? VoxelComputeAdmissionState::Emitting : VoxelComputeAdmissionState::Counting;
 		pendingJobs.push_back(pending);
-		if (queued.consumeKey != 0)
-		{
-			state.queuedConsumeKeys.erase(queued.consumeKey);
-		}
 		if (queued.directPublication)
 		{
 			directOutput = true;
 			outputVertexBuffer = queued.outputBuffers.vertices;
 			outputIndexBuffer = queued.outputBuffers.indices;
 			outputPrimitiveBuffer = queued.outputBuffers.primitives;
-			for (const PendingDirectPublishBinding& binding : queued.directBindings)
-			{
-				state.queuedDirectKeys.erase(binding.directKey);
-			}
 			emittedVertexCount += queued.stats.noDedupeVertexCount;
 			emittedIndexCount += queued.stats.indexCount;
 			emittedPrimitiveCount += queued.stats.coalescedFaceCount * 2u;
@@ -2154,10 +2162,10 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 			parallelArchivedEmit = false;
 		}
 	}
-	state.queuedJobs.erase(state.queuedJobs.begin(), state.queuedJobs.begin() + jobsToProcess);
-
 	if (gpuJobs.empty() || (!directSource && gpuSlabs.empty()))
 	{
+		state.queuedJobs.erase(state.queuedJobs.begin(), state.queuedJobs.begin() + jobsToProcess);
+		recordingGuard.abortReason = "empty-batch";
 		return;
 	}
 
@@ -2183,6 +2191,7 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 			!EnsureBuffer(services, slot.slabScratchBuffer, scratchBytes, sizeof(NRIVoxelComputeSlabScratch), nri::BufferUsageBits::SHADER_RESOURCE_STORAGE, nri::MemoryLocation::DEVICE, nri::BufferView::STORAGE_STRUCTURED_BUFFER, true)) ||
 		!EnsureBuffer(services, slot.readbackBuffer, resultBytes, sizeof(NRIVoxelComputeResult), nri::BufferUsageBits::NONE, nri::MemoryLocation::HOST_READBACK, nri::BufferView::STRUCTURED_BUFFER, false))
 	{
+		recordingGuard.abortReason = "core-buffer-prepare";
 		return;
 	}
 	if (emit)
@@ -2202,6 +2211,7 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 				!EnsureBuffer(services, slot.indexReadbackBuffer, indexBytes, sizeof(uint32_t), nri::BufferUsageBits::NONE, nri::MemoryLocation::HOST_READBACK, nri::BufferView::STRUCTURED_BUFFER, false) ||
 				!EnsureBuffer(services, slot.primitiveReadbackBuffer, primitiveBytes, sizeof(NRIVoxelComputePrimitiveData), nri::BufferUsageBits::NONE, nri::MemoryLocation::HOST_READBACK, nri::BufferView::STRUCTURED_BUFFER, false))))
 		{
+			recordingGuard.abortReason = "emit-buffer-prepare";
 			return;
 		}
 	}
@@ -2212,7 +2222,20 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 			!CopyToUploadBuffer(context, slot.colorRunUploadBuffer, gpuColorRuns.data(), colorRunBytes) ||
 			(emit && !CopyToUploadBuffer(context, slot.faceUploadBuffer, gpuFaces.data(), faceBytes)))))
 	{
+		recordingGuard.abortReason = "upload-map";
 		return;
+	}
+	state.queuedJobs.erase(state.queuedJobs.begin(), state.queuedJobs.begin() + jobsToProcess);
+	for (const PendingReadbackJob& pending : pendingJobs)
+	{
+		if (pending.consumeKey != 0)
+		{
+			state.queuedConsumeKeys.erase(pending.consumeKey);
+		}
+		for (const PendingDirectPublishBinding& binding : pending.directBindings)
+		{
+			state.queuedDirectKeys.erase(binding.directKey);
+		}
 	}
 
 	std::vector<nri::BufferBarrierDesc> uploadBarriers;
@@ -2604,6 +2627,7 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	slot.pendingJobs = std::move(pendingJobs);
 	if (!state.completionRing.Submit(slotIndex, recordingFenceValue))
 	{
+		recordingGuard.abortReason = "ring-submit";
 		FailCompletionSlotJobs(state, slot);
 		return;
 	}
