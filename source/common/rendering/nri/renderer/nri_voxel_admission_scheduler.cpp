@@ -143,6 +143,9 @@ NRIVoxelAdmissionResult NRIVoxelAdmissionScheduler::Admit(const NRIVoxelAdmissio
 		m_snapshot.rejectedJobs++;
 		return { NRIVoxelAdmissionResultCode::StaleGeneration, 0 };
 	}
+	const bool oversizedExclusive =
+		(m_limits.oversizedReservationBytes != 0 && totalBytes > m_limits.oversizedReservationBytes) ||
+		(m_limits.oversizedBlasBytes != 0 && blasBytes > m_limits.oversizedBlasBytes);
 
 	const NRIVoxelAdmissionPairIdentity pairIdentity = { request.mesh.mapGeneration, request.pairKey };
 	auto pairOwner = m_pairOwners.find(pairIdentity);
@@ -241,7 +244,14 @@ NRIVoxelAdmissionResult NRIVoxelAdmissionScheduler::Admit(const NRIVoxelAdmissio
 	}
 
 	const bool bulk = IsBulk(request.fairnessClass);
-	if (bulk)
+	const bool idleOversizedExclusive =
+		bulk && oversizedExclusive &&
+		m_snapshot.activeJobs == 0 &&
+		m_snapshot.computeInFlight == 0 &&
+		m_snapshot.blasInFlight == 0 &&
+		m_snapshot.heldReservationBytes == 0 &&
+		m_snapshot.heldBlasBytes == 0;
+	if (bulk && !idleOversizedExclusive)
 	{
 		const uint32_t optionalJobLimit = m_limits.maxActiveJobs > m_limits.optionalActiveJobReserve ?
 			m_limits.maxActiveJobs - m_limits.optionalActiveJobReserve : 0;
@@ -267,9 +277,7 @@ NRIVoxelAdmissionResult NRIVoxelAdmissionScheduler::Admit(const NRIVoxelAdmissio
 	token.age = request.age;
 	token.sequence = m_nextSequence++;
 	token.sourceReady = request.dependenciesReady;
-	token.oversizedExclusive =
-		(m_limits.oversizedReservationBytes != 0 && totalBytes > m_limits.oversizedReservationBytes) ||
-		(m_limits.oversizedBlasBytes != 0 && blasBytes > m_limits.oversizedBlasBytes);
+	token.oversizedExclusive = oversizedExclusive;
 	token.bindings.push_back({ request.pairKey, request.materialKey });
 	const uint64_t tokenId = token.tokenId;
 	m_tokens.emplace(tokenId, std::move(token));

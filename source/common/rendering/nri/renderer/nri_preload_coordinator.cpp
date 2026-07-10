@@ -48,6 +48,8 @@ namespace
 		std::chrono::steady_clock::time_point firstSeen = {};
 		uint64_t peakTrackedBytes = 0;
 		uint64_t lastLoggedPeakBytes = 0;
+		bool strictAbortLatched = false;
+		bool strictTerminalLogged = false;
 	};
 
 	VoxelPreloadTimeline gVoxelPreloadTimeline;
@@ -132,6 +134,31 @@ namespace
 			(unsigned long long)closure.cpuGeometryUploadBytes,
 			(unsigned long long)closure.cpuGeometryFallback,
 			(unsigned long long)closure.fullGeometryReadbackBytes);
+	}
+
+	void PrintVoxelPreloadTerminal(
+		const char* levelName,
+		const NRIVoxelComputePreloadClosureStats& closure,
+		const char* outcome,
+		const char* result)
+	{
+		Printf("PERF pt voxel preload terminal NRI: level=%s build_serial=%llu manifest_hash=0x%llx sequence=%llu outcome=%s result=%s selected_bindings=%u ready_bindings=%u reused_bindings=%u failed=%u cap_skipped=%u stale_cancelled=%u pending=%u admission_queue=%u compute_inflight=%u blas_inflight=%u\n",
+			levelName != nullptr ? levelName : "(none)",
+			(unsigned long long)closure.buildSerial,
+			(unsigned long long)closure.manifestHash,
+			(unsigned long long)closure.sequence,
+			outcome != nullptr ? outcome : closure.outcome,
+			result != nullptr ? result : "unknown",
+			closure.selectedBindings,
+			closure.readyBindings,
+			closure.reusedBindings,
+			closure.failedBindings,
+			closure.capSkippedBindings,
+			closure.staleCancelledBindings,
+			closure.pendingBindings,
+			closure.admissionQueueCount,
+			closure.computeInFlightCount,
+			closure.blasInFlightCount);
 	}
 }
 
@@ -550,6 +577,20 @@ bool NRIPreloadCoordinator::Finish(NRIRenderer& renderer, const Context& context
 			}
 			return false;
 		}
+		if (closure.strictRequested && std::strcmp(closure.outcome, "complete") != 0)
+		{
+			gVoxelPreloadTimeline.strictAbortLatched = true;
+			if (!gVoxelPreloadTimeline.strictTerminalLogged)
+			{
+				PrintVoxelPreloadTerminal(
+					renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : nullptr,
+					closure,
+					closure.outcome,
+					"aborted");
+				gVoxelPreloadTimeline.strictTerminalLogged = true;
+			}
+			return false;
+		}
 	}
 	Printf("NRI PT loading summary: static_ready=%u startup_correction_pending=%u required_voxel_pending=%u required_voxel_ready=%u optional_voxel_pending=%u voxel_batch_ready=%u voxel_batch_pending=%u deferred_texture_prewarm=%u deferred_onboarding=%u material_pending=%u material_static_ready=%u material_static_pending=%u material_static_realized=%u material_static_bytes=%llu material_voxel_ready=%u material_voxel_pending=%u material_voxel_realized=%u material_voxel_bytes=%llu preload_submits=%u preload_submit_limit=%u submit_budget_hit=%u ms_budget_hit=%u frame_target_used=%u standalone_context_used=%u gpu_voxel_loading=%u static_light_refresh=%u\n",
 		staticReady ? 1u : 0u,
@@ -617,6 +658,15 @@ bool NRIPreloadCoordinator::Finish(NRIRenderer& renderer, const Context& context
 			settings,
 			(int)nri_ptloadingtrace);
 	}
+	if (closure.valid && closure.strictRequested && !gVoxelPreloadTimeline.strictTerminalLogged)
+	{
+		PrintVoxelPreloadTerminal(
+			renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : nullptr,
+			closure,
+			"complete",
+			"complete");
+		gVoxelPreloadTimeline.strictTerminalLogged = true;
+	}
 	if ((int)nri_ptloadingtrace >= 1)
 	{
 		Printf("NRI PT loading gate: event=renderer-preload result=ready reason=complete static_light_refresh=%u ms=%.3f\n",
@@ -669,6 +719,10 @@ bool NRIPreloadCoordinator::Run(NRIRenderer& renderer, const NRIPreloadLevelScen
 		}
 	}
 	UpdateVoxelPreloadTimeline(renderer, renderer.mMapWorld.buildSerial, adapterMemory, "preload-tick");
+	if (computePreloadSettings.strict && gVoxelPreloadTimeline.strictAbortLatched)
+	{
+		return false;
+	}
 	if (computePreloadSettings.strict &&
 		computePreloadSettings.watchdogMilliseconds != 0 &&
 		DurationMs(gVoxelPreloadTimeline.firstSeen, std::chrono::steady_clock::now()) >= computePreloadSettings.watchdogMilliseconds)
@@ -682,10 +736,20 @@ bool NRIPreloadCoordinator::Run(NRIRenderer& renderer, const NRIPreloadLevelScen
 				renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : nullptr,
 				closure,
 				"watchdog");
-			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=strict-watchdog elapsed_ms=%.3f watchdog_ms=%u\n",
+			gVoxelPreloadTimeline.strictAbortLatched = true;
+			if (!gVoxelPreloadTimeline.strictTerminalLogged)
+			{
+				PrintVoxelPreloadTerminal(
+					renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : nullptr,
+					closure,
+					"watchdog",
+					"aborted");
+				gVoxelPreloadTimeline.strictTerminalLogged = true;
+			}
+			Printf("NRI PT loading gate: event=renderer-preload result=aborted reason=strict-watchdog elapsed_ms=%.3f watchdog_ms=%u\n",
 				DurationMs(gVoxelPreloadTimeline.firstSeen, std::chrono::steady_clock::now()),
 				computePreloadSettings.watchdogMilliseconds);
-			return true;
+			return false;
 		}
 	}
 
