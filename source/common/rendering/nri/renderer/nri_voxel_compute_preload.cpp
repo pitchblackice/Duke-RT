@@ -942,11 +942,11 @@ NRIVoxelComputePreloadClosureStats BuildNRIVoxelComputePreloadClosure(
 	closure.selectedUniqueSources = gPreloadPlanState.stats.rawSelectedUniqueSources;
 	closure.selectedUniqueMeshes = gPreloadPlanState.stats.rawSelectedUniqueMeshes;
 	closure.selectedUniqueMaterials = gPreloadPlanState.stats.rawSelectedUniqueMaterials;
-	closure.selectedUniqueTextures = gPreloadPlanState.stats.rawSelectedUniqueTextures;
 
 	std::unordered_set<uint64_t> readyPairs;
 	std::unordered_set<uint64_t> readyMeshes;
 	std::unordered_set<uint64_t> readyMaterials;
+	std::unordered_set<uint64_t> selectedTextures;
 	std::unordered_set<uint64_t> readyTextures;
 	std::unordered_set<uint64_t> withheldReadyMeshes;
 	std::unordered_set<uint64_t> withheldReadyMaterials;
@@ -964,6 +964,19 @@ NRIVoxelComputePreloadClosureStats BuildNRIVoxelComputePreloadClosure(
 		}
 
 		const PersistentVoxelReadinessStatus readiness = residency.GetSharedVariantReadiness(binding.meshResourceKey, binding.materialKey);
+		std::vector<uint64_t> materialTextureKeys;
+		const bool materialTexturesKnown = residency.AppendMaterialTextureKeys(binding.materialKey, materialTextureKeys);
+		if (materialTexturesKnown)
+		{
+			for (uint64_t textureKey : materialTextureKeys)
+			{
+				selectedTextures.insert(textureKey);
+				if (readiness.materialPublished)
+				{
+					readyTextures.insert(textureKey);
+				}
+			}
+		}
 		if (binding.runtimeWithheld)
 		{
 			closure.capSkippedBindings++;
@@ -995,7 +1008,6 @@ NRIVoxelComputePreloadClosureStats BuildNRIVoxelComputePreloadClosure(
 		}
 		readyMeshes.insert(binding.meshResourceKey);
 		readyMaterials.insert(binding.materialKey);
-		readyTextures.insert(binding.textureKey);
 	}
 
 	const NRIPersistentVoxelStatusSnapshot residencyStatus = residency.BuildStatusSnapshot();
@@ -1004,10 +1016,13 @@ NRIVoxelComputePreloadClosureStats BuildNRIVoxelComputePreloadClosure(
 	closure.failedBindings += failedAdmissions;
 	closure.readyUniqueMeshes = (uint32_t)readyMeshes.size();
 	closure.readyUniqueMaterials = (uint32_t)readyMaterials.size();
+	closure.selectedUniqueTextures = (uint32_t)selectedTextures.size();
 	closure.readyUniqueTextures = (uint32_t)readyTextures.size();
 	closure.runtimeWithheldUniqueMeshes = gPreloadPlanState.stats.rawRuntimeWithheldUniqueMeshes;
 	closure.runtimeWithheldReadyMeshes = (uint32_t)withheldReadyMeshes.size();
 	closure.runtimeWithheldReadyMaterials = (uint32_t)withheldReadyMaterials.size();
+	// The residency map intentionally retains ready entries. This field counts
+	// only nonterminal admission work that can still block strict closure.
 	closure.admissionQueueCount =
 		residencyStatus.requiredAdmissionPendingCount +
 		residencyStatus.optionalAdmissionPendingCount;

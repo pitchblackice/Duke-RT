@@ -9181,6 +9181,28 @@ PersistentVoxelReadinessStatus NRIPersistentVoxelResidency::GetSharedVariantRead
 	return status;
 }
 
+bool NRIPersistentVoxelResidency::AppendMaterialTextureKeys(
+	uint64_t materialKeyHash,
+	std::vector<uint64_t>& outKeys) const
+{
+	const auto resourceIt = materialVariantResources.find(materialKeyHash);
+	if (resourceIt == materialVariantResources.end() ||
+		resourceIt->second.materialKeyHash != materialKeyHash ||
+		resourceIt->second.materialCount == 0 ||
+		resourceIt->second.materialBridge.materials.empty())
+	{
+		return false;
+	}
+	for (const nri_scene::TextureUpload& texture : resourceIt->second.materialBridge.textures)
+	{
+		if (texture.key != 0)
+		{
+			outKeys.push_back(texture.key);
+		}
+	}
+	return true;
+}
+
 bool NRIPersistentVoxelResidency::IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const
 {
 	return GetSharedVariantReadiness(meshResourceKey, materialKeyHash).ready;
