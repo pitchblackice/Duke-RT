@@ -454,6 +454,42 @@ void NRIPersistentVoxelResetServices::InvalidateSceneDataDescriptors() const
 	}
 }
 
+bool NRIPersistentVoxelMaterialClosureServices::Register(
+	uint64_t buildSerial,
+	uint64_t materialKey,
+	uint64_t validatedSignature,
+	const nri_scene::MaterialBridgeData& materials,
+	NRIPersistentVoxelMaterialClosureSource source,
+	NRIPersistentVoxelMaterialClosureResult& outResult) const
+{
+	return registerClosure != nullptr && registerClosure(
+		user,
+		buildSerial,
+		materialKey,
+		validatedSignature,
+		materials,
+		source,
+		outResult);
+}
+
+bool NRIPersistentVoxelMaterialClosureServices::TryReuse(
+	uint64_t buildSerial,
+	uint64_t materialKey,
+	uint64_t validatedSignature,
+	NRIPersistentVoxelMaterialClosureSource source,
+	nri_scene::MaterialBridgeData& outMaterials,
+	NRIPersistentVoxelMaterialClosureResult& outResult) const
+{
+	return tryReuse != nullptr && tryReuse(
+		user,
+		buildSerial,
+		materialKey,
+		validatedSignature,
+		source,
+		outMaterials,
+		outResult);
+}
+
 bool NRIPersistentVoxelPreloadServices::PumpAdmissionQueue(const char* phase) const
 {
 	if (pumpAdmissionQueue == nullptr)
@@ -3262,6 +3298,9 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		bool reusedMesh = false;
 		bool reusedMaterial = false;
 		bool inProgress = false;
+		const bool directRequestWasPending =
+			entry->state == PersistentVoxelAdmissionState::DirectComputePending &&
+			entry->directComputeRequested;
 		const char* failureReason = "none";
 		const bool exclusiveRuntimeAdmission =
 			!loadingPhase &&
@@ -3328,6 +3367,9 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 			{
 				entry->lastReason = "uploading";
 			}
+			const bool directRequestNowPending =
+				entry->state == PersistentVoxelAdmissionState::DirectComputePending &&
+				entry->directComputeRequested;
 			stopReason = entry->lastReason;
 			if (traceLevel2)
 			{
@@ -3348,6 +3390,22 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 					(unsigned long long)uploadBytes,
 					(uint32_t)entry->state,
 					entry->lastReason);
+			}
+			if (directRequestNowPending)
+			{
+				if (!directRequestWasPending)
+				{
+					admitted++;
+					if (requiredAdmission)
+					{
+						requiredAdmitted++;
+					}
+					else
+					{
+						optionalAdmitted++;
+					}
+				}
+				continue;
 			}
 			break;
 		}
@@ -3602,14 +3660,22 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 	auto rollbackAdmission = [&](const char* reason, const char* step) -> bool
 	{
 		outFailureReason = reason != nullptr ? reason : "failed";
-		arenaVertexCursor = entry.savedVertexCursor;
-		arenaIndexCursor = entry.savedIndexCursor;
-		arenaPrimitiveCursor = entry.savedPrimitiveCursor;
-		arenaMaterialCursor = entry.savedMaterialCursor;
+		const bool submittedDirectReservation = entry.directComputeRequested;
+		const uint32_t abandonedVertexCapacity = entry.uploadMeshResource.vertexCapacity;
+		const uint32_t abandonedIndexCapacity = entry.uploadMeshResource.indexCapacity;
+		const uint32_t abandonedPrimitiveCapacity = entry.uploadMeshResource.primitiveCapacity;
+		if (!submittedDirectReservation)
+		{
+			arenaVertexCursor = entry.savedVertexCursor;
+			arenaIndexCursor = entry.savedIndexCursor;
+			arenaPrimitiveCursor = entry.savedPrimitiveCursor;
+			arenaMaterialCursor = entry.savedMaterialCursor;
+		}
 		cleanupPendingUpload();
 		if (loadingTraceLevel >= 1 || voxelStatsEnabled)
 		{
-			Printf("NRI PT voxel admission transaction: event=rollback reason=%s tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu step=%s\n",
+			Printf("NRI PT voxel admission transaction: event=%s reason=%s tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu step=%s vertex_capacity=%u index_capacity=%u primitive_capacity=%u\n",
+				submittedDirectReservation ? "abandon-submitted-reservation" : "rollback",
 				outFailureReason,
 				variant.sourcePicnum,
 				variant.resolvedVoxelIndex,
@@ -3617,7 +3683,10 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				(unsigned long long)variant.materialKeyHash,
 				variant.primitiveCount,
 				(unsigned long long)entry.estimatedBytes,
-				step != nullptr ? step : "unknown");
+				step != nullptr ? step : "unknown",
+				abandonedVertexCapacity,
+				abandonedIndexCapacity,
+				abandonedPrimitiveCapacity);
 		}
 		return false;
 	};
@@ -3642,21 +3711,6 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		offset = cursor;
 		capacity = count;
 		cursor += capacity;
-		return true;
-	};
-	auto prewarmVariantTextures = [&](const nri_scene::MaterialBridgeData& materials) -> bool
-	{
-		for (const nri_scene::TextureUpload& upload : materials.textures)
-		{
-			if (upload.width == 0 || upload.height == 0)
-			{
-				continue;
-			}
-			if (!services.PrewarmTexture(upload))
-			{
-				return false;
-			}
-		}
 		return true;
 	};
 	auto traceChunk = [&](const char* stream, uint64_t offset, uint64_t bytes, uint64_t total)
@@ -3780,9 +3834,16 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				{
 					outStats->directFailures++;
 				}
-				arenaVertexCursor = entry.savedVertexCursor;
-				arenaIndexCursor = entry.savedIndexCursor;
-				arenaPrimitiveCursor = entry.savedPrimitiveCursor;
+				if (loadingTraceLevel >= 1 || voxelStatsEnabled)
+				{
+					Printf("NRI PT voxel admission transaction: event=abandon-submitted-reservation reason=direct-publish-invalid-range tex=%d voxel=%d mesh_variant=0x%llx vertex_capacity=%u index_capacity=%u primitive_capacity=%u\n",
+						variant.sourcePicnum,
+						variant.resolvedVoxelIndex,
+						(unsigned long long)variant.meshKeyHash,
+						entry.uploadMeshResource.vertexCapacity,
+						entry.uploadMeshResource.indexCapacity,
+						entry.uploadMeshResource.primitiveCapacity);
+				}
 				entry.uploadMeshResource = {};
 				entry.directComputeRequested = false;
 				entry.directComputeFailed = true;
@@ -3840,8 +3901,8 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				if (!services.BuildBottomLevel(
 					vertexBuffer,
 					indexBuffer,
-					0u,
-					meshResource.vertexOffset + meshResource.vertexCount,
+					meshResource.vertexOffset,
+					meshResource.vertexCount,
 					meshResource.indexOffset,
 					meshResource.indexCount,
 					meshResource.primitiveCount,
@@ -3945,9 +4006,16 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			{
 				outStats->directFailures++;
 			}
-			arenaVertexCursor = entry.savedVertexCursor;
-			arenaIndexCursor = entry.savedIndexCursor;
-			arenaPrimitiveCursor = entry.savedPrimitiveCursor;
+			if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
+			{
+				Printf("NRI PT voxel admission transaction: event=abandon-submitted-reservation reason=direct-publish-failed tex=%d voxel=%d mesh_variant=0x%llx vertex_capacity=%u index_capacity=%u primitive_capacity=%u\n",
+					variant.sourcePicnum,
+					variant.resolvedVoxelIndex,
+					(unsigned long long)variant.meshKeyHash,
+					entry.uploadMeshResource.vertexCapacity,
+					entry.uploadMeshResource.indexCapacity,
+					entry.uploadMeshResource.primitiveCapacity);
+			}
 			entry.uploadMeshResource = {};
 			entry.directComputeRequested = false;
 			entry.directComputeFailed = true;
@@ -4097,8 +4165,32 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		else
 		{
 			nri_scene::MaterialBridgeData builtMaterials;
-			services.BuildMaterials(variantSceneView, builtMaterials, "persistent_voxel_admission_variant");
-			if (builtMaterials.materials.empty() || !prewarmVariantTextures(builtMaterials))
+			NRIPersistentVoxelMaterialClosureResult closure = {};
+			const uint64_t validatedMaterialSignature =
+				variant.materialVariantHash != 0 ? variant.materialVariantHash : variant.materialKeyHash;
+			const bool reusedClosure = services.materialClosure.TryReuse(
+				residencyLastBuildSerial,
+				variant.materialKeyHash,
+				validatedMaterialSignature,
+				NRIPersistentVoxelMaterialClosureSource::RuntimeUnknown,
+				builtMaterials,
+				closure);
+			if (!reusedClosure)
+			{
+				services.BuildMaterials(variantSceneView, builtMaterials, "persistent_voxel_admission_variant");
+				if (builtMaterials.materials.empty() ||
+					!services.materialClosure.Register(
+						residencyLastBuildSerial,
+						variant.materialKeyHash,
+						validatedMaterialSignature,
+						builtMaterials,
+						NRIPersistentVoxelMaterialClosureSource::RuntimeUnknown,
+						closure))
+				{
+					return rollbackAdmission("material-build-failed", "materials");
+				}
+			}
+			if (builtMaterials.materials.empty())
 			{
 				return rollbackAdmission("material-build-failed", "materials");
 			}
@@ -4112,7 +4204,14 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			entry.uploadMaterialResource.materialUploadHash = 0;
 			if (outStats != nullptr)
 			{
-				outStats->materialPayloadBuilds++;
+				if (reusedClosure)
+				{
+					outStats->materialPayloadReuses++;
+				}
+				else
+				{
+					outStats->materialPayloadBuilds++;
+				}
 				outStats->materialPayloadBytes +=
 					(uint64_t)entry.uploadMaterialResource.materialBridge.materials.size() * (uint64_t)sizeof(nri_scene::MaterialData);
 			}
@@ -4250,6 +4349,8 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				const uint64_t generation = ((uint64_t)residencyMapGeneration << 32) | (uint64_t)(entry.retryCount + 1u);
 				NRIVoxelComputeDirectPublishRequest request = {};
 				request.meshResourceKey = meshResourceKey;
+				request.geometryKey = variant.meshKeyHash != 0 ? variant.meshKeyHash : meshResourceKey;
+				request.materialBindingKey = variant.materialKeyHash;
 				request.generation = generation != 0 ? generation : 1u;
 				request.model = variant.model;
 				request.outputKind = NRIVoxelComputeDirectPublishOutputKind::PrivateBlasInputsAndSharedArena;
@@ -4264,6 +4365,11 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				request.primitives.capacity = meshResource.primitiveCapacity;
 				request.materialBase = entry.uploadMaterialResource.materialOffset;
 				request.materialCount = entry.uploadMaterialResource.materialCount;
+				const uint32_t normalizedPriority =
+					(uint32_t)((int64_t)entry.priority - (int64_t)INT32_MIN);
+				request.priority = UINT32_MAX - normalizedPriority;
+				request.age = entry.firstQueuedFrame != UINT32_MAX && frameIndex >= entry.firstQueuedFrame ?
+					(uint64_t)(frameIndex - entry.firstQueuedFrame) : 0u;
 				const NRIVoxelComputeGeneratedGeometryStatus directStatus = RequestNRIVoxelComputeDirectPublication(request);
 				if (directStatus == NRIVoxelComputeGeneratedGeometryStatus::Queued)
 				{
@@ -5150,6 +5256,17 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				materialResource.materialBridge.materials.empty())
 			{
 				nri_scene::MaterialBridgeData builtMaterials;
+				NRIPersistentVoxelMaterialClosureResult closure = {};
+				const uint64_t validatedMaterialSignature =
+					cacheEntry.materialSignature != 0 ? cacheEntry.materialSignature : cacheEntry.materialKeyHash;
+				const bool reusedClosure = batchServices.materialClosure.TryReuse(
+					residencyLastBuildSerial,
+					cacheEntry.materialKeyHash,
+					validatedMaterialSignature,
+					NRIPersistentVoxelMaterialClosureSource::RuntimeUnknown,
+					builtMaterials,
+					closure);
+				if (!reusedClosure)
 				{
 					Clocker materialClock(NriPTMaterialBuild);
 					const nri_scene::SurfaceRef* materialSurface =
@@ -5179,7 +5296,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 					}
 					return true;
 				}
-				if (!prewarmPersistentVoxelActorTextures(builtMaterials))
+				if (!reusedClosure && !prewarmPersistentVoxelActorTextures(builtMaterials))
 				{
 					if (voxelStatsEnabled)
 					{
@@ -5203,6 +5320,25 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 					}
 					return true;
 				}
+				if (!reusedClosure &&
+					!batchServices.materialClosure.Register(
+						residencyLastBuildSerial,
+						cacheEntry.materialKeyHash,
+						validatedMaterialSignature,
+						builtMaterials,
+						NRIPersistentVoxelMaterialClosureSource::RuntimeUnknown,
+						closure))
+				{
+					if (existingActor != nullptr)
+					{
+						existingActor->active = true;
+					}
+					if (outDeferredReason != nullptr)
+					{
+						*outDeferredReason = PersistentVoxelActorDeferredReason::TexturePrewarm;
+					}
+					return true;
+				}
 
 				materialResource.materialKeyHash = cacheEntry.materialKeyHash;
 				materialResource.materialSignature = cacheEntry.materialSignature;
@@ -5212,8 +5348,10 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				materialResource.materialUploadHash = 0;
 				if (voxelStatsEnabled)
 				{
-					Printf("PERF pt voxel material variant NRI: frame=%u action=build reason=none actor_key=0x%llx mat_key=0x%llx ref_count=%u material_offset=%u material_count=%u material_capacity=%u upload_hash=0x%llx ready=1\n",
+					Printf("PERF pt voxel material variant NRI: frame=%u action=%s reason=%s actor_key=0x%llx mat_key=0x%llx ref_count=%u material_offset=%u material_count=%u material_capacity=%u upload_hash=0x%llx ready=1\n",
 						frameIndex,
+						reusedClosure ? "reuse" : "build",
+						reusedClosure ? "preload-closure" : "none",
 						(unsigned long long)cacheEntry.identityKey,
 						(unsigned long long)cacheEntry.materialKeyHash,
 						countBatchActorsUsingMaterialVariant(cacheEntry.materialKeyHash),
@@ -8020,6 +8158,8 @@ bool NRIPersistentVoxelResidency::PreloadMaterialPayloads(
 		}
 
 		outStats.candidates++;
+		const uint64_t validatedMaterialSignature =
+			variant.materialVariantHash != 0 ? variant.materialVariantHash : variant.materialKeyHash;
 		if (variant.materialVariantHash != 0 && variant.materialVariantHash != variant.materialKeyHash)
 		{
 			outStats.actorScopedMaterials++;
@@ -8034,6 +8174,19 @@ bool NRIPersistentVoxelResidency::PreloadMaterialPayloads(
 		if (existingReady)
 		{
 			PersistentVoxelMaterialVariantResource& resource = existingIt->second;
+			NRIPersistentVoxelMaterialClosureResult closure = {};
+			if (!preloadServices.materialClosure.Register(
+					buildSerial,
+					variant.materialKeyHash,
+					validatedMaterialSignature,
+					resource.materialBridge,
+					NRIPersistentVoxelMaterialClosureSource::PreloadKnown,
+					closure))
+			{
+				outStats.failed++;
+				ok = false;
+				continue;
+			}
 			resource.lastDesiredMapGeneration = residencyMapGeneration;
 			resource.lastUsedMapGeneration = residencyMapGeneration;
 			resource.lastUsedFrame = frameIndex;
@@ -8046,10 +8199,10 @@ bool NRIPersistentVoxelResidency::PreloadMaterialPayloads(
 			outStats.materialRows += resource.materialCount;
 			outStats.materialBytes +=
 				(uint64_t)resource.materialBridge.materials.size() * (uint64_t)sizeof(nri_scene::MaterialData);
-			outStats.textureRequests += (uint32_t)resource.materialBridge.textures.size();
-			for (const nri_scene::TextureUpload& upload : resource.materialBridge.textures)
+			outStats.textureRequests += closure.textureDependencies;
+			for (const NRIPersistentVoxelTextureDependency& dependency : closure.textures)
 			{
-				outStats.textureBytes += (uint64_t)upload.width * (uint64_t)upload.height * 4ull;
+				outStats.textureBytes += dependency.estimatedBytes;
 			}
 			continue;
 		}
@@ -8080,30 +8233,28 @@ bool NRIPersistentVoxelResidency::PreloadMaterialPayloads(
 			continue;
 		}
 
-		bool texturesReady = true;
-		for (const nri_scene::TextureUpload& upload : builtMaterials.textures)
-		{
-			if (upload.width == 0 || upload.height == 0)
-			{
-				continue;
-			}
-			outStats.textureRequests++;
-			outStats.textureBytes += (uint64_t)upload.width * (uint64_t)upload.height * 4ull;
-			if (!preloadServices.PrewarmTexture(upload))
-			{
-				texturesReady = false;
-			}
-		}
-		if (!texturesReady)
+		NRIPersistentVoxelMaterialClosureResult closure = {};
+		if (!preloadServices.materialClosure.Register(
+				buildSerial,
+				variant.materialKeyHash,
+				validatedMaterialSignature,
+				builtMaterials,
+				NRIPersistentVoxelMaterialClosureSource::PreloadKnown,
+				closure))
 		{
 			outStats.failed++;
 			ok = false;
 			continue;
 		}
+		outStats.textureRequests += closure.textureDependencies;
+		for (const NRIPersistentVoxelTextureDependency& dependency : closure.textures)
+		{
+			outStats.textureBytes += dependency.estimatedBytes;
+		}
 
 		PersistentVoxelMaterialVariantResource resource = {};
 		resource.materialKeyHash = variant.materialKeyHash;
-		resource.materialSignature = variant.materialVariantHash != 0 ? variant.materialVariantHash : variant.materialKeyHash;
+		resource.materialSignature = validatedMaterialSignature;
 		resource.materialBridge = std::move(builtMaterials);
 		resource.materialCount = (uint32_t)resource.materialBridge.materials.size();
 		resource.materialCapacity = resource.materialCount;

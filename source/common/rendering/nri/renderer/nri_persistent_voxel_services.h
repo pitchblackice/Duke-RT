@@ -5,12 +5,6 @@
 
 class NRIRenderer;
 
-enum class NRIPersistentVoxelMaterialClosureSource : uint8_t
-{
-	PreloadKnown,
-	RuntimeUnknown,
-};
-
 struct NRIPersistentVoxelMaterialClosureTelemetry
 {
 	uint64_t buildSerial = 0;

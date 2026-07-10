@@ -7,6 +7,12 @@
 
 constexpr uint32_t NRI_PERSISTENT_VOXEL_MATERIAL_SEED_VERSION = 1;
 
+enum class NRIPersistentVoxelMaterialClosureSource : uint8_t
+{
+	PreloadKnown,
+	RuntimeUnknown,
+};
+
 enum class NRIPersistentVoxelTextureClosureState : uint8_t
 {
 	Pending,

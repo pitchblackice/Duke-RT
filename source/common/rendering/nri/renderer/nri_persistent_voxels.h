@@ -1,5 +1,6 @@
 #pragma once
 
+#include "nri_persistent_voxel_material_closure.h"
 #include "nri_frame_resources.h"
 #include "nri_persistent_voxel_shared_blas.h"
 #include "nri_renderer_settings.h"
@@ -313,6 +314,45 @@ struct NRIPersistentVoxelResetServices
 
 struct NRIPersistentVoxelBatchStats;
 
+struct NRIPersistentVoxelMaterialClosureServices
+{
+	using RegisterFn = bool (*)(
+		void* user,
+		uint64_t buildSerial,
+		uint64_t materialKey,
+		uint64_t validatedSignature,
+		const nri_scene::MaterialBridgeData& materials,
+		NRIPersistentVoxelMaterialClosureSource source,
+		NRIPersistentVoxelMaterialClosureResult& outResult);
+	using TryReuseFn = bool (*)(
+		void* user,
+		uint64_t buildSerial,
+		uint64_t materialKey,
+		uint64_t validatedSignature,
+		NRIPersistentVoxelMaterialClosureSource source,
+		nri_scene::MaterialBridgeData& outMaterials,
+		NRIPersistentVoxelMaterialClosureResult& outResult);
+
+	void* user = nullptr;
+	RegisterFn registerClosure = nullptr;
+	TryReuseFn tryReuse = nullptr;
+
+	bool Register(
+		uint64_t buildSerial,
+		uint64_t materialKey,
+		uint64_t validatedSignature,
+		const nri_scene::MaterialBridgeData& materials,
+		NRIPersistentVoxelMaterialClosureSource source,
+		NRIPersistentVoxelMaterialClosureResult& outResult) const;
+	bool TryReuse(
+		uint64_t buildSerial,
+		uint64_t materialKey,
+		uint64_t validatedSignature,
+		NRIPersistentVoxelMaterialClosureSource source,
+		nri_scene::MaterialBridgeData& outMaterials,
+		NRIPersistentVoxelMaterialClosureResult& outResult) const;
+};
+
 struct NRIPersistentVoxelPreloadServices
 {
 	using PumpAdmissionQueueFn = bool (*)(void* user, const char* phase);
@@ -331,6 +371,7 @@ struct NRIPersistentVoxelPreloadServices
 	IsSubmitBudgetHitFn isSubmitBudgetHit = nullptr;
 	BuildMaterialsFn buildMaterials = nullptr;
 	PrewarmTextureFn prewarmTexture = nullptr;
+	NRIPersistentVoxelMaterialClosureServices materialClosure;
 
 	bool PumpAdmissionQueue(const char* phase) const;
 	void PumpComputeJobs(uint32_t frameIndex) const;
@@ -387,6 +428,7 @@ struct NRIPersistentVoxelAdmissionServices
 	RetireAccelerationStructureFn retireAccelerationStructure = nullptr;
 	BuildMaterialsFn buildMaterials = nullptr;
 	PrewarmTextureFn prewarmTexture = nullptr;
+	NRIPersistentVoxelMaterialClosureServices materialClosure;
 	AssignGeometryPortalIndicesFn assignGeometryPortalIndices = nullptr;
 	CreateStructuredBufferNoUploadFn createStructuredBufferNoUpload = nullptr;
 	EnsureArenaBufferFn ensureArenaBuffer = nullptr;
@@ -728,6 +770,7 @@ struct NRIPersistentVoxelBatchServices
 	RetireAccelerationStructureFn retireAccelerationStructure = nullptr;
 	MaterialWouldEmitFn materialWouldEmit = nullptr;
 	BuildSurfaceRecordFn buildSurfaceRecord = nullptr;
+	NRIPersistentVoxelMaterialClosureServices materialClosure;
 
 	void BuildMaterials(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label) const;
 	bool IsTextureCached(const nri_scene::TextureUpload& upload) const;

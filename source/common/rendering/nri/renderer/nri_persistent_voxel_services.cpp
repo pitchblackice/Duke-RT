@@ -516,6 +516,49 @@ public:
 		return state.telemetry;
 	}
 
+	static NRIPersistentVoxelMaterialClosureServices BuildMaterialClosureServices(NRIRenderer& renderer)
+	{
+		NRIPersistentVoxelMaterialClosureServices services = {};
+		services.user = &renderer;
+		services.registerClosure = [](
+			void* user,
+			uint64_t buildSerial,
+			uint64_t materialKey,
+			uint64_t validatedSignature,
+			const nri_scene::MaterialBridgeData& materials,
+			NRIPersistentVoxelMaterialClosureSource source,
+			NRIPersistentVoxelMaterialClosureResult& outResult) -> bool
+		{
+			return RegisterMaterialClosure(
+				*static_cast<NRIRenderer*>(user),
+				buildSerial,
+				materialKey,
+				validatedSignature,
+				materials,
+				source,
+				outResult);
+		};
+		services.tryReuse = [](
+			void* user,
+			uint64_t buildSerial,
+			uint64_t materialKey,
+			uint64_t validatedSignature,
+			NRIPersistentVoxelMaterialClosureSource source,
+			nri_scene::MaterialBridgeData& outMaterials,
+			NRIPersistentVoxelMaterialClosureResult& outResult) -> bool
+		{
+			return TryReuseMaterialClosure(
+				*static_cast<NRIRenderer*>(user),
+				buildSerial,
+				materialKey,
+				validatedSignature,
+				source,
+				outMaterials,
+				outResult);
+		};
+		return services;
+	}
+
 	static NRIPersistentVoxelResetServices BuildResetServices(NRIRenderer& renderer)
 	{
 		NRIPersistentVoxelResetServices services = {};
@@ -539,6 +582,7 @@ public:
 	{
 		NRIPersistentVoxelAdmissionServices services = {};
 		services.user = &renderer;
+		services.materialClosure = BuildMaterialClosureServices(renderer);
 		services.admitVariantResource = [](
 			void* user,
 			PersistentVoxelAdmissionEntry& entry,
@@ -819,6 +863,7 @@ public:
 		}
 		NRIPersistentVoxelPreloadServices preloadServices = {};
 		preloadServices.user = &renderer;
+		preloadServices.materialClosure = BuildMaterialClosureServices(renderer);
 		preloadServices.pumpAdmissionQueue = [](void* user, const char* phase) -> bool
 		{
 			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
@@ -944,6 +989,7 @@ public:
 	{
 		NRIPersistentVoxelBatchServices batchServices = {};
 		batchServices.user = &renderer;
+		batchServices.materialClosure = BuildMaterialClosureServices(renderer);
 		batchServices.buildMaterials = [](void* user, nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label)
 		{
 			NRIRenderer& renderer = *static_cast<NRIRenderer*>(user);
