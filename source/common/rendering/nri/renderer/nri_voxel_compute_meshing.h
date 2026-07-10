@@ -132,12 +132,22 @@ struct NRIVoxelComputeMemoryUsage
 {
 	uint32_t rawSourceCount = 0;
 	uint32_t rawSourceUploadedCount = 0;
+	uint32_t rawSourcePendingCount = 0;
+	uint32_t rawArchivePageCount = 0;
 	uint32_t queuedJobCount = 0;
 	uint32_t pendingJobCount = 0;
 	uint32_t readyDirectMeshCount = 0;
 	uint64_t rawCpuBytes = 0;
 	uint64_t rawDeviceBytes = 0;
 	uint64_t rawUploadBytes = 0;
+	uint64_t totalRawSourceScans = 0;
+	uint64_t totalRawSourceScanFailures = 0;
+	uint64_t totalRawSourceNewUploadBytes = 0;
+	uint64_t totalRawSourceWholeArchiveReuploads = 0;
+	uint64_t rawSourceUploadLatencyMaxFrames = 0;
+	double totalRawSourceScanMs = 0.0;
+	double rawSourceScanMaxMs = 0.0;
+	double rawSourceUploadLatencyAverageFrames = 0.0;
 	uint64_t transientInputDeviceBytes = 0;
 	uint64_t transientInputUploadBytes = 0;
 	uint64_t transientGeneratedBytes = 0;
