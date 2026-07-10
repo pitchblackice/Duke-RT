@@ -2216,6 +2216,8 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		else
 		{
 			jobsToProcess = 0;
+			uint64_t dispatchReservationBytes = 0;
+			const uint64_t dispatchByteLimit = (uint64_t)std::max(0, (int)nri_ptvoxeladmitmaxbytesruntime);
 			while (jobsToProcess < state.queuedJobs.size() && jobsToProcess < (size_t)std::max(1, (int)nri_ptvoxelcomputemaxjobs))
 			{
 				const PendingVoxelComputeJob& candidate = state.queuedJobs[jobsToProcess];
@@ -2227,12 +2229,18 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 				{
 					break;
 				}
+				if (dispatchByteLimit != 0 && jobsToProcess != 0 &&
+					(candidate.reservationBytes > dispatchByteLimit - std::min(dispatchReservationBytes, dispatchByteLimit)))
+				{
+					break;
+				}
 				auto archived = state.rawSourceArchive.find(candidate.model);
 				if (archived == state.rawSourceArchive.end() || !archived->second.uploaded || archived->second.failed ||
 					archived->second.pageIndex != directArchivePageIndex)
 				{
 					break;
 				}
+				dispatchReservationBytes += candidate.reservationBytes;
 				jobsToProcess++;
 			}
 		}

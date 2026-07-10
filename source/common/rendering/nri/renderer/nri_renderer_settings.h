@@ -55,6 +55,7 @@ struct NRIPersistentVoxelSettings
 	uint32_t admitMaxBlasRuntime = 0;
 	uint32_t admitMaxBlasPrimitives = 0;
 	int32_t admitIsolateBlasPrimitives = 0;
+	uint32_t computeMaxJobs = 0;
 	uint64_t residentMaxBytes = 0;
 	uint64_t residentMinHeadroomBytes = 0;
 	uint32_t residentMaxColdMaps = 0;

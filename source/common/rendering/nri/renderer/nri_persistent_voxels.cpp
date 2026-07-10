@@ -1218,12 +1218,20 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 
 	std::vector<RuntimeMutationResidentUploadRange> dirtyMaterialRanges;
 	std::vector<PendingMaterialUpload> pendingMaterialUploads;
-	dirtyMaterialRanges.reserve(materialVariantResources.size());
-	pendingMaterialUploads.reserve(materialVariantResources.size());
+	dirtyMaterialRanges.reserve(dirtyMaterialResourceKeys.size());
+	pendingMaterialUploads.reserve(dirtyMaterialResourceKeys.size());
+	std::vector<uint64_t> resolvedDirtyKeys;
+	resolvedDirtyKeys.reserve(dirtyMaterialResourceKeys.size());
 
-	for (auto& pair : materialVariantResources)
+	for (uint64_t materialKey : dirtyMaterialResourceKeys)
 	{
-		PersistentVoxelMaterialVariantResource& resource = pair.second;
+		auto resourceIt = materialVariantResources.find(materialKey);
+		if (resourceIt == materialVariantResources.end())
+		{
+			resolvedDirtyKeys.push_back(materialKey);
+			continue;
+		}
+		PersistentVoxelMaterialVariantResource& resource = resourceIt->second;
 		if (resource.materialCount == 0)
 		{
 			continue;
@@ -1240,6 +1248,7 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 		outStats.domainMaterialPayloadBytes += materialSize;
 		outStats.domainHashChecks++;
 		const uint64_t materialHash = NRIHashUploadPayloadBytes(actorMaterials, materialSize);
+		resolvedDirtyKeys.push_back(materialKey);
 		const bool uploadMaterials = resource.materialUploadHash != materialHash;
 		if (uploadMaterials)
 		{
@@ -1261,7 +1270,14 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 
 	if (dirtyMaterialRanges.empty())
 	{
-		uploadedMaterialResourceGeneration = materialResourceGeneration;
+		for (uint64_t materialKey : resolvedDirtyKeys)
+		{
+			dirtyMaterialResourceKeys.erase(materialKey);
+		}
+		if (dirtyMaterialResourceKeys.empty())
+		{
+			uploadedMaterialResourceGeneration = materialResourceGeneration;
+		}
 		return true;
 	}
 
@@ -1354,7 +1370,14 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 				(unsigned long long)materialSize);
 		}
 	}
-	uploadedMaterialResourceGeneration = materialResourceGeneration;
+	for (uint64_t materialKey : resolvedDirtyKeys)
+	{
+		dirtyMaterialResourceKeys.erase(materialKey);
+	}
+	if (dirtyMaterialResourceKeys.empty())
+	{
+		uploadedMaterialResourceGeneration = materialResourceGeneration;
+	}
 
 	return true;
 }
@@ -2220,6 +2243,11 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			(int)nri_ptvoxelcomputetrace > 0 &&
 			meshResourceFirstPublish;
 		meshResourceIt->second.tlasPublished = true;
+		const uint64_t schedulerTokenId = admissionScheduler.FindTlasPending({ residencyMapGeneration, actor.meshResourceKey });
+		if (schedulerTokenId != 0)
+		{
+			admissionScheduler.MarkTlasReady(schedulerTokenId);
+		}
 		if (voxelStatsEnabled || traceDirectGeneratedTlas)
 		{
 			Printf("PERF pt voxel tlas NRI: frame=%u action=publish reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx instance_id=%u primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u blas=1 shared_route=%u direct_generated=%u tlas_ready=%u tlas_published=1 first_publish=%u new_this_frame=%u ready=1\n",
@@ -2972,6 +3000,7 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 				resource.activeActorReferences);
 		}
 		publishedMaterialKeys.erase(it->first);
+		dirtyMaterialResourceKeys.erase(it->first);
 		it = materialVariantResources.erase(it);
 		materialResourceGeneration++;
 		evictedMaterials++;
@@ -3058,6 +3087,29 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		settings.admitMaxBlasLoading :
 		settings.admitMaxBlasRuntime;
 	uint32_t blasBudgetRemaining = blasBudgetLimit;
+	if (admissionScheduler.GetSnapshot().activeMapGeneration != residencyMapGeneration)
+	{
+		const uint64_t batchBytes = std::max<uint64_t>(
+			std::max(settings.admitMaxBytesLoading, settings.admitMaxBytesRuntime),
+			64ull * 1024ull * 1024ull);
+		const uint64_t maxJobs = std::max<uint64_t>(1u, settings.computeMaxJobs);
+		const uint64_t maxReservedBytes = batchBytes > UINT64_MAX / maxJobs ? UINT64_MAX : batchBytes * maxJobs;
+		NRIVoxelAdmissionLimits limits = {};
+		limits.activeMapGeneration = residencyMapGeneration;
+		limits.maxActiveJobs = settings.computeMaxJobs;
+		limits.maxReservedBytes = maxReservedBytes;
+		limits.maxReservedBlasBytes = maxReservedBytes;
+		limits.maxComputeSlots = settings.computeMaxJobs;
+		limits.maxBlasLanes = settings.computeMaxJobs;
+		limits.oversizedReservationBytes = batchBytes;
+		limits.oversizedBlasBytes = batchBytes;
+		limits.optionalActiveJobReserve = settings.computeMaxJobs > 1 ? 1u : 0u;
+		limits.optionalByteReserve = settings.computeMaxJobs > 1 ? batchBytes : 0u;
+		limits.optionalBlasByteReserve = settings.computeMaxJobs > 1 ? batchBytes : 0u;
+		limits.optionalComputeSlotReserve = settings.computeMaxJobs > 1 ? 1u : 0u;
+		limits.optionalBlasLaneReserve = settings.computeMaxJobs > 1 ? 1u : 0u;
+		admissionScheduler = NRIVoxelAdmissionScheduler(limits);
+	}
 	const auto pumpStart = std::chrono::steady_clock::now();
 	auto elapsedMs = [&]() -> double
 	{
@@ -3587,6 +3639,38 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		};
 		printAdmissionSummary("NRI PT voxel admission summary:");
 		printAdmissionSummary("PERF pt voxel admission summary NRI:");
+		const NRIVoxelAdmissionSnapshot scheduler = admissionScheduler.GetSnapshot();
+		const NRIVoxelAdmissionInvariantReport invariants = admissionScheduler.ValidateInvariants();
+		Printf("PERF pt voxel scheduler NRI: phase=%s generation=%llu active=%u bindings=%u owners=%u pair_owners=%u dependency=%u compute_queued=%u compute_submitted=%u compute_ready=%u blas_queued=%u blas_submitted=%u publication=%u tlas_pending=%u ready=%u compute_inflight=%u blas_inflight=%u reserved=%llu blas_reserved=%llu held=%llu held_blas=%llu retire_pending=%llu abandoned=%llu accepted=%llu attached=%llu rejected=%llu invalid_transitions=%llu invariant_valid=%u invariant_flags=0x%x\n",
+			phase != nullptr ? phase : "unknown",
+			(unsigned long long)scheduler.activeMapGeneration,
+			scheduler.activeJobs,
+			scheduler.activeBindings,
+			scheduler.meshOwnerCount,
+			scheduler.pairOwnerCount,
+			scheduler.stageCounts[(size_t)NRIVoxelAdmissionStage::DependencyPending],
+			scheduler.stageCounts[(size_t)NRIVoxelAdmissionStage::ComputeQueued],
+			scheduler.stageCounts[(size_t)NRIVoxelAdmissionStage::ComputeSubmitted],
+			scheduler.stageCounts[(size_t)NRIVoxelAdmissionStage::ComputeReady],
+			scheduler.stageCounts[(size_t)NRIVoxelAdmissionStage::BlasQueued],
+			scheduler.stageCounts[(size_t)NRIVoxelAdmissionStage::BlasSubmitted],
+			scheduler.stageCounts[(size_t)NRIVoxelAdmissionStage::PublicationPending],
+			scheduler.stageCounts[(size_t)NRIVoxelAdmissionStage::TlasPending],
+			scheduler.stageCounts[(size_t)NRIVoxelAdmissionStage::Ready],
+			scheduler.computeInFlight,
+			scheduler.blasInFlight,
+			(unsigned long long)scheduler.activeReservationBytes,
+			(unsigned long long)scheduler.activeBlasBytes,
+			(unsigned long long)scheduler.heldReservationBytes,
+			(unsigned long long)scheduler.heldBlasBytes,
+			(unsigned long long)scheduler.retirePendingBytes,
+			(unsigned long long)scheduler.abandonedBytes,
+			(unsigned long long)scheduler.acceptedJobs,
+			(unsigned long long)scheduler.attachedBindings,
+			(unsigned long long)scheduler.rejectedJobs,
+			(unsigned long long)scheduler.invalidTransitions,
+			invariants.valid ? 1u : 0u,
+			(uint32_t)invariants.flags);
 	}
 	return stats.failedThisPump == 0;
 }
@@ -3664,6 +3748,11 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 
 	auto cleanupPendingUpload = [&]()
 	{
+		if (entry.schedulerTokenId != 0 && entry.directComputeRequested)
+		{
+			admissionScheduler.Cancel(entry.schedulerTokenId);
+			entry.schedulerTokenId = 0;
+		}
 		services.RetireBuffer(entry.directBlasScratchBuffer);
 		services.RetireBuffer(entry.uploadMeshResource.vertexBuffer);
 		services.RetireBuffer(entry.uploadMeshResource.indexBuffer);
@@ -3794,43 +3883,79 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 	};
 	auto directPublishOwnerPending = [&]() -> bool
 	{
-		for (const auto& pair : admissionQueue)
+		const uint64_t ownerToken = admissionScheduler.FindMeshOwner({ residencyMapGeneration, meshResourceKey });
+		if (ownerToken != 0)
 		{
-			const PersistentVoxelAdmissionEntry& candidate = pair.second;
-			if (&candidate == &entry ||
-				candidate.mapGeneration != residencyMapGeneration ||
-				(candidate.state != PersistentVoxelAdmissionState::DirectComputePending &&
-				 candidate.state != PersistentVoxelAdmissionState::DirectBlasPending) ||
-				!candidate.directComputeRequested ||
-				candidate.directComputeFailed)
-			{
-				continue;
-			}
-			if (BuildPersistentVoxelVariantMeshResourceKey(candidate.variant) == meshResourceKey)
-			{
-				return true;
-			}
+			NRIVoxelAdmissionTokenSnapshot owner = {};
+			return entry.schedulerTokenId == 0 ||
+				ownerToken != entry.schedulerTokenId ||
+				(admissionScheduler.GetTokenSnapshot(ownerToken, owner) &&
+				 !owner.bindings.empty() && owner.bindings.front().pairKey != entry.pairKey);
 		}
 		return false;
 	};
 	auto directBlasLaneBlocked = [&](bool exclusive) -> bool
 	{
-		for (const auto& pair : admissionQueue)
+		const NRIVoxelAdmissionSnapshot scheduler = admissionScheduler.GetSnapshot();
+		if (exclusive && scheduler.blasInFlight != 0)
 		{
-			const PersistentVoxelAdmissionEntry& candidate = pair.second;
-			if (&candidate == &entry ||
-				candidate.mapGeneration != residencyMapGeneration ||
-				candidate.state != PersistentVoxelAdmissionState::DirectBlasPending)
-			{
-				continue;
-			}
-			if (exclusive || candidate.directBlasExclusive)
+			return true;
+		}
+		for (const NRIVoxelAdmissionTokenSnapshot& token : admissionScheduler.GetTokenSnapshots())
+		{
+			if (token.tokenId != entry.schedulerTokenId &&
+				token.stage == NRIVoxelAdmissionStage::BlasSubmitted &&
+				token.oversizedExclusive)
 			{
 				return true;
 			}
 		}
 		return false;
 	};
+	if (entry.schedulerTokenId == 0 &&
+		!existingMeshResourceReady() &&
+		(entry.runtimeRequested || variant.directOnlyAdmission) &&
+		ShouldDirectPublishNRIVoxelComputeMeshing() &&
+		!entry.directComputeFailed &&
+		variant.model != nullptr &&
+		variant.primitiveCount != 0)
+	{
+		NRIVoxelAdmissionRequest schedulerRequest = {};
+		schedulerRequest.mesh = { residencyMapGeneration, meshResourceKey };
+		schedulerRequest.pairKey = entry.pairKey;
+		schedulerRequest.materialKey = variant.materialKeyHash;
+		schedulerRequest.reservation.vertexCapacity = std::max(1u, variant.primitiveCount * 2u);
+		schedulerRequest.reservation.indexCapacity = std::max(1u, variant.primitiveCount * 3u);
+		schedulerRequest.reservation.primitiveCapacity = variant.primitiveCount;
+		schedulerRequest.reservation.materialBindingCapacity = 256;
+		schedulerRequest.reservation.vertexBytes =
+			(uint64_t)schedulerRequest.reservation.vertexCapacity * sizeof(nri_scene::SceneVertex);
+		schedulerRequest.reservation.indexBytes =
+			(uint64_t)schedulerRequest.reservation.indexCapacity * sizeof(uint32_t);
+		schedulerRequest.reservation.primitiveBytes =
+			(uint64_t)variant.primitiveCount * sizeof(nri_scene::PrimitiveData);
+		schedulerRequest.reservation.materialBytes =
+			(uint64_t)schedulerRequest.reservation.materialBindingCapacity * sizeof(nri_scene::MaterialData);
+		schedulerRequest.reservation.blasBytes = (uint64_t)variant.primitiveCount * 64ull;
+		schedulerRequest.reservation.blasScratchBytes = (uint64_t)variant.primitiveCount * 12ull;
+		schedulerRequest.fairnessClass = entry.runtimeRequested ?
+			NRIVoxelAdmissionFairnessClass::VisibleNoFallback :
+			(IsRequiredAdmission(entry) ? NRIVoxelAdmissionFairnessClass::RequiredLoading : NRIVoxelAdmissionFairnessClass::OptionalLoading);
+		schedulerRequest.age = entry.firstQueuedFrame != UINT32_MAX && frameIndex >= entry.firstQueuedFrame ?
+			(uint64_t)(frameIndex - entry.firstQueuedFrame) : 0u;
+		schedulerRequest.dependenciesReady = true;
+		const NRIVoxelAdmissionResult schedulerResult = admissionScheduler.Admit(schedulerRequest);
+		if (schedulerResult.code != NRIVoxelAdmissionResultCode::Accepted &&
+			schedulerResult.code != NRIVoxelAdmissionResultCode::BindingAttached &&
+			schedulerResult.code != NRIVoxelAdmissionResultCode::DuplicateBinding)
+		{
+			outInProgress = true;
+			entry.state = PersistentVoxelAdmissionState::Deferred;
+			entry.lastReason = "scheduler-capacity";
+			return true;
+		}
+		entry.schedulerTokenId = schedulerResult.tokenId;
+	}
 	auto finalizeDirectBlas = [&]() -> bool
 	{
 		PersistentVoxelMeshVariantResource& meshResource = entry.uploadMeshResource;
@@ -3854,6 +3979,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			(uint64_t)entry.uploadMaterialResource.materialBridge.materials.size() * (uint64_t)sizeof(nri_scene::MaterialData);
 		meshVariantResources[meshResourceKey] = std::move(entry.uploadMeshResource);
 		materialVariantResources[variant.materialKeyHash] = std::move(entry.uploadMaterialResource);
+		dirtyMaterialResourceKeys.insert(variant.materialKeyHash);
 		materialResourceGeneration++;
 		publishedMeshKeys.insert(meshResourceKey);
 		publishedMaterialKeys.insert(variant.materialKeyHash);
@@ -3902,6 +4028,15 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		if (outStats != nullptr)
 		{
 			outStats->cpuGeometryAvoided++;
+		}
+		if (entry.schedulerTokenId != 0)
+		{
+			if (!admissionScheduler.MarkBlasReady(entry.schedulerTokenId) ||
+				!admissionScheduler.MarkPublished(entry.schedulerTokenId))
+			{
+				admissionScheduler.Fail(entry.schedulerTokenId);
+				entry.schedulerTokenId = 0;
+			}
 		}
 		services.RetireBuffer(entry.directBlasScratchBuffer);
 		entry.uploadMeshResource = {};
@@ -4086,6 +4221,12 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				meshResource.gpuForce = meshResource.gpuForce || entry.gpuForce;
 				meshResource.gpuPrefer = meshResource.gpuPrefer || entry.gpuPrefer;
 				meshResource.cold = false;
+				if (entry.schedulerTokenId != 0 &&
+					(!admissionScheduler.MarkComputeReady(entry.schedulerTokenId) ||
+					 !admissionScheduler.SubmitBlas(entry.schedulerTokenId)))
+				{
+					return rollbackAdmission("scheduler-blas-lane-unavailable", "direct_blas_schedule");
+				}
 				if (!services.BarrierComputeToBuildInputs(vertexBuffer, indexBuffer))
 				{
 					return rollbackAdmission("direct-blas-input-barrier-failed", "direct_blas");
@@ -4163,6 +4304,11 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			entry.uploadMeshResource = {};
 			entry.directComputeRequested = false;
 			entry.directComputeFailed = true;
+			if (entry.schedulerTokenId != 0)
+			{
+				admissionScheduler.Fail(entry.schedulerTokenId);
+				entry.schedulerTokenId = 0;
+			}
 			entry.directComputeRequestFrame = UINT32_MAX;
 			entry.directComputeFailure = NRIVoxelComputeDirectPublishFailure::StatusFailed;
 			entry.state = PersistentVoxelAdmissionState::Pending;
@@ -4413,6 +4559,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			existingMeshIt->second.gpuPrefer = existingMeshIt->second.gpuPrefer || entry.gpuPrefer;
 			existingMeshIt->second.cold = false;
 			materialVariantResources[variant.materialKeyHash] = std::move(entry.uploadMaterialResource);
+			dirtyMaterialResourceKeys.insert(variant.materialKeyHash);
 			materialResourceGeneration++;
 			publishedMeshKeys.insert(meshResourceKey);
 			publishedMaterialKeys.insert(variant.materialKeyHash);
@@ -4540,6 +4687,11 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				const NRIVoxelComputeGeneratedGeometryStatus directStatus = RequestNRIVoxelComputeDirectPublication(request);
 				if (directStatus == NRIVoxelComputeGeneratedGeometryStatus::Queued)
 				{
+					if (entry.schedulerTokenId != 0 && !admissionScheduler.SubmitCompute(entry.schedulerTokenId))
+					{
+						admissionScheduler.Fail(entry.schedulerTokenId);
+						entry.schedulerTokenId = 0;
+					}
 					if (outStats != nullptr)
 					{
 						outStats->directRequests++;
@@ -4588,6 +4740,11 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				}
 				if (directStatus == NRIVoxelComputeGeneratedGeometryStatus::Ready)
 				{
+					if (entry.schedulerTokenId != 0 && !admissionScheduler.SubmitCompute(entry.schedulerTokenId))
+					{
+						admissionScheduler.Fail(entry.schedulerTokenId);
+						entry.schedulerTokenId = 0;
+					}
 					arenaVertexCursor = entry.savedVertexCursor;
 					arenaIndexCursor = entry.savedIndexCursor;
 					arenaPrimitiveCursor = entry.savedPrimitiveCursor;
@@ -4618,6 +4775,11 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 					entry.directComputeFailed = false;
 					entry.directComputeRequestFrame = UINT32_MAX;
 					entry.directComputeFailure = NRIVoxelComputeDirectPublishFailure::QueueFull;
+					if (entry.schedulerTokenId != 0)
+					{
+						admissionScheduler.Cancel(entry.schedulerTokenId);
+						entry.schedulerTokenId = 0;
+					}
 					entry.state = PersistentVoxelAdmissionState::Pending;
 					entry.lastReason = "direct-publish-queue-full";
 					outInProgress = true;
@@ -4641,6 +4803,11 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				arenaPrimitiveCursor = entry.savedPrimitiveCursor;
 				entry.uploadMeshResource = {};
 				entry.directComputeFailed = true;
+				if (entry.schedulerTokenId != 0)
+				{
+					admissionScheduler.Fail(entry.schedulerTokenId);
+					entry.schedulerTokenId = 0;
+				}
 				entry.directComputeFailure =
 					directStatus == NRIVoxelComputeGeneratedGeometryStatus::Failed ?
 					NRIVoxelComputeDirectPublishFailure::StatusFailed :
@@ -4969,6 +5136,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		(uint64_t)entry.uploadMaterialResource.materialBridge.materials.size() * (uint64_t)sizeof(nri_scene::MaterialData);
 	meshVariantResources[meshResourceKey] = std::move(entry.uploadMeshResource);
 	materialVariantResources[variant.materialKeyHash] = std::move(entry.uploadMaterialResource);
+	dirtyMaterialResourceKeys.insert(variant.materialKeyHash);
 	materialResourceGeneration++;
 	publishedMeshKeys.insert(meshResourceKey);
 	publishedMaterialKeys.insert(variant.materialKeyHash);
@@ -5541,6 +5709,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			}
 			if (!materialVariantWasReady || materialSliceMoved)
 			{
+				dirtyMaterialResourceKeys.insert(cacheEntry.materialKeyHash);
 				materialResourceGeneration++;
 			}
 			materialResource.materialCount = (uint32_t)materialResource.materialBridge.materials.size();
@@ -7230,6 +7399,7 @@ void NRIPersistentVoxelResidency::Reset(
 	});
 	meshVariantResources.clear();
 	materialVariantResources.clear();
+	dirtyMaterialResourceKeys.clear();
 	materialResourceGeneration++;
 	batchMaterialResourceGeneration = 0;
 	uploadedMaterialResourceGeneration = 0;
@@ -7337,7 +7507,6 @@ bool NRIPersistentVoxelResidency::SyncMapGeneration(
 		}
 		admissionQueue.clear();
 	}
-
 	return true;
 }
 
@@ -7763,6 +7932,10 @@ void NRIPersistentVoxelResidency::DiscardAdmissionEntry(PersistentVoxelAdmission
 	if (entry.directComputeRequested)
 	{
 		CancelNRIVoxelComputeDirectPublication(BuildPersistentVoxelVariantMeshResourceKey(entry.variant), entry.directComputeGeneration);
+		if (entry.schedulerTokenId != 0)
+		{
+			admissionScheduler.Cancel(entry.schedulerTokenId);
+		}
 	}
 	services.RetireBuffer(entry.directBlasScratchBuffer);
 	services.RetireBuffer(entry.uploadMeshResource.vertexBuffer);
@@ -7800,6 +7973,7 @@ void NRIPersistentVoxelResidency::DiscardAdmissionEntry(PersistentVoxelAdmission
 	entry.directBlasFenceValue = 0;
 	entry.directBlasRecordedFrame = UINT32_MAX;
 	entry.directBlasExclusive = false;
+	entry.schedulerTokenId = 0;
 }
 
 bool NRIPersistentVoxelResidency::EnqueueAdmission(
@@ -8503,6 +8677,7 @@ bool NRIPersistentVoxelResidency::PreloadMaterialPayloads(
 		outStats.materialRows += resource.materialCount;
 		outStats.materialBytes += resource.residentBytes;
 		materialVariantResources[variant.materialKeyHash] = std::move(resource);
+		dirtyMaterialResourceKeys.insert(variant.materialKeyHash);
 		materialResourceGeneration++;
 		publishedMaterialKeys.insert(variant.materialKeyHash);
 	}

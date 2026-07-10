@@ -1,5 +1,7 @@
 #pragma once
 
+#include "nri_voxel_admission_scheduler.h"
+
 #include "nri_persistent_voxel_material_closure.h"
 #include "nri_frame_resources.h"
 #include "nri_persistent_voxel_shared_blas.h"
@@ -201,6 +203,7 @@ struct PersistentVoxelAdmissionEntry
 	uint64_t directBlasFenceValue = 0;
 	uint32_t directBlasRecordedFrame = UINT32_MAX;
 	bool directBlasExclusive = false;
+	uint64_t schedulerTokenId = 0;
 	NRIBufferResource directBlasScratchBuffer;
 	nri_scene::GeometryData uploadGeometry;
 	std::vector<uint32_t> uploadGpuIndices;
@@ -1057,6 +1060,8 @@ public:
 	std::unordered_map<uint64_t, PersistentVoxelAdmissionEntry> admissionQueue;
 	std::unordered_set<uint64_t> publishedMeshKeys;
 	std::unordered_set<uint64_t> publishedMaterialKeys;
+	std::unordered_set<uint64_t> dirtyMaterialResourceKeys;
+	NRIVoxelAdmissionScheduler admissionScheduler = NRIVoxelAdmissionScheduler(NRIVoxelAdmissionLimits{});
 	NRIPersistentVoxelSharedBlasCache sharedBlasCache;
 	uint32_t arenaVertexCursor = 0;
 	uint32_t arenaIndexCursor = 0;

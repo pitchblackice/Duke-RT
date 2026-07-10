@@ -146,6 +146,7 @@ NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars()
 	settings.admitMaxBlasRuntime = (int)nri_ptvoxeladmitmaxblasruntime <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmitmaxblasruntime;
 	settings.admitMaxBlasPrimitives = (int)nri_ptvoxeladmitmaxblasprims <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmitmaxblasprims;
 	settings.admitIsolateBlasPrimitives = (int)nri_ptvoxeladmitisolateblasprims;
+	settings.computeMaxJobs = (uint32_t)std::max(1, (int)nri_ptvoxelcomputemaxjobs);
 	settings.residentMaxBytes = (int)nri_ptvoxelresidentmaxbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxelresidentmaxbytes;
 	settings.residentMinHeadroomBytes = (int)nri_ptvoxelresidentminheadroombytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxelresidentminheadroombytes;
 	settings.residentMaxColdMaps = (int)nri_ptvoxelresidentmaxcoldmaps < 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxelresidentmaxcoldmaps;
