@@ -755,7 +755,7 @@ namespace
 		{
 			return;
 		}
-		if (!renderer.IsFrameFenceValueComplete(state.rawArchiveUploadFenceValue))
+		if (!renderer.IsCommandFenceValueComplete(state.rawArchiveUploadFenceValue))
 		{
 			return;
 		}
@@ -775,7 +775,7 @@ namespace
 		{
 			return;
 		}
-		const uint64_t recordingFenceValue = renderer.GetRecordingFrameFenceValue();
+		const uint64_t recordingFenceValue = renderer.GetRecordingCommandFenceValue();
 		if (recordingFenceValue == 0)
 		{
 			return;
@@ -1147,7 +1147,7 @@ namespace
 		for (uint32_t slotIndex = 0; slotIndex < state.completionSlots.size(); ++slotIndex)
 		{
 			const NRIVoxelComputeCompletionSlotToken& token = state.completionRing.slots[slotIndex];
-			if (token.phase == NRIVoxelComputeCompletionSlotPhase::Submitted && renderer.IsFrameFenceValueComplete(token.fenceValue))
+			if (token.phase == NRIVoxelComputeCompletionSlotPhase::Submitted && renderer.IsCommandFenceValueComplete(token.fenceValue))
 			{
 				ProcessCompletedSlot(services, slotIndex, observedFrame);
 			}
@@ -1991,7 +1991,7 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	{
 		return;
 	}
-	const uint64_t recordingFenceValue = renderer.GetRecordingFrameFenceValue();
+	const uint64_t recordingFenceValue = renderer.GetRecordingCommandFenceValue();
 	if (recordingFenceValue == 0)
 	{
 		return;

@@ -2230,6 +2230,11 @@ bool NRIRenderer::IsFrameFenceValueComplete(uint64_t fenceValue) const
 	return mFrameBuffer->mCore.GetFenceValue(*mFrameBuffer->mFrameFence) >= fenceValue;
 }
 
+bool NRIRenderer::IsCommandFenceValueComplete(uint64_t fenceValue) const
+{
+	return mFrameBuffer != nullptr && mFrameBuffer->IsCommandFenceValueComplete(fenceValue);
+}
+
 uint64_t NRIRenderer::GetRecordingFrameFenceValue() const
 {
 	if (mFrameBuffer == nullptr || !mFrameBuffer->mFrameBegun || !mFrameBuffer->mCommandBufferOpen)
@@ -2237,6 +2242,11 @@ uint64_t NRIRenderer::GetRecordingFrameFenceValue() const
 		return 0;
 	}
 	return 1u + mFrameBuffer->mFrameIndex;
+}
+
+uint64_t NRIRenderer::GetRecordingCommandFenceValue() const
+{
+	return mFrameBuffer != nullptr ? mFrameBuffer->GetRecordingCommandFenceValue() : 0;
 }
 
 bool NRIRenderer::EnsureResidentStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind)

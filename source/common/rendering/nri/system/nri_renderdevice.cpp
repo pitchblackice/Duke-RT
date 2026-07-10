@@ -2313,6 +2313,11 @@ NRIRenderDevice::~NRIRenderDevice()
 		mCore.DestroyFence(mFrameFence);
 		mFrameFence = nullptr;
 	}
+	if (mCommandCompletionFence != nullptr)
+	{
+		mCore.DestroyFence(mCommandCompletionFence);
+		mCommandCompletionFence = nullptr;
+	}
 
 	if (mStreamerInstance != nullptr)
 	{
@@ -3259,6 +3264,15 @@ void NRIRenderDevice::WaitForCommands(bool finish)
 	}
 }
 
+bool NRIRenderDevice::IsCommandFenceValueComplete(uint64_t fenceValue) const
+{
+	if (fenceValue == 0)
+	{
+		return true;
+	}
+	return mCommandCompletionFence != nullptr && mCore.GetFenceValue(*mCommandCompletionFence) >= fenceValue;
+}
+
 bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 {
 	mLastSubmitAndWaitResult = nri::Result::SUCCESS;
@@ -3285,20 +3299,26 @@ bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 		return false;
 	}
 
-	nri::FenceSubmitDesc signalFence = {};
-	signalFence.fence = submitFence;
-	signalFence.value = 1;
+	nri::FenceSubmitDesc signalFences[2] = {};
+	signalFences[0].fence = submitFence;
+	signalFences[0].value = 1;
+	uint32_t signalFenceCount = 1;
+	if (mCommandCompletionFence != nullptr && mRecordingCommandFenceValue != 0)
+	{
+		signalFences[signalFenceCount++] = { mCommandCompletionFence, mRecordingCommandFenceValue, nri::StageBits::NONE };
+	}
 
 	nri::QueueSubmitDesc submitDesc = {};
 	submitDesc.commandBuffers = commandBuffers;
 	submitDesc.commandBufferNum = 1;
-	submitDesc.signalFences = &signalFence;
-	submitDesc.signalFenceNum = 1;
+	submitDesc.signalFences = signalFences;
+	submitDesc.signalFenceNum = signalFenceCount;
 	const nri::Result submitResult = mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
+	mRecordingCommandFenceValue = 0;
 	mLastSubmitAndWaitResult = submitResult;
 	if (submitResult == nri::Result::SUCCESS)
 	{
-		mCore.Wait(*submitFence, signalFence.value);
+		mCore.Wait(*submitFence, signalFences[0].value);
 	}
 
 	mCore.DestroyFence(submitFence);
@@ -8123,7 +8143,8 @@ bool NRIRenderDevice::CreateDevice()
 		mLowLatency.SetLatencySleepMode != nullptr ? "yes" : "no");
 
 	if (mCore.GetQueue(*mDevice, nri::QueueType::GRAPHICS, 0, mGraphicsQueue) != nri::Result::SUCCESS ||
-		mCore.CreateFence(*mDevice, 0, mFrameFence) != nri::Result::SUCCESS)
+		mCore.CreateFence(*mDevice, 0, mFrameFence) != nri::Result::SUCCESS ||
+		mCore.CreateFence(*mDevice, 0, mCommandCompletionFence) != nri::Result::SUCCESS)
 	{
 		Printf(TEXTCOLOR_RED "Failed to create NRI queue objects.\n");
 		StartupRecovery_MarkNriStartupFailure("nri_create_queue_objects", "queue_objects_failed");
@@ -8131,6 +8152,7 @@ bool NRIRenderDevice::CreateDevice()
 	}
 	SetNriDebugName(mCore, mGraphicsQueue, "Raze.GraphicsQueue");
 	SetNriDebugName(mCore, mFrameFence, "Raze.FrameFence");
+	SetNriDebugName(mCore, mCommandCompletionFence, "Raze.CommandCompletionFence");
 	RefreshNativeFrameGenerationHandles();
 	Printf("NRI framegen native handles: api=%s device=%s queue=%s swapchain=%s\n",
 		startupApi,
@@ -8886,6 +8908,7 @@ bool NRIRenderDevice::BeginCommandList(const char* reason, bool waitForSlotReuse
 	mCore.ResetCommandAllocator(*mCommandAllocator);
 	const bool success = mCore.BeginCommandBuffer(*mCommandBuffer, mDescriptorPool) == nri::Result::SUCCESS;
 	mCommandBufferOpen = success;
+	mRecordingCommandFenceValue = success ? mNextCommandFenceValue++ : 0;
 	if (!success)
 	{
 		Printf(TEXTCOLOR_RED "NRI BeginCommandList failed (reason=%s queued_frame=%u frame_index=%llu frame_begun=%s).\n",
@@ -9067,6 +9090,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 	mSubmittedFenceValue = submittedFenceValue;
 	mLastFrameBoundaryStats.submittedFenceValue = submittedFenceValue;
 	const nri::FenceSubmitDesc frameFence = { mFrameFence, submittedFenceValue, nri::StageBits::NONE };
+	const nri::FenceSubmitDesc commandFence = { mCommandCompletionFence, mRecordingCommandFenceValue, nri::StageBits::NONE };
 	const nri::CommandBuffer* commandBuffers[] = { mCommandBuffer };
 
 	stageStartMs = I_msTimeF();
@@ -9076,27 +9100,30 @@ void NRIRenderDevice::EndFrameAndPresent()
 	submitDesc.commandBuffers = commandBuffers;
 	submitDesc.commandBufferNum = 1;
 	nri::FenceSubmitDesc waitFence = {};
-	nri::FenceSubmitDesc signalFences[2] = {};
+	nri::FenceSubmitDesc signalFences[3] = {};
+	uint32_t signalFenceCount = 0;
 	if (!IsFrameGenerationPresentPathActive())
 	{
 		waitFence = { mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, 0, NRISwapChainAcquireWaitStages() };
 		const nri::FenceSubmitDesc releaseFence = { mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore, 0, nri::StageBits::NONE };
-		signalFences[0] = releaseFence;
-		signalFences[1] = frameFence;
+		signalFences[signalFenceCount++] = releaseFence;
+		signalFences[signalFenceCount++] = frameFence;
 		submitDesc.waitFences = &waitFence;
 		submitDesc.waitFenceNum = 1;
-		submitDesc.signalFences = signalFences;
-		submitDesc.signalFenceNum = 2;
 		const bool lowLatencySwapChainEnabled = ((uint32_t)mSwapChainFlags & (uint32_t)nri::SwapChainBits::ALLOW_LOW_LATENCY) != 0;
 		submitDesc.swapChain = lowLatencySwapChainEnabled ? mSwapChain : nullptr;
 	}
 	else
 	{
-		signalFences[0] = frameFence;
-		submitDesc.signalFences = signalFences;
-		submitDesc.signalFenceNum = 1;
+		signalFences[signalFenceCount++] = frameFence;
 		submitDesc.swapChain = nullptr;
 	}
+	if (commandFence.fence != nullptr && commandFence.value != 0)
+	{
+		signalFences[signalFenceCount++] = commandFence;
+	}
+	submitDesc.signalFences = signalFences;
+	submitDesc.signalFenceNum = signalFenceCount;
 	nri::Result submitResult = nri::Result::FAILURE;
 	stageStartMs = I_msTimeF();
 	mFrameGeneration.OnRenderSubmitStart(*this);
@@ -9107,6 +9134,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 		submitResult = mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
 		submitCallMs = I_msTimeF() - stageStartMs;
 	}
+	mRecordingCommandFenceValue = 0;
 	mFrameGeneration.OnRenderSubmitEnd(*this);
 	if (submitResult != nri::Result::SUCCESS)
 	{

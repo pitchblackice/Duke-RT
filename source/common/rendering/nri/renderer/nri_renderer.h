@@ -1961,6 +1961,8 @@ public:
 
 	uint64_t GetRecordingFrameFenceValue() const;
 	bool IsFrameFenceValueComplete(uint64_t fenceValue) const;
+	uint64_t GetRecordingCommandFenceValue() const;
+	bool IsCommandFenceValueComplete(uint64_t fenceValue) const;
 
 private:
 	friend class NRIExposurePassAccess;

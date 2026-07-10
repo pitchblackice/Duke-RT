@@ -7981,7 +7981,8 @@ bool NRIPersistentVoxelResidency::PreloadVariantResources(
 			if (entry.state == PersistentVoxelAdmissionState::UploadingVertices ||
 				entry.state == PersistentVoxelAdmissionState::UploadingIndices ||
 				entry.state == PersistentVoxelAdmissionState::UploadingPrimitives ||
-				entry.state == PersistentVoxelAdmissionState::BuildingBlas)
+				entry.state == PersistentVoxelAdmissionState::BuildingBlas ||
+				entry.state == PersistentVoxelAdmissionState::DirectComputePending)
 			{
 				return true;
 			}

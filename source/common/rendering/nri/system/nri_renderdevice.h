@@ -93,6 +93,8 @@ public:
 	bool HasCurrentCommandBuffer() const;
 	bool HasActiveTarget() const;
 	bool IsPreloadCommandContextActive() const { return mPreloadCommandContextActive; }
+	uint64_t GetRecordingCommandFenceValue() const { return mCommandBufferOpen ? mRecordingCommandFenceValue : 0; }
+	bool IsCommandFenceValueComplete(uint64_t fenceValue) const;
 	nri::CoreInterface* GetCoreInterface() { return &mCore; }
 	nri::Device* GetDevice() const { return mDevice; }
 	nri::CommandBuffer* GetCurrentCommandBuffer() const { return mCommandBuffer; }
@@ -364,6 +366,7 @@ private:
 	nri::SwapChain* mSwapChain = nullptr;
 	nri::Streamer* mStreamerInstance = nullptr;
 	nri::Fence* mFrameFence = nullptr;
+	nri::Fence* mCommandCompletionFence = nullptr;
 	nri::CommandAllocator* mCommandAllocator = nullptr;
 	nri::CommandBuffer* mCommandBuffer = nullptr;
 	nri::DescriptorPool* mDescriptorPool = nullptr;
@@ -414,6 +417,8 @@ private:
 #endif
 	uint64_t mFrameIndex = 0;
 	uint64_t mSubmittedFenceValue = 0;
+	uint64_t mRecordingCommandFenceValue = 0;
+	uint64_t mNextCommandFenceValue = 1;
 	bool mFrameBegun = false;
 	bool mUsingSaveTarget = false;
 	bool mStandaloneSavePicFrame = false;
