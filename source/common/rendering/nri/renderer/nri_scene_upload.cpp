@@ -1962,6 +1962,10 @@ bool NRIRenderer::EnsureResidentArenaBuffer(NRIBufferResource& resource, uint64_
 
 	NRIBufferResource oldResource = resource;
 	resource = {};
+	const auto growthStart = std::chrono::steady_clock::now();
+	const uint64_t oldSize = oldResource.size;
+	const uint64_t oldUsedSize = oldResource.usedSize;
+	const bool retiredOldResource = oldResource.buffer != nullptr;
 
 	const uint64_t grownSize = GetNRIGrownBufferSize(oldResource.size, alignedRequiredSize, stride);
 	if (!CreateBufferWithoutViewAtLocation(resource, grownSize, stride, usage, nri::MemoryLocation::DEVICE))
@@ -1994,10 +1998,12 @@ bool NRIRenderer::EnsureResidentArenaBuffer(NRIBufferResource& resource, uint64_
 		}
 	}
 	resource.usedSize = requiredSize;
+	uint64_t copiedSize = 0;
 
 	if (oldResource.buffer != nullptr && mFrameBuffer->mCommandBuffer != nullptr)
 	{
 		const uint64_t copySize = std::min(oldResource.usedSize, resource.size);
+		copiedSize = copySize;
 		if (copySize > 0)
 		{
 			nri::BufferBarrierDesc beforeBarriers[2] = {};
@@ -2036,6 +2042,20 @@ bool NRIRenderer::EnsureResidentArenaBuffer(NRIBufferResource& resource, uint64_
 	else if (oldResource.buffer != nullptr || oldResource.shaderView != nullptr || oldResource.storageView != nullptr)
 	{
 		DestroyBufferResource(oldResource);
+	}
+	if ((int)nri_ptvoxelcomputetrace > 0 || (int)perf_looptraceframes > 0)
+	{
+		Printf("PERF pt resident arena growth NRI: frame=%u stride=%u old_size=%llu old_used=%llu required=%llu allocated=%llu headroom=%llu copied=%llu retired=%u ms=%.3f\n",
+			mFrameIndex,
+			stride,
+			(unsigned long long)oldSize,
+			(unsigned long long)oldUsedSize,
+			(unsigned long long)requiredSize,
+			(unsigned long long)resource.size,
+			(unsigned long long)(resource.size - std::min(resource.size, requiredSize)),
+			(unsigned long long)copiedSize,
+			retiredOldResource ? 1u : 0u,
+			DurationMs(growthStart, std::chrono::steady_clock::now()));
 	}
 
 	return true;

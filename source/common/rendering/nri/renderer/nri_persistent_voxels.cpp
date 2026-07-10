@@ -3043,7 +3043,8 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 	};
 	auto isUploadState = [](PersistentVoxelAdmissionState state) -> bool
 	{
-		return state == PersistentVoxelAdmissionState::UploadingVertices ||
+		return state == PersistentVoxelAdmissionState::DirectComputePending ||
+			state == PersistentVoxelAdmissionState::UploadingVertices ||
 			state == PersistentVoxelAdmissionState::UploadingIndices ||
 			state == PersistentVoxelAdmissionState::UploadingPrimitives ||
 			state == PersistentVoxelAdmissionState::BuildingBlas;
@@ -4306,6 +4307,28 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			{
 				entry.state = PersistentVoxelAdmissionState::Deferred;
 				entry.lastReason = "direct-publish-shared-pending";
+				return true;
+			}
+			const uint32_t maxDirectJobs = (uint32_t)std::max(0, (int)nri_ptvoxelcomputemaxjobs);
+			const uint32_t queuedDirectJobs = GetNRIVoxelComputeMemoryUsage().queuedJobCount;
+			if (maxDirectJobs != 0 && queuedDirectJobs >= maxDirectJobs)
+			{
+				entry.state = PersistentVoxelAdmissionState::Pending;
+				entry.lastReason = "direct-publish-queue-full";
+				outInProgress = true;
+				if (outStats != nullptr)
+				{
+					outStats->directPending++;
+				}
+				if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
+				{
+					Printf("PERF pt voxel compute direct publish NRI: action=defer reason=queue_full_preflight tex=%d voxel=%d mesh_variant=0x%llx queued_jobs=%u max_jobs=%u\n",
+						variant.sourcePicnum,
+						variant.resolvedVoxelIndex,
+						(unsigned long long)variant.meshKeyHash,
+						queuedDirectJobs,
+						maxDirectJobs);
+				}
 				return true;
 			}
 			PersistentVoxelMeshVariantResource& meshResource = entry.uploadMeshResource;
