@@ -991,6 +991,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_trace_stats.cpp
 	common/rendering/nri/renderer/nri_upscaler.cpp
 	common/rendering/nri/renderer/nri_voxel_compute_preload.cpp
+	common/rendering/nri/renderer/nri_voxel_compute_batch_plan.cpp
 	common/rendering/nri/renderer/nri_voxel_compute_meshing.cpp
 	common/rendering/nri/scene/nri_map_world.cpp
 	common/rendering/nri/scene/nri_map_builder.cpp

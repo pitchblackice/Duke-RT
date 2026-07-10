@@ -69,6 +69,8 @@ struct NRIVoxelComputeDirectPublishOutputBuffers
 struct NRIVoxelComputeDirectPublishRequest
 {
 	uint64_t meshResourceKey = 0;
+	uint64_t geometryKey = 0;
+	uint64_t materialBindingKey = 0;
 	uint64_t generation = 0;
 	FVoxelModel* model = nullptr;
 	NRIVoxelComputeDirectPublishOutputKind outputKind = NRIVoxelComputeDirectPublishOutputKind::PrivateBlasInputsAndSharedArena;
@@ -78,7 +80,20 @@ struct NRIVoxelComputeDirectPublishRequest
 	NRIVoxelComputeDirectPublishRange primitives;
 	uint32_t materialBase = 0;
 	uint32_t materialCount = 0;
+	uint32_t priority = 0;
+	uint64_t age = 0;
 	bool validationReadbackAllowed = false;
+};
+
+struct NRIVoxelComputeDirectPublishBatchResult
+{
+	NRIVoxelComputeGeneratedGeometryStatus status = NRIVoxelComputeGeneratedGeometryStatus::Unavailable;
+	NRIVoxelComputeDirectPublishFailure failure = NRIVoxelComputeDirectPublishFailure::None;
+	uint32_t inputRequests = 0;
+	uint32_t uniqueJobs = 0;
+	uint32_t dedupeHits = 0;
+	uint32_t materialBindings = 0;
+	uint32_t repeatedRawStatScansAvoided = 0;
 };
 
 struct NRIVoxelComputeDirectPublishedMesh
@@ -147,6 +162,10 @@ void QueueNRIVoxelComputeCountJob(
 	const FVoxelMeshData& cpuMesh);
 NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeGeneratedGeometry(uint64_t requestKey, FVoxelModel* model);
 bool TakeNRIVoxelComputeGeneratedGeometry(uint64_t requestKey, nri_scene::GeometryData& outGeometry, uint32_t* outJobId = nullptr);
+bool RequestNRIVoxelComputeDirectPublicationBatch(
+	const NRIVoxelComputeDirectPublishRequest* requests,
+	uint32_t requestCount,
+	NRIVoxelComputeDirectPublishBatchResult& outResult);
 NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeDirectPublication(const NRIVoxelComputeDirectPublishRequest& request);
 bool TakeNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t generation, NRIVoxelComputeDirectPublishedMesh& outMesh);
 void CancelNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t generation);

@@ -83,14 +83,20 @@ bool EmitFace(
 	const uint vertexBase = job.VertexOffset + localVertexBase;
 	const uint indexBase = job.IndexOffset + localIndexBase;
 	const uint primitiveBase = job.PrimitiveOffset + localPrimitiveBase;
-	const uint globalMaterialIndex = job.MaterialBase + materialIndex;
-
 	VoxelComputeVertices[vertexBase + 0u] = MakeVertex(p0, uv);
 	VoxelComputeVertices[vertexBase + 1u] = MakeVertex(p1, uv);
 	VoxelComputeVertices[vertexBase + 2u] = MakeVertex(p2, uv);
 	VoxelComputeVertices[vertexBase + 3u] = MakeVertex(p3, uv);
 
-	const uint indices[6] = {
+	const uint localIndices[6] = {
+		localVertexBase + 0u,
+		localVertexBase + 1u,
+		localVertexBase + 3u,
+		localVertexBase + 1u,
+		localVertexBase + 2u,
+		localVertexBase + 3u
+	};
+	const uint primitiveIndices[6] = {
 		vertexBase + 0u,
 		vertexBase + 1u,
 		vertexBase + 3u,
@@ -101,12 +107,12 @@ bool EmitFace(
 	[unroll]
 	for (uint i = 0u; i < 6u; ++i)
 	{
-		VoxelComputeIndices[indexBase + i] = indices[i];
-		indexHash = HashCombine(indexHash, indices[i]);
+		VoxelComputeIndices[indexBase + i] = localIndices[i];
+		indexHash = HashCombine(indexHash, localIndices[i]);
 	}
 
-	VoxelComputePrimitives[primitiveBase + 0u] = MakePrimitive(uint3(indices[0], indices[1], indices[2]), globalMaterialIndex, uv, uv, uv, p0, p1, p3);
-	VoxelComputePrimitives[primitiveBase + 1u] = MakePrimitive(uint3(indices[3], indices[4], indices[5]), globalMaterialIndex, uv, uv, uv, p1, p2, p3);
+	VoxelComputePrimitives[primitiveBase + 0u] = MakePrimitive(uint3(primitiveIndices[0], primitiveIndices[1], primitiveIndices[2]), materialIndex, uv, uv, uv, p0, p1, p3);
+	VoxelComputePrimitives[primitiveBase + 1u] = MakePrimitive(uint3(primitiveIndices[3], primitiveIndices[4], primitiveIndices[5]), materialIndex, uv, uv, uv, p1, p2, p3);
 
 	[unroll]
 	for (uint v = 0u; v < 4u; ++v)
@@ -118,13 +124,13 @@ bool EmitFace(
 		vertexHash = HashCombine(vertexHash, asuint(vertex.Uv.x));
 		vertexHash = HashCombine(vertexHash, asuint(vertex.Uv.y));
 	}
-	primitiveHash = HashCombine(primitiveHash, globalMaterialIndex);
-	primitiveHash = HashCombine(primitiveHash, indices[0]);
-	primitiveHash = HashCombine(primitiveHash, indices[1]);
-	primitiveHash = HashCombine(primitiveHash, indices[2]);
-	primitiveHash = HashCombine(primitiveHash, indices[3]);
-	primitiveHash = HashCombine(primitiveHash, indices[4]);
-	primitiveHash = HashCombine(primitiveHash, indices[5]);
+	primitiveHash = HashCombine(primitiveHash, materialIndex);
+	primitiveHash = HashCombine(primitiveHash, primitiveIndices[0]);
+	primitiveHash = HashCombine(primitiveHash, primitiveIndices[1]);
+	primitiveHash = HashCombine(primitiveHash, primitiveIndices[2]);
+	primitiveHash = HashCombine(primitiveHash, primitiveIndices[3]);
+	primitiveHash = HashCombine(primitiveHash, primitiveIndices[4]);
+	primitiveHash = HashCombine(primitiveHash, primitiveIndices[5]);
 	++emittedFaces;
 	return true;
 }
