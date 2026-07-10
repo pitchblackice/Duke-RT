@@ -1062,6 +1062,9 @@ public:
 	uint32_t arenaIndexCursor = 0;
 	uint32_t arenaPrimitiveCursor = 0;
 	uint32_t arenaMaterialCursor = 0;
+	uint64_t materialResourceGeneration = 1;
+	uint64_t batchMaterialResourceGeneration = 0;
+	uint64_t uploadedMaterialResourceGeneration = 0;
 	uint32_t residencyMapGeneration = 0;
 	uint64_t residencyLastBuildSerial = 0;
 	uint32_t lastDesiredResidencyCount = 0;

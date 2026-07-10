@@ -1001,6 +1001,7 @@ void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge(PersistentVoxelBatc
 			actor.materialOffset = 0;
 		}
 	}
+	batchMaterialResourceGeneration = materialResourceGeneration;
 }
 
 void NRIPersistentVoxelResidency::RecomputeBatchState(PersistentVoxelBatch& targetBatch) const
@@ -1197,6 +1198,10 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 	{
 		return true;
 	}
+	if (uploadedMaterialResourceGeneration == materialResourceGeneration && materialBuffer.buffer != nullptr)
+	{
+		return true;
+	}
 
 	if (!services.EnsureMaterialArenaBuffer(
 		materialBuffer,
@@ -1256,6 +1261,7 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 
 	if (dirtyMaterialRanges.empty())
 	{
+		uploadedMaterialResourceGeneration = materialResourceGeneration;
 		return true;
 	}
 
@@ -1348,6 +1354,7 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 				(unsigned long long)materialSize);
 		}
 	}
+	uploadedMaterialResourceGeneration = materialResourceGeneration;
 
 	return true;
 }
@@ -2966,6 +2973,7 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 		}
 		publishedMaterialKeys.erase(it->first);
 		it = materialVariantResources.erase(it);
+		materialResourceGeneration++;
 		evictedMaterials++;
 	}
 
@@ -3846,6 +3854,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			(uint64_t)entry.uploadMaterialResource.materialBridge.materials.size() * (uint64_t)sizeof(nri_scene::MaterialData);
 		meshVariantResources[meshResourceKey] = std::move(entry.uploadMeshResource);
 		materialVariantResources[variant.materialKeyHash] = std::move(entry.uploadMaterialResource);
+		materialResourceGeneration++;
 		publishedMeshKeys.insert(meshResourceKey);
 		publishedMaterialKeys.insert(variant.materialKeyHash);
 		if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
@@ -4404,6 +4413,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			existingMeshIt->second.gpuPrefer = existingMeshIt->second.gpuPrefer || entry.gpuPrefer;
 			existingMeshIt->second.cold = false;
 			materialVariantResources[variant.materialKeyHash] = std::move(entry.uploadMaterialResource);
+			materialResourceGeneration++;
 			publishedMeshKeys.insert(meshResourceKey);
 			publishedMaterialKeys.insert(variant.materialKeyHash);
 			entry.uploadMaterialResource = {};
@@ -4959,6 +4969,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		(uint64_t)entry.uploadMaterialResource.materialBridge.materials.size() * (uint64_t)sizeof(nri_scene::MaterialData);
 	meshVariantResources[meshResourceKey] = std::move(entry.uploadMeshResource);
 	materialVariantResources[variant.materialKeyHash] = std::move(entry.uploadMaterialResource);
+	materialResourceGeneration++;
 	publishedMeshKeys.insert(meshResourceKey);
 	publishedMaterialKeys.insert(variant.materialKeyHash);
 	entry.uploadMeshResource = {};
@@ -5527,6 +5538,10 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			if (materialSliceMoved)
 			{
 				materialResource.materialUploadHash = 0;
+			}
+			if (!materialVariantWasReady || materialSliceMoved)
+			{
+				materialResourceGeneration++;
 			}
 			materialResource.materialCount = (uint32_t)materialResource.materialBridge.materials.size();
 			materialResource.lastDesiredMapGeneration = residencyMapGeneration;
@@ -6349,7 +6364,6 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 		}
 
 		uint32_t updatedActorCount = 0;
-		bool hasInactiveActors = false;
 		{
 			PersistentVoxelScopedTimer perfTimer(outStats.persistentVoxelBatchActorLoopMs);
 			for (const nri_scene::PersistentVoxelCacheEntryView& cacheEntry : cacheEntries)
@@ -6610,7 +6624,6 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			{
 				if (!actor.active)
 				{
-					hasInactiveActors = true;
 					if (voxelStatsEnabled)
 					{
 						Printf("PERF pt voxel instance NRI: frame=%u action=remove reason=not-captured actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=%u primitive_count=%u index_offset=%u index_count=%u material_offset=%u material_count=%u ready=0 pending=0 active=0\n",
@@ -6632,7 +6645,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				}
 			}
 		}
-		if (hasInactiveActors || updatedActorCount != 0)
+		if (batchMaterialResourceGeneration != materialResourceGeneration)
 		{
 			PersistentVoxelScopedTimer perfTimer(outStats.persistentVoxelBatchMaterialBridgeMs);
 			RebuildBatchMaterialBridge(batch);
@@ -7217,6 +7230,9 @@ void NRIPersistentVoxelResidency::Reset(
 	});
 	meshVariantResources.clear();
 	materialVariantResources.clear();
+	materialResourceGeneration++;
+	batchMaterialResourceGeneration = 0;
+	uploadedMaterialResourceGeneration = 0;
 	publishedMeshKeys.clear();
 	publishedMaterialKeys.clear();
 }
@@ -8487,6 +8503,7 @@ bool NRIPersistentVoxelResidency::PreloadMaterialPayloads(
 		outStats.materialRows += resource.materialCount;
 		outStats.materialBytes += resource.residentBytes;
 		materialVariantResources[variant.materialKeyHash] = std::move(resource);
+		materialResourceGeneration++;
 		publishedMaterialKeys.insert(variant.materialKeyHash);
 	}
 
