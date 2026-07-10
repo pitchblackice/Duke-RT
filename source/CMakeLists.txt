@@ -942,6 +942,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_material_policy.cpp
 	common/rendering/nri/renderer/nri_material_warmup.cpp
 	common/rendering/nri/renderer/nri_nrd.cpp
+	common/rendering/nri/renderer/nri_persistent_voxel_material_closure.cpp
 	common/rendering/nri/renderer/nri_persistent_voxel_services.cpp
 	common/rendering/nri/renderer/nri_persistent_voxels.cpp
 	common/rendering/nri/renderer/nri_pass_dispatch.cpp

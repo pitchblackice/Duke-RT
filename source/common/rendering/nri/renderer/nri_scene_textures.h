@@ -70,6 +70,45 @@ struct NRIMaterialTextureWarmupResult
 	bool msBudgetHit = false;
 };
 
+enum class NRISceneTextureClosureState : uint8_t
+{
+	Pending,
+	Ready,
+	NotRequired,
+	Deferred,
+	Failed,
+};
+
+enum class NRISceneTextureClosureFailure : uint8_t
+{
+	None,
+	DynamicTexture,
+	PayloadUnavailable,
+	ResourceCreation,
+	DescriptorUnavailable,
+	ResidencyLost,
+};
+
+struct NRISceneTextureClosureResult
+{
+	uint64_t key = 0;
+	uint64_t estimatedBytes = 0;
+	uint32_t residencyIndex = UINT32_MAX;
+	NRISceneTextureClosureState state = NRISceneTextureClosureState::Pending;
+	NRISceneTextureClosureFailure failure = NRISceneTextureClosureFailure::None;
+	double realizeMs = 0.0;
+	// This is resource-view readiness, not publication into the current scene descriptor table.
+	bool descriptorReady = false;
+	bool realized = false;
+	bool reused = false;
+
+	bool IsReady() const
+	{
+		return state == NRISceneTextureClosureState::Ready ||
+			state == NRISceneTextureClosureState::NotRequired;
+	}
+};
+
 struct NRIMaterialTextureWarmupOptions
 {
 	uint32_t maxTextureInserts = 0;
@@ -108,6 +147,8 @@ public:
 
 	bool EnsurePaletteTexture(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials);
 	bool EnsureCacheEntry(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, double* outRealizeMs = nullptr);
+	bool EnsurePreloadClosure(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, NRISceneTextureClosureResult& outResult);
+	bool QueryPreloadClosure(uint64_t key, NRISceneTextureClosureResult& outResult) const;
 	bool WarmMaterialTextures(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials, NRIMaterialTextureWarmupResult& outResult);
 	bool WarmMaterialTexturesBudgeted(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials, const NRIMaterialTextureWarmupOptions& options, NRIMaterialTextureWarmupCursor& cursor, NRIMaterialTextureWarmupResult& outResult);
 	bool ResolveTextureDescriptor(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, bool tracePerf, SceneTextureResolveResult& outResult);
