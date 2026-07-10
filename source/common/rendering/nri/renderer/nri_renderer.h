@@ -1959,6 +1959,9 @@ public:
 		Count
 	};
 
+	uint64_t GetRecordingFrameFenceValue() const;
+	bool IsFrameFenceValueComplete(uint64_t fenceValue) const;
+
 private:
 	friend class NRIExposurePassAccess;
 	friend class NRIAccelerationStructureManager;
@@ -2387,7 +2390,6 @@ private:
 	void RetireResidentBufferResource(NRIBufferResource& resource);
 	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
 	void RetireTopLevelAccelerationStructure(NRIAccelerationStructureResource& resource);
-	bool IsFrameFenceValueComplete(uint64_t fenceValue) const;
 	bool UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors, const char* reason = nullptr);
 	bool EnsureAutoExposureResources(const NRIAutoExposureSettings& settings);
 	void DestroyAutoExposureResources();
@@ -2446,8 +2448,8 @@ private:
 	std::array<nri::DescriptorSet*, BloomDescriptorSetCount> mBloomOutputSets = {};
 	std::array<nri::DescriptorSet*, 2> mExposureInputSets = {};
 	std::array<nri::DescriptorSet*, 2> mExposureOutputSets = {};
-	nri::DescriptorSet* mVoxelComputeInputSet = nullptr;
-	nri::DescriptorSet* mVoxelComputeOutputSet = nullptr;
+	std::array<nri::DescriptorSet*, 4> mVoxelComputeInputSets = {};
+	std::array<nri::DescriptorSet*, 4> mVoxelComputeOutputSets = {};
 	FrameTextureSlot mAutoExposureInputSourceSlot = FrameTextureSlot::Count;
 
 	NRITextureResource* GetActiveSkyTexture() { return mSkyEnvironment.ActiveTexture(); }

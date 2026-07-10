@@ -1956,8 +1956,8 @@ void NRIRenderer::Shutdown()
 	mBloomOutputSets = {};
 	mExposureInputSets = {};
 	mExposureOutputSets = {};
-	mVoxelComputeInputSet = nullptr;
-	mVoxelComputeOutputSet = nullptr;
+	mVoxelComputeInputSets = {};
+	mVoxelComputeOutputSets = {};
 	mAutoExposureInputSourceSlot = FrameTextureSlot::Count;
 	mSceneDataDescriptorsInitialized.clear();
 }
