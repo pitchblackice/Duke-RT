@@ -1785,7 +1785,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		}
 	}
 
-	if (!UpdateEmissiveSamplingBuffers(emissiveSamplingContext))
+	if (!UpdateEmissiveSamplingBuffers(emissiveSamplingContext, nullptr, true))
 	{
 		LogFallback("PT emissive primitive update failed.");
 		if (preserveHistory)

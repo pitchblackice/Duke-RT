@@ -308,6 +308,10 @@ void NRIRenderer::ResetSceneBufferFrameStats()
 		resetStats(slot.runtimeLightStats);
 		resetStats(slot.runtimeLightTileHeaderStats);
 		resetStats(slot.runtimeLightTileIndexStats);
+		resetStats(slot.emissivePrimitiveHeaderStats);
+		resetStats(slot.emissivePrimitiveStats);
+		resetStats(slot.emissivePrimitiveCdfStats);
+		resetStats(slot.emissiveMaterialResponseStats);
 		resetStats(slot.sectorLightHeaderStats);
 		resetStats(slot.sectorLightStats);
 	}
@@ -2689,8 +2693,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		renderer.mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterCacheHits++;
 	}
 
-	if (!renderer.mEmissiveSamplingPayloadCacheValid ||
-		renderer.mEmissivePrimitiveHeaderBuffer.shaderView == nullptr ||
+	if (renderer.mEmissivePrimitiveHeaderBuffer.shaderView == nullptr ||
 		renderer.mEmissivePrimitiveBuffer.shaderView == nullptr ||
 		renderer.mEmissivePrimitiveCdfBuffer.shaderView == nullptr ||
 		renderer.mEmissiveMaterialResponseBuffer.shaderView == nullptr)

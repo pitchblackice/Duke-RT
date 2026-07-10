@@ -237,6 +237,10 @@ void NRIRenderer::DestroySceneBuffers()
 		DestroyBufferResource(slot.runtimeLightBuffer);
 		DestroyBufferResource(slot.runtimeLightTileHeaderBuffer);
 		DestroyBufferResource(slot.runtimeLightTileIndexBuffer);
+		DestroyBufferResource(slot.emissivePrimitiveHeaderBuffer);
+		DestroyBufferResource(slot.emissivePrimitiveBuffer);
+		DestroyBufferResource(slot.emissivePrimitiveCdfBuffer);
+		DestroyBufferResource(slot.emissiveMaterialResponseBuffer);
 		DestroyBufferResource(slot.sectorLightHeaderBuffer);
 		DestroyBufferResource(slot.sectorLightBuffer);
 	}

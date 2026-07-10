@@ -2678,6 +2678,10 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 		accumulateBuffer(slot.runtimeLightBuffer, telemetry.sceneBufferBytes);
 		accumulateBuffer(slot.runtimeLightTileHeaderBuffer, telemetry.sceneBufferBytes);
 		accumulateBuffer(slot.runtimeLightTileIndexBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.emissivePrimitiveHeaderBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.emissivePrimitiveBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.emissivePrimitiveCdfBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.emissiveMaterialResponseBuffer, telemetry.sceneBufferBytes);
 		accumulateBuffer(slot.sectorLightHeaderBuffer, telemetry.sceneBufferBytes);
 		accumulateBuffer(slot.sectorLightBuffer, telemetry.sceneBufferBytes);
 	}
