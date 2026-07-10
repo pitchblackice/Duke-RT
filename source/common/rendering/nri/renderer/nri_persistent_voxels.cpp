@@ -6,6 +6,7 @@
 #include "nri_shader_contracts.h"
 #include "nri_upload_hash.h"
 #include "nri_voxel_compute_meshing.h"
+#include "nri_voxel_compute_preload.h"
 #include "printf.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "stats.h"
@@ -2159,9 +2160,11 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			persistentVoxelTlasDirectLatencyFrames += directLatency;
 			persistentVoxelTlasDirectMaxLatencyFrames = std::max(persistentVoxelTlasDirectMaxLatencyFrames, directLatency);
 		}
+		const bool runtimeTailMesh = IsNRIVoxelComputePreloadRuntimeWithheldMesh(residencyLastBuildSerial, actor.meshResourceKey);
 		const bool traceDirectGeneratedTlas =
 			meshResourceIt->second.directComputePublished &&
-			(int)nri_ptvoxelcomputetrace > 0;
+			(int)nri_ptvoxelcomputetrace > 0 &&
+			meshResourceFirstPublish;
 		meshResourceIt->second.tlasPublished = true;
 		if (voxelStatsEnabled || traceDirectGeneratedTlas)
 		{
@@ -2181,6 +2184,40 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 				meshResourceIt->second.tlasReadyFrame,
 				meshResourceFirstPublish ? 1u : 0u,
 				meshResourceNewThisFrame ? 1u : 0u);
+		}
+		if (runtimeTailMesh && meshResourceFirstPublish)
+		{
+			const uint32_t requestFrame = meshResourceIt->second.directComputeRequestFrame;
+			const uint32_t readyFrame = meshResourceIt->second.directComputeReadyFrame;
+			const uint32_t blasFrame = meshResourceIt->second.directComputeBlasFrame;
+			const uint32_t publishFrame = meshResourceIt->second.directComputePublishedFrame;
+			const uint32_t requestToReady =
+				requestFrame != UINT32_MAX && readyFrame >= requestFrame ? readyFrame - requestFrame : 0u;
+			const uint32_t readyToBlas =
+				blasFrame != UINT32_MAX && blasFrame >= readyFrame ? blasFrame - readyFrame : 0u;
+			const uint32_t blasToPublish =
+				blasFrame != UINT32_MAX && publishFrame >= blasFrame ? publishFrame - blasFrame : 0u;
+			const uint32_t publishToTlas =
+				publishFrame != UINT32_MAX && frameIndex >= publishFrame ? frameIndex - publishFrame : 0u;
+			const uint32_t requestToTlas =
+				requestFrame != UINT32_MAX && frameIndex >= requestFrame ? frameIndex - requestFrame : 0u;
+			Printf("PERF pt voxel runtime tail NRI: action=tlas-visible build_serial=%llu frame=%u mesh_resource=0x%llx mesh_variant=0x%llx material=0x%llx request_frame=%u ready_frame=%u blas_frame=%u publish_frame=%u tlas_frame=%u request_to_ready=%u ready_to_blas=%u blas_to_publish=%u publish_to_tlas=%u request_to_tlas=%u primitives=%u\n",
+				(unsigned long long)residencyLastBuildSerial,
+				frameIndex,
+				(unsigned long long)actor.meshResourceKey,
+				(unsigned long long)actor.meshKeyHash,
+				(unsigned long long)actor.materialKeyHash,
+				requestFrame,
+				readyFrame,
+				blasFrame,
+				publishFrame,
+				frameIndex,
+				requestToReady,
+				readyToBlas,
+				blasToPublish,
+				publishToTlas,
+				requestToTlas,
+				actor.primitiveCount);
 		}
 		persistentVoxelTlasMeshResources.insert(actor.meshResourceKey);
 		if (routedThroughSharedBlas)
@@ -3517,6 +3554,9 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 	outFailureReason = "none";
 	const nri_scene::PrecachedVoxelVariantView& variant = entry.variant;
 	const uint64_t meshResourceKey = BuildPersistentVoxelVariantMeshResourceKey(variant);
+	const bool runtimeTailRequest =
+		IsNRIVoxelComputePreloadRuntimeWithheldMesh(residencyLastBuildSerial, meshResourceKey) &&
+		IsNRIVoxelComputePreloadRuntimeTailReleased(residencyLastBuildSerial);
 	const bool directOnlyAdmission = variant.directOnlyAdmission && ShouldDirectPublishNRIVoxelComputeMeshing();
 	if ((!directOnlyAdmission && variant.surface == nullptr) ||
 		variant.meshKeyHash == 0 ||
@@ -3706,7 +3746,11 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			}
 			if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
 			{
-				Printf("PERF pt voxel compute direct publish NRI: action=ready tex=%d voxel=%d mesh_variant=0x%llx generation=%llu job=%u vertices=%u indices=%u primitives=%u material_base=%u material_count=%u\n",
+				const uint32_t readyFrame = directMesh.readyFrame != 0 ? directMesh.readyFrame : frameIndex;
+				const uint32_t requestToReady =
+					entry.directComputeRequestFrame != UINT32_MAX && readyFrame >= entry.directComputeRequestFrame ?
+					readyFrame - entry.directComputeRequestFrame : 0u;
+				Printf("PERF pt voxel compute direct publish NRI: action=ready tex=%d voxel=%d mesh_variant=0x%llx generation=%llu job=%u vertices=%u indices=%u primitives=%u material_base=%u material_count=%u request_frame=%u ready_frame=%u request_to_ready=%u runtime_tail=%u\n",
 					variant.sourcePicnum,
 					variant.resolvedVoxelIndex,
 					(unsigned long long)variant.meshKeyHash,
@@ -3716,7 +3760,11 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 					directMesh.indices.count,
 					directMesh.primitives.count,
 					directMesh.materialBase,
-					directMesh.materialCount);
+					directMesh.materialCount,
+					entry.directComputeRequestFrame,
+					readyFrame,
+					requestToReady,
+					runtimeTailRequest ? 1u : 0u);
 			}
 			PersistentVoxelMeshVariantResource& meshResource = entry.uploadMeshResource;
 			const bool directRangeValid =
@@ -3773,7 +3821,10 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				meshResource.directComputeGeneration = directMesh.generation;
 				meshResource.directComputeSourceArchiveSerial = directMesh.sourceArchiveSerial;
 				meshResource.directComputeJobId = directMesh.jobId;
+				meshResource.directComputeRequestFrame = entry.directComputeRequestFrame;
 				meshResource.directComputeReadyFrame = directMesh.readyFrame;
+				meshResource.directComputeBlasFrame = frameIndex;
+				meshResource.directComputePublishedFrame = frameIndex;
 				meshResource.directComputePublished = true;
 				meshResource.directComputeOutputKind = directMesh.outputKind;
 				meshResource.directComputeFailure = NRIVoxelComputeDirectPublishFailure::None;
@@ -3831,7 +3882,12 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				publishedMaterialKeys.insert(variant.materialKeyHash);
 				if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
 				{
-					Printf("PERF pt voxel compute direct blas NRI: action=build tex=%d voxel=%d mesh_variant=0x%llx generation=%llu job=%u vertex_offset=%u vertices=%u index_offset=%u indices=%u primitive_offset=%u primitives=%u as_bytes=%llu scratch_bytes=%llu source_serial=%llu tlas_ready=0\n",
+					const uint32_t readyFrame = directMesh.readyFrame != 0 ? directMesh.readyFrame : frameIndex;
+					const uint32_t requestToBlas =
+						entry.directComputeRequestFrame != UINT32_MAX && frameIndex >= entry.directComputeRequestFrame ?
+						frameIndex - entry.directComputeRequestFrame : 0u;
+					const uint32_t readyToBlas = frameIndex >= readyFrame ? frameIndex - readyFrame : 0u;
+					Printf("PERF pt voxel compute direct blas NRI: action=build tex=%d voxel=%d mesh_variant=0x%llx generation=%llu job=%u vertex_offset=%u vertices=%u index_offset=%u indices=%u primitive_offset=%u primitives=%u as_bytes=%llu scratch_bytes=%llu source_serial=%llu request_frame=%u ready_frame=%u blas_frame=%u request_to_blas=%u ready_to_blas=%u runtime_tail=%u tlas_ready=0\n",
 						variant.sourcePicnum,
 						variant.resolvedVoxelIndex,
 						(unsigned long long)variant.meshKeyHash,
@@ -3845,7 +3901,13 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 						directMesh.primitives.count,
 						(unsigned long long)meshVariantResources[meshResourceKey].accelerationStructure.memorySize,
 						(unsigned long long)meshVariantResources[meshResourceKey].accelerationStructure.buildScratchSize,
-						(unsigned long long)directMesh.sourceArchiveSerial);
+						(unsigned long long)directMesh.sourceArchiveSerial,
+						entry.directComputeRequestFrame,
+						readyFrame,
+						frameIndex,
+						requestToBlas,
+						readyToBlas,
+						runtimeTailRequest ? 1u : 0u);
 				}
 				entry.uploadMeshResource = {};
 				entry.uploadMaterialResource = {};
@@ -4221,7 +4283,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 					outInProgress = true;
 					if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
 					{
-						Printf("PERF pt voxel compute direct publish NRI: action=request tex=%d voxel=%d mesh_variant=0x%llx generation=%llu vertex_offset=%u vertex_capacity=%u index_offset=%u index_capacity=%u primitive_offset=%u primitive_capacity=%u material_base=%u material_count=%u\n",
+						Printf("PERF pt voxel compute direct publish NRI: action=request tex=%d voxel=%d mesh_variant=0x%llx generation=%llu vertex_offset=%u vertex_capacity=%u index_offset=%u index_capacity=%u primitive_offset=%u primitive_capacity=%u material_base=%u material_count=%u request_frame=%u runtime_tail=%u\n",
 							variant.sourcePicnum,
 							variant.resolvedVoxelIndex,
 							(unsigned long long)variant.meshKeyHash,
@@ -4233,7 +4295,21 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 							request.primitives.offset,
 							request.primitives.capacity,
 							request.materialBase,
-							request.materialCount);
+							request.materialCount,
+							frameIndex,
+							runtimeTailRequest ? 1u : 0u);
+						if (runtimeTailRequest)
+						{
+							Printf("PERF pt voxel runtime tail NRI: action=request build_serial=%llu frame=%u mesh_resource=0x%llx mesh_variant=0x%llx material=0x%llx tex=%d voxel=%d primitives=%u\n",
+								(unsigned long long)residencyLastBuildSerial,
+								frameIndex,
+								(unsigned long long)meshResourceKey,
+								(unsigned long long)variant.meshKeyHash,
+								(unsigned long long)variant.materialKeyHash,
+								variant.sourcePicnum,
+								variant.resolvedVoxelIndex,
+								variant.primitiveCount);
+						}
 					}
 					return true;
 				}
@@ -6726,6 +6802,10 @@ bool NRIPersistentVoxelResidency::WarmSharedBlasForLoading(
 	}
 	for (const nri_scene::PrecachedVoxelVariantView& variant : variants)
 	{
+		if (!variant.preloadGeometry)
+		{
+			continue;
+		}
 		warmSharedMesh(BuildPersistentVoxelVariantMeshResourceKey(variant), ResolvePersistentVoxelVariantGeometrySignature(variant));
 	}
 
@@ -7427,6 +7507,21 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 		"admission-map-generation",
 		loadingTraceLevel >= 1 || voxelStatsEnabled,
 		services);
+	if (IsNRIVoxelComputePreloadRuntimeWithheldMesh(buildSerial, meshResourceKey) &&
+		!IsNRIVoxelComputePreloadRuntimeTailReleased(buildSerial))
+	{
+		if (loadingTraceLevel >= 1 || voxelStatsEnabled)
+		{
+			Printf("NRI PT voxel admission queue: event=skip source=%s runtime=%u mesh_resource=0x%llx mesh_variant=0x%llx mat_variant=0x%llx reason=runtime-tail-held generation=%u\n",
+				sourceLabel != nullptr ? sourceLabel : "unknown",
+				runtimeRequested ? 1u : 0u,
+				(unsigned long long)meshResourceKey,
+				(unsigned long long)variant.meshKeyHash,
+				(unsigned long long)variant.materialKeyHash,
+				residencyMapGeneration);
+		}
+		return false;
+	}
 
 	const uint64_t pairKey = nri_scene::HashCombine64(meshResourceKey, variant.materialKeyHash);
 	auto estimateAdmissionBytes = [](const nri_scene::PrecachedVoxelVariantView& admissionVariant) -> uint64_t
@@ -7695,8 +7790,14 @@ bool NRIPersistentVoxelResidency::PreloadVariantResources(
 		return true;
 	}
 
+	uint32_t runtimeWithheldVariants = 0;
 	for (const nri_scene::PrecachedVoxelVariantView& variant : variants)
 	{
+		if (!variant.preloadGeometry)
+		{
+			runtimeWithheldVariants++;
+			continue;
+		}
 		EnqueueAdmission(
 			variant,
 			false,
@@ -7706,6 +7807,12 @@ bool NRIPersistentVoxelResidency::PreloadVariantResources(
 			loadingTraceLevel,
 			voxelStatsEnabled,
 			resetServices);
+	}
+	if (runtimeWithheldVariants != 0 && loadingTraceLevel >= 1)
+	{
+		Printf("NRI PT loading voxel resources: event=runtime-tail-withhold variants=%u admitted_for_geometry=%u\n",
+			runtimeWithheldVariants,
+			(uint32_t)variants.size() - runtimeWithheldVariants);
 	}
 
 	const bool blockOptionalPreloadAdmissions = (bool)nri_ptloadingvoxelblockoptional;
@@ -8243,12 +8350,35 @@ bool NRIPersistentVoxelResidency::PreloadResources(
 		batchStats.persistentVoxelTexturePrewarmDeferredCount == 0 &&
 		batchStats.persistentVoxelOnboardingTexturePrewarmDeferredCount == 0 &&
 		batchStats.persistentVoxelOnboardingTextureBudgetHits == 0;
-	lastPreloadStatus.batchReady = (ready || admissionOnlyDeadEnd) && sharedBlasWarmupReady;
+	uint32_t runtimeTailHeldActors = 0;
+	if (!IsNRIVoxelComputePreloadRuntimeTailReleased(buildSerial))
+	{
+		for (const nri_scene::PersistentVoxelCacheEntryView& cacheEntry : cacheEntries)
+		{
+			if (IsNRIVoxelComputePreloadRuntimeWithheldMesh(
+					buildSerial,
+					BuildPersistentVoxelMeshResourceKey(cacheEntry, settings)))
+			{
+				runtimeTailHeldActors++;
+			}
+		}
+	}
+	const bool runtimeTailHoldDeadEnd =
+		!ready &&
+		lastPreloadStatus.requiredPending == 0 &&
+		lastPreloadStatus.optionalPending == 0 &&
+		runtimeTailHeldActors != 0 &&
+		batchStats.persistentVoxelOnboardingAdmissionPendingCount != 0 &&
+		batchStats.persistentVoxelOnboardingAdmissionPendingCount <= runtimeTailHeldActors &&
+		batchStats.persistentVoxelTexturePrewarmDeferredCount == 0 &&
+		batchStats.persistentVoxelOnboardingTexturePrewarmDeferredCount == 0 &&
+		batchStats.persistentVoxelOnboardingTextureBudgetHits == 0;
+	lastPreloadStatus.batchReady = (ready || admissionOnlyDeadEnd || runtimeTailHoldDeadEnd) && sharedBlasWarmupReady;
 	lastPreloadStatus.batchReadyActors = batch.activeActorCount;
 	lastPreloadStatus.deferredTexturePrewarm =
 		batchStats.persistentVoxelTexturePrewarmDeferredCount +
 		batchStats.persistentVoxelOnboardingTextureBudgetHits;
-	lastPreloadStatus.deferredOnboarding = admissionOnlyDeadEnd
+	lastPreloadStatus.deferredOnboarding = (admissionOnlyDeadEnd || runtimeTailHoldDeadEnd)
 		? 0u
 		: (batchStats.persistentVoxelOnboardingDeferredCount > batchStats.persistentVoxelOnboardingTextureBudgetHits
 			? batchStats.persistentVoxelOnboardingDeferredCount - batchStats.persistentVoxelOnboardingTextureBudgetHits
@@ -8286,6 +8416,13 @@ bool NRIPersistentVoxelResidency::PreloadResources(
 				(uint32_t)cacheEntries.size(),
 				(uint32_t)materialVariantResources.size(),
 				batchStats.persistentVoxelOnboardingAdmissionPendingCount);
+		}
+		if (runtimeTailHoldDeadEnd)
+		{
+			Printf("NRI PT loading voxel resources: event=release reason=runtime-tail-held entries=%u admission_pending=%u held_actors=%u\n",
+				(uint32_t)cacheEntries.size(),
+				batchStats.persistentVoxelOnboardingAdmissionPendingCount,
+				runtimeTailHeldActors);
 		}
 	}
 	return lastPreloadStatus.batchReady;

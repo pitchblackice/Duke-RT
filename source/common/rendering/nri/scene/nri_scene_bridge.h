@@ -338,6 +338,7 @@ struct PrecachedVoxelVariantView
 	SurfaceRef materialSurface;
 	MaterialRef material;
 	bool directOnlyAdmission = false;
+	bool preloadGeometry = true;
 };
 
 struct PrecachedVoxelRawManifestStats

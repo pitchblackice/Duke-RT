@@ -358,6 +358,12 @@ CVAR(Bool, nri_ptvoxelcomputepreloadmaterials, false, 0)
 
 CVAR(Bool, nri_ptvoxelcomputepreloadstrict, false, 0)
 
+CVAR(Int, nri_ptvoxelcomputepreloadruntimewithholdmod, 0, 0)
+
+CVAR(Int, nri_ptvoxelcomputepreloadruntimewithholdrem, 0, 0)
+
+CVAR(Int, nri_ptvoxelcomputepreloadruntimecaptureframes, 0, 0)
+
 CVAR(Int, nri_ptvoxelcomputepreloadmaxms, 0, 0)
 
 CVAR(Int, nri_ptvoxelcomputepreloadmaxjobs, 0, 0)

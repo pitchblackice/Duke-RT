@@ -95,7 +95,7 @@ namespace
 	{
 		const char* outcome = forcedOutcome != nullptr ? forcedOutcome : closure.outcome;
 		const bool final = forcedOutcome != nullptr || !closure.strictRequested || std::strcmp(outcome, "incomplete") != 0;
-		Printf("PERF pt voxel preload closure NRI: level=%s build_serial=%llu manifest_hash=0x%llx sequence=%llu final=%u outcome=%s strict=%u dry_run=%u memory_guard_hit=%u selected_bindings=%u admitted_bindings=%u ready_bindings=%u reused_bindings=%u failed=%u cap_skipped=%u stale_cancelled=%u pending=%u unique_sources=%u unique_meshes=%u ready_meshes=%u unique_materials=%u ready_materials=%u unique_textures=%u ready_textures=%u admission_queue=%u compute_inflight=%u blas_inflight=%u cpu_geometry_builds=%llu cpu_geometry_uploads=%llu cpu_geometry_upload_bytes=%llu cpu_fallback=%llu full_geometry_readback_bytes=%llu\n",
+		Printf("PERF pt voxel preload closure NRI: level=%s build_serial=%llu manifest_hash=0x%llx sequence=%llu final=%u outcome=%s strict=%u dry_run=%u memory_guard_hit=%u selected_bindings=%u admitted_bindings=%u ready_bindings=%u reused_bindings=%u failed=%u cap_skipped=%u stale_cancelled=%u runtime_withheld=%u runtime_withheld_meshes=%u runtime_withheld_ready_meshes=%u runtime_withheld_ready_materials=%u pending=%u unique_sources=%u unique_meshes=%u ready_meshes=%u unique_materials=%u ready_materials=%u unique_textures=%u ready_textures=%u admission_queue=%u compute_inflight=%u blas_inflight=%u cpu_geometry_builds=%llu cpu_geometry_uploads=%llu cpu_geometry_upload_bytes=%llu cpu_fallback=%llu full_geometry_readback_bytes=%llu\n",
 			levelName != nullptr ? levelName : "(none)",
 			(unsigned long long)closure.buildSerial,
 			(unsigned long long)closure.manifestHash,
@@ -112,6 +112,10 @@ namespace
 			closure.failedBindings,
 			closure.capSkippedBindings,
 			closure.staleCancelledBindings,
+			closure.runtimeWithheldBindings,
+			closure.runtimeWithheldUniqueMeshes,
+			closure.runtimeWithheldReadyMeshes,
+			closure.runtimeWithheldReadyMaterials,
 			closure.pendingBindings,
 			closure.selectedUniqueSources,
 			closure.selectedUniqueMeshes,

@@ -88,7 +88,10 @@ struct PersistentVoxelMeshVariantResource
 	uint64_t directComputeGeneration = 0;
 	uint64_t directComputeSourceArchiveSerial = 0;
 	uint32_t directComputeJobId = 0;
+	uint32_t directComputeRequestFrame = UINT32_MAX;
 	uint32_t directComputeReadyFrame = 0;
+	uint32_t directComputeBlasFrame = UINT32_MAX;
+	uint32_t directComputePublishedFrame = UINT32_MAX;
 	uint32_t sourceBits = 0;
 	uint32_t activeActorReferences = 0;
 	int32_t priority = 0;

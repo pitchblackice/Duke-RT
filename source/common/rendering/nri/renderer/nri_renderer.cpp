@@ -18,6 +18,7 @@
 #include "nri_static_scene_geometry.h"
 #include "nri_upload_hash.h"
 #include "nri_voxel_compute_meshing.h"
+#include "nri_voxel_compute_preload.h"
 #include "nri_runtime_mutation_shared.h"
 #include "../scene/nri_hash.h"
 #include "../scene/nri_map_builder.h"
@@ -2146,6 +2147,16 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 
 void NRIRenderer::OnLevelFirstFrameRelease()
 {
+	NotifyNRIVoxelComputePreloadRuntimeTailReleased(mMapWorld.buildSerial, mFrameIndex);
+	const int runtimeCaptureFrames = std::clamp((int)nri_ptvoxelcomputepreloadruntimecaptureframes, 0, 4096);
+	if (runtimeCaptureFrames > 0)
+	{
+		perf_looptraceframes = runtimeCaptureFrames;
+		Printf("PERF pt voxel preload runtime tail capture NRI: build_serial=%llu frame=%u frames=%d\n",
+			(unsigned long long)mMapWorld.buildSerial,
+			mFrameIndex,
+			runtimeCaptureFrames);
+	}
 	mPersistentVoxels.ArmPostLoadAdmissionGrace(
 		mFrameIndex,
 		BuildNRIPersistentVoxelSettingsFromCVars(),

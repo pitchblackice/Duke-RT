@@ -59,9 +59,9 @@ CUSTOM_CVAR(Int, perf_looptraceframes, 0, 0)
 	{
 		self = 0;
 	}
-	else if (self > 600)
+	else if (self > 4096)
 	{
-		self = 600;
+		self = 4096;
 	}
 }
 

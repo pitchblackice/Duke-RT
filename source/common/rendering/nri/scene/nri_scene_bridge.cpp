@@ -2025,6 +2025,24 @@ namespace
 		return hash;
 	}
 
+	VoxelGeometryContentHashes BuildRawVoxelGeometryContentHashes(
+		const FVoxelRawMeshStats& stats,
+		int32_t sourcePicnum,
+		int32_t resolvedVoxelIndex)
+	{
+		VoxelGeometryContentHashes hashes = {};
+		if (stats.contentHash == 0)
+		{
+			return hashes;
+		}
+		hashes.geometryContentHash = HashCombine64(0x565847454f4d3031ull, stats.contentHash); // VXGEOM01
+		uint64_t renderHash = HashCombine64(0x5658525052493032ull, stats.contentHash); // VXRPRI02
+		renderHash = HashCombine64(renderHash, (uint64_t)(uint32_t)sourcePicnum);
+		renderHash = HashCombine64(renderHash, (uint64_t)(uint32_t)resolvedVoxelIndex);
+		hashes.renderPrimitiveHash = renderHash;
+		return hashes;
+	}
+
 	uint64_t BuildVoxelInstanceKeyHash(const VoxelInstanceKey& key)
 	{
 		if (key.actorIndex < 0 || key.actorPtr == nullptr)
@@ -6430,6 +6448,20 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 				entry.second->desiredMeshVariantHash,
 				geometryContentHash,
 				renderPrimitiveHash);
+			if (geometryContentHash == 0 || renderPrimitiveHash == 0)
+			{
+				FVoxelRawMeshStats rawStats = {};
+				if (QueryNRIVoxelComputeRawSourceArchiveStats(
+					reinterpret_cast<FVoxelModel*>(entry.second->voxelModelPtr), rawStats))
+				{
+					const VoxelGeometryContentHashes rawHashes = BuildRawVoxelGeometryContentHashes(
+						rawStats,
+						entry.second->sourcePicnum,
+						entry.second->resolvedVoxelIndex);
+					geometryContentHash = geometryContentHash != 0 ? geometryContentHash : rawHashes.geometryContentHash;
+					renderPrimitiveHash = renderPrimitiveHash != 0 ? renderPrimitiveHash : rawHashes.renderPrimitiveHash;
+				}
+			}
 		}
 		else if ((geometryContentHash == 0 || renderPrimitiveHash == 0) && entry.second->sharedVariantSurface)
 		{
@@ -6852,6 +6884,15 @@ bool BuildPrecachedVoxelRawManifestViews(std::vector<PrecachedVoxelRawManifestVi
 		uint64_t geometryContentHash = 0;
 		uint64_t renderPrimitiveHash = 0;
 		GetReadyVoxelMeshVariantContentHashes(request.meshVariantHash, geometryContentHash, renderPrimitiveHash);
+		if (rawStatsReady && (geometryContentHash == 0 || renderPrimitiveHash == 0))
+		{
+			const VoxelGeometryContentHashes rawHashes = BuildRawVoxelGeometryContentHashes(
+				rawStats,
+				request.texid.GetIndex(),
+				request.resolvedVoxelIndex);
+			geometryContentHash = geometryContentHash != 0 ? geometryContentHash : rawHashes.geometryContentHash;
+			renderPrimitiveHash = renderPrimitiveHash != 0 ? renderPrimitiveHash : rawHashes.renderPrimitiveHash;
+		}
 
 		FGameTexture* voxelTexture = TexMan.GetGameTexture(request.model->GetPaletteTexture());
 		if (voxelTexture != nullptr && !voxelTexture->isValid())

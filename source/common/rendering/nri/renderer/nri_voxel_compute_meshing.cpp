@@ -23,6 +23,50 @@ namespace
 		return std::chrono::duration<double, std::milli>(end - start).count();
 	}
 
+	uint64_t HashRawArchiveValue(uint64_t hash, uint64_t value)
+	{
+		hash ^= value;
+		hash *= 1099511628211ull;
+		return hash;
+	}
+
+	uint64_t BuildRawArchiveContentHash(
+		const FVoxelRawMeshStats& stats,
+		const std::vector<NRIVoxelComputeSlabRecord>& slabs,
+		const std::vector<NRIVoxelComputeColorRunRecord>& colorRuns)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashRawArchiveValue(hash, 0x5658524157483031ull); // VXRAWH01
+		hash = HashRawArchiveValue(hash, stats.sizeX);
+		hash = HashRawArchiveValue(hash, stats.sizeY);
+		hash = HashRawArchiveValue(hash, stats.sizeZ);
+		uint32_t pivotBits[3] = {};
+		std::memcpy(&pivotBits[0], &stats.pivotX, sizeof(uint32_t));
+		std::memcpy(&pivotBits[1], &stats.pivotY, sizeof(uint32_t));
+		std::memcpy(&pivotBits[2], &stats.pivotZ, sizeof(uint32_t));
+		for (uint32_t pivotBit : pivotBits)
+		{
+			hash = HashRawArchiveValue(hash, pivotBit);
+		}
+		for (const NRIVoxelComputeSlabRecord& slab : slabs)
+		{
+			hash = HashRawArchiveValue(hash, (uint32_t)slab.X);
+			hash = HashRawArchiveValue(hash, (uint32_t)slab.Y);
+			hash = HashRawArchiveValue(hash, slab.ZTop);
+			hash = HashRawArchiveValue(hash, slab.ZLength);
+			hash = HashRawArchiveValue(hash, slab.CullMask);
+			hash = HashRawArchiveValue(hash, slab.ColorRunOffset);
+			hash = HashRawArchiveValue(hash, slab.ColorRunCount);
+		}
+		for (const NRIVoxelComputeColorRunRecord& run : colorRuns)
+		{
+			hash = HashRawArchiveValue(hash, run.ZOffset);
+			hash = HashRawArchiveValue(hash, run.ZLength);
+			hash = HashRawArchiveValue(hash, run.Color);
+		}
+		return hash;
+	}
+
 	enum class VoxelComputeAdmissionState : uint32_t
 	{
 		Queued = 0,
@@ -357,6 +401,7 @@ namespace
 		entry.recordSerial = state.nextRawSourceSerial++;
 		CopySlabRecords(slabs, entry.slabs);
 		CopyColorRunRecords(*colorRuns, entry.colorRuns);
+		entry.stats.contentHash = BuildRawArchiveContentHash(entry.stats, entry.slabs, entry.colorRuns);
 		if (faces != nullptr)
 		{
 			CopyFaceRecords(*faces, entry.faces);
@@ -723,7 +768,7 @@ namespace
 		}
 	}
 
-	void ReadbackPreviousResults(NRIRenderer& renderer, const NRIResourceServices& services)
+	void ReadbackPreviousResults(NRIRenderer& renderer, const NRIResourceServices& services, uint64_t observedFrame)
 	{
 		VoxelComputeState& state = gVoxelComputeState;
 		if (!state.pendingReadbackValid || state.readbackBuffer.buffer == nullptr || state.pendingReadbackJobs.empty() || services.context.core == nullptr)
@@ -818,7 +863,7 @@ namespace
 					published.generation = job.directGeneration;
 					published.sourceArchiveSerial = job.sourceArchiveSerial;
 					published.jobId = job.jobId;
-					published.readyFrame = (uint32_t)std::min<uint64_t>(state.pendingFrame, UINT32_MAX);
+					published.readyFrame = (uint32_t)std::min<uint64_t>(observedFrame, UINT32_MAX);
 					published.status = NRIVoxelComputeGeneratedGeometryStatus::Ready;
 					published.failure = NRIVoxelComputeDirectPublishFailure::None;
 					published.outputKind = job.outputKind;
@@ -840,8 +885,10 @@ namespace
 				if (IsTraceEnabled())
 				{
 					Printf(
-						"PERF pt voxel compute direct publish NRI: action=status frame=%llu job=%u generation=%llu status=%s mismatch=%u vertices=%u indices=%u primitives=%u source_serial=%llu status_readback_bytes=%u full_geometry_readback_bytes=%llu\n",
+						"PERF pt voxel compute direct publish NRI: action=status frame=%llu dispatch_frame=%llu observed_frame=%llu job=%u generation=%llu status=%s mismatch=%u vertices=%u indices=%u primitives=%u source_serial=%llu status_readback_bytes=%u full_geometry_readback_bytes=%llu\n",
+						(unsigned long long)observedFrame,
 						(unsigned long long)state.pendingFrame,
+						(unsigned long long)observedFrame,
 						job.jobId,
 						(unsigned long long)job.directGeneration,
 						ok ? "ready" : "failed",
@@ -1488,7 +1535,7 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		return;
 	}
 
-	ReadbackPreviousResults(renderer, services);
+	ReadbackPreviousResults(renderer, services, frameNumber);
 	UploadPendingRawSources(services, frameNumber);
 
 	VoxelComputeState& state = gVoxelComputeState;

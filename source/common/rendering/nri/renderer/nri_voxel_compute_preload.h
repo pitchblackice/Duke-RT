@@ -16,6 +16,8 @@ struct NRIVoxelComputePreloadSettings
 	bool includeOptional = false;
 	bool preloadMaterials = false;
 	bool strict = false;
+	uint32_t runtimeWithholdModulo = 0;
+	uint32_t runtimeWithholdRemainder = 0;
 	uint32_t maxMilliseconds = 0;
 	uint32_t maxJobs = 0;
 	uint32_t maxBlasBuilds = 0;
@@ -93,6 +95,10 @@ struct NRIVoxelComputePreloadStats
 	uint32_t rawCandidateBindings = 0;
 	uint32_t rawCapSkippedBindings = 0;
 	uint32_t rawFailedBindings = 0;
+	uint32_t rawRuntimeWithheldBindings = 0;
+	uint32_t rawRuntimeWithheldUniqueMeshes = 0;
+	uint64_t rawRuntimeWithheldUniqueGeometryBytes = 0;
+	uint64_t rawRuntimeWithheldManifestHash = 0;
 	uint32_t rawSelectedUniqueSources = 0;
 	uint32_t rawSelectedUniqueMeshes = 0;
 	uint32_t rawSelectedUniqueMaterials = 0;
@@ -136,6 +142,10 @@ struct NRIVoxelComputePreloadClosureStats
 	uint32_t failedBindings = 0;
 	uint32_t capSkippedBindings = 0;
 	uint32_t staleCancelledBindings = 0;
+	uint32_t runtimeWithheldBindings = 0;
+	uint32_t runtimeWithheldUniqueMeshes = 0;
+	uint32_t runtimeWithheldReadyMeshes = 0;
+	uint32_t runtimeWithheldReadyMaterials = 0;
 	uint32_t pendingBindings = 0;
 	uint32_t selectedUniqueSources = 0;
 	uint32_t selectedUniqueMeshes = 0;
@@ -176,6 +186,9 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 	uint64_t localMemoryBudgetBytes = 0);
 
 const NRIVoxelComputePreloadStats& GetLastNRIVoxelComputePreloadStats();
+bool IsNRIVoxelComputePreloadRuntimeWithheldMesh(uint64_t buildSerial, uint64_t meshResourceKey);
+bool IsNRIVoxelComputePreloadRuntimeTailReleased(uint64_t buildSerial);
+void NotifyNRIVoxelComputePreloadRuntimeTailReleased(uint64_t buildSerial, uint32_t frameIndex);
 NRIVoxelComputePreloadClosureStats BuildNRIVoxelComputePreloadClosure(
 	const NRIPersistentVoxelResidency& residency,
 	uint64_t buildSerial);
