@@ -181,7 +181,6 @@ struct PersistentVoxelAdmissionEntry
 	uint32_t savedVertexCursor = 0;
 	uint32_t savedIndexCursor = 0;
 	uint32_t savedPrimitiveCursor = 0;
-	uint32_t savedMaterialCursor = 0;
 	uint64_t vertexBytesUploaded = 0;
 	uint64_t vertexArenaBytesUploaded = 0;
 	uint64_t indexBytesUploaded = 0;
@@ -678,6 +677,9 @@ struct NRIPersistentVoxelMaterialUploadStats
 {
 	uint32_t uploads = 0;
 	uint32_t layoutInvalidatedResources = 0;
+	uint32_t activeValidatedResources = 0;
+	uint32_t activeHashMisses = 0;
+	uint32_t actorMaterialRebinds = 0;
 	uint32_t batchRejects = 0;
 	uint64_t requestedBytes = 0;
 	uint64_t dirtyBytes = 0;
@@ -1006,6 +1008,9 @@ public:
 	nri_scene::SceneDebugStats BuildOverlayDebugStats() const;
 	uint64_t BuildSceneGenerationHash() const;
 	void RebuildBatchMaterialBridge(PersistentVoxelBatch& targetBatch);
+	bool PublishCanonicalMaterialResource(
+		PersistentVoxelMaterialVariantResource& candidate,
+		bool& outReused);
 	void RecomputeBatchState(PersistentVoxelBatch& targetBatch) const;
 	void ClearActorInstances(const NRIPersistentVoxelResetServices& services);
 	bool ValidateActorGeometry(
@@ -1072,6 +1077,7 @@ public:
 	uint64_t batchMaterialResourceGeneration = 0;
 	uint64_t uploadedMaterialResourceGeneration = 0;
 	uint32_t pendingMaterialLayoutInvalidatedResources = 0;
+	uint32_t pendingMaterialActorRebinds = 0;
 	std::vector<uint64_t> uploadedMaterialTextureKeys;
 	uint32_t residencyMapGeneration = 0;
 	uint64_t residencyLastBuildSerial = 0;

@@ -172,6 +172,11 @@ NRIPersistentVoxelMaterialClosureResult BuildNRIPersistentVoxelMaterialClosureRe
 bool NRIPersistentVoxelMaterialTextureLayoutPreservesPrefix(
 	const std::vector<uint64_t>& uploadedTextureKeys,
 	const std::vector<uint64_t>& rebuiltTextureKeys);
+bool NRIPersistentVoxelMaterialBindingNeedsRebind(
+	uint32_t actorOffset,
+	uint32_t actorCount,
+	uint32_t canonicalOffset,
+	uint32_t canonicalCount);
 
 class NRIPersistentVoxelMaterialClosureRegistry
 {

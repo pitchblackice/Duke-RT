@@ -3237,6 +3237,18 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 			(unsigned long long)uploadStats.requestedBytes,
 			(unsigned long long)uploadStats.uploadedBytes);
 	}
+	if ((uploadStats.actorMaterialRebinds != 0 || uploadStats.activeHashMisses != 0) &&
+		((int)nri_ptvoxelcomputetrace > 0 || (int)perf_looptraceframes > 0))
+	{
+		Printf("PERF pt voxel material coherence NRI: frame=%u active_validated=%u active_hash_misses=%u actor_rebinds=%u uploads=%u requested_bytes=%llu uploaded_bytes=%llu\n",
+			mFrameIndex,
+			uploadStats.activeValidatedResources,
+			uploadStats.activeHashMisses,
+			uploadStats.actorMaterialRebinds,
+			uploadStats.uploads,
+			(unsigned long long)uploadStats.requestedBytes,
+			(unsigned long long)uploadStats.uploadedBytes);
+	}
 	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialUploads += uploadStats.uploads;
 	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialDirtyBytes += uploadStats.dirtyBytes;
 	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchRejects += uploadStats.batchRejects;

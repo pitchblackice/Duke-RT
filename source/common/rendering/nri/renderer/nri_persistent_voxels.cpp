@@ -954,6 +954,55 @@ uint64_t NRIPersistentVoxelResidency::BuildSceneGenerationHash() const
 		(uint64_t)batch.materialCount);
 }
 
+bool NRIPersistentVoxelResidency::PublishCanonicalMaterialResource(
+	PersistentVoxelMaterialVariantResource& candidate,
+	bool& outReused)
+{
+	outReused = false;
+	if (candidate.materialKeyHash == 0 || candidate.materialSignature == 0 ||
+		candidate.materialCount == 0 || candidate.materialBridge.materials.empty())
+	{
+		return false;
+	}
+
+	auto existingIt = materialVariantResources.find(candidate.materialKeyHash);
+	if (existingIt != materialVariantResources.end() &&
+		existingIt->second.materialSignature == candidate.materialSignature &&
+		existingIt->second.materialCount != 0 &&
+		!existingIt->second.materialBridge.materials.empty())
+	{
+		PersistentVoxelMaterialVariantResource& existing = existingIt->second;
+		existing.lastDesiredMapGeneration = std::max(existing.lastDesiredMapGeneration, candidate.lastDesiredMapGeneration);
+		existing.lastUsedMapGeneration = std::max(existing.lastUsedMapGeneration, candidate.lastUsedMapGeneration);
+		existing.lastUsedFrame = std::max(existing.lastUsedFrame, candidate.lastUsedFrame);
+		existing.sourceBits |= candidate.sourceBits;
+		existing.activeActorReferences = std::max(existing.activeActorReferences, candidate.activeActorReferences);
+		existing.priority = std::min(existing.priority, candidate.priority);
+		existing.gpuForce = existing.gpuForce || candidate.gpuForce;
+		existing.gpuPrefer = existing.gpuPrefer || candidate.gpuPrefer;
+		existing.cold = existing.cold && candidate.cold;
+		candidate = existing;
+		outReused = true;
+		return true;
+	}
+
+	if ((uint64_t)arenaMaterialCursor + candidate.materialCount > UINT32_MAX)
+	{
+		return false;
+	}
+	candidate.materialOffset = arenaMaterialCursor;
+	candidate.materialCapacity = candidate.materialCount;
+	arenaMaterialCursor += candidate.materialCapacity;
+	candidate.materialUploadHash = 0;
+
+	materialVariantResources[candidate.materialKeyHash] = candidate;
+	dirtyMaterialResourceKeys.insert(candidate.materialKeyHash);
+	materialResourceGeneration++;
+	publishedMaterialKeys.insert(candidate.materialKeyHash);
+	candidate = materialVariantResources[candidate.materialKeyHash];
+	return true;
+}
+
 void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge(PersistentVoxelBatch& targetBatch)
 {
 	targetBatch.materialBridge = {};
@@ -994,11 +1043,30 @@ void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge(PersistentVoxelBatc
 				materialSize);
 		}
 	}
+	pendingMaterialActorRebinds = 0;
 	for (PersistentVoxelBatch::ActorEntry& actor : targetBatch.actors)
 	{
 		if (!actor.active)
 		{
 			actor.materialOffset = 0;
+			continue;
+		}
+		const auto materialIt = materialVariantResources.find(actor.materialKeyHash);
+		if (materialIt == materialVariantResources.end() || materialIt->second.materialCount == 0)
+		{
+			continue;
+		}
+		const PersistentVoxelMaterialVariantResource& materialResource = materialIt->second;
+		if (NRIPersistentVoxelMaterialBindingNeedsRebind(
+			actor.materialOffset,
+			actor.materialCount,
+			materialResource.materialOffset,
+			materialResource.materialCount))
+		{
+			actor.materialOffset = materialResource.materialOffset;
+			actor.materialCount = materialResource.materialCount;
+			actor.materialBridge = materialResource.materialBridge;
+			pendingMaterialActorRebinds++;
 		}
 	}
 	std::vector<uint64_t> rebuiltTextureKeys;
@@ -1215,13 +1283,33 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 {
 	outStats = {};
 	outStats.layoutInvalidatedResources = pendingMaterialLayoutInvalidatedResources;
+	outStats.actorMaterialRebinds = pendingMaterialActorRebinds;
 	if (!batch.valid)
 	{
 		return true;
 	}
+	std::unordered_set<uint64_t> activeMaterialKeys;
+	activeMaterialKeys.reserve(batch.actors.size());
+	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	{
+		if (!actor.active || actor.materialKeyHash == 0 ||
+			materialVariantResources.find(actor.materialKeyHash) == materialVariantResources.end())
+		{
+			continue;
+		}
+		activeMaterialKeys.insert(actor.materialKeyHash);
+	}
+	for (uint64_t materialKey : activeMaterialKeys)
+	{
+		dirtyMaterialResourceKeys.insert(materialKey);
+	}
+	outStats.activeValidatedResources = (uint32_t)activeMaterialKeys.size();
 	if (uploadedMaterialResourceGeneration == materialResourceGeneration && materialBuffer.buffer != nullptr)
 	{
-		return true;
+		if (dirtyMaterialResourceKeys.empty())
+		{
+			return true;
+		}
 	}
 
 	if (!services.EnsureMaterialArenaBuffer(
@@ -1273,6 +1361,10 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 		const bool uploadMaterials = resource.materialUploadHash != materialHash;
 		if (uploadMaterials)
 		{
+			if (activeMaterialKeys.find(materialKey) != activeMaterialKeys.end())
+			{
+				outStats.activeHashMisses++;
+			}
 			outStats.domainHashMisses++;
 			outStats.uploads++;
 			outStats.dirtyBytes += materialSize;
@@ -1299,6 +1391,7 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 		{
 			uploadedMaterialResourceGeneration = materialResourceGeneration;
 			pendingMaterialLayoutInvalidatedResources = 0;
+			pendingMaterialActorRebinds = 0;
 			uploadedMaterialTextureKeys.clear();
 			uploadedMaterialTextureKeys.reserve(batch.materialBridge.textures.size());
 			for (const nri_scene::TextureUpload& texture : batch.materialBridge.textures)
@@ -1406,6 +1499,7 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 	{
 		uploadedMaterialResourceGeneration = materialResourceGeneration;
 		pendingMaterialLayoutInvalidatedResources = 0;
+		pendingMaterialActorRebinds = 0;
 		uploadedMaterialTextureKeys.clear();
 		uploadedMaterialTextureKeys.reserve(batch.materialBridge.textures.size());
 		for (const nri_scene::TextureUpload& texture : batch.materialBridge.textures)
@@ -3834,7 +3928,6 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			arenaVertexCursor = entry.savedVertexCursor;
 			arenaIndexCursor = entry.savedIndexCursor;
 			arenaPrimitiveCursor = entry.savedPrimitiveCursor;
-			arenaMaterialCursor = entry.savedMaterialCursor;
 		}
 		cleanupPendingUpload();
 		if (loadingTraceLevel >= 1 || voxelStatsEnabled)
@@ -3864,17 +3957,6 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		}
 		offset = cursor;
 		capacity = std::max<uint32_t>(count, capacity > 0 ? capacity * 2u : count);
-		cursor += capacity;
-		return true;
-	};
-	auto allocateExactArenaSlice = [](uint32_t count, uint32_t& cursor, uint32_t& offset, uint32_t& capacity) -> bool
-	{
-		if (capacity == count && count > 0)
-		{
-			return false;
-		}
-		offset = cursor;
-		capacity = count;
 		cursor += capacity;
 		return true;
 	};
@@ -4012,12 +4094,13 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		entry.uploadMaterialResource.gpuPrefer = entry.uploadMaterialResource.gpuPrefer || entry.gpuPrefer;
 		entry.uploadMaterialResource.residentBytes =
 			(uint64_t)entry.uploadMaterialResource.materialBridge.materials.size() * (uint64_t)sizeof(nri_scene::MaterialData);
+		bool canonicalMaterialReused = false;
+		if (!PublishCanonicalMaterialResource(entry.uploadMaterialResource, canonicalMaterialReused))
+		{
+			return rollbackAdmission("material-publish-failed", "direct_blas_publish");
+		}
 		meshVariantResources[meshResourceKey] = std::move(entry.uploadMeshResource);
-		materialVariantResources[variant.materialKeyHash] = std::move(entry.uploadMaterialResource);
-		dirtyMaterialResourceKeys.insert(variant.materialKeyHash);
-		materialResourceGeneration++;
 		publishedMeshKeys.insert(meshResourceKey);
-		publishedMaterialKeys.insert(variant.materialKeyHash);
 		if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
 		{
 			const PersistentVoxelMeshVariantResource& published = meshVariantResources[meshResourceKey];
@@ -4434,7 +4517,6 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		entry.savedVertexCursor = arenaVertexCursor;
 		entry.savedIndexCursor = arenaIndexCursor;
 		entry.savedPrimitiveCursor = arenaPrimitiveCursor;
-		entry.savedMaterialCursor = arenaMaterialCursor;
 		entry.vertexBytesUploaded = 0;
 		entry.vertexArenaBytesUploaded = 0;
 		entry.indexBytesUploaded = 0;
@@ -4518,6 +4600,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			{
 				return rollbackAdmission("material-build-failed", "materials");
 			}
+			entry.uploadMaterialResource = {};
 			entry.uploadMaterialResource.materialKeyHash = variant.materialKeyHash;
 			entry.uploadMaterialResource.materialSignature = validatedMaterialSignature;
 			entry.uploadMaterialResource.materialBridge = std::move(builtMaterials);
@@ -4549,18 +4632,12 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		entry.uploadMaterialResource.residentBytes =
 			(uint64_t)entry.uploadMaterialResource.materialBridge.materials.size() * (uint64_t)sizeof(nri_scene::MaterialData);
 		entry.uploadMaterialResource.cold = false;
-		if (entry.uploadMaterialResource.materialCount != 0)
+		bool canonicalMaterialReused = false;
+		if (!PublishCanonicalMaterialResource(entry.uploadMaterialResource, canonicalMaterialReused))
 		{
-			const bool materialSliceMoved = allocateExactArenaSlice(
-				entry.uploadMaterialResource.materialCount,
-				arenaMaterialCursor,
-				entry.uploadMaterialResource.materialOffset,
-				entry.uploadMaterialResource.materialCapacity);
-			if (materialSliceMoved)
-			{
-				entry.uploadMaterialResource.materialUploadHash = 0;
-			}
+			return rollbackAdmission("material-publish-failed", "materials");
 		}
+		outReusedMaterial = outReusedMaterial || canonicalMaterialReused;
 
 		auto existingMeshIt = meshVariantResources.find(meshResourceKey);
 		const bool existingMeshPresent =
@@ -4591,11 +4668,12 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			existingMeshIt->second.gpuForce = existingMeshIt->second.gpuForce || entry.gpuForce;
 			existingMeshIt->second.gpuPrefer = existingMeshIt->second.gpuPrefer || entry.gpuPrefer;
 			existingMeshIt->second.cold = false;
-			materialVariantResources[variant.materialKeyHash] = std::move(entry.uploadMaterialResource);
-			dirtyMaterialResourceKeys.insert(variant.materialKeyHash);
-			materialResourceGeneration++;
+			bool canonicalMaterialReused = false;
+			if (!PublishCanonicalMaterialResource(entry.uploadMaterialResource, canonicalMaterialReused))
+			{
+				return rollbackAdmission("material-publish-failed", "publish");
+			}
 			publishedMeshKeys.insert(meshResourceKey);
-			publishedMaterialKeys.insert(variant.materialKeyHash);
 			entry.uploadMaterialResource = {};
 			outReusedMesh = true;
 			entry.uploadPrepared = false;
@@ -5167,12 +5245,13 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 	entry.uploadMaterialResource.gpuPrefer = entry.uploadMaterialResource.gpuPrefer || entry.gpuPrefer;
 	entry.uploadMaterialResource.residentBytes =
 		(uint64_t)entry.uploadMaterialResource.materialBridge.materials.size() * (uint64_t)sizeof(nri_scene::MaterialData);
+	bool canonicalMaterialReused = false;
+	if (!PublishCanonicalMaterialResource(entry.uploadMaterialResource, canonicalMaterialReused))
+	{
+		return rollbackAdmission("material-publish-failed", "publish");
+	}
 	meshVariantResources[meshResourceKey] = std::move(entry.uploadMeshResource);
-	materialVariantResources[variant.materialKeyHash] = std::move(entry.uploadMaterialResource);
-	dirtyMaterialResourceKeys.insert(variant.materialKeyHash);
-	materialResourceGeneration++;
 	publishedMeshKeys.insert(meshResourceKey);
-	publishedMaterialKeys.insert(variant.materialKeyHash);
 	entry.uploadMeshResource = {};
 	entry.uploadMaterialResource = {};
 	entry.uploadGeometry = {};
@@ -7433,6 +7512,7 @@ void NRIPersistentVoxelResidency::Reset(
 	materialVariantResources.clear();
 	dirtyMaterialResourceKeys.clear();
 	pendingMaterialLayoutInvalidatedResources = 0;
+	pendingMaterialActorRebinds = 0;
 	uploadedMaterialTextureKeys.clear();
 	materialResourceGeneration++;
 	batchMaterialResourceGeneration = 0;
@@ -7984,7 +8064,6 @@ void NRIPersistentVoxelResidency::DiscardAdmissionEntry(PersistentVoxelAdmission
 	entry.savedVertexCursor = 0;
 	entry.savedIndexCursor = 0;
 	entry.savedPrimitiveCursor = 0;
-	entry.savedMaterialCursor = 0;
 	entry.vertexBytesUploaded = 0;
 	entry.vertexArenaBytesUploaded = 0;
 	entry.indexBytesUploaded = 0;
@@ -8602,6 +8681,7 @@ bool NRIPersistentVoxelResidency::PreloadMaterialPayloads(
 		const bool existingReady =
 			existingIt != materialVariantResources.end() &&
 			existingIt->second.materialKeyHash == variant.materialKeyHash &&
+			existingIt->second.materialSignature == validatedMaterialSignature &&
 			existingIt->second.materialCount != 0 &&
 			!existingIt->second.materialBridge.materials.empty();
 		if (existingReady)
@@ -8690,9 +8770,6 @@ bool NRIPersistentVoxelResidency::PreloadMaterialPayloads(
 		resource.materialSignature = validatedMaterialSignature;
 		resource.materialBridge = std::move(builtMaterials);
 		resource.materialCount = (uint32_t)resource.materialBridge.materials.size();
-		resource.materialCapacity = resource.materialCount;
-		resource.materialOffset = arenaMaterialCursor;
-		arenaMaterialCursor += resource.materialCapacity;
 		resource.lastDesiredMapGeneration = residencyMapGeneration;
 		resource.lastUsedMapGeneration = residencyMapGeneration;
 		resource.lastUsedFrame = frameIndex;
@@ -8706,14 +8783,25 @@ bool NRIPersistentVoxelResidency::PreloadMaterialPayloads(
 			(uint64_t)resource.materialBridge.materials.size() * (uint64_t)sizeof(nri_scene::MaterialData);
 		resource.cold = false;
 
+		bool canonicalMaterialReused = false;
+		if (!PublishCanonicalMaterialResource(resource, canonicalMaterialReused))
+		{
+			outStats.failed++;
+			ok = false;
+			continue;
+		}
+
 		outStats.selected++;
-		outStats.built++;
+		if (canonicalMaterialReused)
+		{
+			outStats.reused++;
+		}
+		else
+		{
+			outStats.built++;
+		}
 		outStats.materialRows += resource.materialCount;
 		outStats.materialBytes += resource.residentBytes;
-		materialVariantResources[variant.materialKeyHash] = std::move(resource);
-		dirtyMaterialResourceKeys.insert(variant.materialKeyHash);
-		materialResourceGeneration++;
-		publishedMaterialKeys.insert(variant.materialKeyHash);
 	}
 
 	outStats.uniqueMaterials = (uint32_t)seenMaterials.size();

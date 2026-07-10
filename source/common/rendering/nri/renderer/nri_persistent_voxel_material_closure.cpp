@@ -204,6 +204,15 @@ bool NRIPersistentVoxelMaterialTextureLayoutPreservesPrefix(
 		std::equal(uploadedTextureKeys.begin(), uploadedTextureKeys.end(), rebuiltTextureKeys.begin());
 }
 
+bool NRIPersistentVoxelMaterialBindingNeedsRebind(
+	uint32_t actorOffset,
+	uint32_t actorCount,
+	uint32_t canonicalOffset,
+	uint32_t canonicalCount)
+{
+	return actorOffset != canonicalOffset || actorCount != canonicalCount;
+}
+
 size_t NRIPersistentVoxelMaterialClosureRegistry::BindingIdentityHash::operator()(const BindingIdentity& identity) const
 {
 	uint64_t hash = FnvOffset;
