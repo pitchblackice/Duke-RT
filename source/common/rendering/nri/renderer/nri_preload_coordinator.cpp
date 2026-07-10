@@ -9,6 +9,7 @@
 #include "../system/nri_renderdevice.h"
 
 #include "mapinfo.h"
+#include "c_dispatch.h"
 #include "printf.h"
 
 #include <cstring>
@@ -159,6 +160,19 @@ namespace
 			closure.admissionQueueCount,
 			closure.computeInFlightCount,
 			closure.blasInFlightCount);
+	}
+
+	void QueueStrictPreloadTerminalCommand()
+	{
+		const FString command((const char*)nri_ptvoxelcomputepreloadterminalcommand);
+		if (command.IsEmpty())
+		{
+			return;
+		}
+
+		nri_ptvoxelcomputepreloadterminalcommand = "";
+		Printf("PERF pt voxel preload terminal action NRI: result=queued command=\"%s\"\n", command.GetChars());
+		AddCommandString(command.GetChars());
 	}
 }
 
@@ -666,6 +680,7 @@ bool NRIPreloadCoordinator::Finish(NRIRenderer& renderer, const Context& context
 			"complete",
 			"complete");
 		gVoxelPreloadTimeline.strictTerminalLogged = true;
+		QueueStrictPreloadTerminalCommand();
 	}
 	if ((int)nri_ptloadingtrace >= 1)
 	{
