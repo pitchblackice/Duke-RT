@@ -294,7 +294,8 @@ public:
 		{
 			telemetry.textureReuses++;
 		}
-		if (result.state == NRISceneTextureClosureState::Deferred)
+		if (result.state == NRISceneTextureClosureState::Pending ||
+			result.state == NRISceneTextureClosureState::Deferred)
 		{
 			telemetry.textureDeferred++;
 		}
@@ -307,6 +308,7 @@ public:
 	static bool PrewarmTextureTracked(
 		NRIRenderer& renderer,
 		const nri_scene::TextureUpload& upload,
+		bool runtime,
 		double* outRealizeMs = nullptr)
 	{
 		if (renderer.mFrameBuffer == nullptr)
@@ -314,7 +316,9 @@ public:
 			return false;
 		}
 		NRISceneTextureClosureResult result = {};
-		const bool ready = renderer.mSceneTextures.EnsurePreloadClosure(*renderer.mFrameBuffer, upload, result);
+		const bool ready = runtime ?
+			renderer.mSceneTextures.EnsureRuntimeClosure(*renderer.mFrameBuffer, upload, result) :
+			renderer.mSceneTextures.EnsurePreloadClosure(*renderer.mFrameBuffer, upload, result);
 		RecordTextureClosure(renderer, result);
 		if (outRealizeMs != nullptr)
 		{
@@ -366,7 +370,17 @@ public:
 		{
 			const nri_scene::TextureUpload& upload = materials.textures[textureIndex];
 			NRISceneTextureClosureResult textureResult = {};
-			renderer.mSceneTextures.EnsurePreloadClosure(*renderer.mFrameBuffer, upload, textureResult);
+			const bool runtimeClosure =
+				source == NRIPersistentVoxelMaterialClosureSource::RuntimeUnknown &&
+				!renderer.mFrameBuffer->IsPathTracingLevelPreloadPending();
+			if (runtimeClosure)
+			{
+				renderer.mSceneTextures.EnsureRuntimeClosure(*renderer.mFrameBuffer, upload, textureResult);
+			}
+			else
+			{
+				renderer.mSceneTextures.EnsurePreloadClosure(*renderer.mFrameBuffer, upload, textureResult);
+			}
 			RecordTextureClosure(renderer, textureResult);
 			NRIPersistentVoxelTextureDependency dependency = {};
 			dependency.key = upload.key;
@@ -651,7 +665,8 @@ public:
 		};
 		services.prewarmTexture = [](void* user, const nri_scene::TextureUpload& upload) -> bool
 		{
-			return PrewarmTextureTracked(*static_cast<NRIRenderer*>(user), upload);
+			NRIRenderer& renderer = *static_cast<NRIRenderer*>(user);
+			return PrewarmTextureTracked(renderer, upload, !renderer.mPersistentVoxels.loadingWarmupActive);
 		};
 		services.assignGeometryPortalIndices = [](void* user, nri_scene::GeometryData& geometry)
 		{
@@ -945,7 +960,7 @@ public:
 		};
 		preloadServices.prewarmTexture = [](void* user, const nri_scene::TextureUpload& upload) -> bool
 		{
-			return PrewarmTextureTracked(*static_cast<NRIRenderer*>(user), upload);
+			return PrewarmTextureTracked(*static_cast<NRIRenderer*>(user), upload, false);
 		};
 		const bool preloadReady = renderer.mPersistentVoxels.PreloadResources(
 			variants,
@@ -1011,7 +1026,9 @@ public:
 		};
 		batchServices.prewarmTexture = [](void* user, const nri_scene::TextureUpload& upload, double* outMs) -> bool
 		{
-			return PrewarmTextureTracked(*static_cast<NRIRenderer*>(user), upload, outMs);
+			NRIRenderer& renderer = *static_cast<NRIRenderer*>(user);
+			const bool runtime = renderer.mFrameBuffer == nullptr || !renderer.mFrameBuffer->IsPathTracingLevelPreloadPending();
+			return PrewarmTextureTracked(renderer, upload, runtime, outMs);
 		};
 		batchServices.assignGeometryPortalIndices = [](void* user, nri_scene::GeometryData& geometry)
 		{

@@ -2627,8 +2627,10 @@ namespace
 		FVoxelRawMeshStats rawStats = {};
 		if (!QueryNRIVoxelComputeRawSourceArchiveStats(model, rawStats))
 		{
-			routing.cpuMeshClassification = "failure";
-			routing.reason = "raw-source-unavailable";
+			QueryNRIVoxelComputeRawSourceStats(model, rawStats);
+			routing.cpuMeshClassification = "supported";
+			routing.reason = "raw-source-pending";
+			routing.directOnlyAdmission = true;
 			return routing;
 		}
 		const uint32_t primitiveCount = rawStats.coalescedFaceCount * 2u;
