@@ -628,6 +628,14 @@ public:
 			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
 			return renderer->mFrameBuffer != nullptr && renderer->mFrameBuffer->IsPreloadSubmitBudgetHit();
 		};
+		services.getRecordingCommandFenceValue = [](void* user) -> uint64_t
+		{
+			return static_cast<NRIRenderer*>(user)->GetRecordingCommandFenceValue();
+		};
+		services.isCommandFenceValueComplete = [](void* user, uint64_t fenceValue) -> bool
+		{
+			return static_cast<NRIRenderer*>(user)->IsCommandFenceValueComplete(fenceValue);
+		};
 		services.retireBuffer = [](void* user, NRIBufferResource& resource)
 		{
 			static_cast<NRIRenderer*>(user)->RetireResidentBufferResource(resource);
@@ -697,7 +705,8 @@ public:
 			uint32_t indexOffset,
 			uint32_t indexCount,
 			uint32_t primitiveCount,
-			NRIAccelerationStructureResource& outAccelerationStructure) -> bool
+			NRIAccelerationStructureResource& outAccelerationStructure,
+			NRIBufferResource* buildScratchBuffer) -> bool
 		{
 			return static_cast<NRIRenderer*>(user)->BuildBottomLevelAccelerationStructure(
 				vertexBuffer,
@@ -708,7 +717,8 @@ public:
 				indexCount,
 				primitiveCount,
 				outAccelerationStructure,
-				false);
+				false,
+				buildScratchBuffer);
 		};
 		services.barrierBuildInputs = [](void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) -> bool
 		{

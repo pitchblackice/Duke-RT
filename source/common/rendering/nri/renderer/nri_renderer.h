@@ -2238,7 +2238,8 @@ private:
 		uint32_t indexCount,
 		uint32_t primitiveCount,
 		NRIAccelerationStructureResource& outAccelerationStructure,
-		bool updateDynamicPerfStats);
+		bool updateDynamicPerfStats,
+		NRIBufferResource* buildScratchBuffer = nullptr);
 	bool PreloadStaticMapResources();
 	bool PreloadPersistentVoxelResources();
 	bool PreloadMaterialResources();

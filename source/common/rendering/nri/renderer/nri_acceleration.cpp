@@ -143,7 +143,8 @@ bool NRIAccelerationStructureManager::BuildBottomLevel(
 	uint32_t indexCount,
 	uint32_t primitiveCount,
 	NRIAccelerationStructureResource& outAccelerationStructure,
-	bool updateDynamicPerfStats)
+	bool updateDynamicPerfStats,
+	NRIBufferResource* buildScratchBuffer)
 {
 	Clocker clock(NriPTAcceleration);
 	ScopedPtPerfTimer perfTimer(renderer.mLastPerfShellTraceStats.dynamicAsMs);
@@ -247,16 +248,24 @@ bool NRIAccelerationStructureManager::BuildBottomLevel(
 	{
 		renderer.mLastPerfShellTraceStats.dynamicAsScratchRequestedBytes = requiredScratchSize;
 	}
-	if (renderer.mScratchBuffer.buffer == nullptr || renderer.mScratchBuffer.size < requiredScratchSize)
+	NRIBufferResource& scratchBuffer = buildScratchBuffer != nullptr ? *buildScratchBuffer : renderer.mScratchBuffer;
+	if (scratchBuffer.buffer == nullptr || scratchBuffer.size < requiredScratchSize)
 	{
-		renderer.DestroyBufferResource(renderer.mScratchBuffer);
+		if (buildScratchBuffer != nullptr)
+		{
+			renderer.RetireResidentBufferResource(scratchBuffer);
+		}
+		else
+		{
+			renderer.DestroyBufferResource(scratchBuffer);
+		}
 		{
 			ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.dynamicAsScratchMs);
 			if (updateDynamicPerfStats)
 			{
 				renderer.mLastPerfShellTraceStats.dynamicAsScratchGrowCount++;
 			}
-			if (!renderer.CreateBufferWithoutView(renderer.mScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+			if (!renderer.CreateBufferWithoutView(scratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
 			{
 				return false;
 			}
@@ -267,7 +276,7 @@ bool NRIAccelerationStructureManager::BuildBottomLevel(
 	dynamicBuild.dst = outAccelerationStructure.accelerationStructure;
 	dynamicBuild.geometries = &dynamicGeometryDesc;
 	dynamicBuild.geometryNum = 1;
-	dynamicBuild.scratchBuffer = renderer.mScratchBuffer.buffer;
+	dynamicBuild.scratchBuffer = scratchBuffer.buffer;
 	dynamicBuild.scratchOffset = 0;
 	{
 		ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.dynamicAsBuildMs);
@@ -278,7 +287,7 @@ bool NRIAccelerationStructureManager::BuildBottomLevel(
 	barriers[0].buffer = renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*outAccelerationStructure.accelerationStructure);
 	barriers[0].before = NRIResourceAccelerationStructureWriteAccess();
 	barriers[0].after = NRIResourceAccelerationStructureReadAccess();
-	barriers[1].buffer = renderer.mScratchBuffer.buffer;
+	barriers[1].buffer = scratchBuffer.buffer;
 	barriers[1].before = NRIResourceAccelerationStructureScratchAccess();
 	barriers[1].after = NRIResourceAccelerationStructureScratchAccess();
 
@@ -894,7 +903,8 @@ bool NRIRenderer::BuildBottomLevelAccelerationStructure(
 	uint32_t indexCount,
 	uint32_t primitiveCount,
 	NRIAccelerationStructureResource& outAccelerationStructure,
-	bool updateDynamicPerfStats)
+	bool updateDynamicPerfStats,
+	NRIBufferResource* buildScratchBuffer)
 {
 	return NRIAccelerationStructureManager::BuildBottomLevel(
 		*this,
@@ -906,7 +916,8 @@ bool NRIRenderer::BuildBottomLevelAccelerationStructure(
 		indexCount,
 		primitiveCount,
 		outAccelerationStructure,
-		updateDynamicPerfStats);
+		updateDynamicPerfStats,
+		buildScratchBuffer);
 }
 
 bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()

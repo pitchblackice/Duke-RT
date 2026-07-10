@@ -145,6 +145,7 @@ enum class PersistentVoxelAdmissionState : uint8_t
 {
 	Pending,
 	DirectComputePending,
+	DirectBlasPending,
 	UploadingVertices,
 	UploadingIndices,
 	UploadingPrimitives,
@@ -197,6 +198,10 @@ struct PersistentVoxelAdmissionEntry
 	uint32_t directComputeRequestFrame = UINT32_MAX;
 	NRIVoxelComputeDirectPublishOutputKind directComputeOutputKind = NRIVoxelComputeDirectPublishOutputKind::None;
 	NRIVoxelComputeDirectPublishFailure directComputeFailure = NRIVoxelComputeDirectPublishFailure::None;
+	uint64_t directBlasFenceValue = 0;
+	uint32_t directBlasRecordedFrame = UINT32_MAX;
+	bool directBlasExclusive = false;
+	NRIBufferResource directBlasScratchBuffer;
 	nri_scene::GeometryData uploadGeometry;
 	std::vector<uint32_t> uploadGpuIndices;
 	std::vector<nri_scene::PrimitiveData> uploadGpuPrimitives;
@@ -247,6 +252,7 @@ struct PersistentVoxelAdmissionStats
 	uint32_t failedThisPump = 0;
 	uint32_t statePending = 0;
 	uint32_t stateDirectPending = 0;
+	uint32_t stateDirectBlasPending = 0;
 	uint32_t stateUploading = 0;
 	uint32_t stateBuildingBlas = 0;
 	uint32_t runtimePending = 0;
@@ -398,6 +404,8 @@ struct NRIPersistentVoxelAdmissionServices
 		PersistentVoxelAdmissionStats* outStats);
 	using SubmitWaitAndRestartFn = bool (*)(void* user, const char* reason);
 	using IsSubmitBudgetHitFn = bool (*)(void* user);
+	using GetRecordingCommandFenceValueFn = uint64_t (*)(void* user);
+	using IsCommandFenceValueCompleteFn = bool (*)(void* user, uint64_t fenceValue);
 	using RetireBufferFn = void (*)(void* user, NRIBufferResource& resource);
 	using RetireAccelerationStructureFn = void (*)(void* user, NRIAccelerationStructureResource& resource);
 	using BuildMaterialsFn = void (*)(void* user, nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label);
@@ -416,7 +424,8 @@ struct NRIPersistentVoxelAdmissionServices
 		uint32_t indexOffset,
 		uint32_t indexCount,
 		uint32_t primitiveCount,
-		NRIAccelerationStructureResource& outAccelerationStructure);
+		NRIAccelerationStructureResource& outAccelerationStructure,
+		NRIBufferResource* buildScratchBuffer);
 	using BarrierBuildInputsFn = bool (*)(void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer);
 	using BarrierComputeToBuildInputsFn = bool (*)(void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer);
 
@@ -424,6 +433,8 @@ struct NRIPersistentVoxelAdmissionServices
 	AdmitVariantResourceFn admitVariantResource = nullptr;
 	SubmitWaitAndRestartFn submitWaitAndRestart = nullptr;
 	IsSubmitBudgetHitFn isSubmitBudgetHit = nullptr;
+	GetRecordingCommandFenceValueFn getRecordingCommandFenceValue = nullptr;
+	IsCommandFenceValueCompleteFn isCommandFenceValueComplete = nullptr;
 	RetireBufferFn retireBuffer = nullptr;
 	RetireAccelerationStructureFn retireAccelerationStructure = nullptr;
 	BuildMaterialsFn buildMaterials = nullptr;
@@ -468,7 +479,10 @@ struct NRIPersistentVoxelAdmissionServices
 		uint32_t indexOffset,
 		uint32_t indexCount,
 		uint32_t primitiveCount,
-		NRIAccelerationStructureResource& outAccelerationStructure) const;
+		NRIAccelerationStructureResource& outAccelerationStructure,
+		NRIBufferResource* buildScratchBuffer = nullptr) const;
+	uint64_t GetRecordingCommandFenceValue() const;
+	bool IsCommandFenceValueComplete(uint64_t fenceValue) const;
 	bool BarrierBuildInputs(const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) const;
 	bool BarrierComputeToBuildInputs(const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) const;
 };
