@@ -11,6 +11,15 @@
 #define NRI_VOXEL_COMPUTE_STATUS_COUNT_MISMATCH 2u
 #define NRI_VOXEL_COMPUTE_STATUS_EMIT_OK 3u
 #define NRI_VOXEL_COMPUTE_STATUS_EMIT_MISMATCH 4u
+#define NRI_VOXEL_COMPUTE_STATUS_SCAN_OK 5u
+#define NRI_VOXEL_COMPUTE_STATUS_SCAN_MISMATCH 6u
+#define NRI_VOXEL_COMPUTE_MISMATCH_OUTPUT_OVERFLOW (1u << 5u)
+#define NRI_VOXEL_COMPUTE_MISMATCH_SOURCE_RANGE (1u << 6u)
+#define NRI_VOXEL_COMPUTE_MISMATCH_COLOR_RUN_RANGE (1u << 7u)
+#define NRI_VOXEL_COMPUTE_MISMATCH_SCRATCH_RANGE (1u << 8u)
+#define NRI_VOXEL_COMPUTE_MISMATCH_ARITHMETIC_OVERFLOW (1u << 9u)
+#define NRI_VOXEL_COMPUTE_MISMATCH_SLAB_EMIT_COUNT (1u << 10u)
+#define NRI_VOXEL_COMPUTE_MISMATCH_ALGORITHM (1u << 11u)
 
 struct NRIVoxelComputeConstants
 {
@@ -18,6 +27,14 @@ struct NRIVoxelComputeConstants
 	uint SlabRecordCount;
 	uint FaceRecordCount;
 	uint ColorRunRecordCount;
+	uint ScratchRecordCount;
+	uint MaxSlabsPerJob;
+	uint AlgorithmVersion;
+	uint Reserved0;
+	uint VertexRecordCount;
+	uint IndexRecordCount;
+	uint PrimitiveRecordCount;
+	uint Reserved1;
 };
 
 struct NRIVoxelComputeJob
@@ -40,6 +57,8 @@ struct NRIVoxelComputeJob
 	uint VertexCapacity;
 	uint IndexCapacity;
 	uint PrimitiveCapacity;
+	uint ScratchOffset;
+	uint ScratchCount;
 };
 
 struct NRIVoxelComputeSlabRecord
@@ -76,6 +95,14 @@ struct NRIVoxelComputeResult
 	uint VertexHash;
 	uint IndexHash;
 	uint PrimitiveHash;
+};
+
+struct NRIVoxelComputeSlabScratch
+{
+	uint FaceCount;
+	uint FaceOffset;
+	uint VoxelCount;
+	uint StatusMask;
 };
 
 struct NRIVoxelComputeFaceRecord

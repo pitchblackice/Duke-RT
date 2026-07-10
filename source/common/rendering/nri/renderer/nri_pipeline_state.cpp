@@ -313,8 +313,15 @@ bool NRIPipelineStateManager::CreateVoxelComputePipelineLayout(NRIRenderer& rend
 	emitOutputRange.shaderStages = PipelineComputeStage();
 	emitOutputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
 
+	nri::DescriptorRangeDesc scratchRange = {};
+	scratchRange.baseRegisterIndex = 4;
+	scratchRange.descriptorNum = NRI_VOXEL_COMPUTE_SCRATCH_DESCRIPTOR_NUM;
+	scratchRange.descriptorType = nri::DescriptorType::STORAGE_STRUCTURED_BUFFER;
+	scratchRange.shaderStages = PipelineComputeStage();
+	scratchRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+
 	nri::DescriptorRangeDesc inputRanges[2] = { inputRange, faceRange };
-	nri::DescriptorRangeDesc outputRanges[2] = { resultRange, emitOutputRange };
+	nri::DescriptorRangeDesc outputRanges[3] = { resultRange, emitOutputRange, scratchRange };
 
 	nri::DescriptorSetDesc descriptorSets[2] = {};
 	descriptorSets[0].registerSpace = NRI_VOXEL_COMPUTE_SET_INPUTS;
@@ -393,6 +400,10 @@ bool NRIPipelineStateManager::CreatePipelines(NRIRenderer& renderer)
 	const std::string bloomCopy = "BloomCopy.cs." + suffix;
 	const std::string voxelComputeCount = "VoxelComputeCount.cs." + suffix;
 	const std::string voxelComputeEmit = "VoxelComputeEmit.cs." + suffix;
+	const std::string voxelComputeClassify = "VoxelComputeClassify.cs." + suffix;
+	const std::string voxelComputeScan = "VoxelComputeScan.cs." + suffix;
+	const std::string voxelComputeEmitParallel = "VoxelComputeEmitParallel.cs." + suffix;
+	const std::string voxelComputeFinalize = "VoxelComputeFinalize.cs." + suffix;
 	const std::string bloomDownsample = "BloomDownsample.cs." + suffix;
 	const std::string bloomUpsample = "BloomUpsample.cs." + suffix;
 	const std::string bloomComposite = "BloomComposite.cs." + suffix;
@@ -414,6 +425,10 @@ bool NRIPipelineStateManager::CreatePipelines(NRIRenderer& renderer)
 		createPipeline(bloomCopy.c_str(), NRIRenderer::PipelineSlot::BloomCopy, renderer.mBloomPipelineLayout) &&
 		createPipeline(voxelComputeCount.c_str(), NRIRenderer::PipelineSlot::VoxelComputeCount, renderer.mVoxelComputePipelineLayout) &&
 		createPipeline(voxelComputeEmit.c_str(), NRIRenderer::PipelineSlot::VoxelComputeEmit, renderer.mVoxelComputePipelineLayout) &&
+		createPipeline(voxelComputeClassify.c_str(), NRIRenderer::PipelineSlot::VoxelComputeClassify, renderer.mVoxelComputePipelineLayout) &&
+		createPipeline(voxelComputeScan.c_str(), NRIRenderer::PipelineSlot::VoxelComputeScan, renderer.mVoxelComputePipelineLayout) &&
+		createPipeline(voxelComputeEmitParallel.c_str(), NRIRenderer::PipelineSlot::VoxelComputeEmitParallel, renderer.mVoxelComputePipelineLayout) &&
+		createPipeline(voxelComputeFinalize.c_str(), NRIRenderer::PipelineSlot::VoxelComputeFinalize, renderer.mVoxelComputePipelineLayout) &&
 		createPipeline(bloomDownsample.c_str(), NRIRenderer::PipelineSlot::BloomDownsample, renderer.mBloomPipelineLayout) &&
 		createPipeline(bloomUpsample.c_str(), NRIRenderer::PipelineSlot::BloomUpsample, renderer.mBloomPipelineLayout) &&
 		createPipeline(bloomComposite.c_str(), NRIRenderer::PipelineSlot::BloomComposite, renderer.mBloomPipelineLayout);

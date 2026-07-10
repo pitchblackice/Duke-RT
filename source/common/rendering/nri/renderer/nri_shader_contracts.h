@@ -262,11 +262,21 @@ constexpr uint32_t NRI_VOXEL_COMPUTE_INPUT_DESCRIPTOR_NUM = 2;
 constexpr uint32_t NRI_VOXEL_COMPUTE_FACE_DESCRIPTOR_NUM = 2;
 constexpr uint32_t NRI_VOXEL_COMPUTE_RESULT_DESCRIPTOR_NUM = 1;
 constexpr uint32_t NRI_VOXEL_COMPUTE_EMIT_OUTPUT_DESCRIPTOR_NUM = 3;
+constexpr uint32_t NRI_VOXEL_COMPUTE_SCRATCH_DESCRIPTOR_NUM = 1;
 constexpr uint32_t NRI_VOXEL_COMPUTE_ROOT_REGISTER = 0;
 constexpr uint32_t NRI_VOXEL_COMPUTE_STATUS_COUNT_OK = 1;
 constexpr uint32_t NRI_VOXEL_COMPUTE_STATUS_COUNT_MISMATCH = 2;
 constexpr uint32_t NRI_VOXEL_COMPUTE_STATUS_EMIT_OK = 3;
 constexpr uint32_t NRI_VOXEL_COMPUTE_STATUS_EMIT_MISMATCH = 4;
+constexpr uint32_t NRI_VOXEL_COMPUTE_STATUS_SCAN_OK = 5;
+constexpr uint32_t NRI_VOXEL_COMPUTE_STATUS_SCAN_MISMATCH = 6;
+constexpr uint32_t NRI_VOXEL_COMPUTE_MISMATCH_OUTPUT_OVERFLOW = 1u << 5;
+constexpr uint32_t NRI_VOXEL_COMPUTE_MISMATCH_SOURCE_RANGE = 1u << 6;
+constexpr uint32_t NRI_VOXEL_COMPUTE_MISMATCH_COLOR_RUN_RANGE = 1u << 7;
+constexpr uint32_t NRI_VOXEL_COMPUTE_MISMATCH_SCRATCH_RANGE = 1u << 8;
+constexpr uint32_t NRI_VOXEL_COMPUTE_MISMATCH_ARITHMETIC_OVERFLOW = 1u << 9;
+constexpr uint32_t NRI_VOXEL_COMPUTE_MISMATCH_SLAB_EMIT_COUNT = 1u << 10;
+constexpr uint32_t NRI_VOXEL_COMPUTE_MISMATCH_ALGORITHM = 1u << 11;
 
 struct NRIVoxelComputeConstants
 {
@@ -274,6 +284,14 @@ struct NRIVoxelComputeConstants
 	uint32_t SlabRecordCount = 0;
 	uint32_t FaceRecordCount = 0;
 	uint32_t ColorRunRecordCount = 0;
+	uint32_t ScratchRecordCount = 0;
+	uint32_t MaxSlabsPerJob = 0;
+	uint32_t AlgorithmVersion = 0;
+	uint32_t Reserved0 = 0;
+	uint32_t VertexRecordCount = 0;
+	uint32_t IndexRecordCount = 0;
+	uint32_t PrimitiveRecordCount = 0;
+	uint32_t Reserved1 = 0;
 };
 
 struct NRIVoxelComputeJob
@@ -296,6 +314,8 @@ struct NRIVoxelComputeJob
 	uint32_t VertexCapacity = 0;
 	uint32_t IndexCapacity = 0;
 	uint32_t PrimitiveCapacity = 0;
+	uint32_t ScratchOffset = 0;
+	uint32_t ScratchCount = 0;
 };
 
 struct NRIVoxelComputeSlabRecord
@@ -334,6 +354,14 @@ struct NRIVoxelComputeResult
 	uint32_t PrimitiveHash = 0;
 };
 
+struct NRIVoxelComputeSlabScratch
+{
+	uint32_t FaceCount = 0;
+	uint32_t FaceOffset = 0;
+	uint32_t VoxelCount = 0;
+	uint32_t StatusMask = 0;
+};
+
 struct NRIVoxelComputeFaceRecord
 {
 	int32_t X[4] = {};
@@ -363,11 +391,12 @@ struct NRIVoxelComputePrimitiveData
 	uint32_t Reserved0 = UINT32_MAX;
 };
 
-static_assert(sizeof(NRIVoxelComputeConstants) == 16, "NRIVoxelComputeConstants must match VoxelComputeConstants.hlsli.");
-static_assert(sizeof(NRIVoxelComputeJob) == 72, "NRIVoxelComputeJob must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputeConstants) == 48, "NRIVoxelComputeConstants must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputeJob) == 80, "NRIVoxelComputeJob must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeSlabRecord) == 32, "NRIVoxelComputeSlabRecord must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeColorRunRecord) == 16, "NRIVoxelComputeColorRunRecord must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeResult) == 48, "NRIVoxelComputeResult must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputeSlabScratch) == 16, "NRIVoxelComputeSlabScratch must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeFaceRecord) == 56, "NRIVoxelComputeFaceRecord must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeSceneVertex) == 32, "NRIVoxelComputeSceneVertex must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputePrimitiveData) == 64, "NRIVoxelComputePrimitiveData must match VoxelComputeConstants.hlsli.");

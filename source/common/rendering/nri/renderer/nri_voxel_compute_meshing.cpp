@@ -1,6 +1,7 @@
 #include "nri_voxel_compute_meshing.h"
 
 #include "nri_voxel_compute_batch_plan.h"
+#include "nri_voxel_compute_parallel_plan.h"
 #include "nri_cvars.h"
 #include "nri_renderer.h"
 #include "nri_shader_contracts.h"
@@ -244,6 +245,7 @@ namespace
 		NRIBufferResource vertexBuffer = {};
 		NRIBufferResource indexBuffer = {};
 		NRIBufferResource primitiveBuffer = {};
+		NRIBufferResource slabScratchBuffer = {};
 		NRIBufferResource readbackBuffer = {};
 		NRIBufferResource vertexReadbackBuffer = {};
 		NRIBufferResource indexReadbackBuffer = {};
@@ -261,6 +263,13 @@ namespace
 	bool IsEmitEnabled()
 	{
 		return (bool)nri_ptvoxelcompute && (int)nri_ptvoxelcomputemode >= 3;
+	}
+
+	NRIVoxelComputeAlgorithm SelectedComputeAlgorithm()
+	{
+		return (int)nri_ptvoxelcomputealgorithm == (int)NRIVoxelComputeAlgorithm::ParallelSlabV1 ?
+			NRIVoxelComputeAlgorithm::ParallelSlabV1 :
+			NRIVoxelComputeAlgorithm::SerialV1;
 	}
 
 	bool IsAdmissionTraceEnabled()
@@ -1801,7 +1810,8 @@ NRIVoxelComputeMemoryUsage GetNRIVoxelComputeMemoryUsage()
 	usage.transientGeneratedBytes =
 		bufferBytes(state.vertexBuffer) +
 		bufferBytes(state.indexBuffer) +
-		bufferBytes(state.primitiveBuffer);
+		bufferBytes(state.primitiveBuffer) +
+		bufferBytes(state.slabScratchBuffer);
 	usage.statusReadbackBytes = bufferBytes(state.readbackBuffer);
 	usage.geometryReadbackBufferBytes =
 		bufferBytes(state.vertexReadbackBuffer) +
@@ -1894,6 +1904,9 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	const bool directSource =
 		emit && IsDirectGpuPublicationEnabled() && IsRawSourceArchiveEnabled() &&
 		state.queuedJobs.front().directPublication;
+	const int requestedAlgorithm = (int)nri_ptvoxelcomputealgorithm;
+	bool parallelArchivedEmit =
+		directSource && SelectedComputeAlgorithm() == NRIVoxelComputeAlgorithm::ParallelSlabV1;
 	std::vector<NRIVoxelComputeJob> gpuJobs;
 	std::vector<NRIVoxelComputeSlabRecord> gpuSlabs;
 	std::vector<NRIVoxelComputeFaceRecord> gpuFaces;
@@ -2072,6 +2085,29 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 			emittedPrimitiveCount += gpuJob.ExpectedFaces * 2u;
 		}
 	}
+	NRIVoxelComputeParallelDispatchPlan parallelPlan = {};
+	if (parallelArchivedEmit)
+	{
+		std::vector<NRIVoxelComputeParallelJobShape> shapes;
+		shapes.reserve(gpuJobs.size());
+		for (const NRIVoxelComputeJob& gpuJob : gpuJobs)
+		{
+			shapes.push_back({ gpuJob.SlabCount, gpuJob.ExpectedFaces * 2u });
+		}
+		parallelPlan = BuildNRIVoxelComputeParallelDispatchPlan(shapes);
+		if (parallelPlan.valid)
+		{
+			for (size_t jobIndex = 0; jobIndex < gpuJobs.size(); ++jobIndex)
+			{
+				gpuJobs[jobIndex].ScratchOffset = parallelPlan.jobs[jobIndex].scratchOffset;
+				gpuJobs[jobIndex].ScratchCount = parallelPlan.jobs[jobIndex].scratchCount;
+			}
+		}
+		else
+		{
+			parallelArchivedEmit = false;
+		}
+	}
 	state.queuedJobs.erase(state.queuedJobs.begin(), state.queuedJobs.begin() + jobsToProcess);
 
 	if (gpuJobs.empty() || (!directSource && gpuSlabs.empty()))
@@ -2087,6 +2123,8 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	const uint64_t vertexBytes = (uint64_t)emittedVertexCount * sizeof(NRIVoxelComputeSceneVertex);
 	const uint64_t indexBytes = (uint64_t)emittedIndexCount * sizeof(uint32_t);
 	const uint64_t primitiveBytes = (uint64_t)emittedPrimitiveCount * sizeof(NRIVoxelComputePrimitiveData);
+	const uint64_t scratchBytes = parallelArchivedEmit ?
+		(uint64_t)parallelPlan.scratchRecordCount * sizeof(NRIVoxelComputeSlabScratch) : 0u;
 	if (!EnsureBuffer(services, state.jobUploadBuffer, jobBytes, sizeof(NRIVoxelComputeJob), nri::BufferUsageBits::NONE, nri::MemoryLocation::DEVICE_UPLOAD, nri::BufferView::STRUCTURED_BUFFER, false) ||
 		!EnsureBuffer(services, state.jobBuffer, jobBytes, sizeof(NRIVoxelComputeJob), nri::BufferUsageBits::SHADER_RESOURCE, nri::MemoryLocation::DEVICE, nri::BufferView::STRUCTURED_BUFFER, true) ||
 		(!directSource &&
@@ -2095,6 +2133,8 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 			!EnsureBuffer(services, state.colorRunUploadBuffer, colorRunBytes, sizeof(NRIVoxelComputeColorRunRecord), nri::BufferUsageBits::NONE, nri::MemoryLocation::DEVICE_UPLOAD, nri::BufferView::STRUCTURED_BUFFER, false) ||
 			!EnsureBuffer(services, state.colorRunBuffer, colorRunBytes, sizeof(NRIVoxelComputeColorRunRecord), nri::BufferUsageBits::SHADER_RESOURCE, nri::MemoryLocation::DEVICE, nri::BufferView::STRUCTURED_BUFFER, true))) ||
 		!EnsureBuffer(services, state.resultBuffer, resultBytes, sizeof(NRIVoxelComputeResult), nri::BufferUsageBits::SHADER_RESOURCE_STORAGE, nri::MemoryLocation::DEVICE, nri::BufferView::STORAGE_STRUCTURED_BUFFER, true) ||
+		(parallelArchivedEmit &&
+			!EnsureBuffer(services, state.slabScratchBuffer, scratchBytes, sizeof(NRIVoxelComputeSlabScratch), nri::BufferUsageBits::SHADER_RESOURCE_STORAGE, nri::MemoryLocation::DEVICE, nri::BufferView::STORAGE_STRUCTURED_BUFFER, true)) ||
 		!EnsureBuffer(services, state.readbackBuffer, resultBytes, sizeof(NRIVoxelComputeResult), nri::BufferUsageBits::NONE, nri::MemoryLocation::HOST_READBACK, nri::BufferView::STRUCTURED_BUFFER, false))
 	{
 		return;
@@ -2173,7 +2213,7 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	const NRIBufferResource& emitPrimitiveBuffer = directOutput ? *outputPrimitiveBuffer : state.primitiveBuffer;
 
 	std::vector<nri::BufferBarrierDesc> computeBarriers;
-	computeBarriers.resize(directSource ? (emit ? 7 : 4) : (emit ? 8 : 4));
+	computeBarriers.resize((directSource ? (emit ? 7 : 4) : (emit ? 8 : 4)) + (parallelArchivedEmit ? 1u : 0u));
 	computeBarriers[0].buffer = state.jobBuffer.buffer;
 	computeBarriers[0].before = NRIResourceCopyDestinationAccess();
 	computeBarriers[0].after = NRIResourceComputeShaderResourceAccess();
@@ -2203,6 +2243,13 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 			computeBarriers[7].before = NRIResourceCopyDestinationAccess();
 			computeBarriers[7].after = NRIResourceComputeShaderResourceAccess();
 		}
+	}
+	if (parallelArchivedEmit)
+	{
+		nri::BufferBarrierDesc& scratchBarrier = computeBarriers.back();
+		scratchBarrier.buffer = state.slabScratchBuffer.buffer;
+		scratchBarrier.before = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
+		scratchBarrier.after = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
 	}
 	nri::BarrierDesc computeBarrier = {};
 	computeBarrier.buffers = computeBarriers.data();
@@ -2254,18 +2301,123 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		emitUpdate.descriptorNum = 3;
 		context.core->UpdateDescriptorRanges(&emitUpdate, 1);
 	}
+	if (parallelArchivedEmit)
+	{
+		const nri::Descriptor* scratchDescriptor[1] = { state.slabScratchBuffer.shaderView };
+		nri::UpdateDescriptorRangeDesc scratchUpdate = {};
+		scratchUpdate.descriptorSet = renderer.mVoxelComputeOutputSet;
+		scratchUpdate.rangeIndex = 2;
+		scratchUpdate.descriptors = scratchDescriptor;
+		scratchUpdate.descriptorNum = 1;
+		context.core->UpdateDescriptorRanges(&scratchUpdate, 1);
+	}
 
 	NRIVoxelComputeConstants constants = {};
 	constants.JobCount = (uint32_t)gpuJobs.size();
 	constants.SlabRecordCount = directSource ? (uint32_t)state.rawArchiveSlabs.size() : (uint32_t)gpuSlabs.size();
 	constants.FaceRecordCount = directSource ? 0u : (uint32_t)gpuFaces.size();
 	constants.ColorRunRecordCount = directSource ? (uint32_t)state.rawArchiveColorRuns.size() : 0u;
+	constants.ScratchRecordCount = parallelArchivedEmit ? parallelPlan.scratchRecordCount : 0u;
+	constants.MaxSlabsPerJob = parallelArchivedEmit ? parallelPlan.maxSlabsPerJob : 0u;
+	constants.AlgorithmVersion = parallelArchivedEmit ? (uint32_t)NRIVoxelComputeAlgorithm::ParallelSlabV1 : (uint32_t)NRIVoxelComputeAlgorithm::SerialV1;
+	constants.VertexRecordCount = emit ? (uint32_t)std::min<uint64_t>(emitVertexBuffer.size / sizeof(NRIVoxelComputeSceneVertex), UINT32_MAX) : 0u;
+	constants.IndexRecordCount = emit ? (uint32_t)std::min<uint64_t>(emitIndexBuffer.size / sizeof(uint32_t), UINT32_MAX) : 0u;
+	constants.PrimitiveRecordCount = emit ? (uint32_t)std::min<uint64_t>(emitPrimitiveBuffer.size / sizeof(NRIVoxelComputePrimitiveData), UINT32_MAX) : 0u;
 	context.core->CmdSetPipelineLayout(*context.commandBuffer, nri::BindPoint::COMPUTE, *renderer.mVoxelComputePipelineLayout);
 	context.core->CmdSetRootConstants(*context.commandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
 	context.core->CmdSetDescriptorSet(*context.commandBuffer, { 0, renderer.mVoxelComputeInputSet, nri::BindPoint::COMPUTE });
 	context.core->CmdSetDescriptorSet(*context.commandBuffer, { 1, renderer.mVoxelComputeOutputSet, nri::BindPoint::COMPUTE });
-	context.core->CmdSetPipeline(*context.commandBuffer, *renderer.GetPipeline(emit ? NRIRenderer::PipelineSlot::VoxelComputeEmit : NRIRenderer::PipelineSlot::VoxelComputeCount));
-	context.core->CmdDispatch(*context.commandBuffer, { (uint32_t)gpuJobs.size(), 1, 1 });
+	double classifyRecordMs = 0.0;
+	double scanRecordMs = 0.0;
+	double emitRecordMs = 0.0;
+	double finalizeRecordMs = 0.0;
+	double transitionRecordMs = 0.0;
+	if (parallelArchivedEmit)
+	{
+		auto dispatchStage = [&](NRIRenderer::PipelineSlot slot, const nri::DispatchDesc& dispatch, double& elapsedMs)
+		{
+			const auto start = std::chrono::steady_clock::now();
+			context.core->CmdSetPipeline(*context.commandBuffer, *renderer.GetPipeline(slot));
+			context.core->CmdDispatch(*context.commandBuffer, dispatch);
+			elapsedMs = DurationMs(start, std::chrono::steady_clock::now());
+		};
+		auto storageBarrier = [&](nri::Buffer* const* buffers, uint32_t bufferCount)
+		{
+			const auto start = std::chrono::steady_clock::now();
+			std::vector<nri::BufferBarrierDesc> barriers(bufferCount);
+			for (uint32_t i = 0; i < bufferCount; ++i)
+			{
+				barriers[i].buffer = buffers[i];
+				barriers[i].before = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
+				barriers[i].after = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
+			}
+			nri::BarrierDesc barrier = {};
+			barrier.buffers = barriers.data();
+			barrier.bufferNum = bufferCount;
+			context.core->CmdBarrier(*context.commandBuffer, barrier);
+			transitionRecordMs += DurationMs(start, std::chrono::steady_clock::now());
+		};
+
+		dispatchStage(
+			NRIRenderer::PipelineSlot::VoxelComputeClassify,
+			{ parallelPlan.classifyEmitGroupCountX, parallelPlan.jobCount, 1 },
+			classifyRecordMs);
+		nri::Buffer* classifyBuffers[] = { state.slabScratchBuffer.buffer };
+		storageBarrier(classifyBuffers, (uint32_t)std::size(classifyBuffers));
+		dispatchStage(
+			NRIRenderer::PipelineSlot::VoxelComputeScan,
+			{ parallelPlan.jobCount, 1, 1 },
+			scanRecordMs);
+		nri::Buffer* scanBuffers[] = { state.slabScratchBuffer.buffer, state.resultBuffer.buffer };
+		storageBarrier(scanBuffers, (uint32_t)std::size(scanBuffers));
+		dispatchStage(
+			NRIRenderer::PipelineSlot::VoxelComputeEmitParallel,
+			{ parallelPlan.classifyEmitGroupCountX, parallelPlan.jobCount, 1 },
+			emitRecordMs);
+		nri::Buffer* emitBuffers[] = { state.resultBuffer.buffer };
+		storageBarrier(emitBuffers, (uint32_t)std::size(emitBuffers));
+		dispatchStage(
+			NRIRenderer::PipelineSlot::VoxelComputeFinalize,
+			{ parallelPlan.jobCount, 1, 1 },
+			finalizeRecordMs);
+	}
+	else
+	{
+		const auto start = std::chrono::steady_clock::now();
+		context.core->CmdSetPipeline(*context.commandBuffer, *renderer.GetPipeline(emit ? NRIRenderer::PipelineSlot::VoxelComputeEmit : NRIRenderer::PipelineSlot::VoxelComputeCount));
+		context.core->CmdDispatch(*context.commandBuffer, { (uint32_t)gpuJobs.size(), 1, 1 });
+		emitRecordMs = DurationMs(start, std::chrono::steady_clock::now());
+	}
+	if (IsTraceEnabled())
+	{
+		const bool requestedParallel = requestedAlgorithm == (int)NRIVoxelComputeAlgorithm::ParallelSlabV1;
+		const char* fallback = parallelArchivedEmit ? "none" :
+			(!requestedParallel ? (requestedAlgorithm == (int)NRIVoxelComputeAlgorithm::SerialV1 ? "serial_requested" : "unsupported_version") :
+				(directSource ? "invalid_parallel_plan" : "non_archive_work"));
+		Printf(
+			"PERF pt voxel compute stages NRI: frame=%llu algorithm=%s requested_version=%d active_version=%u fallback=%s jobs=%u scratch_records=%u scratch_bytes=%llu max_slabs_per_job=%u classify_dispatch=%u,%u,1 scan_dispatch=%u,1,1 emit_dispatch=%u,%u,1 finalize_dispatch=%u,1,1 classify_record_ms=%.6f scan_record_ms=%.6f emit_record_ms=%.6f finalize_record_ms=%.6f transition_record_ms=%.6f hashes=%s\n",
+			(unsigned long long)frameNumber,
+			parallelArchivedEmit ? "parallel_slab_v1" : "serial_v1",
+			requestedAlgorithm,
+			parallelArchivedEmit ? (uint32_t)NRIVoxelComputeAlgorithm::ParallelSlabV1 : (uint32_t)NRIVoxelComputeAlgorithm::SerialV1,
+			fallback,
+			(uint32_t)gpuJobs.size(),
+			parallelArchivedEmit ? parallelPlan.scratchRecordCount : 0u,
+			(unsigned long long)scratchBytes,
+			parallelArchivedEmit ? parallelPlan.maxSlabsPerJob : 0u,
+			parallelArchivedEmit ? parallelPlan.classifyEmitGroupCountX : 0u,
+			parallelArchivedEmit ? parallelPlan.jobCount : 0u,
+			parallelArchivedEmit ? parallelPlan.jobCount : 0u,
+			parallelArchivedEmit ? parallelPlan.classifyEmitGroupCountX : (uint32_t)gpuJobs.size(),
+			parallelArchivedEmit ? parallelPlan.jobCount : 1u,
+			parallelArchivedEmit ? parallelPlan.jobCount : 0u,
+			classifyRecordMs,
+			scanRecordMs,
+			emitRecordMs,
+			finalizeRecordMs,
+			transitionRecordMs,
+			parallelArchivedEmit ? "zero" : (fullGeneratedReadback ? "validation" : "serial"));
+	}
 
 	std::vector<nri::BufferBarrierDesc> readbackBarriers;
 	readbackBarriers.resize((fullGeneratedReadback ? 4 : 1) + (directOutput ? 3 : 0));
@@ -2450,18 +2602,21 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	if (IsTraceEnabled())
 	{
 		Printf(
-			"PERF pt voxel compute dispatch NRI: frame=%llu mode=%s source=%s jobs=%u slab_records=%u color_run_records=%u face_records=%u job_bytes=%llu slab_bytes=%llu color_run_bytes=%llu face_bytes=%llu result_bytes=%llu vertex_bytes=%llu index_bytes=%llu primitive_bytes=%llu production_readback_bytes=%llu validation_readback_bytes=%llu direct_gpu=%u raw_archive=%u direct_publish=%u\n",
+			"PERF pt voxel compute dispatch NRI: frame=%llu mode=%s algorithm=%s source=%s jobs=%u slab_records=%u color_run_records=%u face_records=%u scratch_records=%u job_bytes=%llu slab_bytes=%llu color_run_bytes=%llu face_bytes=%llu scratch_bytes=%llu result_bytes=%llu vertex_bytes=%llu index_bytes=%llu primitive_bytes=%llu production_readback_bytes=%llu validation_readback_bytes=%llu direct_gpu=%u raw_archive=%u direct_publish=%u\n",
 			(unsigned long long)frameNumber,
 			emit ? (buildBlas ? "emit_blas" : "emit") : "count",
+			parallelArchivedEmit ? "parallel_slab_v1" : "serial_v1",
 			directSource ? "archive_decode" : (emit ? "face_records" : "slab_count"),
 			(unsigned)gpuJobs.size(),
 			directSource ? (uint32_t)state.rawArchiveSlabs.size() : (uint32_t)gpuSlabs.size(),
 			directSource ? (uint32_t)state.rawArchiveColorRuns.size() : 0u,
 			directSource ? 0u : (uint32_t)gpuFaces.size(),
+			parallelArchivedEmit ? parallelPlan.scratchRecordCount : 0u,
 			(unsigned long long)jobBytes,
 			(unsigned long long)slabBytes,
 			(unsigned long long)colorRunBytes,
 			(unsigned long long)faceBytes,
+			(unsigned long long)scratchBytes,
 			(unsigned long long)resultBytes,
 			(unsigned long long)vertexBytes,
 			(unsigned long long)indexBytes,
@@ -2494,6 +2649,7 @@ void DestroyNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer)
 	services.DestroyBufferResource(state.vertexBuffer);
 	services.DestroyBufferResource(state.indexBuffer);
 	services.DestroyBufferResource(state.primitiveBuffer);
+	services.DestroyBufferResource(state.slabScratchBuffer);
 	services.DestroyBufferResource(state.readbackBuffer);
 	services.DestroyBufferResource(state.vertexReadbackBuffer);
 	services.DestroyBufferResource(state.indexReadbackBuffer);

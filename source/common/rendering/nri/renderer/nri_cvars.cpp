@@ -320,6 +320,8 @@ CVAR(Bool, nri_ptvoxelcompute, false, 0)
 
 CVAR(Int, nri_ptvoxelcomputemode, 0, 0)
 
+CVAR(Int, nri_ptvoxelcomputealgorithm, 1, 0)
+
 CVAR(Int, nri_ptvoxelcomputemaxjobs, 2, 0)
 
 CVAR(Int, nri_ptvoxelcomputedirectmaxprimitives, 0, 0)
@@ -332,7 +334,7 @@ CVAR(Bool, nri_ptvoxelcomputerawarchive, false, 0)
 
 CVAR(Bool, nri_ptvoxelcomputedirectpublish, false, 0)
 
-CVAR(Bool, nri_ptvoxelcomputevalidatefullreadback, true, 0)
+CVAR(Bool, nri_ptvoxelcomputevalidatefullreadback, false, 0)
 
 CVAR(Bool, nri_ptvoxelcomputeforcecpu, false, 0)
 
