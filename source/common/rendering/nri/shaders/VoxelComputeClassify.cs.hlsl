@@ -44,13 +44,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const NRIVoxelComputeSlabRecord slab = VoxelComputeSlabs[job.SlabOffset + localSlab];
 	scratch.VoxelCount = slab.ZLength;
-	const uint sideDirections = countbits(slab.CullMask & 15u);
-	if (sideDirections != 0u && slab.ColorRunCount > 0xffffffffu / sideDirections)
-	{
-		scratch.StatusMask |= NRI_VOXEL_COMPUTE_MISMATCH_ARITHMETIC_OVERFLOW;
-		VoxelComputeScratch[scratchIndex] = scratch;
-		return;
-	}
+	const uint sideDirections =
+		((slab.CullMask & 1u) != 0u ? 1u : 0u) +
+		((slab.CullMask & 2u) != 0u ? 1u : 0u) +
+		((slab.CullMask & 4u) != 0u ? 1u : 0u) +
+		((slab.CullMask & 8u) != 0u ? 1u : 0u);
 
 	uint faceCount = sideDirections * slab.ColorRunCount;
 	if (slab.ColorRunCount != 0u)

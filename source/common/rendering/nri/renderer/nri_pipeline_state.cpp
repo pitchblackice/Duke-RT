@@ -6,6 +6,7 @@
 #include "printf.h"
 
 #include <array>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -369,6 +370,10 @@ bool NRIPipelineStateManager::CreatePipelines(NRIRenderer& renderer)
 		nri::ComputePipelineDesc pipelineDesc = {};
 		pipelineDesc.pipelineLayout = layout;
 		pipelineDesc.shader = shader;
+		if (fileName != nullptr && std::strncmp(fileName, "VoxelCompute", 12) == 0)
+		{
+			Printf("NRI PT voxel pipeline create: shader=%s slot=%u event=begin\n", fileName, (unsigned)slot);
+		}
 		const nri::Result result = renderer.mFrameBuffer->mCore.CreateComputePipeline(
 			*renderer.mFrameBuffer->mDevice,
 			pipelineDesc,
