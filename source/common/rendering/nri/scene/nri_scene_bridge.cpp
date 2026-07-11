@@ -6552,6 +6552,7 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.meshVariantHash = desiredDirectPending ? entry.second->desiredMeshVariantHash : entry.second->meshVariantHash;
 		view.materialVariantHash = desiredDirectPending ? entry.second->desiredMaterialVariantHash : entry.second->materialVariantHash;
 		view.meshBakeSpace = entry.second->meshBakeSpace;
+		view.actorIndex = entry.second->actorIndex;
 		view.sourcePicnum = entry.second->sourcePicnum;
 		view.resolvedVoxelIndex = entry.second->resolvedVoxelIndex;
 		view.primitiveCount = desiredDirectPending ? entry.second->desiredPrimitiveCount : entry.second->primitiveCount;

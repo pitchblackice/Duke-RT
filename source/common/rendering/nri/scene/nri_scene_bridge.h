@@ -288,6 +288,7 @@ struct PersistentVoxelCacheEntryView
 	uint64_t meshVariantHash = 0;
 	uint64_t materialVariantHash = 0;
 	VoxelMeshBakeSpace meshBakeSpace = VoxelMeshBakeSpace::Unknown;
+	int32_t actorIndex = -1;
 	int32_t sourcePicnum = -1;
 	int32_t resolvedVoxelIndex = -1;
 	uint32_t primitiveCount = 0;

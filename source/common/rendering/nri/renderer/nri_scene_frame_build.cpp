@@ -1346,6 +1346,10 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			if (paletteReady && texturesReady && buffersReady && accelerationReady)
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectStateCommitMs);
+				if (selectedPersistentVoxelSceneInstanceCount != 0)
+				{
+					mPersistentVoxels.CommitWorldTlasFrame(mFrameIndex);
+				}
 				{
 					ScopedPtPerfTimer stateFlagsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitFlagsMs);
 					mUsedDynamicSceneLastFrame = selectedSceneHasDynamicOverlay;

@@ -36,9 +36,11 @@ struct PersistentVoxelBatch
 		uint64_t materialKeyHash = 0;
 		uint64_t lastSeenFrame = 0;
 		uint64_t retainedFrameAge = 0;
+		int32_t actorIndex = -1;
 		int32_t sourcePicnum = -1;
 		int32_t resolvedVoxelIndex = -1;
 		uint32_t visibilityChunkIndex = UINT32_MAX;
+		uint32_t worldTlasFrameIndex = UINT32_MAX;
 		bool capturedThisFrame = false;
 		bool inWorldTlasThisFrame = false;
 		bool active = true;
@@ -549,6 +551,7 @@ struct NRIPersistentVoxelDestroyServices
 
 struct NRIPersistentVoxelLightAppendStats
 {
+	uint32_t activationAnchors = 0;
 	uint32_t appendedActors = 0;
 	uint32_t skippedActors = 0;
 	uint32_t appendedRecords = 0;
@@ -1044,6 +1047,7 @@ public:
 		bool voxelStatsEnabled,
 		const NRIPersistentVoxelTlasServices& services,
 		NRIPersistentVoxelTlasBuildStats& outStats);
+	void CommitWorldTlasFrame(uint32_t frameIndex) { committedWorldTlasFrameIndex = frameIndex; }
 	void DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool AppendMaterialTextureKeys(uint64_t materialKeyHash, std::vector<uint64_t>& outKeys) const;
@@ -1085,6 +1089,7 @@ public:
 	uint64_t materialResourceGeneration = 1;
 	uint64_t batchMaterialResourceGeneration = 0;
 	uint64_t uploadedMaterialResourceGeneration = 0;
+	uint32_t committedWorldTlasFrameIndex = UINT32_MAX;
 	uint32_t pendingMaterialLayoutInvalidatedResources = 0;
 	uint32_t pendingMaterialActorRebinds = 0;
 	std::vector<uint64_t> uploadedMaterialTextureKeys;

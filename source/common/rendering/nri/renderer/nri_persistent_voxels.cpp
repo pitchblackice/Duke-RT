@@ -2342,6 +2342,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 		}
 		persistentVoxelInstance.instanceId = raySceneBuilder.AddLegacyInstance(persistentVoxelInstance, sceneInstance);
 		actor.inWorldTlasThisFrame = true;
+		actor.worldTlasFrameIndex = frameIndex;
 		if (meshResourceFirstPublish)
 		{
 			persistentVoxelTlasNewMeshCount++;
@@ -2679,14 +2680,25 @@ NRIPersistentVoxelLightAppendStats NRIPersistentVoxelResidency::AppendSceneLight
 
 	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
 	{
-		if (!actor.active || actor.lightRecords.empty() || actor.materialCount == 0)
+		if (!actor.active || actor.materialCount == 0)
 		{
 			continue;
 		}
-		if (!actor.inWorldTlasThisFrame)
+		if (!actor.inWorldTlasThisFrame ||
+			actor.worldTlasFrameIndex != frameIndex ||
+			committedWorldTlasFrameIndex != frameIndex)
 		{
 			stats.skippedActors++;
 			stats.skippedRecords += (uint32_t)actor.lightRecords.size();
+			continue;
+		}
+		if (actor.actorIndex >= 0)
+		{
+			sceneLights.MarkActorPublishedForOverlayActivation(actor.actorIndex);
+			stats.activationAnchors++;
+		}
+		if (actor.lightRecords.empty())
+		{
 			continue;
 		}
 
@@ -2694,10 +2706,11 @@ NRIPersistentVoxelLightAppendStats NRIPersistentVoxelResidency::AppendSceneLight
 		stats.appendedActors++;
 		stats.appendedRecords += (uint32_t)actor.lightRecords.size();
 	}
-	if (voxelStatsEnabled && (stats.appendedActors != 0 || stats.skippedActors != 0))
+	if (voxelStatsEnabled && (stats.activationAnchors != 0 || stats.appendedActors != 0 || stats.skippedActors != 0))
 	{
-		Printf("PERF pt voxel light NRI: frame=%u appended_actors=%u skipped_not_tlas=%u appended_records=%u skipped_records=%u actors=%u active=%u\n",
+		Printf("PERF pt voxel light NRI: frame=%u activation_anchors=%u appended_actors=%u skipped_not_tlas=%u appended_records=%u skipped_records=%u actors=%u active=%u\n",
 			frameIndex,
+			stats.activationAnchors,
 			stats.appendedActors,
 			stats.skippedActors,
 			stats.appendedRecords,
@@ -6022,6 +6035,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 		{
 			PersistentVoxelBatch::ActorEntry actor = existingActor != nullptr ? *existingActor : PersistentVoxelBatch::ActorEntry{};
 			actor.identityKey = cacheEntry.identityKey;
+			actor.actorIndex = cacheEntry.actorIndex;
 			actor.signature = cacheEntry.signature;
 			actor.geometrySignature = ResolvePersistentVoxelCacheEntryGeometrySignature(cacheEntry);
 			actor.surfaceSignature = cacheEntry.surfaceSignature;
@@ -6475,6 +6489,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 
 		PersistentVoxelBatch::ActorEntry actor = existingActor != nullptr ? *existingActor : PersistentVoxelBatch::ActorEntry{};
 		actor.identityKey = cacheEntry.identityKey;
+		actor.actorIndex = cacheEntry.actorIndex;
 		actor.signature = cacheEntry.signature;
 		actor.geometrySignature = ResolvePersistentVoxelCacheEntryGeometrySignature(cacheEntry);
 		actor.surfaceSignature = cacheEntry.surfaceSignature;
@@ -7546,6 +7561,7 @@ void NRIPersistentVoxelResidency::Reset(
 	cumulativeCpuGeometryFallbackCount = 0;
 	postLoadAdmissionGraceEndFrame = 0;
 	postLoadAdmissionGraceMapGeneration = 0;
+	committedWorldTlasFrameIndex = UINT32_MAX;
 	services.InvalidateSceneDataDescriptors();
 	if (!clearSharedResources)
 	{

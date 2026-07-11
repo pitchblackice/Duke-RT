@@ -347,6 +347,8 @@ public:
 		uint32_t matchedSurfaceCount = 0;
 		uint32_t actorOverlayRuleCount = 0;
 		uint32_t actorOverlayMatchedSurfaceCount = 0;
+		uint32_t actorOverlayPublishedActorCount = 0;
+		uint32_t actorOverlayPublishedFallbackActivationCount = 0;
 		uint32_t mapOverlayRuleCount = 0;
 		uint32_t spriteTileRuleCount = 0;
 		uint32_t spriteRecordCandidateScans = 0;
@@ -738,6 +740,7 @@ public:
 	void AppendSurfaceRecords(
 		const std::vector<SurfaceRecord>& records,
 		uint32_t materialIndexBase = 0);
+	void MarkActorPublishedForOverlayActivation(int32_t actorIndex);
 	SurfaceRecord BuildSurfaceRecord(
 		const nri_scene::SurfaceRef& surface,
 		const nri_scene::MaterialBridgeData& materials,
@@ -921,6 +924,7 @@ private:
 	};
 
 	static NRILightingSettings CaptureSettings();
+	bool IsActorPublishedForOverlayActivation(int32_t actorIndex) const;
 	void AppendSurfaceRecord(SurfaceRecord record, uint32_t materialIndexBase);
 	void AppendSurfaceList(
 		const std::vector<nri_scene::SurfaceRef>& surfaces,
@@ -944,6 +948,7 @@ private:
 	uint64_t mFrameSerial = 0;
 	uint32_t mNextRuntimePointLightId = 1;
 	std::unordered_set<uint64_t> mActivatedActorOverlayKeys;
+	std::unordered_set<int32_t> mPublishedActorOverlayIndices;
 	std::unordered_map<uint64_t, EmissiveStableSurfaceState> mEmissiveStableSurfaceStates;
 	std::unordered_map<std::string, ResolvedLightOverlayMuzzleFlashRule> mResolvedMuzzleFlashRuleLookup;
 	std::vector<TransientMuzzleFlashSlot> mTransientMuzzleFlashSlots;

@@ -2894,6 +2894,7 @@ void SceneLightSystem::Reset()
 	mFrameAppendStats = {};
 	mFrameSerial = 0;
 	mActivatedActorOverlayKeys.clear();
+	mPublishedActorOverlayIndices.clear();
 	mEmissiveStableSurfaceStates.clear();
 	mResolvedMuzzleFlashRuleLookup.clear();
 	mTransientMuzzleFlashSlots.clear();
@@ -2916,6 +2917,8 @@ void SceneLightSystem::ResetLevelState()
 	mAnalyticLights.matchedSurfaceCount = 0;
 	mAnalyticLights.actorOverlayRuleCount = 0;
 	mAnalyticLights.actorOverlayMatchedSurfaceCount = 0;
+	mAnalyticLights.actorOverlayPublishedActorCount = 0;
+	mAnalyticLights.actorOverlayPublishedFallbackActivationCount = 0;
 	mAnalyticLights.mapOverlayRuleCount = 0;
 	mAnalyticLights.transientMuzzleSlotCount = 0;
 	mAnalyticLights.transientMuzzleActiveCount = 0;
@@ -2958,6 +2961,7 @@ void SceneLightSystem::ResetLevelState()
 	mFrameAppendStats = {};
 	mFrameSerial = 0;
 	mActivatedActorOverlayKeys.clear();
+	mPublishedActorOverlayIndices.clear();
 	mEmissiveStableSurfaceStates.clear();
 	mResolvedMuzzleFlashRuleLookup.clear();
 	mTransientMuzzleFlashSlots.clear();
@@ -3511,10 +3515,13 @@ void SceneLightSystem::BeginFrame(uint64_t frameSerial)
 	mFrameSerial = frameSerial;
 	mSurfaceRecords.clear();
 	mSurfaceRecordIndex.Clear();
+	mPublishedActorOverlayIndices.clear();
 	mFrameAppendStats = {};
 	mAnalyticLights.matchedSurfaceCount = 0;
 	mAnalyticLights.actorOverlayRuleCount = 0;
 	mAnalyticLights.actorOverlayMatchedSurfaceCount = 0;
+	mAnalyticLights.actorOverlayPublishedActorCount = 0;
+	mAnalyticLights.actorOverlayPublishedFallbackActivationCount = 0;
 	mAnalyticLights.mapOverlayRuleCount = 0;
 	mAnalyticLights.dedupedMatchCount = 0;
 	mAnalyticLights.truncatedLightCount = 0;
@@ -3725,6 +3732,19 @@ void SceneLightSystem::AppendSurfaceRecords(
 	}
 }
 
+void SceneLightSystem::MarkActorPublishedForOverlayActivation(int32_t actorIndex)
+{
+	if (actorIndex >= 0)
+	{
+		mPublishedActorOverlayIndices.insert(actorIndex);
+	}
+}
+
+bool SceneLightSystem::IsActorPublishedForOverlayActivation(int32_t actorIndex) const
+{
+	return actorIndex >= 0 && mPublishedActorOverlayIndices.find(actorIndex) != mPublishedActorOverlayIndices.end();
+}
+
 uint64_t SceneLightSystem::ComputeSurfaceIdentityKey(
 	SceneLightRecordSource source,
 	const nri_scene::SurfaceProvenance& provenance,
@@ -3769,6 +3789,8 @@ void SceneLightSystem::RebuildAnalyticLights(
 	mAnalyticLights.actorOverlayFullRecordScans = 0;
 	mAnalyticLights.actorOverlaySurfaceCandidateScans = 0;
 	mAnalyticLights.actorOverlayIndexedCandidateCount = 0;
+	mAnalyticLights.actorOverlayPublishedActorCount = (uint32_t)mPublishedActorOverlayIndices.size();
+	mAnalyticLights.actorOverlayPublishedFallbackActivationCount = 0;
 	mAnalyticLights.topologyKeyCount = 0;
 	mAnalyticLights.topologyRebuildCount = 0;
 	mAnalyticLights.propertyOnlyUpdateCount = 0;
@@ -3943,14 +3965,19 @@ void SceneLightSystem::RebuildAnalyticLights(
 			}
 
 			const bool hasSurface = record != nullptr;
+			const bool publishedActor = IsActorPublishedForOverlayActivation(rule.actorIndex);
 			const uint64_t stableKey = BuildActorOverlayTopologyKey(rule);
 			liveActorOverlayKeys.insert(stableKey);
-			if (hasSurface || rule.activateImmediately)
+			if (hasSurface || publishedActor || rule.activateImmediately)
 			{
 				if (hasSurface)
 				{
 					mAnalyticLights.matchedSurfaceCount++;
 					mAnalyticLights.actorOverlayMatchedSurfaceCount++;
+				}
+				else if (publishedActor)
+				{
+					mAnalyticLights.actorOverlayPublishedFallbackActivationCount++;
 				}
 				mActivatedActorOverlayKeys.insert(stableKey);
 			}
@@ -3987,7 +4014,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 
 			if (ShouldTraceActorOverlayRule(rule))
 			{
-				Printf("NRI PT explosion actor: frame=%u actor=%d class=%s rule=%u rule_name=%s live=yes emitted=yes active=%s activation=%s ownership=actor live_tile=%u pal=%d has_surface=%s surface_source=%s surface_tile=%u stable=0x%016llx pos=(%.3f, %.3f, %.3f)\n",
+				Printf("NRI PT explosion actor: frame=%u actor=%d class=%s rule=%u rule_name=%s live=yes emitted=yes active=%s activation=%s ownership=actor live_tile=%u pal=%d has_surface=%s published_actor=%s surface_source=%s surface_tile=%u stable=0x%016llx pos=(%.3f, %.3f, %.3f)\n",
 					renderFrameIndex,
 					rule.actorIndex,
 					rule.actorClassName != nullptr ? rule.actorClassName : "",
@@ -3998,6 +4025,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 					rule.actorTextureId,
 					rule.actorPalette,
 					YesNo(hasSurface),
+					YesNo(publishedActor),
 					hasSurface ? nri_diag::GetSurfaceSourceTypeName(record->provenance.sourceType) : "none",
 					hasSurface ? record->material.textureId : 0u,
 					(unsigned long long)light.stableKey,
@@ -5405,7 +5433,7 @@ void SceneLightSystem::ResetRuntimePointLights()
 void SceneLightSystem::PrintRuntimePointLights(uint32_t maxLights) const
 {
 	const auto& analyticLights = GetAnalyticLights();
-	Printf("NRI PT analytic lights: active=%u manual=%u muzzle_slots=%u muzzle_active=%u rules=%u overlay_rules=%u map_rules=%u matched_surfaces=%u overlay_matches=%u deduped=%u truncated=%u topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u limit=%u\n",
+	Printf("NRI PT analytic lights: active=%u manual=%u muzzle_slots=%u muzzle_active=%u rules=%u overlay_rules=%u map_rules=%u matched_surfaces=%u overlay_matches=%u published_actors=%u published_fallback_activations=%u deduped=%u truncated=%u topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u limit=%u\n",
 		(uint32_t)analyticLights.activeLights.size(),
 		(uint32_t)analyticLights.manualLights.size(),
 		analyticLights.transientMuzzleSlotCount,
@@ -5415,6 +5443,8 @@ void SceneLightSystem::PrintRuntimePointLights(uint32_t maxLights) const
 		analyticLights.mapOverlayRuleCount,
 		analyticLights.matchedSurfaceCount,
 		analyticLights.actorOverlayMatchedSurfaceCount,
+		analyticLights.actorOverlayPublishedActorCount,
+		analyticLights.actorOverlayPublishedFallbackActivationCount,
 		analyticLights.dedupedMatchCount,
 		analyticLights.truncatedLightCount,
 		YesNo(analyticLights.lastBuildTopologyChanged),
