@@ -57,7 +57,7 @@ namespace
 
 	void MigratePreloadSettingsCVars()
 	{
-		constexpr int CurrentLoadingSettingsVersion = 2;
+		constexpr int CurrentLoadingSettingsVersion = 3;
 		const int loadingSettingsVersion = (int)nri_ptloadingsettingsversion;
 		if (loadingSettingsVersion >= CurrentLoadingSettingsVersion)
 		{
@@ -80,11 +80,26 @@ namespace
 			nri_ptpreloadmaxsubmitspertick = 2;
 			migrated = true;
 		}
+		if (loadingSettingsVersion < 3)
+		{
+			if ((bool)nri_ptloadingvoxelcpu) nri_ptloadingvoxelcpu = false;
+			if ((bool)nri_ptloadingvoxelgpuwhitelistonly) nri_ptloadingvoxelgpuwhitelistonly = false;
+			if ((int)nri_ptloadingvoxelvariants == 256) nri_ptloadingvoxelvariants = 0;
+			if ((int)nri_ptpersistentvoxelbuildactors == 0) nri_ptpersistentvoxelbuildactors = 1;
+			if ((int)nri_ptvoxeladmissionloadvariants == 4) nri_ptvoxeladmissionloadvariants = 8;
+			if ((int)nri_ptvoxeladmissionruntimevariants == 1) nri_ptvoxeladmissionruntimevariants = 4;
+			if ((int)nri_ptvoxeladmissionruntimebytes == 16 * 1024 * 1024) nri_ptvoxeladmissionruntimebytes = 32 * 1024 * 1024;
+			if ((int)nri_ptvoxelpreloadreadygraceframes == 16) nri_ptvoxelpreloadreadygraceframes = 0;
+			if ((int)nri_ptvoxeladmitmaxbytesruntime == 16 * 1024 * 1024) nri_ptvoxeladmitmaxbytesruntime = 32 * 1024 * 1024;
+			if ((int)nri_ptvoxeladmitmaxblasloading == 4) nri_ptvoxeladmitmaxblasloading = 8;
+			if ((int)nri_ptvoxeladmitmaxblasruntime == 1) nri_ptvoxeladmitmaxblasruntime = 4;
+			migrated = true;
+		}
 
 		nri_ptloadingsettingsversion = CurrentLoadingSettingsVersion;
 		if (migrated)
 		{
-			Printf("NRI preload config: migrated archived preload defaults to nri_ptpreloadmaxsubmitspertick=2, nri_ptloadingvoxelvariants=256, and nri_ptloadingvoxelcpumaxvariants=256\n");
+			Printf("NRI preload config: migrated archived preload defaults through version %d\n", CurrentLoadingSettingsVersion);
 		}
 	}
 }

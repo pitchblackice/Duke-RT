@@ -316,13 +316,13 @@ CVAR(Int, nri_ptvoxelpersistentpromoteframes, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFI
 
 CVAR(Int, nri_ptvoxelmeshbuilds, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Bool, nri_ptvoxelcompute, false, 0)
+CVAR(Bool, nri_ptvoxelcompute, true, 0)
 
-CVAR(Int, nri_ptvoxelcomputemode, 0, 0)
+CVAR(Int, nri_ptvoxelcomputemode, 6, 0)
 
 CVAR(Int, nri_ptvoxelcomputealgorithm, 1, 0)
 
-CVAR(Int, nri_ptvoxelcomputemaxjobs, 2, 0)
+CVAR(Int, nri_ptvoxelcomputemaxjobs, 4, 0)
 
 CVAR(Int, nri_ptvoxelcomputeruntimemaxjobs, 2, 0)
 
@@ -330,25 +330,25 @@ CVAR(Int, nri_ptvoxelcomputedirectmaxprimitives, 0, 0)
 
 CVAR(Int, nri_ptvoxelcomputetrace, 0, 0)
 
-CVAR(Bool, nri_ptvoxelcomputedirectgpu, false, 0)
+CVAR(Bool, nri_ptvoxelcomputedirectgpu, true, 0)
 
-CVAR(Bool, nri_ptvoxelcomputerawarchive, false, 0)
+CVAR(Bool, nri_ptvoxelcomputerawarchive, true, 0)
 
-CVAR(Bool, nri_ptvoxelcomputedirectpublish, false, 0)
+CVAR(Bool, nri_ptvoxelcomputedirectpublish, true, 0)
 
 CVAR(Bool, nri_ptvoxelcomputevalidatefullreadback, false, 0)
 
 CVAR(Bool, nri_ptvoxelcomputeforcecpu, false, 0)
 
-CVAR(Bool, nri_ptvoxelcomputedeferdynamic, false, 0)
+CVAR(Bool, nri_ptvoxelcomputedeferdynamic, true, 0)
 
-CVAR(Bool, nri_ptvoxelcomputerawpreload, false, 0)
+CVAR(Bool, nri_ptvoxelcomputerawpreload, true, 0)
 
-CVAR(Int, nri_ptvoxelcomputerawpreloadmaxsources, 256, 0)
+CVAR(Int, nri_ptvoxelcomputerawpreloadmaxsources, 0, 0)
 
-CVAR(Int, nri_ptvoxelcomputerawpreloadmaxbytes, 64 * 1024 * 1024, 0)
+CVAR(Int, nri_ptvoxelcomputerawpreloadmaxbytes, 0, 0)
 
-CVAR(Bool, nri_ptvoxelcomputepreload, false, 0)
+CVAR(Bool, nri_ptvoxelcomputepreload, true, 0)
 
 CVAR(Bool, nri_ptvoxelcomputepreloaddryrun, false, 0)
 
@@ -356,9 +356,9 @@ CVAR(Int, nri_ptvoxelcomputepreloadtrace, 0, 0)
 
 CVAR(Bool, nri_ptvoxelcomputepreloadrequired, true, 0)
 
-CVAR(Bool, nri_ptvoxelcomputepreloadoptional, false, 0)
+CVAR(Bool, nri_ptvoxelcomputepreloadoptional, true, 0)
 
-CVAR(Bool, nri_ptvoxelcomputepreloadmaterials, false, 0)
+CVAR(Bool, nri_ptvoxelcomputepreloadmaterials, true, 0)
 
 CVAR(Bool, nri_ptvoxelcomputepreloadstrict, false, 0)
 
@@ -374,7 +374,7 @@ CVAR(Int, nri_ptvoxelcomputepreloadruntimeprobemod, 0, 0)
 
 CVAR(Int, nri_ptvoxelcomputepreloadruntimeproberem, 0, 0)
 
-CVAR(Int, nri_ptvoxelcomputepreloadruntimewithholdmod, 0, 0)
+CVAR(Int, nri_ptvoxelcomputepreloadruntimewithholdmod, 1, 0)
 
 CVAR(Int, nri_ptvoxelcomputepreloadruntimewithholdrem, 0, 0)
 
@@ -416,13 +416,13 @@ CVAR(Int, nri_ptloadingsettingsversion, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, nri_ptloadingmutationbaseline, false, 0)
 
-CVAR(Bool, nri_ptloadingvoxelcpu, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptloadingvoxelcpu, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, nri_ptloadingvoxelgpu, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, nri_ptloadingvoxelblockoptional, true, 0)
 
-CVAR(Bool, nri_ptloadingvoxelgpuwhitelistonly, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptloadingvoxelgpuwhitelistonly, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptloadingvoxelgpuminprims, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -434,7 +434,7 @@ CVAR(Int, nri_ptloadingvoxelgpumaxvariants, 256, CVAR_ARCHIVE | CVAR_GLOBALCONFI
 
 CVAR(Int, nri_ptloadingvoxelactors, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_ptloadingvoxelvariants, 256, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelvariants, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptloadingvoxelvariantprims, 2000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -1450,7 +1450,7 @@ CVAR(Int, nri_ptdynamicoverlayblasbuilds, 1, 0)
 
 // Moved from source/common/rendering/nri/renderer/nri_renderer_settings.cpp
 
-CVAR(Int, nri_ptpersistentvoxelbuildactors, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptpersistentvoxelbuildactors, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptpersistentvoxelbuildprims, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -1462,31 +1462,31 @@ CVAR(Int, nri_ptpersistentvoxeltexturebytes, 1024 * 1024, CVAR_ARCHIVE | CVAR_GL
 
 CVAR(Int, nri_ptvoxelruntimebudget, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_ptvoxeladmissionloadvariants, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmissionloadvariants, 8, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptvoxeladmissionloadbytes, 64 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_ptvoxeladmissionruntimevariants, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmissionruntimevariants, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_ptvoxeladmissionruntimebytes, 16 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmissionruntimebytes, 32 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptvoxeladmissiongraceframes, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptvoxeladmissiongracevariants, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_ptvoxelpreloadreadygraceframes, 16, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxelpreloadreadygraceframes, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptvoxeladmitmaxbytesloading, 64 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_ptvoxeladmitmaxbytesruntime, 16 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmitmaxbytesruntime, 32 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptvoxeladmitmaxmsloading, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptvoxeladmitmaxmsruntime, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_ptvoxeladmitmaxblasloading, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmitmaxblasloading, 8, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_ptvoxeladmitmaxblasruntime, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmitmaxblasruntime, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptvoxeladmitmaxblasprims, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -1502,13 +1502,13 @@ CVAR(Bool, nri_ptvoxeltrimcoldloading, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, nri_ptvoxeltransformkeyed, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Bool, nri_ptvoxelsharedblasbuild, true, 0)
+CVAR(Bool, nri_ptvoxelsharedblasbuild, false, 0)
 
 CVAR(Int, nri_ptvoxelsharedblasbuilds, 128, 0)
 
-CVAR(Bool, nri_ptvoxelsharedblasloading, true, 0)
+CVAR(Bool, nri_ptvoxelsharedblasloading, false, 0)
 
-CVAR(Bool, nri_ptvoxelsharedblasroute, true, 0)
+CVAR(Bool, nri_ptvoxelsharedblasroute, false, 0)
 
 CVAR(Int, nri_ptvoxelexcludeindex, -1, 0)
 
