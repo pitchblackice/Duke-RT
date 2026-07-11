@@ -3,16 +3,26 @@
 #include <algorithm>
 #include <cmath>
 
+namespace
+{
+	uint64_t HashCandidateIdentity(uint64_t hash, uint64_t value)
+	{
+		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6u) + (hash >> 2u));
+	}
+}
+
 void NRIEmissiveSamplingDistribution::Reset()
 {
+	mProposalRecords.clear();
 }
 
 void NRIEmissiveSamplingDistribution::Build(
 	const std::vector<NRIEmissiveSamplingDistributionCandidate>& candidates,
+	uint64_t frameIndex,
 	size_t maxCandidateCount,
 	std::vector<NRIEmissiveSamplingDistributionEntry>& outEntries,
 	std::vector<float>& outCdf,
-	NRIEmissiveSamplingDistributionStats* outStats) const
+	NRIEmissiveSamplingDistributionStats* outStats)
 {
 	NRIEmissiveSamplingDistributionStats stats = {};
 	stats.inputCount = (uint32_t)candidates.size();
@@ -36,39 +46,117 @@ void NRIEmissiveSamplingDistribution::Build(
 		{
 			return a.bindingKey < b.bindingKey;
 		}
+		if (a.tieBreakKey != b.tieBreakKey)
+		{
+			return a.tieBreakKey < b.tieBreakKey;
+		}
 		return aIndex < bIndex;
 	});
 
 	std::vector<size_t> uniqueIndices;
 	uniqueIndices.reserve(orderedIndices.size());
-	for (size_t index : orderedIndices)
+	std::vector<uint64_t> resolvedStableKeys(candidates.size(), 0);
+	for (size_t first = 0; first < orderedIndices.size();)
 	{
-		if (!uniqueIndices.empty() && candidates[uniqueIndices.back()].stableKey == candidates[index].stableKey)
+		size_t last = first + 1u;
+		while (last < orderedIndices.size() && candidates[orderedIndices[last]].stableKey == candidates[orderedIndices[first]].stableKey)
 		{
-			stats.duplicateCount++;
-			continue;
+			last++;
 		}
-		uniqueIndices.push_back(index);
+		const bool duplicateGroup = last - first > 1u;
+		if (duplicateGroup)
+		{
+			stats.duplicateCount += (uint32_t)(last - first - 1u);
+		}
+		for (size_t i = first; i < last; ++i)
+		{
+			const size_t index = orderedIndices[i];
+			resolvedStableKeys[index] = duplicateGroup ?
+				HashCandidateIdentity(candidates[index].stableKey, (uint64_t)(i - first)) :
+				candidates[index].stableKey;
+			uniqueIndices.push_back(index);
+		}
+		first = last;
 	}
 	stats.uniqueCount = (uint32_t)uniqueIndices.size();
+	std::vector<uint64_t> liveKeys;
+	liveKeys.reserve(uniqueIndices.size());
+	for (size_t index : uniqueIndices)
+	{
+		liveKeys.push_back(resolvedStableKeys[index]);
+	}
+	std::sort(liveKeys.begin(), liveKeys.end());
+	for (auto it = mProposalRecords.begin(); it != mProposalRecords.end();)
+	{
+		if (!std::binary_search(liveKeys.begin(), liveKeys.end(), it->first))
+		{
+			it = mProposalRecords.erase(it);
+		}
+		else
+		{
+			++it;
+		}
+	}
+
+	std::vector<float> resolvedWeights(candidates.size(), 0.0f);
+	constexpr float BoundAbsoluteTolerance = 1e-6f;
+	constexpr float BoundRelativeTolerance = 1e-4f;
+	for (size_t index : uniqueIndices)
+	{
+		const auto& candidate = candidates[index];
+		const float currentWeight = std::isfinite(candidate.proposalWeight) ? std::max(candidate.proposalWeight, 0.0f) : 0.0f;
+		const float authoredWeight =
+			candidate.hasReferenceProposalWeight && std::isfinite(candidate.referenceProposalWeight) ?
+				std::max(candidate.referenceProposalWeight, 0.0f) : 0.0f;
+		const float initialWeight = std::max(currentWeight, authoredWeight);
+		const uint64_t stableKey = resolvedStableKeys[index];
+		auto [recordIt, inserted] = mProposalRecords.emplace(stableKey, ProposalRecord{});
+		auto& record = recordIt->second;
+		if (inserted || record.bindingKey != candidate.bindingKey)
+		{
+			record.bindingKey = candidate.bindingKey;
+			record.referenceWeight = initialWeight;
+			record.authored = candidate.hasReferenceProposalWeight;
+		}
+		else
+		{
+			const float requestedWeight = std::max(currentWeight, authoredWeight);
+			const float growthTolerance = BoundAbsoluteTolerance + record.referenceWeight * BoundRelativeTolerance;
+			if (requestedWeight > record.referenceWeight + growthTolerance)
+			{
+				stats.boundGrowthCount++;
+				stats.lastBoundGrowthStableKey = stableKey;
+				stats.lastBoundGrowthOldWeight = record.referenceWeight;
+				stats.lastBoundGrowthNewWeight = requestedWeight;
+				stats.lastBoundGrowthWasAuthored = authoredWeight >= currentWeight;
+				record.referenceWeight = requestedWeight;
+				record.authored = stats.lastBoundGrowthWasAuthored;
+			}
+		}
+		if (currentWeight > 0.0f)
+		{
+			record.lastActiveFrame = frameIndex;
+		}
+		resolvedWeights[index] = record.referenceWeight;
+	}
 
 	if (uniqueIndices.size() > maxCandidateCount)
 	{
 		std::sort(uniqueIndices.begin(), uniqueIndices.end(), [&](size_t aIndex, size_t bIndex)
 		{
-			const float aWeight = std::isfinite(candidates[aIndex].proposalWeight) ? std::max(candidates[aIndex].proposalWeight, 0.0f) : 0.0f;
-			const float bWeight = std::isfinite(candidates[bIndex].proposalWeight) ? std::max(candidates[bIndex].proposalWeight, 0.0f) : 0.0f;
+			const float aWeight = resolvedWeights[aIndex];
+			const float bWeight = resolvedWeights[bIndex];
 			if (aWeight != bWeight)
 			{
 				return aWeight > bWeight;
 			}
-			return candidates[aIndex].stableKey < candidates[bIndex].stableKey;
+			return resolvedStableKeys[aIndex] < resolvedStableKeys[bIndex];
 		});
 		stats.cappedCount = (uint32_t)(uniqueIndices.size() - maxCandidateCount);
 		uniqueIndices.resize(maxCandidateCount);
 		std::sort(uniqueIndices.begin(), uniqueIndices.end(), [&](size_t aIndex, size_t bIndex)
 		{
-			return candidates[aIndex].stableKey < candidates[bIndex].stableKey;
+			return resolvedStableKeys[aIndex] < resolvedStableKeys[bIndex];
 		});
 	}
 
@@ -79,9 +167,9 @@ void NRIEmissiveSamplingDistribution::Build(
 		const auto& candidate = candidates[index];
 		NRIEmissiveSamplingDistributionEntry entry = {};
 		entry.inputIndex = index;
-		entry.stableKey = candidate.stableKey;
+		entry.stableKey = resolvedStableKeys[index];
 		entry.bindingKey = candidate.bindingKey;
-		entry.proposalWeight = std::isfinite(candidate.proposalWeight) ? std::max(candidate.proposalWeight, 0.0f) : 0.0f;
+		entry.proposalWeight = resolvedWeights[index];
 		totalWeight += entry.proposalWeight;
 		outEntries.push_back(entry);
 	}

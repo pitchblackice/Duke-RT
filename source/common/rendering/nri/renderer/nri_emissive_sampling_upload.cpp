@@ -330,6 +330,16 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(
 	mLastPerfShellTraceStats.emissiveSamplingOutputDynamicRecords = emissiveStats.outputDynamicRecords;
 	mLastPerfShellTraceStats.emissiveSamplingOutputPersistentVoxelRecords = emissiveStats.outputPersistentVoxelRecords;
 	mLastPerfShellTraceStats.emissiveSamplingSkippedPersistentVoxelSurfaces = emissiveStats.skippedPersistentVoxelSurfaces;
+	if (emissiveStats.proposalBoundGrowthCount > 0 && stabilityTraceEnabled)
+	{
+		Printf("NRI PT emissive proposal bound growth: frame=%u count=%u stable_key=0x%016llx old=%.9g new=%.9g source=%s reason=observed-above-bound\n",
+			mFrameIndex,
+			emissiveStats.proposalBoundGrowthCount,
+			(unsigned long long)emissiveStats.lastProposalBoundGrowthStableKey,
+			emissiveStats.lastProposalBoundGrowthOldWeight,
+			emissiveStats.lastProposalBoundGrowthNewWeight,
+			emissiveStats.lastProposalBoundGrowthWasAuthored ? "authored" : "observed");
+	}
 
 	const uint64_t headerBytes = sizeof(emissiveHeader);
 	const uint64_t primitiveBytes = emissivePrimitives.size() * sizeof(NRIEmissivePrimitiveGpuData);

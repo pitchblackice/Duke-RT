@@ -4967,6 +4967,8 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 	{
 		NRIEmissivePrimitiveGpuData gpu = {};
 		NRIEmissivePrimitiveDebugRecord debug = {};
+		float referenceProposalWeight = 0.0f;
+		bool hasReferenceProposalWeight = false;
 	};
 
 	auto buildRanges = [](const nri_scene::GeometryData* geometry, std::vector<MaterialPrimitiveRange>& outRanges)
@@ -5032,6 +5034,7 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 			representativeLuminance = std::max(surface.powerEstimate / (surface.surfaceArea * surface.emissiveIntensity), 0.0f);
 		}
 		const float samplingScale = ResolveGlowSamplingScale(surface.sourceFlags, surface.emissiveMode, settings) * std::max(surface.reachScale, 0.0f);
+		const bool sectorResponseEligible = IsEmissiveSurfaceSectorResponseEligible(surface);
 		bool sectorResponseApplied = false;
 		const float sectorRawResponseScale = ResolveSectorEmissionScale(surface, sectorResponseApplied);
 		const float sectorResponseScale = sectorResponseApplied ? ResolveSectorEmissionIntensityScale(surface, sectorRawResponseScale) : 1.0f;
@@ -5039,18 +5042,12 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 		bool materialResponseApplied = false;
 		const float materialResponseScale = ResolveEmissiveMaterialResponseScale(surface, materialResponseApplied);
 		const bool materialResponseEligible = IsEmissiveSurfaceMaterialResponseEligible(surface);
+		const float sectorReachBound = sectorResponseEligible ?
+			(surface.hasSectorResponseReachMax ?
+				std::max(std::max(0.0f, surface.sectorResponseReachMin), surface.sectorResponseReachMax) :
+				std::max(std::max(0.0f, (float)nri_ptsectoremissionreachmin), (float)nri_ptsectoremissionreachmax)) :
+			1.0f;
 		uint64_t surfacePrimitiveKey = surface.stableKey;
-		surfacePrimitiveKey = nri_scene::HashCombine64(surfacePrimitiveKey, (uint64_t)surface.sourceRuleId);
-		surfacePrimitiveKey = nri_scene::HashCombine64(surfacePrimitiveKey, (uint64_t)surface.overrideRuleId);
-		surfacePrimitiveKey = nri_scene::HashCombine64(surfacePrimitiveKey, (uint64_t)surface.textureId);
-		surfacePrimitiveKey = nri_scene::HashCombine64(surfacePrimitiveKey, (uint64_t)surface.emissiveTextureIndex);
-		if (surface.actorIndex < 0)
-		{
-			surfacePrimitiveKey = HashQuantizedFloat(surfacePrimitiveKey, surface.center[0], 16.0f);
-			surfacePrimitiveKey = HashQuantizedFloat(surfacePrimitiveKey, surface.center[1], 16.0f);
-			surfacePrimitiveKey = HashQuantizedFloat(surfacePrimitiveKey, surface.center[2], 16.0f);
-			surfacePrimitiveKey = HashQuantizedFloat(surfacePrimitiveKey, surface.surfaceArea, 16.0f);
-		}
 
 		for (uint32_t localOffset = 0; localOffset < range.count; ++localOffset)
 		{
@@ -5072,6 +5069,8 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 			candidate.gpu.powerEstimate = basePowerEstimate * sectorResponseScale;
 			candidate.gpu.selectionWeight = basePowerEstimate * samplingScale * sectorReachScale;
 			candidate.gpu.emissionScale = sectorResponseScale;
+			candidate.referenceProposalWeight = basePowerEstimate * samplingScale * sectorReachBound;
+			candidate.hasReferenceProposalWeight = sectorResponseEligible;
 
 			candidate.debug.stableKey = nri_scene::HashCombine64(surfacePrimitiveKey, ((uint64_t)dataSource << 32u) | localOffset);
 			candidate.debug.surfaceStableKey = surface.stableKey;
@@ -5159,17 +5158,30 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 		NRIEmissiveSamplingDistributionCandidate distributionCandidate = {};
 		distributionCandidate.stableKey = candidate.debug.stableKey;
 		distributionCandidate.bindingKey = nri_scene::HashCombine64(
+			candidate.debug.stableKey,
+			(uint64_t)candidate.debug.emissiveMode);
+		distributionCandidate.tieBreakKey = nri_scene::HashCombine64(
 			(uint64_t)candidate.gpu.dataSource,
 			(uint64_t)candidate.gpu.primitiveIndex);
 		distributionCandidate.proposalWeight = candidate.gpu.selectionWeight;
+		distributionCandidate.referenceProposalWeight = candidate.referenceProposalWeight;
+		distributionCandidate.hasReferenceProposalWeight = candidate.hasReferenceProposalWeight;
 		distributionCandidates.push_back(distributionCandidate);
 	}
 	std::vector<NRIEmissiveSamplingDistributionEntry> distributionEntries;
+	NRIEmissiveSamplingDistributionStats distributionStats = {};
 	mEmissiveSamplingDistribution.Build(
 		distributionCandidates,
+		mFrameSerial,
 		NriMaxEmissivePrimitives,
 		distributionEntries,
-		outCdf);
+		outCdf,
+		&distributionStats);
+	localStats.proposalBoundGrowthCount = distributionStats.boundGrowthCount;
+	localStats.lastProposalBoundGrowthStableKey = distributionStats.lastBoundGrowthStableKey;
+	localStats.lastProposalBoundGrowthOldWeight = distributionStats.lastBoundGrowthOldWeight;
+	localStats.lastProposalBoundGrowthNewWeight = distributionStats.lastBoundGrowthNewWeight;
+	localStats.lastProposalBoundGrowthWasAuthored = distributionStats.lastBoundGrowthWasAuthored;
 
 	outPrimitives.reserve(candidates.size());
 	outDebugRecords.reserve(candidates.size());

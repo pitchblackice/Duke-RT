@@ -787,6 +787,11 @@ public:
 		uint32_t outputDynamicRecords = 0;
 		uint32_t outputPersistentVoxelRecords = 0;
 		uint32_t skippedPersistentVoxelSurfaces = 0;
+		uint32_t proposalBoundGrowthCount = 0;
+		uint64_t lastProposalBoundGrowthStableKey = 0;
+		float lastProposalBoundGrowthOldWeight = 0.0f;
+		float lastProposalBoundGrowthNewWeight = 0.0f;
+		bool lastProposalBoundGrowthWasAuthored = false;
 	};
 
 	void BuildEmissiveSamplingUpload(
