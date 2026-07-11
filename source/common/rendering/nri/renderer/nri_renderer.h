@@ -1585,6 +1585,10 @@ public:
 		uint32_t sceneLightTopologyAddedKeyCount = 0;
 		uint32_t sceneLightTopologyRemovedKeyCount = 0;
 		uint32_t sceneLightTopologyReboundKeyCount = 0;
+		uint32_t sceneLightSoftLightCount = 0;
+		uint32_t sceneLightSurvivingIndexChangeCount = 0;
+		uint32_t sceneLightSurvivingSoftIndexChangeCount = 0;
+		uint64_t sceneLightOrderedStableKeyHash = 0;
 		double sceneLightTopologySortMs = 0.0;
 		uint32_t traceOpaqueDispatchX = 0;
 		uint32_t traceOpaqueDispatchY = 0;
@@ -2384,6 +2388,7 @@ private:
 	void CopyFinalToActiveTarget();
 	void UpdateFrameGenerationFrameDesc();
 	void UpdateFrameGenerationHistoryPolicy(int debugMode, const NRIFrameGenerationPolicy& frameGenPolicy, bool preserveHistory);
+	bool HasFrameGenerationCadenceBreak() const;
 	void NoteSuccessfulRealFrame();
 	void CopyTexture(NRITextureResource& source, NRITextureResource& destination);
 	void CopyTextureToActiveTarget(NRITextureResource& source);
@@ -2760,6 +2765,16 @@ private:
 	uint32_t mBoundEmissiveDominantDataSource = 0;
 	bool mEmissiveSamplingPayloadCacheValid = false;
 	uint64_t mEmissiveSamplingPayloadHash = 0;
+	bool mEmissiveStabilityTraceValid = false;
+	uint64_t mEmissiveStabilityTopologyEpoch = 0;
+	uint64_t mEmissiveStabilityDistributionEpoch = 0;
+	uint64_t mEmissiveStabilityTopologyHash = 0;
+	uint64_t mEmissiveStabilityOrderedKeyHash = 0;
+	uint64_t mEmissiveStabilityLivePowerHash = 0;
+	uint64_t mEmissiveStabilityProposalWeightHash = 0;
+	uint64_t mEmissiveStabilityCdfHash = 0;
+	std::vector<uint64_t> mEmissiveStabilityOrderedKeys;
+	std::vector<float> mEmissiveStabilityCdf;
 	bool mEmissiveSectorResponsePayloadCacheValid = false;
 	uint64_t mEmissiveSectorResponsePayloadHash = 0;
 	uint32_t mEmissiveTlasInstanceCount = 0;

@@ -598,28 +598,32 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 	float3 origin = surfaceHit.position + surfaceHit.normal * 0.05;
 	float3 direction = SampleCosineHemisphere(surfaceHit.normal, rngState);
 	bool hasSecondaryHitDistance = false;
-	float accumulatedSecondaryHitDistance = 0.0;
 
 	[loop]
 	for (uint bounce = 0u; bounce < bounceCount; ++bounce)
 	{
 		TraceShaderStatAdd(TRACE_STAT_INDIRECT_DIFFUSE_BOUNCES, 1u);
 		float3 tracedDirection = direction;
-		const HitData bounceHit = TracePrimaryUngated(origin, direction, tracedDirection);
+		const HitData bounceHit = TraceIndirectUngated(origin, direction, tracedDirection);
 		if (!bounceHit.hit)
 		{
 			TraceShaderStatAdd(TRACE_STAT_INDIRECT_DIFFUSE_MISSES, 1u);
 			if (!hasSecondaryHitDistance)
 			{
-				accumulatedSecondaryHitDistance = NRD_INF;
+				outHitDistance = NRD_INF;
 				hasSecondaryHitDistance = true;
 			}
 			indirectRadiance += throughput * GetMissColor(tracedDirection);
 			break;
 		}
 
-		accumulatedSecondaryHitDistance += bounceHit.distance;
-		hasSecondaryHitDistance = true;
+		if (!hasSecondaryHitDistance)
+		{
+			// NRD expects the first in-lobe secondary distance. Summing later path
+			// segments makes unrelated topology publication look like a guide change.
+			outHitDistance = bounceHit.distance;
+			hasSecondaryHitDistance = true;
+		}
 		const MaterialData bounceMaterial = GetMaterialData(bounceHit.materialIndex, bounceHit.dataSource);
 		const bool bounceReceivesShadow = MaterialReceivesShadow(bounceMaterial);
 		if ((bounceMaterial.flags & (MATERIAL_FLAG_MIRROR | MATERIAL_FLAG_PORTAL)) != 0)
@@ -681,7 +685,6 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 		direction = SampleCosineHemisphere(bounceHit.normal, rngState);
 	}
 
-	outHitDistance = hasSecondaryHitDistance ? accumulatedSecondaryHitDistance : 0.0;
 	return indirectRadiance;
 }
 
@@ -706,7 +709,7 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 	{
 		TraceShaderStatAdd(TRACE_STAT_INDIRECT_SPECULAR_BOUNCES, 1u);
 		float3 tracedDirection = direction;
-		const HitData bounceHit = TracePrimaryUngated(origin, direction, tracedDirection);
+		const HitData bounceHit = TraceIndirectUngated(origin, direction, tracedDirection);
 		if (!bounceHit.hit)
 		{
 			TraceShaderStatAdd(TRACE_STAT_INDIRECT_SPECULAR_MISSES, 1u);
@@ -1192,7 +1195,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					const float3 centerLightDir = toLightCenter / centerLightDistance;
 					const bool runtimeLightCastsShadow = (runtimeLight.flags & RUNTIME_POINT_LIGHT_FLAG_CASTS_SHADOW) != 0u;
 					const bool useSoftRuntimeShadow = !directSceneTrace && receivesShadow && runtimeLightCastsShadow && runtimeLight.emitterRadius > 0.0;
-					uint runtimeLightRng = pixelPos.x * 1973u ^ pixelPos.y * 9277u ^ (gTraceConstants.FrameIndex + 1u) * 26699u ^ runtimeLightIndex * 911u;
+					const uint runtimeLightStableSeed = Hash32(runtimeLight.stableKeyLo ^ Hash32(runtimeLight.stableKeyHi + 0x9e3779b9u));
+					uint runtimeLightRng = pixelPos.x * 1973u ^ pixelPos.y * 9277u ^ (gTraceConstants.FrameIndex + 1u) * 26699u ^ runtimeLightStableSeed;
 					float3 sampledLightPosition = runtimeLight.position;
 					if (useSoftRuntimeShadow)
 					{

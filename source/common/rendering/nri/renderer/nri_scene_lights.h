@@ -4,6 +4,7 @@
 #include "../scene/nri_geometry_bridge.h"
 #include "../scene/nri_map_world.h"
 #include "../scene/nri_scene_bridge.h"
+#include "nri_emissive_sampling_distribution.h"
 #include "lightoverlay.h"
 #include "v_video.h"
 
@@ -78,9 +79,10 @@ struct NRIRuntimePointLightGpuData
 	float intensity = 1.0f;
 	uint32_t flags = 0;
 	float emitterRadius = 0.0f;
-	uint32_t softShadowFlags = 0;
-	uint32_t reserved = 0;
+	uint32_t stableKeyLo = 0;
+	uint32_t stableKeyHi = 0;
 };
+static_assert(sizeof(NRIRuntimePointLightGpuData) == 48, "Runtime point-light CPU/GPU layout must remain 48 bytes");
 
 struct NRISectorLightHeaderGpuData
 {
@@ -363,6 +365,10 @@ public:
 		uint32_t topologyAddedKeyCount = 0;
 		uint32_t topologyRemovedKeyCount = 0;
 		uint32_t topologyReboundKeyCount = 0;
+		uint32_t softLightCount = 0;
+		uint32_t survivingKeyIndexChangeCount = 0;
+		uint32_t survivingSoftLightIndexChangeCount = 0;
+		uint64_t orderedStableKeyHash = 0;
 		uint32_t transientMuzzleSlotCount = 0;
 		uint32_t transientMuzzleActiveCount = 0;
 		uint32_t dedupedMatchCount = 0;
@@ -786,6 +792,17 @@ public:
 		uint32_t outputDynamicRecords = 0;
 		uint32_t outputPersistentVoxelRecords = 0;
 		uint32_t skippedPersistentVoxelSurfaces = 0;
+		uint32_t proposalBoundGrowthCount = 0;
+		uint64_t lastProposalBoundGrowthStableKey = 0;
+		float lastProposalBoundGrowthOldWeight = 0.0f;
+		float lastProposalBoundGrowthNewWeight = 0.0f;
+		bool lastProposalBoundGrowthWasAuthored = false;
+		uint32_t proposalActiveCount = 0;
+		uint32_t proposalRetainedDarkCount = 0;
+		uint32_t proposalReactivatedCount = 0;
+		uint32_t proposalRetiredMissingCount = 0;
+		uint32_t proposalRetiredReplacedCount = 0;
+		uint32_t proposalRecordCount = 0;
 	};
 
 	void BuildEmissiveSamplingUpload(
@@ -795,7 +812,7 @@ public:
 		std::vector<float>& outCdf,
 		std::vector<NRIEmissiveMaterialResponseGpuData>& outMaterialResponses,
 		std::vector<NRIEmissivePrimitiveDebugRecord>& outDebugRecords,
-		EmissiveSamplingUploadStats* outStats = nullptr) const;
+		EmissiveSamplingUploadStats* outStats = nullptr);
 	uint64_t BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBuildContext& context) const;
 	void BuildSectorLightingUpload(
 		float sectorLightMultiplier,
@@ -942,6 +959,7 @@ private:
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
 	PersistentDynamicEmissiveHighWaterStats mPersistentDynamicEmissiveHighWaterStats = {};
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
+	NRIEmissiveSamplingDistribution mEmissiveSamplingDistribution;
 	std::vector<SurfaceRecord> mSurfaceRecords;
 	SurfaceRecordIndex mSurfaceRecordIndex = {};
 	FrameAppendStats mFrameAppendStats = {};

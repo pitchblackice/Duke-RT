@@ -4,10 +4,14 @@
 #include "NRDIntegration.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace
 {
+	constexpr float NRI_NRD_DEFAULT_FRAME_TIME_MS = 1000.0f / 60.0f;
+	constexpr float NRI_NRD_MAX_TEMPORAL_FRAME_TIME_MS = 1000.0f / 30.0f;
+
 	const nrd::DenoiserDesc gDenoisers[] = {
 		{ nrd::Identifier(1), nrd::Denoiser::REBLUR_DIFFUSE_SPECULAR },
 		{ nrd::Identifier(2), nrd::Denoiser::RELAX_DIFFUSE_SPECULAR },
@@ -17,6 +21,18 @@ namespace
 	static bool UseRelax(NRINrdDenoiserMode mode)
 	{
 		return mode == NRINrdDenoiserMode::Relax;
+	}
+
+	static float ResolveNrdTemporalFrameTimeMs(float observedFrameTimeMs)
+	{
+		if (!std::isfinite(observedFrameTimeMs) || observedFrameTimeMs <= 0.0f)
+		{
+			return NRI_NRD_DEFAULT_FRAME_TIME_MS;
+		}
+
+		// CPU-side asset admission and shader-link stalls are not changes in scene motion.
+		// Keep them from becoming a one-frame RELAX temporal-policy discontinuity.
+		return std::min(observedFrameTimeMs, NRI_NRD_MAX_TEMPORAL_FRAME_TIME_MS);
 	}
 
 	static nrd::HitDistanceReconstructionMode ClampHitDistanceReconstructionMode(uint32_t value)
@@ -80,6 +96,40 @@ namespace
 		return settings;
 	}
 
+	static bool ReblurSettingsEqual(const nrd::ReblurSettings& a, const nrd::ReblurSettings& b)
+	{
+		return
+			a.maxAccumulatedFrameNum == b.maxAccumulatedFrameNum &&
+			a.maxFastAccumulatedFrameNum == b.maxFastAccumulatedFrameNum &&
+			a.maxStabilizedFrameNum == b.maxStabilizedFrameNum &&
+			a.hitDistanceReconstructionMode == b.hitDistanceReconstructionMode &&
+			a.enableAntiFirefly == b.enableAntiFirefly &&
+			a.fastHistoryClampingSigmaScale == b.fastHistoryClampingSigmaScale &&
+			a.diffusePrepassBlurRadius == b.diffusePrepassBlurRadius &&
+			a.specularPrepassBlurRadius == b.specularPrepassBlurRadius &&
+			a.minBlurRadius == b.minBlurRadius &&
+			a.maxBlurRadius == b.maxBlurRadius &&
+			a.minMaterialForDiffuse == b.minMaterialForDiffuse &&
+			a.minMaterialForSpecular == b.minMaterialForSpecular &&
+			a.usePrepassOnlyForSpecularMotionEstimation == b.usePrepassOnlyForSpecularMotionEstimation;
+	}
+
+	static bool RelaxSettingsEqual(const nrd::RelaxSettings& a, const nrd::RelaxSettings& b)
+	{
+		return
+			a.diffuseMaxAccumulatedFrameNum == b.diffuseMaxAccumulatedFrameNum &&
+			a.specularMaxAccumulatedFrameNum == b.specularMaxAccumulatedFrameNum &&
+			a.diffuseMaxFastAccumulatedFrameNum == b.diffuseMaxFastAccumulatedFrameNum &&
+			a.specularMaxFastAccumulatedFrameNum == b.specularMaxFastAccumulatedFrameNum &&
+			a.hitDistanceReconstructionMode == b.hitDistanceReconstructionMode &&
+			a.enableAntiFirefly == b.enableAntiFirefly &&
+			a.fastHistoryClampingSigmaScale == b.fastHistoryClampingSigmaScale &&
+			a.diffusePrepassBlurRadius == b.diffusePrepassBlurRadius &&
+			a.specularPrepassBlurRadius == b.specularPrepassBlurRadius &&
+			a.minMaterialForDiffuse == b.minMaterialForDiffuse &&
+			a.minMaterialForSpecular == b.minMaterialForSpecular;
+	}
+
 	static bool SigmaSettingsEqual(const nrd::SigmaSettings& a, const nrd::SigmaSettings& b)
 	{
 		return
@@ -102,7 +152,7 @@ nrd::Resource NRINrdContext::MakeResource(NRITextureResource& texture)
 
 bool NRINrdContext::EnsureReady(nri::Device& device, uint32_t width, uint32_t height, uint8_t queuedFrameNum)
 {
-	if (mInitialized && mWidth == width && mHeight == height)
+	if (mInitialized && mWidth == width && mHeight == height && mQueuedFrameNum == queuedFrameNum)
 	{
 		return true;
 	}
@@ -131,6 +181,7 @@ bool NRINrdContext::EnsureReady(nri::Device& device, uint32_t width, uint32_t he
 	mSigmaDenoiser = gDenoisers[2].identifier;
 	mWidth = width;
 	mHeight = height;
+	mQueuedFrameNum = queuedFrameNum;
 	mInitialized = true;
 	mHasReblurSettings = false;
 	mHasRelaxSettings = false;
@@ -190,7 +241,7 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 		const nrd::RelaxSettings relaxSettings = BuildRelaxSettings(desc);
 		settingsChanged =
 			!mHasRelaxSettings ||
-			std::memcmp(&mRelaxSettings, &relaxSettings, sizeof(relaxSettings)) != 0;
+			!RelaxSettingsEqual(mRelaxSettings, relaxSettings);
 
 		if (settingsChanged)
 		{
@@ -208,7 +259,7 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 		const nrd::ReblurSettings reblurSettings = BuildReblurSettings(desc);
 		settingsChanged =
 			!mHasReblurSettings ||
-			std::memcmp(&mReblurSettings, &reblurSettings, sizeof(reblurSettings)) != 0;
+			!ReblurSettingsEqual(mReblurSettings, reblurSettings);
 
 		if (settingsChanged)
 		{
@@ -253,6 +304,8 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 	commonSettings.disocclusionThreshold = 0.01f;
 	commonSettings.disocclusionThresholdAlternate = 0.05f;
 	commonSettings.frameIndex = desc.frameIndex;
+	const float temporalFrameTimeMs = ResolveNrdTemporalFrameTimeMs(desc.observedFrameTimeMs);
+	commonSettings.timeDeltaBetweenFrames = temporalFrameTimeMs;
 	commonSettings.accumulationMode = (desc.resetHistory || denoiserChanged || settingsChanged || sigmaSettingsChanged) ? nrd::AccumulationMode::CLEAR_AND_RESTART : nrd::AccumulationMode::CONTINUE;
 	// Camera motion is already represented by the matrices above, so motion vectors stay in screen space here.
 	commonSettings.isMotionVectorInWorldSpace = false;
@@ -262,6 +315,25 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 	// for REBLUR until we have a more deliberate motion-patching policy.
 	commonSettings.isBaseColorMetalnessAvailable = useRelax;
 	commonSettings.enableValidation = desc.enableValidation;
+	if (desc.traceTemporalInput)
+	{
+		const float frameRateScale = useRelax ?
+			std::clamp(16.66f / temporalFrameTimeMs, 0.25f, 4.0f) :
+			std::max(33.333f / temporalFrameTimeMs, 1.0f);
+		Printf("PERF pt nrd temporal NRI: frame=%u mode=%s observed_frame_ms=%.3f effective_frame_ms=%.3f frame_rate_scale=%.3f renderer_queued_frames=%u integration_queued_frames=%u accumulation=%s reset_explicit=%u reset_mode=%u reset_settings=%u reset_sigma=%u\n",
+			desc.frameIndex,
+			useRelax ? "relax" : "reblur",
+			desc.observedFrameTimeMs,
+			temporalFrameTimeMs,
+			frameRateScale,
+			(unsigned)desc.queuedFrameNum,
+			(unsigned)mQueuedFrameNum,
+			commonSettings.accumulationMode == nrd::AccumulationMode::CONTINUE ? "continue" : "clear-and-restart",
+			desc.resetHistory ? 1u : 0u,
+			denoiserChanged ? 1u : 0u,
+			settingsChanged ? 1u : 0u,
+			sigmaSettingsChanged ? 1u : 0u);
+	}
 
 	if (mIntegration.SetCommonSettings(commonSettings) != nrd::Result::SUCCESS)
 	{
@@ -314,6 +386,7 @@ void NRINrdContext::Shutdown()
 	mInitialized = false;
 	mWidth = 0;
 	mHeight = 0;
+	mQueuedFrameNum = 0;
 	mReblurDenoiser = 0;
 	mRelaxDenoiser = 0;
 	mSigmaDenoiser = 0;

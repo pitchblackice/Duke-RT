@@ -276,6 +276,10 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext(bool mainViewEligib
 	init.frame.outputHeight = mOutputHeight;
 	init.frame.targetWidth = mTargetWidth;
 	init.frame.targetHeight = mTargetHeight;
+	init.frame.queuedFrameNum = frameBuffer != nullptr ?
+		(uint8_t)std::clamp<size_t>(frameBuffer->mQueuedFrames.size(), 1u, 255u) :
+		1u;
+	init.frame.observedFrameTimeMs = mHasPendingFrameGenerationRealFrameTime ? mPendingFrameGenerationRealFrameTimeMs : 0.0f;
 	init.frame.sceneLeft = mSceneLeft;
 	init.frame.sceneTop = mSceneTop;
 	std::copy(mCurrentCameraPos, mCurrentCameraPos + 3, init.frame.currentCameraPos.begin());

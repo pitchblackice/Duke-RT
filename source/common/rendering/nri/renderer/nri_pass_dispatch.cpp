@@ -524,7 +524,7 @@ bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 	Clocker clock(NriPTDenoiser);
 	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars();
 
-	if (!context.mNrd.EnsureReady(*context.mResources.device, context.mFrame.renderWidth, context.mFrame.renderHeight, 1))
+	if (!context.mNrd.EnsureReady(*context.mResources.device, context.mFrame.renderWidth, context.mFrame.renderHeight, context.mFrame.queuedFrameNum))
 	{
 		return false;
 	}
@@ -547,6 +547,8 @@ bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 	desc.resourceWidth = context.mFrame.renderWidth;
 	desc.resourceHeight = context.mFrame.renderHeight;
 	desc.frameIndex = context.mFrame.frameIndex;
+	desc.queuedFrameNum = context.mFrame.queuedFrameNum;
+	desc.observedFrameTimeMs = context.mFrame.observedFrameTimeMs;
 	Copy2(context.mFrame.currentJitter.data(), desc.cameraJitter);
 	Copy2(context.mFrame.previousJitter.data(), desc.cameraJitterPrev);
 	std::memcpy(desc.viewToClipMatrix, context.mFrame.currentViewToClip.data(), sizeof(desc.viewToClipMatrix));
@@ -573,6 +575,7 @@ bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 	desc.enableAntiFirefly = denoiserSettings.enableAntiFirefly;
 	desc.enableValidation = denoiserSettings.enableValidation;
 	desc.enableSigmaShadow = context.mUseSplitShadowDenoiser;
+	desc.traceTemporalInput = ShouldTracePtPerf();
 	return context.mNrd.Denoise(desc);
 }
 

@@ -751,13 +751,13 @@ void NRIRenderer::PrintStatus()
 			denoiserSettings.specularPrepassBlurRadius);
 	}
 	Printf("NRI PT NRD guides: diffuse_signal=primary_demodulated_radiance specular_signal=primary_demodulated_radiance hit_distance=%s roughness=material_hint metalness=material_hint material_id=semantic_class\n",
-		denoiserSettings.denoiserMode == NRINrdDenoiserMode::Relax ? "secondary_transport_linear_hitdist" : "secondary_transport_reblur_norm");
+		denoiserSettings.denoiserMode == NRINrdDenoiserMode::Relax ? "first_secondary_linear_hitdist" : "first_secondary_reblur_norm");
 	Printf("NRI PT scene stats: %s\n", nri_ptscenestats ? "on" : "off");
 	Printf("NRI PT mutation trace: chunk=%d sector=%d\n",
 		(int)nri_ptmutationtracechunk,
 		(int)nri_ptmutationtracesector);
 	Printf("NRI PT runtime link trace: %s\n", nri_ptruntimelinktrace ? "on" : "off");
-	Printf("NRI PT analytic lights: active=%u manual=%u muzzle_slots=%u muzzle_active=%u rules=%u topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u limit=%u\n",
+	Printf("NRI PT analytic lights: active=%u manual=%u muzzle_slots=%u muzzle_active=%u rules=%u topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u ordered_key_hash=0x%016llx soft=%u surviving_index_changed=%u surviving_soft_index_changed=%u limit=%u\n",
 		(uint32_t)mSceneLights.GetAnalyticLights().activeLights.size(),
 		(uint32_t)mSceneLights.GetAnalyticLights().manualLights.size(),
 		mSceneLights.GetAnalyticLights().transientMuzzleSlotCount,
@@ -768,6 +768,10 @@ void NRIRenderer::PrintStatus()
 		(uint32_t)mSceneLights.GetAnalyticLights().addedTopologyKeys.size(),
 		(uint32_t)mSceneLights.GetAnalyticLights().removedTopologyKeys.size(),
 		(uint32_t)mSceneLights.GetAnalyticLights().reboundTopologyKeys.size(),
+		(unsigned long long)mSceneLights.GetAnalyticLights().orderedStableKeyHash,
+		mSceneLights.GetAnalyticLights().softLightCount,
+		mSceneLights.GetAnalyticLights().survivingKeyIndexChangeCount,
+		mSceneLights.GetAnalyticLights().survivingSoftLightIndexChangeCount,
 		NRI_MAX_RUNTIME_POINT_LIGHTS);
 	Printf("NRI PT analytic clusters: tile=%u grid=%ux%u used_indices=%u max_occupancy=%u debug_mode=%u\n",
 		mBoundRuntimeLightTileSize,
