@@ -2807,6 +2807,11 @@ NRIPersistentVoxelStatusSnapshot NRIPersistentVoxelResidency::BuildStatusSnapsho
 	return snapshot;
 }
 
+bool NRIPersistentVoxelResidency::HasDirectBlasInFlight() const
+{
+	return admissionScheduler.GetSnapshot().blasInFlight != 0;
+}
+
 void NRIPersistentVoxelResidency::FillResourceStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const
 {
 	snapshot.meshVariantResourceCount = (uint32_t)meshVariantResources.size();
@@ -4051,7 +4056,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 	auto directBlasLaneBlocked = [&](bool exclusive) -> bool
 	{
 		const NRIVoxelAdmissionSnapshot scheduler = admissionScheduler.GetSnapshot();
-		if (exclusive && scheduler.blasInFlight != 0)
+		if (scheduler.blasInFlight != 0)
 		{
 			return true;
 		}
@@ -4799,7 +4804,12 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				requiredIndexBytes > indexBuffer.size ||
 				requiredPrimitiveBytes > primitiveBuffer.size;
 			const NRIVoxelAdmissionSnapshot schedulerSnapshot = admissionScheduler.GetSnapshot();
-			if (arenaGrowthRequired && (schedulerSnapshot.computeInFlight != 0 || schedulerSnapshot.blasInFlight != 0))
+			const NRIVoxelComputeMemoryUsage computeMemory = GetNRIVoxelComputeMemoryUsage();
+			if (arenaGrowthRequired &&
+				(schedulerSnapshot.computeInFlight != 0 ||
+				 schedulerSnapshot.blasInFlight != 0 ||
+				 computeMemory.pendingJobCount != 0 ||
+				 computeMemory.readyDirectMeshCount != 0))
 			{
 				arenaVertexCursor = entry.savedVertexCursor;
 				arenaIndexCursor = entry.savedIndexCursor;

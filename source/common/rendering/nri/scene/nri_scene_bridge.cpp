@@ -4786,15 +4786,18 @@ namespace
 			const double buildMs = DurationMs(buildStart, std::chrono::steady_clock::now());
 			if (ShouldTraceNRIVoxelComputeMeshing() || ShouldRunNRIVoxelComputeMeshing())
 			{
+				const bool queueComputeDiagnostics =
+					ShouldRunNRIVoxelComputeMeshing() &&
+					!ShouldDirectPublishNRIVoxelComputeMeshing();
 				FVoxelRawMeshStats rawStats = {};
 				TArray<FVoxelRawSlabRecord> rawSlabs;
 				TArray<FVoxelRawFaceRecord> rawFaces;
 				TArray<FVoxelRawColorRunRecord> rawColorRuns;
 				model->BuildRawMeshStats(
 					rawStats,
-					ShouldRunNRIVoxelComputeMeshing() ? &rawSlabs : nullptr,
-					ShouldEmitNRIVoxelComputeMeshing() ? &rawFaces : nullptr,
-					ShouldRunNRIVoxelComputeMeshing() ? &rawColorRuns : nullptr);
+					queueComputeDiagnostics ? &rawSlabs : nullptr,
+					queueComputeDiagnostics && ShouldEmitNRIVoxelComputeMeshing() ? &rawFaces : nullptr,
+					queueComputeDiagnostics ? &rawColorRuns : nullptr);
 				if (ShouldTraceNRIVoxelComputeMeshing())
 				{
 					Printf(
@@ -4815,16 +4818,23 @@ namespace
 						(uint32_t)entry.mesh.vertices.Size(),
 						rawStats.indexCount,
 						(uint32_t)entry.mesh.indices.Size(),
-						ShouldRunNRIVoxelComputeMeshing() ? 1u : 0u,
-						ShouldEmitNRIVoxelComputeMeshing() ? 1u : 0u);
+						queueComputeDiagnostics ? 1u : 0u,
+						queueComputeDiagnostics && ShouldEmitNRIVoxelComputeMeshing() ? 1u : 0u);
 				}
-				QueueNRIVoxelComputeCountJob(
-					model,
-					rawStats,
-					ShouldRunNRIVoxelComputeMeshing() ? &rawSlabs : nullptr,
-					ShouldEmitNRIVoxelComputeMeshing() ? &rawFaces : nullptr,
-					ShouldRunNRIVoxelComputeMeshing() ? &rawColorRuns : nullptr,
-					entry.mesh);
+				// Direct publication owns the production GPU meshing queue. A mesh that
+				// has already been built on the CPU has no consumer for a second GPU
+				// result, and dispatching that redundant work can overlap the shared
+				// voxel arenas used by direct publication and BLAS construction.
+				if (queueComputeDiagnostics)
+				{
+					QueueNRIVoxelComputeCountJob(
+						model,
+						rawStats,
+						ShouldRunNRIVoxelComputeMeshing() ? &rawSlabs : nullptr,
+						ShouldEmitNRIVoxelComputeMeshing() ? &rawFaces : nullptr,
+						ShouldRunNRIVoxelComputeMeshing() ? &rawColorRuns : nullptr,
+						entry.mesh);
+				}
 			}
 			entry.built = true;
 			entry.valid = entry.mesh.vertices.Size() > 0 && entry.mesh.indices.Size() >= 3;
