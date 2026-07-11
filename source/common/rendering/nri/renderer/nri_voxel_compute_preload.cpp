@@ -126,6 +126,10 @@ namespace
 		uint32_t capSkippedBindings = 0;
 		uint32_t failedBindings = 0;
 		uint32_t runtimeWithheldBindings = 0;
+		uint32_t balancedRequiredBindings = 0;
+		uint32_t balancedImportanceBindings = 0;
+		uint32_t balancedLargeBindings = 0;
+		uint32_t balancedFilteredOptionalBindings = 0;
 		uint32_t skippedSourceMissing = 0;
 		uint32_t skippedMaterialMissing = 0;
 		uint32_t skippedJobBudget = 0;
@@ -136,12 +140,17 @@ namespace
 		uint64_t uniqueSourceBytes = 0;
 		uint64_t runtimeWithheldUniqueGeometryBytes = 0;
 		uint64_t runtimeWithheldManifestHash = 1469598103934665603ull;
+		uint64_t balancedRequiredGeometryBytes = 0;
+		uint64_t balancedImportanceGeometryBytes = 0;
+		uint64_t balancedLargeGeometryBytes = 0;
+		uint64_t runtimeProbeDigest = 1469598103934665603ull;
 		uint64_t manifestHash = 1469598103934665603ull;
 		std::unordered_set<uint64_t> uniqueSources;
 		std::unordered_set<uint64_t> uniqueMeshes;
 		std::unordered_set<uint64_t> uniqueMaterials;
 		std::unordered_set<uint64_t> uniqueTextures;
 		std::unordered_set<uint64_t> runtimeWithheldMeshes;
+		std::unordered_set<uint64_t> runtimeProbeMeshes;
 	};
 
 	RawPlanResult BuildRawPlan(
@@ -153,19 +162,44 @@ namespace
 		result.bindings.reserve(rawVariants.size());
 		std::unordered_set<uint64_t> selectedMaterialRows;
 		std::unordered_set<uint64_t> requiredMeshResources;
-		if (settings.runtimeWithholdModulo != 0 && settings.includeRequired)
+		std::unordered_set<uint64_t> optionalMeshResources;
+		if (settings.runtimeWithholdModulo != 0 || settings.runtimeProbeModulo != 0)
 		{
 			for (const nri_scene::PrecachedVoxelRawManifestView& rawVariant : rawVariants)
 			{
-				if (!IsRequiredComputePreloadRawVariant(rawVariant) ||
-					!rawVariant.rawSourceResident || rawVariant.primitiveCount == 0 ||
+				if (!rawVariant.rawSourceResident || rawVariant.primitiveCount == 0 ||
 					rawVariant.meshKeyHash == 0 || rawVariant.model == nullptr ||
 					!rawVariant.materialContextReady || rawVariant.materialKeyHash == 0)
 				{
 					continue;
 				}
-				requiredMeshResources.insert(BuildPersistentVoxelVariantMeshResourceKey(BuildDirectVariant(rawVariant)));
+				const uint64_t meshResourceKey = BuildPersistentVoxelVariantMeshResourceKey(BuildDirectVariant(rawVariant));
+				if (IsRequiredComputePreloadRawVariant(rawVariant))
+				{
+					requiredMeshResources.insert(meshResourceKey);
+				}
+				else
+				{
+					optionalMeshResources.insert(meshResourceKey);
+				}
 			}
+		}
+		if (settings.runtimeProbeModulo != 0)
+		{
+			for (uint64_t meshResourceKey : optionalMeshResources)
+			{
+				if (requiredMeshResources.find(meshResourceKey) == requiredMeshResources.end() &&
+					meshResourceKey % settings.runtimeProbeModulo == settings.runtimeProbeRemainder)
+				{
+					result.runtimeProbeMeshes.insert(meshResourceKey);
+				}
+			}
+		}
+		std::vector<uint64_t> sortedProbeMeshes(result.runtimeProbeMeshes.begin(), result.runtimeProbeMeshes.end());
+		std::sort(sortedProbeMeshes.begin(), sortedProbeMeshes.end());
+		for (uint64_t meshResourceKey : sortedProbeMeshes)
+		{
+			result.runtimeProbeDigest = HashValue(result.runtimeProbeDigest, meshResourceKey);
 		}
 
 		uint64_t selectedPairBytes = 0;
@@ -177,7 +211,6 @@ namespace
 				continue;
 			}
 
-			result.candidateBindings++;
 			nri_scene::PrecachedVoxelVariantView directVariant = BuildDirectVariant(rawVariant);
 			PlannedBinding binding = {};
 			binding.meshResourceKey = BuildPersistentVoxelVariantMeshResourceKey(directVariant);
@@ -186,6 +219,18 @@ namespace
 				(uint64_t)(uint32_t)rawVariant.resolvedVoxelIndex + 1ull :
 				(rawVariant.geometryContentHash != 0 ? rawVariant.geometryContentHash : rawVariant.meshKeyHash);
 			binding.textureKey = rawVariant.sourcePicnum >= 0 ? (uint64_t)(uint32_t)rawVariant.sourcePicnum + 1ull : rawVariant.materialKeyHash;
+			const bool runtimeProbe =
+				!required &&
+				result.runtimeProbeMeshes.find(binding.meshResourceKey) != result.runtimeProbeMeshes.end();
+			const bool selectedByImportance = !required && rawVariant.priority <= settings.balancedMaxPriority;
+			const bool selectedByLarge = !required && rawVariant.primitiveCount >= settings.balancedMinPrimitives;
+			if (!required && settings.balancedOptional &&
+				(runtimeProbe || (!selectedByImportance && !selectedByLarge)))
+			{
+				result.balancedFilteredOptionalBindings++;
+				continue;
+			}
+			result.candidateBindings++;
 			result.manifestHash = HashValue(result.manifestHash, binding.meshResourceKey);
 			result.manifestHash = HashValue(result.manifestHash, binding.materialKey);
 			result.manifestHash = HashValue(result.manifestHash, rawVariant.geometryContentHash);
@@ -240,7 +285,7 @@ namespace
 			const bool runtimeWithheld =
 				!required &&
 				settings.runtimeWithholdModulo != 0 &&
-				requiredMeshResources.find(binding.meshResourceKey) == requiredMeshResources.end() &&
+				(!settings.includeRequired || requiredMeshResources.find(binding.meshResourceKey) == requiredMeshResources.end()) &&
 				binding.meshResourceKey % settings.runtimeWithholdModulo == settings.runtimeWithholdRemainder;
 			directVariant.preloadGeometry = !runtimeWithheld;
 			binding.runtimeWithheld = runtimeWithheld;
@@ -254,6 +299,21 @@ namespace
 			result.runtimeWithheldBindings += runtimeWithheld ? 1u : 0u;
 			selectedPairBytes += estimatedBytes;
 			result.admittedPairGeometryBytes += estimatedBytes;
+			if (required)
+			{
+				result.balancedRequiredBindings++;
+				result.balancedRequiredGeometryBytes += estimatedBytes;
+			}
+			else if (settings.balancedOptional && selectedByImportance)
+			{
+				result.balancedImportanceBindings++;
+				result.balancedImportanceGeometryBytes += estimatedBytes;
+			}
+			else if (settings.balancedOptional)
+			{
+				result.balancedLargeBindings++;
+				result.balancedLargeGeometryBytes += estimatedBytes;
+			}
 			selectedMaterialRows.insert(rawVariant.materialKeyHash);
 			if (result.uniqueMeshes.insert(binding.meshResourceKey).second && !runtimeWithheld)
 			{
@@ -287,6 +347,7 @@ namespace
 		NRIVoxelComputePreloadStats stats = {};
 		std::vector<PlannedBinding> bindings;
 		std::unordered_set<uint64_t> runtimeWithheldMeshes;
+		std::unordered_set<uint64_t> runtimeProbeMeshes;
 		bool runtimeTailReleased = false;
 	};
 
@@ -303,6 +364,12 @@ NRIVoxelComputePreloadSettings BuildNRIVoxelComputePreloadSettingsFromCVars()
 	settings.includeOptional = (bool)nri_ptvoxelcomputepreloadoptional;
 	settings.preloadMaterials = (bool)nri_ptvoxelcomputepreloadmaterials;
 	settings.strict = (bool)nri_ptvoxelcomputepreloadstrict;
+	settings.balancedOptional = (bool)nri_ptvoxelcomputepreloadbalancedoptional;
+	settings.balancedMaxPriority = (int)nri_ptvoxelcomputepreloadbalancedmaxpriority;
+	settings.balancedMinPrimitives = (uint32_t)std::max(0, (int)nri_ptvoxelcomputepreloadbalancedminprimitives);
+	settings.runtimeProbeModulo = (uint32_t)std::max(0, (int)nri_ptvoxelcomputepreloadruntimeprobemod);
+	settings.runtimeProbeRemainder = settings.runtimeProbeModulo != 0 ?
+		(uint32_t)std::max(0, (int)nri_ptvoxelcomputepreloadruntimeproberem) % settings.runtimeProbeModulo : 0u;
 	settings.runtimeWithholdModulo = (uint32_t)std::max(0, (int)nri_ptvoxelcomputepreloadruntimewithholdmod);
 	settings.runtimeWithholdRemainder = settings.runtimeWithholdModulo != 0 ?
 		(uint32_t)std::max(0, (int)nri_ptvoxelcomputepreloadruntimewithholdrem) % settings.runtimeWithholdModulo : 0u;
@@ -630,6 +697,15 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 	stats.rawRuntimeWithheldUniqueMeshes = (uint32_t)rawPlan.runtimeWithheldMeshes.size();
 	stats.rawRuntimeWithheldUniqueGeometryBytes = rawPlan.runtimeWithheldUniqueGeometryBytes;
 	stats.rawRuntimeWithheldManifestHash = rawPlan.runtimeWithheldManifestHash;
+	stats.rawBalancedRequiredBindings = rawPlan.balancedRequiredBindings;
+	stats.rawBalancedImportanceBindings = rawPlan.balancedImportanceBindings;
+	stats.rawBalancedLargeBindings = rawPlan.balancedLargeBindings;
+	stats.rawBalancedFilteredOptionalBindings = rawPlan.balancedFilteredOptionalBindings;
+	stats.rawBalancedRequiredGeometryBytes = rawPlan.balancedRequiredGeometryBytes;
+	stats.rawBalancedImportanceGeometryBytes = rawPlan.balancedImportanceGeometryBytes;
+	stats.rawBalancedLargeGeometryBytes = rawPlan.balancedLargeGeometryBytes;
+	stats.rawRuntimeProbeUniqueMeshes = (uint32_t)rawPlan.runtimeProbeMeshes.size();
+	stats.rawRuntimeProbeDigest = rawPlan.runtimeProbeDigest;
 	stats.rawSelectedUniqueSources = (uint32_t)rawPlan.uniqueSources.size();
 	stats.rawSelectedUniqueMeshes = (uint32_t)rawPlan.uniqueMeshes.size();
 	stats.rawSelectedUniqueMaterials = (uint32_t)rawPlan.uniqueMaterials.size();
@@ -674,6 +750,7 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 		gPreloadPlanState.stats = stats;
 		gPreloadPlanState.bindings = std::move(rawPlan.bindings);
 		gPreloadPlanState.runtimeWithheldMeshes = std::move(rawPlan.runtimeWithheldMeshes);
+		gPreloadPlanState.runtimeProbeMeshes = std::move(rawPlan.runtimeProbeMeshes);
 	}
 
 	if (ShouldEmitPreloadTrace(settings))
@@ -718,6 +795,25 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 			stats.rawSelected,
 			stats.rawSelectedUniqueMaterials,
 			stats.rawSelectedUniqueTextures);
+		Printf("PERF pt voxel preload selection NRI: level=%s build_serial=%llu frame=%u balanced=%u max_priority=%d min_primitives=%u required_bindings=%u required_pair_bytes=%llu importance_bindings=%u importance_pair_bytes=%llu large_bindings=%u large_pair_bytes=%llu filtered_optional_bindings=%u probe_enabled=%u probe_modulo=%u probe_remainder=%u probe_meshes=%u probe_digest=0x%llx\n",
+			levelName != nullptr ? levelName : "unknown",
+			(unsigned long long)buildSerial,
+			frameIndex,
+			settings.balancedOptional ? 1u : 0u,
+			settings.balancedMaxPriority,
+			settings.balancedMinPrimitives,
+			stats.rawBalancedRequiredBindings,
+			(unsigned long long)stats.rawBalancedRequiredGeometryBytes,
+			stats.rawBalancedImportanceBindings,
+			(unsigned long long)stats.rawBalancedImportanceGeometryBytes,
+			stats.rawBalancedLargeBindings,
+			(unsigned long long)stats.rawBalancedLargeGeometryBytes,
+			stats.rawBalancedFilteredOptionalBindings,
+			settings.runtimeProbeModulo != 0 ? 1u : 0u,
+			settings.runtimeProbeModulo,
+			settings.runtimeProbeRemainder,
+			stats.rawRuntimeProbeUniqueMeshes,
+			(unsigned long long)stats.rawRuntimeProbeDigest);
 		Printf("NRI PT voxel compute preload: event=plan stage=%s level=%s build_serial=%llu frame=%u enabled=%u dry_run=%u action=%s variants=%u required=%u optional=%u selected=%u selected_required=%u selected_optional=%u unique_meshes=%u unique_materials=%u surface_ready=%u direct_only=%u source_ready=%u material_context=%u mesh_resident=%u material_resident=%u blas_ready=%u ready=%u not_ready=%u material_rows_planned=%u estimated_bytes=%llu selected_bytes=%llu resident_scene_bytes=%llu resident_as_bytes=%llu skipped_disabled=%u skipped_required_off=%u skipped_optional_off=%u skipped_byte_budget=%u skipped_job_budget=%u skipped_material_budget=%u raw_variants=%u raw_required=%u raw_optional=%u raw_selected=%u raw_selected_required=%u raw_selected_optional=%u raw_unique_meshes=%u raw_unique_materials=%u raw_material_required_keys=%u raw_material_optional_keys=%u raw_material_selected_keys=%u raw_material_actor_scoped_keys=%u raw_material_texture_refs=%u raw_source_resident=%u raw_source_missing=%u raw_material_context=%u raw_material_missing=%u raw_cpu_surface_ready=%u raw_legacy_gpu_candidate=%u raw_legacy_gpu_source_skipped=%u raw_estimated_bytes=%llu raw_selected_bytes=%llu raw_skipped_disabled=%u raw_skipped_required_off=%u raw_skipped_optional_off=%u raw_skipped_source_missing=%u raw_skipped_material_missing=%u raw_skipped_byte_budget=%u raw_skipped_job_budget=%u manifest_sources=%u manifest_lines=%u manifest_requests=%u manifest_discovered=%u manifest_unique=%u manifest_skipped_inactive=%u manifest_skipped_syntax=%u manifest_skipped_actor=%u manifest_skipped_unsupported=%u manifest_skipped_invalid=%u manifest_skipped_duplicate=%u max_ms=%u max_jobs=%u max_blas=%u max_bytes=%llu max_material_rows=%u ms=%.3f\n",
 			timelineStage != nullptr ? timelineStage : "snapshot",
 			levelName != nullptr ? levelName : "unknown",
@@ -893,7 +989,16 @@ bool IsNRIVoxelComputePreloadRuntimeWithheldMesh(uint64_t buildSerial, uint64_t 
 	return
 		buildSerial != 0 &&
 		gPreloadPlanState.buildSerial == buildSerial &&
-		gPreloadPlanState.runtimeWithheldMeshes.find(meshResourceKey) != gPreloadPlanState.runtimeWithheldMeshes.end();
+		(gPreloadPlanState.runtimeWithheldMeshes.find(meshResourceKey) != gPreloadPlanState.runtimeWithheldMeshes.end() ||
+		 gPreloadPlanState.runtimeProbeMeshes.find(meshResourceKey) != gPreloadPlanState.runtimeProbeMeshes.end());
+}
+
+bool IsNRIVoxelComputePreloadRuntimeProbeMesh(uint64_t buildSerial, uint64_t meshResourceKey)
+{
+	return
+		buildSerial != 0 &&
+		gPreloadPlanState.buildSerial == buildSerial &&
+		gPreloadPlanState.runtimeProbeMeshes.find(meshResourceKey) != gPreloadPlanState.runtimeProbeMeshes.end();
 }
 
 bool IsNRIVoxelComputePreloadRuntimeTailReleased(uint64_t buildSerial)
@@ -908,16 +1013,17 @@ void NotifyNRIVoxelComputePreloadRuntimeTailReleased(uint64_t buildSerial, uint3
 {
 	if (buildSerial == 0 ||
 		gPreloadPlanState.buildSerial != buildSerial ||
-		gPreloadPlanState.runtimeWithheldMeshes.empty() ||
+		(gPreloadPlanState.runtimeWithheldMeshes.empty() && gPreloadPlanState.runtimeProbeMeshes.empty()) ||
 		gPreloadPlanState.runtimeTailReleased)
 	{
 		return;
 	}
 	gPreloadPlanState.runtimeTailReleased = true;
-	Printf("PERF pt voxel preload runtime tail release NRI: build_serial=%llu frame=%u withheld_unique_meshes=%u\n",
+	Printf("PERF pt voxel preload runtime tail release NRI: build_serial=%llu frame=%u withheld_unique_meshes=%u probe_unique_meshes=%u\n",
 		(unsigned long long)buildSerial,
 		frameIndex,
-		(uint32_t)gPreloadPlanState.runtimeWithheldMeshes.size());
+		(uint32_t)gPreloadPlanState.runtimeWithheldMeshes.size(),
+		(uint32_t)gPreloadPlanState.runtimeProbeMeshes.size());
 }
 
 NRIVoxelComputePreloadClosureStats BuildNRIVoxelComputePreloadClosure(

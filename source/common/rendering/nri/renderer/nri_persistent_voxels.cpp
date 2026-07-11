@@ -2368,6 +2368,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			persistentVoxelTlasDirectMaxLatencyFrames = std::max(persistentVoxelTlasDirectMaxLatencyFrames, directLatency);
 		}
 		const bool runtimeTailMesh = IsNRIVoxelComputePreloadRuntimeWithheldMesh(residencyLastBuildSerial, actor.meshResourceKey);
+		const bool runtimeProbeMesh = IsNRIVoxelComputePreloadRuntimeProbeMesh(residencyLastBuildSerial, actor.meshResourceKey);
 		const bool traceDirectGeneratedTlas =
 			meshResourceIt->second.directComputePublished &&
 			(int)nri_ptvoxelcomputetrace > 0 &&
@@ -2413,12 +2414,13 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 				publishFrame != UINT32_MAX && frameIndex >= publishFrame ? frameIndex - publishFrame : 0u;
 			const uint32_t requestToTlas =
 				requestFrame != UINT32_MAX && frameIndex >= requestFrame ? frameIndex - requestFrame : 0u;
-			Printf("PERF pt voxel runtime tail NRI: action=tlas-visible build_serial=%llu frame=%u mesh_resource=0x%llx mesh_variant=0x%llx material=0x%llx request_frame=%u ready_frame=%u blas_frame=%u publish_frame=%u tlas_frame=%u request_to_ready=%u ready_to_blas=%u blas_to_publish=%u publish_to_tlas=%u request_to_tlas=%u primitives=%u\n",
+			Printf("PERF pt voxel runtime tail NRI: action=tlas-visible build_serial=%llu frame=%u mesh_resource=0x%llx mesh_variant=0x%llx material=0x%llx probe=%u request_frame=%u ready_frame=%u blas_frame=%u publish_frame=%u tlas_frame=%u request_to_ready=%u ready_to_blas=%u blas_to_publish=%u publish_to_tlas=%u request_to_tlas=%u primitives=%u\n",
 				(unsigned long long)residencyLastBuildSerial,
 				frameIndex,
 				(unsigned long long)actor.meshResourceKey,
 				(unsigned long long)actor.meshKeyHash,
 				(unsigned long long)actor.materialKeyHash,
+				runtimeProbeMesh ? 1u : 0u,
 				requestFrame,
 				readyFrame,
 				blasFrame,
@@ -3881,6 +3883,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 	const bool runtimeTailRequest =
 		IsNRIVoxelComputePreloadRuntimeWithheldMesh(residencyLastBuildSerial, meshResourceKey) &&
 		IsNRIVoxelComputePreloadRuntimeTailReleased(residencyLastBuildSerial);
+	const bool runtimeProbeRequest = IsNRIVoxelComputePreloadRuntimeProbeMesh(residencyLastBuildSerial, meshResourceKey);
 	const bool directOnlyAdmission = variant.directOnlyAdmission && ShouldDirectPublishNRIVoxelComputeMeshing();
 	if ((!directOnlyAdmission && variant.surface == nullptr) ||
 		variant.meshKeyHash == 0 ||
@@ -4036,6 +4039,12 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		}
 		for (const NRIVoxelAdmissionTokenSnapshot& token : admissionScheduler.GetTokenSnapshots())
 		{
+			if (exclusive && token.tokenId != entry.schedulerTokenId &&
+				token.stage == NRIVoxelAdmissionStage::ComputeSubmitted &&
+				token.oversizedExclusive && token.tokenId < entry.schedulerTokenId)
+			{
+				return true;
+			}
 			if (token.tokenId != entry.schedulerTokenId &&
 				token.stage == NRIVoxelAdmissionStage::BlasSubmitted &&
 				token.oversizedExclusive)
@@ -4115,6 +4124,12 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		{
 			return rollbackAdmission("material-publish-failed", "direct_blas_publish");
 		}
+		if (entry.schedulerTokenId == 0 ||
+			!admissionScheduler.MarkBlasReady(entry.schedulerTokenId) ||
+			!admissionScheduler.MarkPublished(entry.schedulerTokenId))
+		{
+			return rollbackAdmission("scheduler-publication-transition", "direct_blas_publish");
+		}
 		meshVariantResources[meshResourceKey] = std::move(entry.uploadMeshResource);
 		publishedMeshKeys.insert(meshResourceKey);
 		if (loadingTraceLevel >= 1 || voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
@@ -4162,15 +4177,6 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		if (outStats != nullptr)
 		{
 			outStats->cpuGeometryAvoided++;
-		}
-		if (entry.schedulerTokenId != 0)
-		{
-			if (!admissionScheduler.MarkBlasReady(entry.schedulerTokenId) ||
-				!admissionScheduler.MarkPublished(entry.schedulerTokenId))
-			{
-				admissionScheduler.Fail(entry.schedulerTokenId);
-				entry.schedulerTokenId = 0;
-			}
 		}
 		services.RetireBuffer(entry.directBlasScratchBuffer);
 		entry.uploadMeshResource = {};
@@ -4236,7 +4242,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			entry.lastReason = "direct-blas-shared-owner";
 			return true;
 		}
-		if (entry.runtimeRequested && directBlasLaneBlocked(isolateBlasBuild))
+		if (directBlasLaneBlocked(isolateBlasBuild))
 		{
 			outInProgress = true;
 			entry.lastReason = isolateBlasBuild ? "direct-blas-exclusive-lane" : "direct-blas-exclusive-owner";
@@ -4811,13 +4817,37 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				request.priority = UINT32_MAX - normalizedPriority;
 				request.age = entry.firstQueuedFrame != UINT32_MAX && frameIndex >= entry.firstQueuedFrame ?
 					(uint64_t)(frameIndex - entry.firstQueuedFrame) : 0u;
+				auto deferSchedulerCompute = [&]()
+				{
+					CancelNRIVoxelComputeDirectPublication(meshResourceKey, request.generation);
+					arenaVertexCursor = entry.savedVertexCursor;
+					arenaIndexCursor = entry.savedIndexCursor;
+					arenaPrimitiveCursor = entry.savedPrimitiveCursor;
+					entry.uploadMeshResource = {};
+					entry.directComputeRequested = false;
+					entry.directComputeFailed = false;
+					entry.directComputeRequestFrame = UINT32_MAX;
+					entry.directComputeFailure = NRIVoxelComputeDirectPublishFailure::QueueFull;
+					if (entry.schedulerTokenId != 0)
+					{
+						admissionScheduler.Cancel(entry.schedulerTokenId);
+						entry.schedulerTokenId = 0;
+					}
+					entry.state = PersistentVoxelAdmissionState::Pending;
+					entry.lastReason = "scheduler-compute-lane";
+					outInProgress = true;
+					if (outStats != nullptr)
+					{
+						outStats->directPending++;
+					}
+				};
 				const NRIVoxelComputeGeneratedGeometryStatus directStatus = RequestNRIVoxelComputeDirectPublication(request);
 				if (directStatus == NRIVoxelComputeGeneratedGeometryStatus::Queued)
 				{
-					if (entry.schedulerTokenId != 0 && !admissionScheduler.SubmitCompute(entry.schedulerTokenId))
+					if (entry.schedulerTokenId == 0 || !admissionScheduler.SubmitCompute(entry.schedulerTokenId))
 					{
-						admissionScheduler.Fail(entry.schedulerTokenId);
-						entry.schedulerTokenId = 0;
+						deferSchedulerCompute();
+						return true;
 					}
 					if (outStats != nullptr)
 					{
@@ -4852,12 +4882,13 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 							runtimeTailRequest ? 1u : 0u);
 						if (runtimeTailRequest)
 						{
-							Printf("PERF pt voxel runtime tail NRI: action=request build_serial=%llu frame=%u mesh_resource=0x%llx mesh_variant=0x%llx material=0x%llx tex=%d voxel=%d primitives=%u\n",
+							Printf("PERF pt voxel runtime tail NRI: action=request build_serial=%llu frame=%u mesh_resource=0x%llx mesh_variant=0x%llx material=0x%llx probe=%u tex=%d voxel=%d primitives=%u\n",
 								(unsigned long long)residencyLastBuildSerial,
 								frameIndex,
 								(unsigned long long)meshResourceKey,
 								(unsigned long long)variant.meshKeyHash,
 								(unsigned long long)variant.materialKeyHash,
+								runtimeProbeRequest ? 1u : 0u,
 								variant.sourcePicnum,
 								variant.resolvedVoxelIndex,
 								variant.primitiveCount);
@@ -4867,10 +4898,10 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				}
 				if (directStatus == NRIVoxelComputeGeneratedGeometryStatus::Ready)
 				{
-					if (entry.schedulerTokenId != 0 && !admissionScheduler.SubmitCompute(entry.schedulerTokenId))
+					if (entry.schedulerTokenId == 0 || !admissionScheduler.SubmitCompute(entry.schedulerTokenId))
 					{
-						admissionScheduler.Fail(entry.schedulerTokenId);
-						entry.schedulerTokenId = 0;
+						deferSchedulerCompute();
+						return true;
 					}
 					arenaVertexCursor = entry.savedVertexCursor;
 					arenaIndexCursor = entry.savedIndexCursor;

@@ -16,6 +16,11 @@ struct NRIVoxelComputePreloadSettings
 	bool includeOptional = false;
 	bool preloadMaterials = false;
 	bool strict = false;
+	bool balancedOptional = false;
+	int32_t balancedMaxPriority = 1;
+	uint32_t balancedMinPrimitives = 100000;
+	uint32_t runtimeProbeModulo = 0;
+	uint32_t runtimeProbeRemainder = 0;
 	uint32_t runtimeWithholdModulo = 0;
 	uint32_t runtimeWithholdRemainder = 0;
 	uint32_t maxMilliseconds = 0;
@@ -99,6 +104,15 @@ struct NRIVoxelComputePreloadStats
 	uint32_t rawRuntimeWithheldUniqueMeshes = 0;
 	uint64_t rawRuntimeWithheldUniqueGeometryBytes = 0;
 	uint64_t rawRuntimeWithheldManifestHash = 0;
+	uint32_t rawBalancedRequiredBindings = 0;
+	uint32_t rawBalancedImportanceBindings = 0;
+	uint32_t rawBalancedLargeBindings = 0;
+	uint32_t rawBalancedFilteredOptionalBindings = 0;
+	uint64_t rawBalancedRequiredGeometryBytes = 0;
+	uint64_t rawBalancedImportanceGeometryBytes = 0;
+	uint64_t rawBalancedLargeGeometryBytes = 0;
+	uint32_t rawRuntimeProbeUniqueMeshes = 0;
+	uint64_t rawRuntimeProbeDigest = 0;
 	uint32_t rawSelectedUniqueSources = 0;
 	uint32_t rawSelectedUniqueMeshes = 0;
 	uint32_t rawSelectedUniqueMaterials = 0;
@@ -187,6 +201,7 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 
 const NRIVoxelComputePreloadStats& GetLastNRIVoxelComputePreloadStats();
 bool IsNRIVoxelComputePreloadRuntimeWithheldMesh(uint64_t buildSerial, uint64_t meshResourceKey);
+bool IsNRIVoxelComputePreloadRuntimeProbeMesh(uint64_t buildSerial, uint64_t meshResourceKey);
 bool IsNRIVoxelComputePreloadRuntimeTailReleased(uint64_t buildSerial);
 void NotifyNRIVoxelComputePreloadRuntimeTailReleased(uint64_t buildSerial, uint32_t frameIndex);
 NRIVoxelComputePreloadClosureStats BuildNRIVoxelComputePreloadClosure(
