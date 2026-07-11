@@ -792,6 +792,12 @@ public:
 		float lastProposalBoundGrowthOldWeight = 0.0f;
 		float lastProposalBoundGrowthNewWeight = 0.0f;
 		bool lastProposalBoundGrowthWasAuthored = false;
+		uint32_t proposalActiveCount = 0;
+		uint32_t proposalRetainedDarkCount = 0;
+		uint32_t proposalReactivatedCount = 0;
+		uint32_t proposalRetiredMissingCount = 0;
+		uint32_t proposalRetiredReplacedCount = 0;
+		uint32_t proposalRecordCount = 0;
 	};
 
 	void BuildEmissiveSamplingUpload(

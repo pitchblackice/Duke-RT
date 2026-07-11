@@ -90,6 +90,7 @@ void NRIEmissiveSamplingDistribution::Build(
 	{
 		if (!std::binary_search(liveKeys.begin(), liveKeys.end(), it->first))
 		{
+			stats.retiredMissingCount++;
 			it = mProposalRecords.erase(it);
 		}
 		else
@@ -114,9 +115,14 @@ void NRIEmissiveSamplingDistribution::Build(
 		auto& record = recordIt->second;
 		if (inserted || record.bindingKey != candidate.bindingKey)
 		{
+			if (!inserted)
+			{
+				stats.retiredReplacedCount++;
+			}
 			record.bindingKey = candidate.bindingKey;
 			record.referenceWeight = initialWeight;
 			record.authored = candidate.hasReferenceProposalWeight;
+			record.wasDark = false;
 		}
 		else
 		{
@@ -133,12 +139,23 @@ void NRIEmissiveSamplingDistribution::Build(
 				record.authored = stats.lastBoundGrowthWasAuthored;
 			}
 		}
-		if (currentWeight > 0.0f)
+		if (candidate.live)
 		{
+			stats.activeCount++;
+			if (record.wasDark)
+			{
+				stats.reactivatedCount++;
+			}
 			record.lastActiveFrame = frameIndex;
+		}
+		record.wasDark = !candidate.live && record.referenceWeight > 0.0f;
+		if (record.wasDark)
+		{
+			stats.retainedDarkCount++;
 		}
 		resolvedWeights[index] = record.referenceWeight;
 	}
+	stats.recordCount = (uint32_t)mProposalRecords.size();
 
 	if (uniqueIndices.size() > maxCandidateCount)
 	{

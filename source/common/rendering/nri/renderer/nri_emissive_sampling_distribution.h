@@ -13,6 +13,7 @@ struct NRIEmissiveSamplingDistributionCandidate
 	float proposalWeight = 0.0f;
 	float referenceProposalWeight = 0.0f;
 	bool hasReferenceProposalWeight = false;
+	bool live = true;
 };
 
 struct NRIEmissiveSamplingDistributionEntry
@@ -35,6 +36,12 @@ struct NRIEmissiveSamplingDistributionStats
 	float lastBoundGrowthOldWeight = 0.0f;
 	float lastBoundGrowthNewWeight = 0.0f;
 	bool lastBoundGrowthWasAuthored = false;
+	uint32_t activeCount = 0;
+	uint32_t retainedDarkCount = 0;
+	uint32_t reactivatedCount = 0;
+	uint32_t retiredMissingCount = 0;
+	uint32_t retiredReplacedCount = 0;
+	uint32_t recordCount = 0;
 };
 
 class NRIEmissiveSamplingDistribution
@@ -56,6 +63,7 @@ private:
 		uint64_t lastActiveFrame = 0;
 		float referenceWeight = 0.0f;
 		bool authored = false;
+		bool wasDark = false;
 	};
 
 	std::unordered_map<uint64_t, ProposalRecord> mProposalRecords;

@@ -192,7 +192,6 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(
 		uint64_t livePowerHash = 1469598103934665603ull;
 		uint64_t proposalWeightHash = 1469598103934665603ull;
 		uint64_t cdfHash = 1469598103934665603ull;
-		uint32_t activeCount = 0;
 		for (size_t i = 0; i < emissiveDebugRecords.size(); ++i)
 		{
 			const uint64_t stableKey = emissiveDebugRecords[i].stableKey;
@@ -202,10 +201,6 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(
 			livePowerHash = HashEmissiveStabilityValue(livePowerHash, EmissiveStabilityFloatBits(emissivePrimitives[i].emissionScale));
 			proposalWeightHash = HashEmissiveStabilityValue(proposalWeightHash, stableKey);
 			proposalWeightHash = HashEmissiveStabilityValue(proposalWeightHash, EmissiveStabilityFloatBits(emissivePrimitives[i].selectionWeight));
-			if (emissivePrimitives[i].powerEstimate > 0.0f && emissivePrimitives[i].emissionScale > 0.0f)
-			{
-				activeCount++;
-			}
 		}
 		for (float cdfValue : emissiveCdf)
 		{
@@ -259,12 +254,17 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(
 			}
 		}
 
-		Printf("PERF pt emissive stability NRI: frame=%u topology_epoch=%llu distribution_epoch=%llu candidate_count=%u active_count=%u retained_dark_count=0 topology_key_hash=0x%016llx ordered_key_hash=0x%016llx live_power_hash=0x%016llx proposal_weight_hash=0x%016llx cdf_hash=0x%016llx cdf_max_delta=%.9g fixed_grid_remap_count=%u fixed_grid_sample_count=%u topology_changed=%u properties_changed=%u proposal_changed=%u upload_wait=%u frame_gap_ms=%.3f reset_history=%u reset_reason=%s\n",
+		Printf("PERF pt emissive stability NRI: frame=%u topology_epoch=%llu distribution_epoch=%llu candidate_count=%u active_count=%u retained_dark_count=%u reactivated=%u retired_missing=%u retired_replaced=%u proposal_record_count=%u topology_key_hash=0x%016llx ordered_key_hash=0x%016llx live_power_hash=0x%016llx proposal_weight_hash=0x%016llx cdf_hash=0x%016llx cdf_max_delta=%.9g fixed_grid_remap_count=%u fixed_grid_sample_count=%u topology_changed=%u properties_changed=%u proposal_changed=%u upload_wait=%u frame_gap_ms=%.3f reset_history=%u reset_reason=%s\n",
 			mFrameIndex,
 			(unsigned long long)mEmissiveStabilityTopologyEpoch,
 			(unsigned long long)mEmissiveStabilityDistributionEpoch,
 			(uint32_t)orderedKeys.size(),
-			activeCount,
+			emissiveStats.proposalActiveCount,
+			emissiveStats.proposalRetainedDarkCount,
+			emissiveStats.proposalReactivatedCount,
+			emissiveStats.proposalRetiredMissingCount,
+			emissiveStats.proposalRetiredReplacedCount,
+			emissiveStats.proposalRecordCount,
 			(unsigned long long)topologyHash,
 			(unsigned long long)orderedKeyHash,
 			(unsigned long long)livePowerHash,

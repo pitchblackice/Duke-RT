@@ -5166,6 +5166,7 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 		distributionCandidate.proposalWeight = candidate.gpu.selectionWeight;
 		distributionCandidate.referenceProposalWeight = candidate.referenceProposalWeight;
 		distributionCandidate.hasReferenceProposalWeight = candidate.hasReferenceProposalWeight;
+		distributionCandidate.live = candidate.gpu.powerEstimate > 0.0f && candidate.gpu.emissionScale > 0.0f;
 		distributionCandidates.push_back(distributionCandidate);
 	}
 	std::vector<NRIEmissiveSamplingDistributionEntry> distributionEntries;
@@ -5182,6 +5183,12 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 	localStats.lastProposalBoundGrowthOldWeight = distributionStats.lastBoundGrowthOldWeight;
 	localStats.lastProposalBoundGrowthNewWeight = distributionStats.lastBoundGrowthNewWeight;
 	localStats.lastProposalBoundGrowthWasAuthored = distributionStats.lastBoundGrowthWasAuthored;
+	localStats.proposalActiveCount = distributionStats.activeCount;
+	localStats.proposalRetainedDarkCount = distributionStats.retainedDarkCount;
+	localStats.proposalReactivatedCount = distributionStats.reactivatedCount;
+	localStats.proposalRetiredMissingCount = distributionStats.retiredMissingCount;
+	localStats.proposalRetiredReplacedCount = distributionStats.retiredReplacedCount;
+	localStats.proposalRecordCount = distributionStats.recordCount;
 
 	outPrimitives.reserve(candidates.size());
 	outDebugRecords.reserve(candidates.size());
