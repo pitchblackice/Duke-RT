@@ -605,7 +605,7 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 	{
 		TraceShaderStatAdd(TRACE_STAT_INDIRECT_DIFFUSE_BOUNCES, 1u);
 		float3 tracedDirection = direction;
-		const HitData bounceHit = TracePrimaryUngated(origin, direction, tracedDirection);
+		const HitData bounceHit = TraceIndirectUngated(origin, direction, tracedDirection);
 		if (!bounceHit.hit)
 		{
 			TraceShaderStatAdd(TRACE_STAT_INDIRECT_DIFFUSE_MISSES, 1u);
@@ -706,7 +706,7 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 	{
 		TraceShaderStatAdd(TRACE_STAT_INDIRECT_SPECULAR_BOUNCES, 1u);
 		float3 tracedDirection = direction;
-		const HitData bounceHit = TracePrimaryUngated(origin, direction, tracedDirection);
+		const HitData bounceHit = TraceIndirectUngated(origin, direction, tracedDirection);
 		if (!bounceHit.hit)
 		{
 			TraceShaderStatAdd(TRACE_STAT_INDIRECT_SPECULAR_MISSES, 1u);
