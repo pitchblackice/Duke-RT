@@ -200,3 +200,29 @@ NRIRuntimeMutationSettings BuildNRIRuntimeMutationSettingsFromCVars()
 	settings.nearDistance = std::max(0.0f, (float)nri_ptruntimemutationneardistance);
 	return settings;
 }
+
+NRISmokeSettings BuildNRISmokeSettingsFromCVars()
+{
+	NRISmokeSettings settings = {};
+	settings.enabled = (bool)nri_ptsmoke;
+	settings.readback = (bool)nri_ptsmokereadback;
+	settings.quality = (uint32_t)std::clamp((int)nri_ptsmokequality, 0, 2);
+	settings.particleCapacity = (uint32_t)std::clamp((int)nri_ptsmokeparticles, 256, 65536);
+	settings.froxelPixelSize = (uint32_t)std::clamp((int)nri_ptsmokefroxelpixels, 4, 64);
+	settings.froxelDepth = (uint32_t)std::clamp((int)nri_ptsmokefroxelz, 8, 128);
+	settings.columnCapacity = (uint32_t)std::clamp((int)nri_ptsmokecolumncapacity, 8, 256);
+	settings.simulationRate = (uint32_t)std::clamp((int)nri_ptsmokesimrate, 15, 240);
+	settings.maxSubsteps = (uint32_t)std::clamp((int)nri_ptsmokemaxsubsteps, 1, 8);
+	settings.lightMode = (uint32_t)std::clamp((int)nri_ptsmokelightmode, 0, 3);
+	settings.lightSamples = (uint32_t)std::clamp((int)nri_ptsmokelightsamples, 1, 4);
+	settings.debugMode = (uint32_t)std::clamp((int)nri_ptsmokedebug, 0, 7);
+	settings.traceMode = (uint32_t)std::clamp((int)nri_ptsmoketrace, 0, 2);
+	settings.froxelMaxDistance = std::clamp((float)nri_ptsmokefroxelmaxdistance, 64.0f, 32768.0f);
+	settings.timeScale = std::clamp((float)nri_ptsmoketimescale, 0.0f, 4.0f);
+	settings.wind[0] = std::clamp((float)nri_ptsmokewindx, -256.0f, 256.0f);
+	settings.wind[1] = std::clamp((float)nri_ptsmokewindy, -256.0f, 256.0f);
+	settings.wind[2] = std::clamp((float)nri_ptsmokewindz, -256.0f, 256.0f);
+	settings.densityScale = std::clamp((float)nri_ptsmokedensityscale, 0.0f, 16.0f);
+	settings.radianceScale = std::clamp((float)nri_ptsmokeradiancescale, 0.0f, 16.0f);
+	return settings;
+}

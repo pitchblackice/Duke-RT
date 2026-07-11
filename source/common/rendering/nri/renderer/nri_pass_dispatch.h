@@ -13,6 +13,24 @@ namespace nri_scene
 	struct MaterialData;
 }
 
+enum class NRISmokeRoutePlacement : uint32_t
+{
+	StandardPreUpscale = 0,
+	DlrrPostUpscale,
+};
+
+struct NRISmokeRouteDesc
+{
+	NRIRenderer::FrameTextureSlot inputSlot = NRIRenderer::FrameTextureSlot::Count;
+	NRIRenderer::FrameTextureSlot outputSlot = NRIRenderer::FrameTextureSlot::Count;
+	NRIRenderer::FrameTextureSlot depthSlot = NRIRenderer::FrameTextureSlot::Count;
+	NRIRenderer::ExposureDomain exposureDomain = NRIRenderer::ExposureDomain::SceneHDR;
+	NRISmokeRoutePlacement placement = NRISmokeRoutePlacement::StandardPreUpscale;
+	uint32_t width = 0;
+	uint32_t height = 0;
+	bool supported = false;
+};
+
 class NRIPassDispatchContext
 {
 public:
@@ -187,6 +205,19 @@ public:
 		void SetSelfTestRouteSnapshot(const char* routeName, const char* presenterName, const char* ownerName, const char* passListName, bool denoiserRun, bool upscalerRun, bool exposureRun) const;
 	};
 
+	struct SmokeService
+	{
+		using PrepareFrameFn = bool (*)(void* user, bool mainViewEligible);
+		using DispatchRouteFn = bool (*)(void* user, const NRISmokeRouteDesc& route);
+
+		void* user = nullptr;
+		PrepareFrameFn prepareFrame = nullptr;
+		DispatchRouteFn dispatchRoute = nullptr;
+
+		bool PrepareFrame(bool mainViewEligible) const;
+		bool DispatchRoute(const NRISmokeRouteDesc& route) const;
+	};
+
 	struct FrameSnapshot
 	{
 		uint32_t frameIndex = 0;
@@ -220,6 +251,7 @@ public:
 		std::array<float, 3> groundColor = {};
 		bool guiCaptureActive = false;
 		bool resetHistory = false;
+		bool mainViewEligible = false;
 	};
 
 	struct SceneStatsSnapshot
@@ -246,6 +278,7 @@ public:
 		ExposureService exposureService;
 		UpscalerService upscalerService;
 		SelfTestService selfTest;
+		SmokeService smokeService;
 		nri::PipelineLayout** pipelineLayout = nullptr;
 		nri::PipelineLayout** taaPipelineLayout = nullptr;
 		nri::PipelineLayout** presentPipelineLayout = nullptr;
@@ -300,6 +333,7 @@ public:
 	ExposureService mExposureService;
 	UpscalerService mUpscalerService;
 	SelfTestService mSelfTest;
+	SmokeService mSmokeService;
 	nri::PipelineLayout*& mPipelineLayout;
 	nri::PipelineLayout*& mTaaPipelineLayout;
 	nri::PipelineLayout*& mPresentPipelineLayout;

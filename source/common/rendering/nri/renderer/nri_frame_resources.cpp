@@ -115,6 +115,7 @@ bool NRIFrameResources::EnsureFrameResources(NRIRenderer& renderer, uint32_t out
 		renderer.mSceneLeft == sceneLeft &&
 		renderer.mSceneTop == sceneTop &&
 		renderer.mFinalSceneFormat == finalFormat &&
+		(!nri_ptsmoke || renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::PostVolumeOutput).texture != nullptr) &&
 		renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Final).texture != nullptr;
 
 	if (upToDate)
@@ -170,6 +171,8 @@ bool NRIFrameResources::EnsureFrameResources(NRIRenderer& renderer, uint32_t out
 	const nri::Format rrGuideAlbedoFormat = nri::Format::R10_G10_B10_A2_UNORM;
 	const nri::Format rrGuideSpecHitDistanceFormat = nri::Format::R16_SFLOAT;
 	const nri::Format rrGuideNormalRoughnessFormat = nri::Format::RGBA16_SFLOAT;
+	const bool smokeOutputReady = !nri_ptsmoke ||
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::PostVolumeOutput, outputWidth, outputHeight, colorFormat);
 
 	return
 		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::ViewZ, renderWidth, renderHeight, colorFormat) &&
@@ -198,6 +201,7 @@ bool NRIFrameResources::EnsureFrameResources(NRIRenderer& renderer, uint32_t out
 		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::RrGuideNormalRoughness, renderWidth, renderHeight, rrGuideNormalRoughnessFormat) &&
 		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::VendorOutput, outputWidth, outputHeight, colorFormat) &&
 		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::PostSharpenOutput, outputWidth, outputHeight, colorFormat) &&
+		smokeOutputReady &&
 		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::PostBloomOutput, outputWidth, outputHeight, colorFormat) &&
 		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::BloomPyramid0, BloomPyramidExtent(outputWidth, 0), BloomPyramidExtent(outputHeight, 0), colorFormat) &&
 		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::BloomPyramid1, BloomPyramidExtent(outputWidth, 1), BloomPyramidExtent(outputHeight, 1), colorFormat) &&

@@ -555,6 +555,7 @@ const char* NRIRenderer::GetFrameTextureSlotName(FrameTextureSlot slot) const
 	case FrameTextureSlot::RrGuideNormalRoughness: return "RrGuideNormalRoughness";
 	case FrameTextureSlot::VendorOutput: return "VendorOutput";
 	case FrameTextureSlot::PostSharpenOutput: return "PostSharpenOutput";
+	case FrameTextureSlot::PostVolumeOutput: return "PostVolumeOutput";
 	case FrameTextureSlot::PostBloomOutput: return "PostBloomOutput";
 	case FrameTextureSlot::BloomPyramid0: return "BloomPyramid0";
 	case FrameTextureSlot::BloomPyramid1: return "BloomPyramid1";

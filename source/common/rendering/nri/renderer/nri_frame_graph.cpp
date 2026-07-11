@@ -322,6 +322,10 @@ bool ExecuteNRIFrameGraph(
 	{
 		return false;
 	}
+	if (!context.mSmokeService.PrepareFrame(context.mFrame.mainViewEligible))
+	{
+		return false;
+	}
 
 	if (bootstrapRawTracePresent)
 	{
@@ -493,6 +497,22 @@ bool ExecuteNRIFrameGraph(
 
 		const FrameTextureSlot resolvedPresentSlot = context.mUseUpscaledInFinal ? context.mUpscaledInputSlot : context.mHistoryOutputSlot;
 		FrameTextureSlot finalPresentSlot = resolvedPresentSlot;
+		if (context.mUpscalerService.ResolveMainUpscalerKind(false) == NRIMainUpscalerKind::DLRR)
+		{
+			NRISmokeRouteDesc smokeRoute = {};
+			smokeRoute.inputSlot = resolvedPresentSlot;
+			smokeRoute.outputSlot = FrameTextureSlot::PostVolumeOutput;
+			smokeRoute.depthSlot = FrameTextureSlot::UpscalerDepth;
+			smokeRoute.exposureDomain = NRIRenderer::ExposureDomain::SceneHDR;
+			smokeRoute.placement = NRISmokeRoutePlacement::DlrrPostUpscale;
+			smokeRoute.width = context.mFrame.outputWidth;
+			smokeRoute.height = context.mFrame.outputHeight;
+			smokeRoute.supported = false;
+			if (!context.mSmokeService.DispatchRoute(smokeRoute))
+			{
+				return false;
+			}
+		}
 		if (bloomEnabled)
 		{
 			NRIBloomDispatchDesc bloomDesc = {};

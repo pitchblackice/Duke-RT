@@ -2,11 +2,12 @@
 
 #include "nri_descriptor_sets.h"
 #include "nri_scene_upload.h"
+#include "nri_smoke.h"
 #include "../system/nri_renderdevice.h"
 
 #include <algorithm>
 
-NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext()
+NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext(bool mainViewEligible)
 {
 	NRIPassDispatchContext::Init init = {};
 	NRIRenderDevice* const frameBuffer = mFrameBuffer;
@@ -209,6 +210,23 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext()
 		return service;
 	};
 
+	auto buildSmokeService = [&]()
+	{
+		NRIPassDispatchContext::SmokeService service = {};
+		service.user = this;
+		service.prepareFrame = [](void* user, bool eligible) -> bool
+		{
+			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			return renderer->mSmoke == nullptr || renderer->mSmoke->PrepareFrame(*renderer, eligible);
+		};
+		service.dispatchRoute = [](void* user, const NRISmokeRouteDesc& route) -> bool
+		{
+			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			return renderer->mSmoke == nullptr || renderer->mSmoke->DispatchRoute(*renderer, route);
+		};
+		return service;
+	};
+
 	init.textures = buildTextureService();
 	init.pipelines = buildPipelineService();
 	init.descriptors = buildDescriptorService();
@@ -218,6 +236,7 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext()
 	init.exposureService = buildExposureService();
 	init.upscalerService = buildUpscalerService();
 	init.selfTest = buildSelfTestService();
+	init.smokeService = buildSmokeService();
 	init.pipelineLayout = &mPipelineLayout;
 	init.taaPipelineLayout = &mTaaPipelineLayout;
 	init.presentPipelineLayout = &mPresentPipelineLayout;
@@ -281,6 +300,7 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext()
 	std::copy(mGroundColor, mGroundColor + 3, init.frame.groundColor.begin());
 	init.frame.guiCaptureActive = mGuiCaptureActive;
 	init.frame.resetHistory = mResetHistory;
+	init.frame.mainViewEligible = mainViewEligible;
 	init.sceneStats.sceneInstanceCount = (uint32_t)mBoundSceneInstances.size();
 	init.sceneStats.staticPrimitiveCount = mBoundStaticPrimitiveCount;
 	init.sceneStats.dynamicPrimitiveCount = mBoundDynamicPrimitiveCount;

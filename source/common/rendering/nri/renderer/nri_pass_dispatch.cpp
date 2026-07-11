@@ -683,11 +683,16 @@ bool NRIPassDispatcher::DispatchComposition(NRIPassDispatchContext& context, NRI
 bool NRIPassDispatcher::DispatchTraceTransparent(NRIPassDispatchContext& context)
 {
 	Clocker clock(NriPTComposition);
-
-	NRITextureResource& composed = context.mTextures.Get(NRIRenderer::FrameTextureSlot::Composed);
-	NRITextureResource& transparentOutput = context.mTextures.Get(NRIRenderer::FrameTextureSlot::TraceTransparentOutput);
-	context.mResources.CopyTexture(composed, transparentOutput);
-	return true;
+	NRISmokeRouteDesc route = {};
+	route.inputSlot = NRIRenderer::FrameTextureSlot::Composed;
+	route.outputSlot = NRIRenderer::FrameTextureSlot::TraceTransparentOutput;
+	route.depthSlot = NRIRenderer::FrameTextureSlot::ViewZ;
+	route.exposureDomain = NRIRenderer::ExposureDomain::SceneHDR;
+	route.placement = NRISmokeRoutePlacement::StandardPreUpscale;
+	route.width = context.mFrame.renderWidth;
+	route.height = context.mFrame.renderHeight;
+	route.supported = true;
+	return context.mSmokeService.DispatchRoute(route);
 }
 
 

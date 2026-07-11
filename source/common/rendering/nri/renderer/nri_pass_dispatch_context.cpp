@@ -194,6 +194,16 @@ void NRIPassDispatchContext::SelfTestService::SetSelfTestRouteSnapshot(const cha
 	setSelfTestRouteSnapshot(user, routeName, presenterName, ownerName, passListName, denoiserRun, upscalerRun, exposureRun);
 }
 
+bool NRIPassDispatchContext::SmokeService::PrepareFrame(bool mainViewEligible) const
+{
+	return prepareFrame == nullptr || prepareFrame(user, mainViewEligible);
+}
+
+bool NRIPassDispatchContext::SmokeService::DispatchRoute(const NRISmokeRouteDesc& route) const
+{
+	return dispatchRoute == nullptr || dispatchRoute(user, route);
+}
+
 NRIPassDispatchContext::NRIPassDispatchContext(const Init& init)
 	: mTextures(init.textures),
 	mPipelines(init.pipelines),
@@ -204,6 +214,7 @@ NRIPassDispatchContext::NRIPassDispatchContext(const Init& init)
 	mExposureService(init.exposureService),
 	mUpscalerService(init.upscalerService),
 	mSelfTest(init.selfTest),
+	mSmokeService(init.smokeService),
 	mPipelineLayout(*init.pipelineLayout),
 	mTaaPipelineLayout(*init.taaPipelineLayout),
 	mPresentPipelineLayout(*init.presentPipelineLayout),

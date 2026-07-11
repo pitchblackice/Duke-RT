@@ -37,6 +37,7 @@
 #include <chrono>
 #include <cstdint>
 #include <array>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -44,6 +45,7 @@
 
 class NRIRenderDevice;
 class NRIPassDispatchContext;
+class NRISmokeSystem;
 struct MapRecord;
 struct LevelTransitionInfo;
 struct PathTracingActorSpriteTraceEvent;
@@ -1902,6 +1904,7 @@ public:
 		RrGuideNormalRoughness,
 		VendorOutput,
 		PostSharpenOutput,
+		PostVolumeOutput,
 		PostBloomOutput,
 		BloomPyramid0,
 		BloomPyramid1,
@@ -1963,6 +1966,8 @@ public:
 	bool IsFrameFenceValueComplete(uint64_t fenceValue) const;
 	uint64_t GetRecordingCommandFenceValue() const;
 	bool IsCommandFenceValueComplete(uint64_t fenceValue) const;
+	void PrintSmokeStatus() const;
+	void ResetSmoke(const char* reason = "console");
 
 private:
 	friend class NRIExposurePassAccess;
@@ -1970,6 +1975,7 @@ private:
 	friend class NRIDescriptorSetManager;
 	friend class NRIFrameResources;
 	friend class NRIPipelineStateManager;
+	friend class NRISmokeSystem;
 	friend class NRIPreloadCoordinator;
 	friend class NRIPersistentVoxelServiceFactory;
 	friend class NRISceneUploadManager;
@@ -2013,7 +2019,7 @@ private:
 	NRIResourceContext BuildResourceContext() const;
 	NRIResourceServices BuildResourceServices();
 	NRIRendererFrameContext BuildFrameContext(int drawmode, bool portal, int debugMode, bool preserveHistory) const;
-	NRIPassDispatchContext BuildPassDispatchContext();
+	NRIPassDispatchContext BuildPassDispatchContext(bool mainViewEligible = false);
 
 	RenderSceneHistorySnapshot CaptureRenderSceneHistorySnapshot(bool preserveHistory) const;
 	void RestoreRenderSceneHistorySnapshot(const RenderSceneHistorySnapshot& snapshot);
@@ -2446,6 +2452,7 @@ private:
 	const char* GetFrameTextureSlotName(FrameTextureSlot slot) const;
 
 	NRIRenderDevice* mFrameBuffer = nullptr;
+	std::unique_ptr<NRISmokeSystem> mSmoke;
 	nri::PipelineLayout* mPipelineLayout = nullptr;
 	nri::PipelineLayout* mTaaPipelineLayout = nullptr;
 	nri::PipelineLayout* mPresentPipelineLayout = nullptr;

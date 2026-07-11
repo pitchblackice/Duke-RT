@@ -84,7 +84,30 @@ struct NRIRuntimeMutationSettings
 	float nearDistance = 1024.0f;
 };
 
+struct NRISmokeSettings
+{
+	bool enabled = false;
+	bool readback = false;
+	uint32_t quality = 1;
+	uint32_t particleCapacity = 8192;
+	uint32_t froxelPixelSize = 16;
+	uint32_t froxelDepth = 48;
+	uint32_t columnCapacity = 64;
+	uint32_t simulationRate = 60;
+	uint32_t maxSubsteps = 4;
+	uint32_t lightMode = 1;
+	uint32_t lightSamples = 1;
+	uint32_t debugMode = 0;
+	uint32_t traceMode = 0;
+	float froxelMaxDistance = 4096.0f;
+	float timeScale = 1.0f;
+	float wind[3] = {};
+	float densityScale = 1.0f;
+	float radianceScale = 1.0f;
+};
+
 NRITraceSettings BuildNRITraceSettingsFromCVars();
 NRIDenoiserSettings BuildNRIDenoiserSettingsFromCVars();
 NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars();
 NRIRuntimeMutationSettings BuildNRIRuntimeMutationSettingsFromCVars();
+NRISmokeSettings BuildNRISmokeSettingsFromCVars();

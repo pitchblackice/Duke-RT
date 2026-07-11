@@ -956,6 +956,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_render_geometry_helpers.cpp
 	common/rendering/nri/renderer/nri_renderer.cpp
 	common/rendering/nri/renderer/nri_renderer_settings.cpp
+	common/rendering/nri/renderer/nri_smoke.cpp
 	common/rendering/nri/renderer/nri_settings_profiles.cpp
 	common/rendering/nri/renderer/nri_scene_frame_coordinator.cpp
 	common/rendering/nri/renderer/nri_scene_frame_geometry.cpp

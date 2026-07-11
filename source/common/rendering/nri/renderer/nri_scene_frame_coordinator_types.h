@@ -41,6 +41,7 @@ struct RenderSceneDispatchInputs
 	bool bootstrapCapturedView = false;
 	bool buffersReady = false;
 	bool accelerationReady = false;
+	bool mainViewEligible = false;
 	HWDrawInfo* drawInfo = nullptr;
 	const nri_scene::GeometryData* activeGeometry = nullptr;
 	const std::vector<nri_scene::MaterialData>* activeGpuMaterials = nullptr;

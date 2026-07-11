@@ -508,7 +508,7 @@ bool NRIRenderer::RenderSimpleBootstrapView(bool preserveHistory, const RenderSc
 	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 	mUpscaledInputSlot = FrameTextureSlot::Composed;
 	mUseUpscaledInFinal = false;
-	NRIPassDispatchContext passContext = BuildPassDispatchContext();
+	NRIPassDispatchContext passContext = BuildPassDispatchContext(false);
 	if (!NRIPassDispatcher::DispatchBootstrapView(passContext))
 	{
 		LogFallback("PT bootstrap view dispatch failed.");
@@ -542,11 +542,11 @@ bool NRIRenderer::DispatchSelectedRenderScene(const RenderSceneDispatchInputs& i
 		mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 		mUpscaledInputSlot = FrameTextureSlot::Composed;
 		mUseUpscaledInFinal = false;
-		NRIPassDispatchContext passContext = BuildPassDispatchContext();
+		NRIPassDispatchContext passContext = BuildPassDispatchContext(false);
 		return inputs.buffersReady && NRIPassDispatcher::DispatchBootstrapView(passContext);
 	}
 
-	NRIPassDispatchContext passContext = BuildPassDispatchContext();
+	NRIPassDispatchContext passContext = BuildPassDispatchContext(inputs.mainViewEligible);
 	return inputs.accelerationReady &&
 		inputs.drawInfo != nullptr &&
 		inputs.activeGeometry != nullptr &&
@@ -1144,6 +1144,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	dispatchInputs.bootstrapCapturedView = bootstrapCapturedView;
 	dispatchInputs.buffersReady = sceneFrame.buffersReady;
 	dispatchInputs.accelerationReady = sceneFrame.accelerationReady;
+	dispatchInputs.mainViewEligible = drawmode == DM_MAINVIEW && !portal && !preserveHistory;
 	dispatchInputs.drawInfo = &di;
 	dispatchInputs.activeGeometry = sceneFrame.activeGeometry;
 	dispatchInputs.activeGpuMaterials = sceneFrame.activeGpuMaterials;

@@ -1,4 +1,5 @@
 #include "nri_renderer.h"
+#include "nri_smoke.h"
 #include "nri_cvars.h"
 
 #include "../framegen/nri_framegen.h"
@@ -1814,13 +1815,30 @@ namespace
 }
 
 NRIRenderer::NRIRenderer(NRIRenderDevice* frameBuffer)
-	: mFrameBuffer(frameBuffer)
+	: mFrameBuffer(frameBuffer),
+	mSmoke(std::make_unique<NRISmokeSystem>())
 {
 }
 
 NRIRenderer::~NRIRenderer()
 {
 	Shutdown();
+}
+
+void NRIRenderer::PrintSmokeStatus() const
+{
+	if (mSmoke != nullptr)
+	{
+		mSmoke->PrintStatus(*this);
+	}
+}
+
+void NRIRenderer::ResetSmoke(const char* reason)
+{
+	if (mSmoke != nullptr)
+	{
+		mSmoke->Reset(reason);
+	}
 }
 
 bool NRIRenderer::Initialize()
@@ -1862,6 +1880,10 @@ bool NRIRenderer::Initialize()
 
 void NRIRenderer::Shutdown()
 {
+	if (mSmoke != nullptr)
+	{
+		mSmoke->Shutdown();
+	}
 	ResetMuzzleFlashOverlayState("renderer-shutdown");
 	mLastResolvedLightOverlayGeneration = 0;
 
@@ -2775,6 +2797,7 @@ NRIRenderer::ExposureDomain NRIRenderer::ResolveFrameTextureExposureDomain(Frame
 	{
 	case FrameTextureSlot::Composed:
 	case FrameTextureSlot::TraceTransparentOutput:
+	case FrameTextureSlot::PostVolumeOutput:
 	case FrameTextureSlot::SrInput:
 	case FrameTextureSlot::RrInput:
 		return ExposureDomain::SceneHDR;

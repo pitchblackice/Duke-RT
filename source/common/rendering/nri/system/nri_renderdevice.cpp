@@ -1729,6 +1729,22 @@ CCMD(nri_ptstatus)
 	}
 }
 
+CCMD(nri_ptsmokestatus)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingSmokeStatus();
+	}
+}
+
+CCMD(nri_ptsmokereset)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->ResetPathTracingSmoke();
+	}
+}
+
 CCMD(nri_ptchunkdump)
 {
 	const int32_t chunkIndex = argv.argc() > 1 ? atoi(argv[1]) : -1;
@@ -7435,6 +7451,22 @@ void NRIRenderDevice::ResetPathTracingAutoExposure()
 
 	mRenderer->RequestAutoExposureReset("console");
 	Printf("NRI PT auto exposure reset requested.\n");
+}
+
+void NRIRenderDevice::PrintPathTracingSmokeStatus() const
+{
+	if (mRenderer != nullptr)
+	{
+		mRenderer->PrintSmokeStatus();
+	}
+}
+
+void NRIRenderDevice::ResetPathTracingSmoke()
+{
+	if (mRenderer != nullptr)
+	{
+		mRenderer->ResetSmoke("console");
+	}
 }
 
 void NRIRenderDevice::NotifyPathTracingCameraCut(const char* reason)
