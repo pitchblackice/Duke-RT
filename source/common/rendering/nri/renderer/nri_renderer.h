@@ -2381,6 +2381,7 @@ private:
 	void CopyFinalToActiveTarget();
 	void UpdateFrameGenerationFrameDesc();
 	void UpdateFrameGenerationHistoryPolicy(int debugMode, const NRIFrameGenerationPolicy& frameGenPolicy, bool preserveHistory);
+	bool HasFrameGenerationCadenceBreak() const;
 	void NoteSuccessfulRealFrame();
 	void CopyTexture(NRITextureResource& source, NRITextureResource& destination);
 	void CopyTextureToActiveTarget(NRITextureResource& source);

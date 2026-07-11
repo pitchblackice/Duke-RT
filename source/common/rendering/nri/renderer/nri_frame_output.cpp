@@ -20,6 +20,7 @@
 namespace
 {
 	constexpr float NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS = 0.5f;
+	constexpr float NRI_FRAME_GENERATION_CADENCE_BREAK_MS = 250.0f;
 
 	float GetTemporalExposureForOutput(const NRIPTOutputPolicy& outputPolicy)
 	{
@@ -62,6 +63,12 @@ namespace
 		double* mTarget = nullptr;
 		std::chrono::steady_clock::time_point mStart = {};
 	};
+}
+
+bool NRIRenderer::HasFrameGenerationCadenceBreak() const
+{
+	return mHasPendingFrameGenerationRealFrameTime &&
+		mPendingFrameGenerationRealFrameTimeMs > NRI_FRAME_GENERATION_CADENCE_BREAK_MS;
 }
 
 void NRIRenderer::CopyFinalToActiveTarget()
@@ -223,6 +230,7 @@ void NRIRenderer::UpdateFrameGenerationFrameDesc()
 	}
 
 	NRIFrameGenerationFrameDesc desc = {};
+	const bool frameGenerationCadenceBreak = HasFrameGenerationCadenceBreak();
 	desc.frameId = mFrameGenerationFrameId + 1u;
 	desc.renderWidth = mRenderWidth;
 	desc.renderHeight = mRenderHeight;
@@ -231,10 +239,12 @@ void NRIRenderer::UpdateFrameGenerationFrameDesc()
 	desc.renderRect = { 0u, 0u, mRenderWidth, mRenderHeight };
 	desc.outputRect = { 0u, 0u, mOutputWidth, mOutputHeight };
 	desc.hasPreviousCamera = mHasPreviousCameraState;
-	desc.resetHistory = mResetHistory;
+	desc.resetHistory = mResetHistory || frameGenerationCadenceBreak;
 	desc.hasRealFrameTimeMs = mHasPendingFrameGenerationRealFrameTime;
 	desc.realFrameTimeMs = mPendingFrameGenerationRealFrameTimeMs;
-	const char* resetReason = mResetHistory && !mLastHistoryResetReason.empty() ? mLastHistoryResetReason.c_str() : "none";
+	const char* resetReason = mResetHistory && !mLastHistoryResetReason.empty() ?
+		mLastHistoryResetReason.c_str() :
+		(frameGenerationCadenceBreak ? "cadence-break" : "none");
 	std::strncpy(desc.resetReason, resetReason, std::size(desc.resetReason) - 1u);
 	desc.resetReason[std::size(desc.resetReason) - 1u] = '\0';
 	desc.hudlessColorSource = NRIFrameGenerationColorSource::Final;

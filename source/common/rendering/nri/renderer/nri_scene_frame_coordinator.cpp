@@ -467,9 +467,15 @@ bool NRIRenderer::BeginRenderSceneFrame(HWDrawInfo& di, const NRIRendererFrameCo
 			const auto elapsed = mPendingFrameGenerationTimestamp - mLastFrameGenerationTimestamp;
 			mPendingFrameGenerationRealFrameTimeMs = (float)std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(elapsed).count();
 			mHasPendingFrameGenerationRealFrameTime = true;
-			if (mPendingFrameGenerationRealFrameTimeMs > 250.0f)
+			if (HasFrameGenerationCadenceBreak())
 			{
-				RequestHistoryReset("cadence-break");
+				ArmTemporalTraceBudget("framegen-cadence-break");
+				if (ShouldEmitRendererTemporalTraceLogs())
+				{
+					Printf("NRI PT frame generation reset: reason=cadence-break frame=%u gap_ms=%.3f renderer_history_reset=no\n",
+						mFrameIndex,
+						mPendingFrameGenerationRealFrameTimeMs);
+				}
 			}
 		}
 	}
