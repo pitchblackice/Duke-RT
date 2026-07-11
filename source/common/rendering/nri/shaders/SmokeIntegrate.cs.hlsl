@@ -3,8 +3,14 @@
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
+	if (gSmokeConstants.FroxelWidth == 0u || gSmokeConstants.FroxelHeight == 0u || gSmokeConstants.FroxelDepth == 0u)
+		return;
+
 	if (dispatchThreadId.x >= gSmokeConstants.FroxelWidth || dispatchThreadId.y >= gSmokeConstants.FroxelHeight)
 		return;
+	uint localFroxelCount, integratedFroxelCount, ignoredStride;
+	gSmokeFroxelLocal.GetDimensions(localFroxelCount, ignoredStride);
+	gSmokeFroxelIntegrated.GetDimensions(integratedFroxelCount, ignoredStride);
 
 	float transmittance = 1.0;
 	float3 radiance = 0.0;
@@ -12,6 +18,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	for (uint z = 0u; z < gSmokeConstants.FroxelDepth; ++z)
 	{
 		const uint froxelIndex = SmokeFroxelIndex(dispatchThreadId.x, dispatchThreadId.y, z);
+		if (froxelIndex >= min(localFroxelCount, integratedFroxelCount))
+			break;
 		const float4 localMedium = gSmokeFroxelLocal[froxelIndex];
 		const float farDepth = SmokeSliceFarDepth(z);
 		const float stepLength = max(farDepth - previousDepth, 0.0);

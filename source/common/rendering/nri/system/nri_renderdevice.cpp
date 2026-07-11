@@ -8846,7 +8846,7 @@ bool NRIRenderDevice::CreateRenderResources()
 	poolDesc.descriptorSetMaxNum = 4096;
 	poolDesc.samplerMaxNum = 8;
 	poolDesc.textureMaxNum = 16384;
-	poolDesc.storageTextureMaxNum = 64;
+	poolDesc.storageTextureMaxNum = 128;
 	poolDesc.structuredBufferMaxNum = 512;
 	poolDesc.storageStructuredBufferMaxNum = 64;
 	poolDesc.accelerationStructureMaxNum = 8;

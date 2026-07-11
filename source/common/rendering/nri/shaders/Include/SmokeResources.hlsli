@@ -10,6 +10,11 @@
 #define NRI_SMOKE_SET_OUTPUT 3
 #define NRI_SMOKE_SET_ROOT 4
 
+// Hard ceilings keep authored or near-camera effects from turning one GPU thread
+// into unbounded work. Normal smoke footprints and injection counts are unchanged.
+#define NRI_SMOKE_MAX_BIN_COLUMNS_PER_AXIS 16u
+#define NRI_SMOKE_MAX_PARTICLES_PER_COMMAND 256u
+
 struct SmokeParticle
 {
 	float3 Position;
@@ -92,6 +97,20 @@ NRI_ROOT_CONSTANTS(SmokeConstants, gSmokeConstants, 0, NRI_SMOKE_SET_ROOT);
 uint SmokeFroxelIndex(uint x, uint y, uint z)
 {
 	return (z * gSmokeConstants.FroxelHeight + y) * gSmokeConstants.FroxelWidth + x;
+}
+
+void SmokeLimitColumnRange(inout int minimumColumn, inout int maximumColumn)
+{
+	const int maximumSpan = (int)NRI_SMOKE_MAX_BIN_COLUMNS_PER_AXIS;
+	const int span = maximumColumn - minimumColumn + 1;
+	if (span <= maximumSpan)
+		return;
+
+	const int originalMinimum = minimumColumn;
+	const int originalMaximum = maximumColumn;
+	const int center = (originalMinimum + originalMaximum) / 2;
+	minimumColumn = clamp(center - maximumSpan / 2, originalMinimum, originalMaximum - maximumSpan + 1);
+	maximumColumn = minimumColumn + maximumSpan - 1;
 }
 
 float SmokeSliceFarDepth(uint z)

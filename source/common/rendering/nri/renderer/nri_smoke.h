@@ -38,7 +38,13 @@ struct NRISmokeStatusSnapshot
 	uint32_t commandsDropped = 0;
 	uint32_t simulationSubsteps = 0;
 	uint64_t residentBytes = 0;
-	uint64_t routineParticleReadbackBytes = 0;
+	uint64_t controlReadbackBytes = 0;
+	bool gpuStatsValid = false;
+	uint32_t activeParticles = 0;
+	uint32_t spawnedParticles = 0;
+	uint32_t expiredParticles = 0;
+	uint32_t liveEvictions = 0;
+	uint32_t columnOverflow = 0;
 };
 
 class NRISmokeSystem
@@ -58,10 +64,15 @@ private:
 	{
 		NRIBufferResource upload;
 		NRIBufferResource device;
+		NRIBufferResource styleUpload;
+		NRIBufferResource controlReadback;
 		nri::DescriptorSet* inputSet = nullptr;
 		nri::DescriptorSet* bufferSet = nullptr;
 		nri::DescriptorSet* textureSet = nullptr;
 		nri::DescriptorSet* outputSet = nullptr;
+		bool readbackPending = false;
+		bool initialized = false;
+		bool readbackInitialized = false;
 	};
 
 	bool EnsureResources(NRIRenderer& renderer);
@@ -78,7 +89,6 @@ private:
 	std::array<nri::Pipeline*, 7> mPipelines = {};
 	std::vector<CommandSlot> mCommandSlots;
 	NRIBufferResource mStyleBuffer;
-	NRIBufferResource mStyleUpload;
 	NRIBufferResource mParticles;
 	NRIBufferResource mControl;
 	NRIBufferResource mColumnCounts;
@@ -101,4 +111,6 @@ private:
 	double mLastGameplaySeconds = -1.0;
 	bool mSyntheticRequested = false;
 	bool mNeedsClear = true;
+	bool mControlCopyPending = false;
+	bool mResourcesInitialized = false;
 };
