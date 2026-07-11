@@ -5216,7 +5216,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.persistentVoxelTexturePrewarmByteBudget,
 			shell.persistentVoxelTexturePrewarmMs);
 		Printf(
-			"PERF pt scene light detail NRI: frame=%llu records=%u static=%u mutation=%u captured=%u dynamic=%u persistent_voxel=%u append_static=%.3f append_mutation=%.3f append_captured=%.3f append_dynamic=%.3f append_persistent_voxel=%.3f rebuild_analytic=%.3f rebuild_emissive=%.3f rebuild_sector=%.3f sprite_rules=%u sprite_record_scans=%u actor_overlay_rules=%u actor_surface_lookups=%u actor_full_scans=%u actor_surface_scans=%u actor_indexed_candidates=%u topology_keys=%u topology_rebuild=%u property_only=%u topology_sort_skipped=%u topology_added=%u topology_removed=%u topology_rebound=%u topology_sort=%.3f\n",
+			"PERF pt scene light detail NRI: frame=%llu records=%u static=%u mutation=%u captured=%u dynamic=%u persistent_voxel=%u append_static=%.3f append_mutation=%.3f append_captured=%.3f append_dynamic=%.3f append_persistent_voxel=%.3f rebuild_analytic=%.3f rebuild_emissive=%.3f rebuild_sector=%.3f sprite_rules=%u sprite_record_scans=%u actor_overlay_rules=%u actor_surface_lookups=%u actor_full_scans=%u actor_surface_scans=%u actor_indexed_candidates=%u topology_keys=%u topology_rebuild=%u property_only=%u topology_sort_skipped=%u topology_added=%u topology_removed=%u topology_rebound=%u ordered_key_hash=0x%016llx soft=%u surviving_index_changed=%u surviving_soft_index_changed=%u topology_sort=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneLightSurfaceRecordCount,
 			shell.sceneLightStaticRecordCount,
@@ -5246,6 +5246,10 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneLightTopologyAddedKeyCount,
 			shell.sceneLightTopologyRemovedKeyCount,
 			shell.sceneLightTopologyReboundKeyCount,
+			(unsigned long long)shell.sceneLightOrderedStableKeyHash,
+			shell.sceneLightSoftLightCount,
+			shell.sceneLightSurvivingIndexChangeCount,
+			shell.sceneLightSurvivingSoftIndexChangeCount,
 			shell.sceneLightTopologySortMs);
 		Printf(
 			"PERF pt cache detail NRI: frame=%llu mutation_active=%u mutation_valid=%u mutation_excl_static=%u mutation_cached_surfaces=%u mutation_cached_tris=%u mutation_cached_mats=%u mutation_cached_states=%u mutation_mat_cache_hits=%u mutation_mat_cache_misses=%u mutation_mat_cache_stores=%u anim_slice_cached_states=%u anim_slice_cache_hits=%u anim_slice_cache_misses=%u anim_slice_cache_stores=%u anim_slice_apply_hits=%u anim_slice_apply_misses=%u anim_slice_sync_skip_hits=%u anim_gpu_cache_hits=%u anim_gpu_cache_misses=%u anim_gpu_cache_stores=%u persistent_actor=%u persistent_non_actor=%u persistent_walls=%u persistent_flats=%u persistent_sprites=%u persistent_highwater_surfaces=%u persistent_highwater_prims=%u persistent_highwater_mats=%u persistent_highwater_actor=%u persistent_highwater_sprites=%u\n",

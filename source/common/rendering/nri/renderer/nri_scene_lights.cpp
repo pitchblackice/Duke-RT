@@ -2792,6 +2792,10 @@ void NRIRenderer::RefreshSceneLightSystem(
 	mLastPerfShellTraceStats.sceneLightTopologyAddedKeyCount = analyticStats.topologyAddedKeyCount;
 	mLastPerfShellTraceStats.sceneLightTopologyRemovedKeyCount = analyticStats.topologyRemovedKeyCount;
 	mLastPerfShellTraceStats.sceneLightTopologyReboundKeyCount = analyticStats.topologyReboundKeyCount;
+	mLastPerfShellTraceStats.sceneLightSoftLightCount = analyticStats.softLightCount;
+	mLastPerfShellTraceStats.sceneLightSurvivingIndexChangeCount = analyticStats.survivingKeyIndexChangeCount;
+	mLastPerfShellTraceStats.sceneLightSurvivingSoftIndexChangeCount = analyticStats.survivingSoftLightIndexChangeCount;
+	mLastPerfShellTraceStats.sceneLightOrderedStableKeyHash = analyticStats.orderedStableKeyHash;
 	mLastPerfShellTraceStats.sceneLightTopologySortMs = analyticStats.topologySortMs;
 	if (hadDirectionalLightState && directionalLightStateChanged)
 	{
@@ -3800,6 +3804,10 @@ void SceneLightSystem::RebuildAnalyticLights(
 	mAnalyticLights.topologyAddedKeyCount = 0;
 	mAnalyticLights.topologyRemovedKeyCount = 0;
 	mAnalyticLights.topologyReboundKeyCount = 0;
+	mAnalyticLights.softLightCount = 0;
+	mAnalyticLights.survivingKeyIndexChangeCount = 0;
+	mAnalyticLights.survivingSoftLightIndexChangeCount = 0;
+	mAnalyticLights.orderedStableKeyHash = 0;
 	mAnalyticLights.topologySortMs = 0.0;
 	nextLights.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.transientLights.size() + mAnalyticLights.spriteTileRules.size() + overlayRuleCount + mapOverlayRuleCount);
 	std::unordered_map<uint64_t, size_t> keyToLightIndex;
@@ -4230,6 +4238,45 @@ void SceneLightSystem::RebuildAnalyticLights(
 			});
 		}
 		nextLights.resize(maxActiveLights);
+	}
+
+	// Upload order is a transport contract: tile lists reference these indices, while
+	// each light's stochastic sequence is identified by stableKey. Keep cap selection
+	// distance-based, then publish the survivors in identity order.
+	std::sort(nextLights.begin(), nextLights.end(), [](const SceneAnalyticLight& left, const SceneAnalyticLight& right)
+	{
+		return left.stableKey < right.stableKey;
+	});
+
+	std::unordered_map<uint64_t, uint32_t> previousIndices;
+	previousIndices.reserve(mAnalyticLights.activeLights.size());
+	for (uint32_t index = 0; index < (uint32_t)mAnalyticLights.activeLights.size(); ++index)
+	{
+		previousIndices.emplace(mAnalyticLights.activeLights[index].stableKey, index);
+	}
+	mAnalyticLights.orderedStableKeyHash = 1469598103934665603ull;
+	for (uint32_t index = 0; index < (uint32_t)nextLights.size(); ++index)
+	{
+		const SceneAnalyticLight& light = nextLights[index];
+		mAnalyticLights.orderedStableKeyHash = nri_scene::HashCombine64(mAnalyticLights.orderedStableKeyHash, light.stableKey);
+		const bool softLight =
+			light.intensity > 0.0f &&
+			light.radius > 0.0f &&
+			(light.flags & SceneAnalyticLightFlag_CastsShadow) != 0 &&
+			ResolveAnalyticEmitterRadius(light) > 0.0f;
+		if (softLight)
+		{
+			mAnalyticLights.softLightCount++;
+		}
+		const auto previousIt = previousIndices.find(light.stableKey);
+		if (previousIt != previousIndices.end() && previousIt->second != index)
+		{
+			mAnalyticLights.survivingKeyIndexChangeCount++;
+			if (softLight)
+			{
+				mAnalyticLights.survivingSoftLightIndexChangeCount++;
+			}
+		}
 	}
 
 	std::vector<uint64_t> nextTopologyKeys;
@@ -4769,6 +4816,8 @@ void SceneLightSystem::BuildRuntimePointLightUpload(std::vector<NRIRuntimePointL
 		gpuLight.intensity = light.intensity;
 		gpuLight.flags = light.flags;
 		gpuLight.emitterRadius = ResolveAnalyticEmitterRadius(light);
+		gpuLight.stableKeyLo = (uint32_t)(light.stableKey & 0xffffffffu);
+		gpuLight.stableKeyHi = (uint32_t)(light.stableKey >> 32u);
 		outLights.push_back(gpuLight);
 	}
 }
@@ -4780,6 +4829,7 @@ uint64_t SceneLightSystem::BuildRuntimeLightPayloadHash() const
 	hash = nri_scene::HashCombine64(hash, (uint64_t)activeLights.size());
 	for (const SceneAnalyticLight& light : activeLights)
 	{
+		hash = nri_scene::HashCombine64(hash, light.stableKey);
 		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(light.position[0]));
 		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(light.position[1]));
 		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(light.position[2]));

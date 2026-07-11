@@ -1017,7 +1017,7 @@ void NRIRenderer::EmitRenderSceneTemporalTrace(uint32_t traceFrameIndex)
 
 	const auto& analyticLights = mSceneLights.GetAnalyticLights();
 	const auto& emissiveSurfaces = mSceneLights.GetEmissiveSurfaces();
-	Printf("NRI PT light trace: frame=%u analytic=%u topo=%s prop=%s added=%u removed=%u rebound=%u emissive=%u topo=%s prop=%s added=%u removed=%u rebound=%u reset=%s reason=%s\n",
+	Printf("NRI PT light trace: frame=%u analytic=%u topo=%s prop=%s added=%u removed=%u rebound=%u ordered_key_hash=0x%016llx soft=%u surviving_index_changed=%u surviving_soft_index_changed=%u emissive=%u topo=%s prop=%s added=%u removed=%u rebound=%u reset=%s reason=%s\n",
 		traceFrameIndex,
 		(uint32_t)analyticLights.activeLights.size(),
 		YesNo(analyticLights.lastBuildTopologyChanged),
@@ -1025,6 +1025,10 @@ void NRIRenderer::EmitRenderSceneTemporalTrace(uint32_t traceFrameIndex)
 		(uint32_t)analyticLights.addedTopologyKeys.size(),
 		(uint32_t)analyticLights.removedTopologyKeys.size(),
 		(uint32_t)analyticLights.reboundTopologyKeys.size(),
+		(unsigned long long)analyticLights.orderedStableKeyHash,
+		analyticLights.softLightCount,
+		analyticLights.survivingKeyIndexChangeCount,
+		analyticLights.survivingSoftLightIndexChangeCount,
 		(uint32_t)emissiveSurfaces.activeSurfaces.size(),
 		YesNo(emissiveSurfaces.lastBuildTopologyChanged),
 		YesNo(emissiveSurfaces.lastBuildPropertiesChanged),

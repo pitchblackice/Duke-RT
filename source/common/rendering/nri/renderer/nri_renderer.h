@@ -1583,6 +1583,10 @@ public:
 		uint32_t sceneLightTopologyAddedKeyCount = 0;
 		uint32_t sceneLightTopologyRemovedKeyCount = 0;
 		uint32_t sceneLightTopologyReboundKeyCount = 0;
+		uint32_t sceneLightSoftLightCount = 0;
+		uint32_t sceneLightSurvivingIndexChangeCount = 0;
+		uint32_t sceneLightSurvivingSoftIndexChangeCount = 0;
+		uint64_t sceneLightOrderedStableKeyHash = 0;
 		double sceneLightTopologySortMs = 0.0;
 		uint32_t traceOpaqueDispatchX = 0;
 		uint32_t traceOpaqueDispatchY = 0;

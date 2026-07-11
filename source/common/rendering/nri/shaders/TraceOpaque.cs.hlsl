@@ -1192,7 +1192,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					const float3 centerLightDir = toLightCenter / centerLightDistance;
 					const bool runtimeLightCastsShadow = (runtimeLight.flags & RUNTIME_POINT_LIGHT_FLAG_CASTS_SHADOW) != 0u;
 					const bool useSoftRuntimeShadow = !directSceneTrace && receivesShadow && runtimeLightCastsShadow && runtimeLight.emitterRadius > 0.0;
-					uint runtimeLightRng = pixelPos.x * 1973u ^ pixelPos.y * 9277u ^ (gTraceConstants.FrameIndex + 1u) * 26699u ^ runtimeLightIndex * 911u;
+					const uint runtimeLightStableSeed = Hash32(runtimeLight.stableKeyLo ^ Hash32(runtimeLight.stableKeyHi + 0x9e3779b9u));
+					uint runtimeLightRng = pixelPos.x * 1973u ^ pixelPos.y * 9277u ^ (gTraceConstants.FrameIndex + 1u) * 26699u ^ runtimeLightStableSeed;
 					float3 sampledLightPosition = runtimeLight.position;
 					if (useSoftRuntimeShadow)
 					{

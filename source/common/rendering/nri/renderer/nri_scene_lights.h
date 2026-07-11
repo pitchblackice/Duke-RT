@@ -79,9 +79,10 @@ struct NRIRuntimePointLightGpuData
 	float intensity = 1.0f;
 	uint32_t flags = 0;
 	float emitterRadius = 0.0f;
-	uint32_t softShadowFlags = 0;
-	uint32_t reserved = 0;
+	uint32_t stableKeyLo = 0;
+	uint32_t stableKeyHi = 0;
 };
+static_assert(sizeof(NRIRuntimePointLightGpuData) == 48, "Runtime point-light CPU/GPU layout must remain 48 bytes");
 
 struct NRISectorLightHeaderGpuData
 {
@@ -364,6 +365,10 @@ public:
 		uint32_t topologyAddedKeyCount = 0;
 		uint32_t topologyRemovedKeyCount = 0;
 		uint32_t topologyReboundKeyCount = 0;
+		uint32_t softLightCount = 0;
+		uint32_t survivingKeyIndexChangeCount = 0;
+		uint32_t survivingSoftLightIndexChangeCount = 0;
+		uint64_t orderedStableKeyHash = 0;
 		uint32_t transientMuzzleSlotCount = 0;
 		uint32_t transientMuzzleActiveCount = 0;
 		uint32_t dedupedMatchCount = 0;

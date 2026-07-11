@@ -126,8 +126,8 @@ struct RuntimePointLightData
 	float intensity;
 	uint flags;
 	float emitterRadius;
-	uint softShadowFlags;
-	uint reserved;
+	uint stableKeyLo;
+	uint stableKeyHi;
 };
 
 #define RUNTIME_POINT_LIGHT_FLAG_CASTS_SHADOW 0x1u
