@@ -1745,6 +1745,15 @@ CCMD(nri_ptsmokereset)
 	}
 }
 
+CCMD(nri_ptsmoke_test)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->QueueSyntheticPathTracingSmoke();
+		Printf("NRI PT smoke synthetic injection queued.\n");
+	}
+}
+
 CCMD(nri_ptchunkdump)
 {
 	const int32_t chunkIndex = argv.argc() > 1 ? atoi(argv[1]) : -1;
@@ -7469,6 +7478,14 @@ void NRIRenderDevice::ResetPathTracingSmoke()
 	}
 }
 
+void NRIRenderDevice::QueueSyntheticPathTracingSmoke()
+{
+	if (mRenderer != nullptr)
+	{
+		mRenderer->QueueSyntheticSmoke();
+	}
+}
+
 void NRIRenderDevice::NotifyPathTracingCameraCut(const char* reason)
 {
 	if (mRenderer != nullptr)
@@ -8831,7 +8848,7 @@ bool NRIRenderDevice::CreateRenderResources()
 	poolDesc.textureMaxNum = 16384;
 	poolDesc.storageTextureMaxNum = 64;
 	poolDesc.structuredBufferMaxNum = 512;
-	poolDesc.storageStructuredBufferMaxNum = 16;
+	poolDesc.storageStructuredBufferMaxNum = 64;
 	poolDesc.accelerationStructureMaxNum = 8;
 
 	if (mCore.CreateDescriptorPool(*mDevice, poolDesc, mDescriptorPool) != nri::Result::SUCCESS)

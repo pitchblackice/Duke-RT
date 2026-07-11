@@ -14,6 +14,74 @@ enum class NRISmokePass : uint32_t
 	Composite,
 };
 
+struct NRISmokeParticleGpu
+{
+	float position[3] = {};
+	float radius = 0.0f;
+	float velocity[3] = {};
+	float age = 0.0f;
+	float density = 0.0f;
+	float lifetime = 0.0f;
+	uint32_t styleIndex = 0;
+	uint32_t epoch = 0;
+	float initialDensity = 0.0f;
+	float initialRadius = 0.0f;
+	uint32_t serial = 0;
+	uint32_t active = 0;
+};
+
+struct NRISmokeStyleGpu
+{
+	float albedo[3] = { 0.5f, 0.5f, 0.5f };
+	float extinction = 1.0f;
+	float anisotropy = 0.0f;
+	float radius = 16.0f;
+	float expansionVelocity = 8.0f;
+	float lifetime = 3.0f;
+	float density = 1.0f;
+	float densityHalfLife = 1.5f;
+	float riseVelocity = 8.0f;
+	float velocityRandom = 2.0f;
+	float velocityInherit = 0.0f;
+	float buoyancy = 0.0f;
+	float drag = 0.5f;
+	float turbulence = 1.0f;
+	float turbulenceScale = 32.0f;
+	float padding[3] = {};
+};
+
+struct NRISmokeInjectionCommandGpu
+{
+	float position[3] = {};
+	float spawnRadius = 0.0f;
+	float velocity[3] = {};
+	uint32_t styleIndex = 0;
+	uint32_t count = 1;
+	uint32_t serial = 0;
+	float densityScale = 1.0f;
+	float radiusScale = 1.0f;
+	float velocityCone = 0.0f;
+	uint32_t epoch = 0;
+	uint32_t padding[2] = {};
+};
+
+struct NRISmokeControlGpu
+{
+	uint32_t writeCursor = 0;
+	uint32_t activeApprox = 0;
+	uint32_t liveEvictions = 0;
+	uint32_t columnOverflow = 0;
+	uint32_t epoch = 0;
+	uint32_t spawned = 0;
+	uint32_t expired = 0;
+	uint32_t reserved = 0;
+};
+
+static_assert(sizeof(NRISmokeParticleGpu) == 64);
+static_assert(sizeof(NRISmokeStyleGpu) == 80);
+static_assert(sizeof(NRISmokeInjectionCommandGpu) == 64);
+static_assert(sizeof(NRISmokeControlGpu) == 32);
+
 struct NRISmokeConstants
 {
 	uint32_t pass = 0;

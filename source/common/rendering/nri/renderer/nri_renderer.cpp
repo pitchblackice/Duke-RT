@@ -1841,6 +1841,14 @@ void NRIRenderer::ResetSmoke(const char* reason)
 	}
 }
 
+void NRIRenderer::QueueSyntheticSmoke()
+{
+	if (mSmoke != nullptr)
+	{
+		mSmoke->QueueSyntheticInjection();
+	}
+}
+
 bool NRIRenderer::Initialize()
 {
 	Clocker clock(NriPTInitialize);
@@ -1866,7 +1874,7 @@ bool NRIRenderer::Initialize()
 		return true;
 	}
 
-	return
+	const bool rendererReady =
 		NRIPipelineStateManager::CreatePipelineLayout(*this) &&
 		NRIPipelineStateManager::CreateTaaPipelineLayout(*this) &&
 		NRIPipelineStateManager::CreatePresentPipelineLayout(*this) &&
@@ -1876,13 +1884,14 @@ bool NRIRenderer::Initialize()
 		NRIDescriptorSetManager::AllocateDescriptorSets(*this) &&
 		NRIDescriptorSetManager::UpdateSamplerSet(*this) &&
 		NRIPipelineStateManager::CreatePipelines(*this);
+	return rendererReady && (mSmoke == nullptr || mSmoke->Initialize(*this));
 }
 
 void NRIRenderer::Shutdown()
 {
 	if (mSmoke != nullptr)
 	{
-		mSmoke->Shutdown();
+		mSmoke->Shutdown(*this);
 	}
 	ResetMuzzleFlashOverlayState("renderer-shutdown");
 	mLastResolvedLightOverlayGeneration = 0;

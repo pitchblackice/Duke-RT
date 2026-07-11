@@ -64,6 +64,7 @@ struct NRIAdapterMemoryTelemetry
 
 class NRIRenderDevice : public SystemBaseFrameBuffer
 {
+	friend class NRISmokeSystem;
 	typedef SystemBaseFrameBuffer Super;
 
 public:
@@ -141,6 +142,7 @@ public:
 	void ResetPathTracingAutoExposure();
 	void PrintPathTracingSmokeStatus() const;
 	void ResetPathTracingSmoke();
+	void QueueSyntheticPathTracingSmoke();
 	void NotifyPathTracingCameraCut(const char* reason) override;
 	void SetPathTracingGuiCaptureState(bool active) override;
 	bool SpawnPathTracingPointLight(float red, float green, float blue, float intensity, float radius, float offset, uint32_t& outId);

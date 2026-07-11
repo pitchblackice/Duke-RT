@@ -19,6 +19,11 @@ enum class LightOverlayActorActivationPolicy : uint8_t
 	Immediate,
 };
 
+enum class LightOverlaySmokeTrigger : uint8_t
+{
+	Spawn,
+};
+
 struct LightOverlaySourceLocation
 {
 	FString sourceName;
@@ -275,6 +280,51 @@ struct ParsedLightOverlayActorOverrideRule
 	bool shadowCast = true;
 };
 
+struct ParsedLightOverlaySmokeStyle
+{
+	FString id;
+	LightOverlaySourceLocation source;
+	float density = 1.0f;
+	float extinction = 0.04f;
+	float albedo[3] = { 0.5f, 0.5f, 0.5f };
+	float anisotropy = 0.0f;
+	float radius = 8.0f;
+	float expansionVelocity = 0.0f;
+	float lifetime = 2.0f;
+	float densityHalfLife = 1.0f;
+	float riseVelocity = 0.0f;
+	float velocityRandom = 0.0f;
+	float velocityInherit = 0.0f;
+	float buoyancy = 0.0f;
+	float drag = 0.0f;
+	float turbulence = 0.0f;
+	float turbulenceScale = 0.0f;
+};
+
+struct ParsedLightOverlaySmokeActorRule
+{
+	FString id;
+	LightOverlaySourceLocation source;
+	FString actorClassName;
+	LightOverlaySmokeTrigger trigger = LightOverlaySmokeTrigger::Spawn;
+	FString styleId;
+	uint32_t count = 1;
+	float spawnRadius = 0.0f;
+};
+
+struct ParsedLightOverlaySmokeEventRule
+{
+	FString id;
+	LightOverlaySourceLocation source;
+	FString styleId;
+	uint32_t count = 1;
+	float offset[3] = { 0.0f, 0.0f, 0.0f };
+	float spawnRadius = 0.0f;
+	float densityScale = 1.0f;
+	float radiusScale = 1.0f;
+	float velocityCone = 0.0f;
+};
+
 struct ParsedLightOverlaySourceFile
 {
 	FString sourceName;
@@ -297,6 +347,9 @@ struct ParsedLightOverlayDatabase
 	TArray<ParsedLightOverlayEmissiveMaterialResponseRule> emissiveMaterialResponseRules;
 	TArray<ParsedLightOverlaySurfaceLightRule> surfaceLightRules;
 	TArray<ParsedLightOverlayActorOverrideRule> actorOverrideRules;
+	TArray<ParsedLightOverlaySmokeStyle> smokeStyles;
+	TArray<ParsedLightOverlaySmokeActorRule> smokeActorRules;
+	TArray<ParsedLightOverlaySmokeEventRule> smokeEventRules;
 };
 
 struct ResolvedLightOverlayActorRule
@@ -538,6 +591,25 @@ struct ResolvedLightOverlayActorOverrideRule
 	bool shadowCast = true;
 };
 
+struct ResolvedLightOverlaySmokeStyle : ParsedLightOverlaySmokeStyle
+{
+	uint32_t styleIndex = 0;
+};
+
+struct ResolvedLightOverlaySmokeActorRule : ParsedLightOverlaySmokeActorRule
+{
+	PClassActor* actorClass = nullptr;
+	bool actorClassResolved = false;
+	uint32_t styleIndex = 0;
+	bool styleResolved = false;
+};
+
+struct ResolvedLightOverlaySmokeEventRule : ParsedLightOverlaySmokeEventRule
+{
+	uint32_t styleIndex = 0;
+	bool styleResolved = false;
+};
+
 struct ResolvedLightOverlaySet
 {
 	uint32_t parsedGeneration = 0;
@@ -552,6 +624,9 @@ struct ResolvedLightOverlaySet
 	TArray<ResolvedLightOverlayEmissiveMaterialResponseRule> emissiveMaterialResponseRules;
 	TArray<ResolvedLightOverlaySurfaceLightRule> surfaceLightRules;
 	TArray<ResolvedLightOverlayActorOverrideRule> actorOverrideRules;
+	TArray<ResolvedLightOverlaySmokeStyle> smokeStyles;
+	TArray<ResolvedLightOverlaySmokeActorRule> smokeActorRules;
+	TArray<ResolvedLightOverlaySmokeEventRule> smokeEventRules;
 };
 
 enum class LightOverlayRuleKind : uint8_t
@@ -564,6 +639,9 @@ enum class LightOverlayRuleKind : uint8_t
 	EmissiveMaterialResponse,
 	SurfaceLight,
 	ActorOverride,
+	SmokeStyle,
+	SmokeActorRule,
+	SmokeEventRule,
 };
 
 const ParsedLightOverlayDatabase& GetParsedLightOverlayDatabase();
@@ -580,4 +658,7 @@ bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const Pa
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayEmissiveMaterialResponseRule& rule, bool* outReplaced = nullptr);
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlaySurfaceLightRule& rule, bool* outReplaced = nullptr);
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayActorOverrideRule& rule, bool* outReplaced = nullptr);
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlaySmokeStyle& rule, bool* outReplaced = nullptr);
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlaySmokeActorRule& rule, bool* outReplaced = nullptr);
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlaySmokeEventRule& rule, bool* outReplaced = nullptr);
 bool RemoveLightOverlayRule(ParsedLightOverlayDatabase& database, LightOverlayRuleKind kind, const char* id, const char* mapName = nullptr);

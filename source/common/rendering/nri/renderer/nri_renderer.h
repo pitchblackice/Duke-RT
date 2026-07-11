@@ -1968,6 +1968,7 @@ public:
 	bool IsCommandFenceValueComplete(uint64_t fenceValue) const;
 	void PrintSmokeStatus() const;
 	void ResetSmoke(const char* reason = "console");
+	void QueueSyntheticSmoke();
 
 private:
 	friend class NRIExposurePassAccess;
