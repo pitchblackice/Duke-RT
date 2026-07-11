@@ -10,10 +10,11 @@
 #define NRI_SMOKE_SET_OUTPUT 3
 #define NRI_SMOKE_SET_ROOT 4
 
-// Hard ceilings keep authored or near-camera effects from turning one GPU thread
-// into unbounded work. Normal smoke footprints and injection counts are unchanged.
-#define NRI_SMOKE_MAX_BIN_COLUMNS_PER_AXIS 16u
+// Hard ceilings keep overlapping or near-camera effects from turning smoke into
+// an unbounded per-frame workload.
+#define NRI_SMOKE_MAX_BIN_COLUMNS_PER_AXIS 8u
 #define NRI_SMOKE_MAX_PARTICLES_PER_COMMAND 256u
+#define NRI_SMOKE_MAX_EVALUATED_PARTICLES_PER_COLUMN 32u
 
 struct SmokeParticle
 {

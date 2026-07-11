@@ -222,10 +222,12 @@ void NRISmokeSystem::AppendSyntheticCommand(NRIRenderer& renderer)
 	NRISmokeInjectionCommandGpu command = {};
 	for (uint32_t i = 0; i < 3; ++i)
 		command.position[i] = renderer.mCurrentCameraPos[i] + renderer.mCurrentCameraForward[i] * 96.0f;
-	// Use one shader-bounded command so the manual test is unmistakable and
-	// also exercises the maximum safe per-command spawn workload.
-	command.count = 256;
-	command.spawnRadius = 12.0f;
+	// Keep the test conspicuous without manufacturing a large overlapping
+	// particle workload when the command is invoked repeatedly.
+	command.count = 64;
+	command.spawnRadius = 10.0f;
+	command.densityScale = 4.0f;
+	command.radiusScale = 1.5f;
 	command.serial = mNextCommandSerial++;
 	command.epoch = mStatus.simulationEpoch;
 	mPendingCommands.push_back(command);

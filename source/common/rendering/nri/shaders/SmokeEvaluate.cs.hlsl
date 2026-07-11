@@ -19,7 +19,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint froxelIndex = SmokeFroxelIndex(dispatchThreadId.x, dispatchThreadId.y, dispatchThreadId.z);
 	if (columnIndex >= actualColumnCount || froxelIndex >= localFroxelCount)
 		return;
-	const uint candidateCount = min(gSmokeColumnCounts[columnIndex], gSmokeConstants.ColumnCapacity);
+	const uint candidateCount = min(min(gSmokeColumnCounts[columnIndex], gSmokeConstants.ColumnCapacity), NRI_SMOKE_MAX_EVALUATED_PARTICLES_PER_COLUMN);
 	const float viewDepth = 0.5 * (SmokeSliceFarDepth(dispatchThreadId.z) + (dispatchThreadId.z == 0u ? 0.0 : SmokeSliceFarDepth(dispatchThreadId.z - 1u)));
 	const float2 uv = (float2(dispatchThreadId.xy) + 0.5) / float2(gSmokeConstants.FroxelWidth, gSmokeConstants.FroxelHeight);
 	const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);

@@ -66,8 +66,8 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, std::vector<NRISmokeStyleGpu>
 			if (commands.size() >= 256u) continue;
 			NRISmokeInjectionCommandGpu command = {};
 			command.position[0] = (float)actor->spr.pos.X;
-			command.position[1] = (float)-actor->spr.pos.Z;
-			command.position[2] = (float)-actor->spr.pos.Y;
+			command.position[1] = (float)-actor->spr.pos.Y;
+			command.position[2] = (float)-actor->spr.pos.Z;
 			command.spawnRadius = rule.spawnRadius;
 			command.styleIndex = rule.styleIndex;
 			command.count = rule.count;
