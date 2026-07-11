@@ -2156,13 +2156,6 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	CompleteRawArchiveUploads(renderer, services);
 	PumpPendingRawSources(frameNumber);
 	UploadPendingRawSources(renderer, services, frameNumber);
-	// Scene construction runs before this dispatcher and can record a direct
-	// voxel BLAS build into the current command buffer. Keep compute emission
-	// off the shared build-input arenas until that BLAS has completed.
-	if (renderer.mPersistentVoxels.HasDirectBlasInFlight())
-	{
-		return;
-	}
 
 	if (state.queuedJobs.empty())
 	{

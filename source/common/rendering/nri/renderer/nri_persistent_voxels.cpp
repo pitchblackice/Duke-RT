@@ -2807,11 +2807,6 @@ NRIPersistentVoxelStatusSnapshot NRIPersistentVoxelResidency::BuildStatusSnapsho
 	return snapshot;
 }
 
-bool NRIPersistentVoxelResidency::HasDirectBlasInFlight() const
-{
-	return admissionScheduler.GetSnapshot().blasInFlight != 0;
-}
-
 void NRIPersistentVoxelResidency::FillResourceStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const
 {
 	snapshot.meshVariantResourceCount = (uint32_t)meshVariantResources.size();
@@ -4056,7 +4051,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 	auto directBlasLaneBlocked = [&](bool exclusive) -> bool
 	{
 		const NRIVoxelAdmissionSnapshot scheduler = admissionScheduler.GetSnapshot();
-		if (scheduler.blasInFlight != 0)
+		if (exclusive && scheduler.blasInFlight != 0)
 		{
 			return true;
 		}
@@ -4796,49 +4791,21 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			allocateArenaSlice(directVertexCapacity, arenaVertexCursor, meshResource.vertexOffset, meshResource.vertexCapacity);
 			allocateArenaSlice(directIndexCapacity, arenaIndexCursor, meshResource.indexOffset, meshResource.indexCapacity);
 			allocateArenaSlice(directPrimitiveCapacity, arenaPrimitiveCursor, meshResource.primitiveOffset, meshResource.primitiveCapacity);
-			const uint64_t requiredVertexBytes = (uint64_t)arenaVertexCursor * sizeof(nri_scene::SceneVertex);
-			const uint64_t requiredIndexBytes = (uint64_t)arenaIndexCursor * sizeof(uint32_t);
-			const uint64_t requiredPrimitiveBytes = (uint64_t)arenaPrimitiveCursor * sizeof(nri_scene::PrimitiveData);
-			const bool arenaGrowthRequired =
-				requiredVertexBytes > vertexBuffer.size ||
-				requiredIndexBytes > indexBuffer.size ||
-				requiredPrimitiveBytes > primitiveBuffer.size;
-			const NRIVoxelAdmissionSnapshot schedulerSnapshot = admissionScheduler.GetSnapshot();
-			const NRIVoxelComputeMemoryUsage computeMemory = GetNRIVoxelComputeMemoryUsage();
-			if (arenaGrowthRequired &&
-				(schedulerSnapshot.computeInFlight != 0 ||
-				 schedulerSnapshot.blasInFlight != 0 ||
-				 computeMemory.pendingJobCount != 0 ||
-				 computeMemory.readyDirectMeshCount != 0))
-			{
-				arenaVertexCursor = entry.savedVertexCursor;
-				arenaIndexCursor = entry.savedIndexCursor;
-				arenaPrimitiveCursor = entry.savedPrimitiveCursor;
-				entry.uploadMeshResource = {};
-				entry.state = PersistentVoxelAdmissionState::Deferred;
-				entry.lastReason = "arena-growth-in-flight";
-				outInProgress = true;
-				if (outStats != nullptr)
-				{
-					outStats->directPending++;
-				}
-				return true;
-			}
 			if (!services.EnsureArenaBuffer(
 					vertexBuffer,
-					requiredVertexBytes,
+					(uint64_t)arenaVertexCursor * sizeof(nri_scene::SceneVertex),
 					sizeof(nri_scene::SceneVertex),
 					NRIResourceFlags(NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::SHADER_RESOURCE_STORAGE), nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
 					PersistentVoxelComputeShaderResourceAccess()) ||
 				!services.EnsureArenaBuffer(
 					indexBuffer,
-					requiredIndexBytes,
+					(uint64_t)arenaIndexCursor * sizeof(uint32_t),
 					sizeof(uint32_t),
 					NRIResourceFlags(NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::SHADER_RESOURCE_STORAGE), nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
 					PersistentVoxelComputeShaderResourceAccess()) ||
 				!services.EnsureArenaBuffer(
 					primitiveBuffer,
-					requiredPrimitiveBytes,
+					(uint64_t)arenaPrimitiveCursor * sizeof(nri_scene::PrimitiveData),
 					sizeof(nri_scene::PrimitiveData),
 					NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::SHADER_RESOURCE_STORAGE),
 					PersistentVoxelComputeShaderResourceAccess()))

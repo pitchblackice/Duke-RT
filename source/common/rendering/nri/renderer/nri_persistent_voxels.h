@@ -1005,7 +1005,6 @@ public:
 	void CollectResidentAccelerationStructures(std::vector<NRIAccelerationStructureResource*>& outResources);
 	const NRIPersistentVoxelSharedBlasFrameStats& GetSharedBlasFrameStats() const;
 	NRIPersistentVoxelStatusSnapshot BuildStatusSnapshot() const;
-	bool HasDirectBlasInFlight() const;
 	void FillResourceStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const;
 	void FillBatchStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const;
 	NRIPersistentVoxelOverlayStats BuildOverlayStats() const;
