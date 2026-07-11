@@ -23,6 +23,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float viewDepth = dot(relativePosition, gSmokeConstants.CameraForward);
 	if (viewDepth + particle.Radius <= 0.0 || viewDepth - particle.Radius >= gSmokeConstants.FroxelMaxDistance)
 		return;
+	const bool cameraInside = dot(relativePosition, relativePosition) <= particle.Radius * particle.Radius;
 	const float projectionDepth = max(viewDepth, max(particle.Radius * 0.25, 0.001));
 
 	const float2 ndcCenter = float2(
@@ -34,10 +35,32 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		particle.Radius / max(projectionDepth * gSmokeConstants.TanHalfFovY, 0.001)) * 0.5;
 	int2 minimumColumn = max(int2(floor((uvCenter - uvRadius) * float2(gSmokeConstants.FroxelWidth, gSmokeConstants.FroxelHeight))), int2(0, 0));
 	int2 maximumColumn = min(int2(floor((uvCenter + uvRadius) * float2(gSmokeConstants.FroxelWidth, gSmokeConstants.FroxelHeight))), int2(gSmokeConstants.FroxelWidth - 1u, gSmokeConstants.FroxelHeight - 1u));
+	if (cameraInside)
+	{
+		minimumColumn = int2(0, 0);
+		maximumColumn = int2(gSmokeConstants.FroxelWidth - 1u, gSmokeConstants.FroxelHeight - 1u);
+	}
 	if (any(minimumColumn > maximumColumn))
 		return;
-	SmokeLimitColumnRange(minimumColumn.x, maximumColumn.x);
-	SmokeLimitColumnRange(minimumColumn.y, maximumColumn.y);
+	const bool wideParticle = maximumColumn.x - minimumColumn.x + 1 > (int)NRI_SMOKE_MAX_BIN_COLUMNS_PER_AXIS ||
+		maximumColumn.y - minimumColumn.y + 1 > (int)NRI_SMOKE_MAX_BIN_COLUMNS_PER_AXIS;
+	if (wideParticle)
+	{
+		if (controlCount == 0u)
+			return;
+		uint wideIndex = 0u;
+		InterlockedAdd(gSmokeControl[0].Reserved, 1u, wideIndex);
+		if (wideIndex >= NRI_SMOKE_MAX_WIDE_PARTICLES)
+		{
+			InterlockedAdd(gSmokeControl[0].ColumnOverflow, 1u);
+			return;
+		}
+	}
+	else
+	{
+		SmokeLimitColumnRange(minimumColumn.x, maximumColumn.x);
+		SmokeLimitColumnRange(minimumColumn.y, maximumColumn.y);
+	}
 
 	bool particleOverflow = false;
 	for (int y = minimumColumn.y; y <= maximumColumn.y; ++y)

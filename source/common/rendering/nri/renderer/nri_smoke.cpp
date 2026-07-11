@@ -264,7 +264,7 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible)
 		}
 	}
 	const uint32_t previousGeneration = mEmitters.GetGeneration();
-	mEmitters.Gather(mStatus.simulationEpoch, mStyles, mPendingCommands, mNextCommandSerial);
+	mEmitters.Gather(mStatus.simulationEpoch, mStyles, mPendingCommands, mNextCommandSerial, mSettings.traceMode);
 	if (previousGeneration != 0 && previousGeneration != mEmitters.GetGeneration())
 	{
 		mStatus.simulationEpoch = std::max(1u, mStatus.simulationEpoch + 1u);

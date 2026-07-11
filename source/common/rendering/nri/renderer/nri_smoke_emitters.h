@@ -9,7 +9,7 @@
 class NRISmokeEmitterSystem
 {
 public:
-	void Gather(uint32_t epoch, std::vector<NRISmokeStyleGpu>& styles, std::vector<NRISmokeInjectionCommandGpu>& commands, uint32_t& nextSerial);
+	void Gather(uint32_t epoch, std::vector<NRISmokeStyleGpu>& styles, std::vector<NRISmokeInjectionCommandGpu>& commands, uint32_t& nextSerial, uint32_t traceMode);
 	void Reset();
 	uint32_t GetGeneration() const { return mGeneration; }
 

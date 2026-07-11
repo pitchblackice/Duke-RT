@@ -26,7 +26,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float2 uv = (float2(outputPixel) + 0.5) / float2(outputDimensions);
 	const uint2 inputPixel = min((uint2)(uv * float2(inputDimensions)), inputDimensions - 1u);
 	const uint2 froxelColumn = min((uint2)(uv * float2(gSmokeConstants.FroxelWidth, gSmokeConstants.FroxelHeight)), uint2(gSmokeConstants.FroxelWidth - 1u, gSmokeConstants.FroxelHeight - 1u));
-	const float viewDepth = min(max(gSmokeViewZInput.Load(int3(inputPixel, 0)).x, 0.0), gSmokeConstants.FroxelMaxDistance);
+	const float viewDepth = min(abs(gSmokeViewZInput.Load(int3(inputPixel, 0)).x), gSmokeConstants.FroxelMaxDistance);
 	const uint depthSlice = SmokeDepthSlice(viewDepth);
 	const uint froxelIndex = SmokeFroxelIndex(froxelColumn.x, froxelColumn.y, depthSlice);
 	const float4 scene = gSmokeSceneInput.Load(int3(inputPixel, 0));
