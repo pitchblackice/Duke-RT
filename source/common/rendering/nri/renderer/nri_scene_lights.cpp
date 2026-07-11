@@ -2883,6 +2883,7 @@ NRILightingSettings SceneLightSystem::CaptureSettings()
 
 void SceneLightSystem::Reset()
 {
+	mEmissiveSamplingDistribution.Reset();
 	mAnalyticLights = {};
 	mEmissiveSurfaces = {};
 	mSectorLighting = {};
@@ -2904,6 +2905,7 @@ void SceneLightSystem::Reset()
 
 void SceneLightSystem::ResetLevelState()
 {
+	mEmissiveSamplingDistribution.Reset();
 	mAnalyticLights.manualLights.clear();
 	mAnalyticLights.transientLights.clear();
 	mAnalyticLights.activeLights.clear();
@@ -4940,7 +4942,7 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 	std::vector<float>& outCdf,
 	std::vector<NRIEmissiveMaterialResponseGpuData>& outMaterialResponses,
 	std::vector<NRIEmissivePrimitiveDebugRecord>& outDebugRecords,
-	EmissiveSamplingUploadStats* outStats) const
+	EmissiveSamplingUploadStats* outStats)
 {
 	EmissiveSamplingUploadStats localStats = {};
 	outHeader = {};
@@ -5037,6 +5039,18 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 		bool materialResponseApplied = false;
 		const float materialResponseScale = ResolveEmissiveMaterialResponseScale(surface, materialResponseApplied);
 		const bool materialResponseEligible = IsEmissiveSurfaceMaterialResponseEligible(surface);
+		uint64_t surfacePrimitiveKey = surface.stableKey;
+		surfacePrimitiveKey = nri_scene::HashCombine64(surfacePrimitiveKey, (uint64_t)surface.sourceRuleId);
+		surfacePrimitiveKey = nri_scene::HashCombine64(surfacePrimitiveKey, (uint64_t)surface.overrideRuleId);
+		surfacePrimitiveKey = nri_scene::HashCombine64(surfacePrimitiveKey, (uint64_t)surface.textureId);
+		surfacePrimitiveKey = nri_scene::HashCombine64(surfacePrimitiveKey, (uint64_t)surface.emissiveTextureIndex);
+		if (surface.actorIndex < 0)
+		{
+			surfacePrimitiveKey = HashQuantizedFloat(surfacePrimitiveKey, surface.center[0], 16.0f);
+			surfacePrimitiveKey = HashQuantizedFloat(surfacePrimitiveKey, surface.center[1], 16.0f);
+			surfacePrimitiveKey = HashQuantizedFloat(surfacePrimitiveKey, surface.center[2], 16.0f);
+			surfacePrimitiveKey = HashQuantizedFloat(surfacePrimitiveKey, surface.surfaceArea, 16.0f);
+		}
 
 		for (uint32_t localOffset = 0; localOffset < range.count; ++localOffset)
 		{
@@ -5059,7 +5073,7 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 			candidate.gpu.selectionWeight = basePowerEstimate * samplingScale * sectorReachScale;
 			candidate.gpu.emissionScale = sectorResponseScale;
 
-			candidate.debug.stableKey = nri_scene::HashCombine64(surface.stableKey, ((uint64_t)dataSource << 32u) | primitiveIndex);
+			candidate.debug.stableKey = nri_scene::HashCombine64(surfacePrimitiveKey, ((uint64_t)dataSource << 32u) | localOffset);
 			candidate.debug.surfaceStableKey = surface.stableKey;
 			candidate.debug.dataSource = dataSource;
 			candidate.debug.primitiveIndex = primitiveIndex;
@@ -5138,49 +5152,57 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 		}
 	}
 
-	if (candidates.size() > NriMaxEmissivePrimitives)
+	std::vector<NRIEmissiveSamplingDistributionCandidate> distributionCandidates;
+	distributionCandidates.reserve(candidates.size());
+	for (const auto& candidate : candidates)
 	{
-		std::stable_sort(candidates.begin(), candidates.end(), [](const BuiltCandidate& a, const BuiltCandidate& b)
-		{
-			if (a.gpu.selectionWeight != b.gpu.selectionWeight)
-			{
-				return a.gpu.selectionWeight > b.gpu.selectionWeight;
-			}
-
-			return a.debug.stableKey < b.debug.stableKey;
-		});
-		candidates.resize(NriMaxEmissivePrimitives);
+		NRIEmissiveSamplingDistributionCandidate distributionCandidate = {};
+		distributionCandidate.stableKey = candidate.debug.stableKey;
+		distributionCandidate.bindingKey = nri_scene::HashCombine64(
+			(uint64_t)candidate.gpu.dataSource,
+			(uint64_t)candidate.gpu.primitiveIndex);
+		distributionCandidate.proposalWeight = candidate.gpu.selectionWeight;
+		distributionCandidates.push_back(distributionCandidate);
 	}
+	std::vector<NRIEmissiveSamplingDistributionEntry> distributionEntries;
+	mEmissiveSamplingDistribution.Build(
+		distributionCandidates,
+		NriMaxEmissivePrimitives,
+		distributionEntries,
+		outCdf);
 
 	outPrimitives.reserve(candidates.size());
 	outDebugRecords.reserve(candidates.size());
 
 	float totalPower = 0.0f;
-	float totalSelectionWeight = 0.0f;
 	float dominantPower = -1.0f;
 
-	for (size_t i = 0; i < candidates.size(); ++i)
+	for (const auto& distributionEntry : distributionEntries)
 	{
-		outPrimitives.push_back(candidates[i].gpu);
-		outDebugRecords.push_back(candidates[i].debug);
-		if (candidates[i].debug.dataSource == nri_diag::SceneDataSourceStatic)
+		BuiltCandidate candidate = candidates[distributionEntry.inputIndex];
+		candidate.gpu.selectionWeight = distributionEntry.proposalWeight;
+		candidate.gpu.selectionPdf = distributionEntry.selectionPdf;
+		candidate.debug.selectionWeight = distributionEntry.proposalWeight;
+		candidate.debug.selectionPdf = distributionEntry.selectionPdf;
+		outPrimitives.push_back(candidate.gpu);
+		outDebugRecords.push_back(candidate.debug);
+		if (candidate.debug.dataSource == nri_diag::SceneDataSourceStatic)
 		{
 			localStats.outputStaticRecords++;
 		}
-		else if (candidates[i].debug.dataSource == nri_diag::SceneDataSourceDynamic)
+		else if (candidate.debug.dataSource == nri_diag::SceneDataSourceDynamic)
 		{
 			localStats.outputDynamicRecords++;
 		}
-		else if (candidates[i].debug.dataSource == nri_diag::SceneDataSourcePersistentVoxel)
+		else if (candidate.debug.dataSource == nri_diag::SceneDataSourcePersistentVoxel)
 		{
 			localStats.outputPersistentVoxelRecords++;
 		}
-		totalPower += candidates[i].gpu.powerEstimate;
-		totalSelectionWeight += candidates[i].gpu.selectionWeight;
-		if (candidates[i].gpu.powerEstimate > dominantPower)
+		totalPower += candidate.gpu.powerEstimate;
+		if (candidate.gpu.powerEstimate > dominantPower)
 		{
-			dominantPower = candidates[i].gpu.powerEstimate;
-			outHeader.dominantIndex = (uint32_t)i;
+			dominantPower = candidate.gpu.powerEstimate;
+			outHeader.dominantIndex = (uint32_t)outPrimitives.size() - 1u;
 		}
 	}
 
@@ -5192,31 +5214,6 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 		*outStats = localStats;
 	}
 
-	if (outPrimitives.empty())
-	{
-		outCdf.resize(1, 1.0f);
-		return;
-	}
-
-	float runningCdf = 0.0f;
-	const float invTotalSelectionWeight = totalSelectionWeight > 0.0f ? (1.0f / totalSelectionWeight) : 0.0f;
-	for (size_t i = 0; i < outPrimitives.size(); ++i)
-	{
-		float pdf = 0.0f;
-		if (totalSelectionWeight > 0.0f)
-		{
-			pdf = outPrimitives[i].selectionWeight * invTotalSelectionWeight;
-		}
-		else
-		{
-			pdf = 1.0f / (float)outPrimitives.size();
-		}
-
-		outPrimitives[i].selectionPdf = pdf;
-		outDebugRecords[i].selectionPdf = pdf;
-		runningCdf += pdf;
-		outCdf.push_back(i + 1 == outPrimitives.size() ? 1.0f : std::min(runningCdf, 1.0f));
-	}
 }
 
 uint64_t SceneLightSystem::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBuildContext& context) const

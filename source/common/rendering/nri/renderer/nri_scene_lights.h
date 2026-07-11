@@ -4,6 +4,7 @@
 #include "../scene/nri_geometry_bridge.h"
 #include "../scene/nri_map_world.h"
 #include "../scene/nri_scene_bridge.h"
+#include "nri_emissive_sampling_distribution.h"
 #include "lightoverlay.h"
 #include "v_video.h"
 
@@ -795,7 +796,7 @@ public:
 		std::vector<float>& outCdf,
 		std::vector<NRIEmissiveMaterialResponseGpuData>& outMaterialResponses,
 		std::vector<NRIEmissivePrimitiveDebugRecord>& outDebugRecords,
-		EmissiveSamplingUploadStats* outStats = nullptr) const;
+		EmissiveSamplingUploadStats* outStats = nullptr);
 	uint64_t BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBuildContext& context) const;
 	void BuildSectorLightingUpload(
 		float sectorLightMultiplier,
@@ -942,6 +943,7 @@ private:
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
 	PersistentDynamicEmissiveHighWaterStats mPersistentDynamicEmissiveHighWaterStats = {};
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
+	NRIEmissiveSamplingDistribution mEmissiveSamplingDistribution;
 	std::vector<SurfaceRecord> mSurfaceRecords;
 	SurfaceRecordIndex mSurfaceRecordIndex = {};
 	FrameAppendStats mFrameAppendStats = {};
