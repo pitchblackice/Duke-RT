@@ -598,7 +598,6 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 	float3 origin = surfaceHit.position + surfaceHit.normal * 0.05;
 	float3 direction = SampleCosineHemisphere(surfaceHit.normal, rngState);
 	bool hasSecondaryHitDistance = false;
-	float accumulatedSecondaryHitDistance = 0.0;
 
 	[loop]
 	for (uint bounce = 0u; bounce < bounceCount; ++bounce)
@@ -611,15 +610,20 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 			TraceShaderStatAdd(TRACE_STAT_INDIRECT_DIFFUSE_MISSES, 1u);
 			if (!hasSecondaryHitDistance)
 			{
-				accumulatedSecondaryHitDistance = NRD_INF;
+				outHitDistance = NRD_INF;
 				hasSecondaryHitDistance = true;
 			}
 			indirectRadiance += throughput * GetMissColor(tracedDirection);
 			break;
 		}
 
-		accumulatedSecondaryHitDistance += bounceHit.distance;
-		hasSecondaryHitDistance = true;
+		if (!hasSecondaryHitDistance)
+		{
+			// NRD expects the first in-lobe secondary distance. Summing later path
+			// segments makes unrelated topology publication look like a guide change.
+			outHitDistance = bounceHit.distance;
+			hasSecondaryHitDistance = true;
+		}
 		const MaterialData bounceMaterial = GetMaterialData(bounceHit.materialIndex, bounceHit.dataSource);
 		const bool bounceReceivesShadow = MaterialReceivesShadow(bounceMaterial);
 		if ((bounceMaterial.flags & (MATERIAL_FLAG_MIRROR | MATERIAL_FLAG_PORTAL)) != 0)
@@ -681,7 +685,6 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 		direction = SampleCosineHemisphere(bounceHit.normal, rngState);
 	}
 
-	outHitDistance = hasSecondaryHitDistance ? accumulatedSecondaryHitDistance : 0.0;
 	return indirectRadiance;
 }
 

@@ -29,6 +29,8 @@ struct NRINrdDispatchDesc
 	uint32_t resourceWidth = 0;
 	uint32_t resourceHeight = 0;
 	uint32_t frameIndex = 0;
+	uint8_t queuedFrameNum = 1;
+	float observedFrameTimeMs = 0.0f;
 	float cameraJitter[2] = {};
 	float cameraJitterPrev[2] = {};
 	float lightDirection[3] = {};
@@ -52,6 +54,7 @@ struct NRINrdDispatchDesc
 	bool enableAntiFirefly = true;
 	bool enableValidation = false;
 	bool enableSigmaShadow = false;
+	bool traceTemporalInput = false;
 };
 
 class NRINrdContext
@@ -75,6 +78,7 @@ private:
 	nrd::SigmaSettings mSigmaSettings = {};
 	uint32_t mWidth = 0;
 	uint32_t mHeight = 0;
+	uint8_t mQueuedFrameNum = 0;
 	bool mInitialized = false;
 	bool mHasReblurSettings = false;
 	bool mHasRelaxSettings = false;

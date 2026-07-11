@@ -196,6 +196,8 @@ public:
 		uint32_t outputHeight = 0;
 		uint32_t targetWidth = 0;
 		uint32_t targetHeight = 0;
+		uint8_t queuedFrameNum = 1;
+		float observedFrameTimeMs = 0.0f;
 		int32_t sceneLeft = 0;
 		int32_t sceneTop = 0;
 		std::array<float, 3> currentCameraPos = {};

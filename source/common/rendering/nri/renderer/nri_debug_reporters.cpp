@@ -751,7 +751,7 @@ void NRIRenderer::PrintStatus()
 			denoiserSettings.specularPrepassBlurRadius);
 	}
 	Printf("NRI PT NRD guides: diffuse_signal=primary_demodulated_radiance specular_signal=primary_demodulated_radiance hit_distance=%s roughness=material_hint metalness=material_hint material_id=semantic_class\n",
-		denoiserSettings.denoiserMode == NRINrdDenoiserMode::Relax ? "secondary_transport_linear_hitdist" : "secondary_transport_reblur_norm");
+		denoiserSettings.denoiserMode == NRINrdDenoiserMode::Relax ? "first_secondary_linear_hitdist" : "first_secondary_reblur_norm");
 	Printf("NRI PT scene stats: %s\n", nri_ptscenestats ? "on" : "off");
 	Printf("NRI PT mutation trace: chunk=%d sector=%d\n",
 		(int)nri_ptmutationtracechunk,
