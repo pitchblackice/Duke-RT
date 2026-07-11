@@ -6,6 +6,23 @@
 
 #include <algorithm>
 
+namespace
+{
+	void WorldToPathTracingPosition(const DVector3& worldPosition, float outPosition[3])
+	{
+		outPosition[0] = (float)worldPosition.X;
+		outPosition[1] = (float)-worldPosition.Z;
+		outPosition[2] = (float)-worldPosition.Y;
+	}
+
+	void WorldToPathTracingDirection(const DVector3& worldDirection, float outDirection[3])
+	{
+		outDirection[0] = (float)worldDirection.X;
+		outDirection[1] = (float)-worldDirection.Z;
+		outDirection[2] = (float)-worldDirection.Y;
+	}
+}
+
 size_t NRISmokeEmitterSystem::IdentityHash::operator()(const Identity& value) const
 {
 	size_t hash = (size_t)value.rule * 16777619u;
@@ -20,7 +37,9 @@ void NRISmokeEmitterSystem::Reset()
 	mGeneration = 0;
 }
 
-void NRISmokeEmitterSystem::Gather(uint32_t epoch, std::vector<NRISmokeStyleGpu>& styles, std::vector<NRISmokeInjectionCommandGpu>& commands, uint32_t& nextSerial, uint32_t traceMode)
+void NRISmokeEmitterSystem::Gather(uint32_t epoch, const TArray<PathTracingWeaponLightEvent>& weaponEvents,
+	std::vector<NRISmokeStyleGpu>& styles, std::vector<NRISmokeInjectionCommandGpu>& commands,
+	uint32_t& nextSerial, uint32_t traceMode)
 {
 	const ResolvedLightOverlaySet& resolved = GetResolvedLightOverlaySet();
 	if (mGeneration != resolved.resolvedGeneration)
@@ -75,7 +94,6 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, std::vector<NRISmokeStyleGpu>
 			observed.insert(identity);
 			if (traceMode != 0) observedPerRule[ruleIndex]++;
 			if (mEmitted.find(identity) != mEmitted.end()) continue;
-			if (commands.size() >= 256u) continue;
 			NRISmokeInjectionCommandGpu command = {};
 			command.position[0] = (float)actor->spr.pos.X;
 			// Match WorldToPathTracingPosition used by analytic actor lights.
@@ -95,8 +113,8 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, std::vector<NRISmokeStyleGpu>
 			}
 			if (traceMode >= 2 && verbosePrinted < 32u)
 			{
-				Printf("NRI PT smoke emitter: event=spawn rule=%s class=%s actor=%d world=(%.3f,%.3f,%.3f) render=(%.3f,%.3f,%.3f) style=%u particles=%u\n",
-					rule.id.GetChars(), actor->GetClass()->TypeName.GetChars(), actor->GetIndex(),
+				Printf("NRI PT smoke emitter: event=spawn rule=%s class=%s actor=%d identity=%p serial=%u world=(%.3f,%.3f,%.3f) render=(%.3f,%.3f,%.3f) style=%u particles=%u\n",
+					rule.id.GetChars(), actor->GetClass()->TypeName.GetChars(), actor->GetIndex(), actor, command.serial,
 					actor->spr.pos.X, actor->spr.pos.Y, actor->spr.pos.Z,
 					command.position[0], command.position[1], command.position[2], command.styleIndex, command.count);
 				verbosePrinted++;
@@ -115,4 +133,59 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, std::vector<NRISmokeStyleGpu>
 	}
 	for (auto it = mEmitted.begin(); it != mEmitted.end(); )
 		it = observed.find(*it) == observed.end() ? mEmitted.erase(it) : std::next(it);
+
+	uint32_t eventCommands = 0;
+	uint32_t eventParticles = 0;
+	for (const PathTracingWeaponLightEvent& event : weaponEvents)
+	{
+		bool matchedEventRule = false;
+		for (const ResolvedLightOverlaySmokeEventRule& rule : resolved.smokeEventRules)
+		{
+			if (!rule.styleResolved || event.eventId.CompareNoCase(rule.id) != 0)
+				continue;
+			matchedEventRule = true;
+			DVector3 worldPosition = event.worldPosition;
+			if (event.hasBasis)
+			{
+				worldPosition += event.basisRight * rule.offset[0] +
+					event.basisForward * rule.offset[1] +
+					event.basisUp * rule.offset[2];
+			}
+
+			NRISmokeInjectionCommandGpu command = {};
+			WorldToPathTracingPosition(worldPosition, command.position);
+			if (event.hasBasis)
+				WorldToPathTracingDirection(event.basisForward, command.velocity);
+			command.spawnRadius = rule.spawnRadius;
+			command.styleIndex = rule.styleIndex;
+			command.count = rule.count;
+			command.serial = nextSerial++;
+			command.densityScale = rule.densityScale;
+			command.radiusScale = rule.radiusScale;
+			command.velocityCone = rule.velocityCone;
+			command.epoch = epoch;
+			commands.push_back(command);
+			eventCommands++;
+			eventParticles += command.count;
+
+			if (traceMode != 0 && verbosePrinted < 32u)
+			{
+				Printf("NRI PT smoke emitter: event=weapon rule=%s source_event=%s source_serial=%llu command_serial=%u style=%u particles=%u render=(%.3f,%.3f,%.3f) direction=(%.3f,%.3f,%.3f) cone=%.3f\n",
+					rule.id.GetChars(), event.eventId.GetChars(), (unsigned long long)event.serial, command.serial,
+					command.styleIndex, command.count, command.position[0], command.position[1], command.position[2],
+					command.velocity[0], command.velocity[1], command.velocity[2], command.velocityCone);
+				verbosePrinted++;
+			}
+		}
+		if (!matchedEventRule && traceMode != 0)
+		{
+			Printf("NRI PT smoke emitter: event=weapon-ignored source_event=%s source_serial=%llu reason=no-rule\n",
+				event.eventId.GetChars(), (unsigned long long)event.serial);
+		}
+	}
+	if (traceMode != 0 && eventCommands != 0u)
+	{
+		Printf("NRI PT smoke emitter: event=weapon-frame-summary source_events=%u commands=%u particles=%u\n",
+			(uint32_t)weaponEvents.Size(), eventCommands, eventParticles);
+	}
 }

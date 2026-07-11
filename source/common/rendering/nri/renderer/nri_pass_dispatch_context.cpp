@@ -196,7 +196,8 @@ void NRIPassDispatchContext::SelfTestService::SetSelfTestRouteSnapshot(const cha
 
 bool NRIPassDispatchContext::SmokeService::PrepareFrame(bool mainViewEligible) const
 {
-	return prepareFrame == nullptr || prepareFrame(user, mainViewEligible);
+	static const TArray<PathTracingWeaponLightEvent> emptyWeaponEvents;
+	return prepareFrame == nullptr || prepareFrame(user, mainViewEligible, weaponEvents != nullptr ? *weaponEvents : emptyWeaponEvents);
 }
 
 bool NRIPassDispatchContext::SmokeService::DispatchRoute(const NRISmokeRouteDesc& route) const

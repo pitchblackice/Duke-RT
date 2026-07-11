@@ -25,6 +25,7 @@
 #include "nri_static_scene_geometry_upload.h"
 #include "nri_trace_stats.h"
 #include "nri_upscaler.h"
+#include "nri_weapon_event_batch.h"
 #include "../framegen/nri_framegen.h"
 
 #include "../scene/nri_map_builder.h"
@@ -2371,7 +2372,8 @@ private:
 		const nri_scene::MaterialBridgeData* dynamicMaterials,
 		const nri_scene::SceneView* surfaceLightSceneView,
 		const nri_scene::MaterialBridgeData* surfaceLightMaterials,
-		bool appendPersistentVoxelSceneLights);
+		bool appendPersistentVoxelSceneLights,
+		const TArray<PathTracingWeaponLightEvent>* weaponEvents);
 	void ResetMuzzleFlashOverlayState(const char* reason);
 	void ResetPersistentDynamicEmissiveCache();
 	SceneLightSystem::PersistentDynamicEmissiveCacheBuildServices BuildPersistentDynamicEmissiveCacheServices();
@@ -2459,6 +2461,7 @@ private:
 
 	NRIRenderDevice* mFrameBuffer = nullptr;
 	std::unique_ptr<NRISmokeSystem> mSmoke;
+	NRIWeaponEventBatch mWeaponEventBatch;
 	nri::PipelineLayout* mPipelineLayout = nullptr;
 	nri::PipelineLayout* mTaaPipelineLayout = nullptr;
 	nri::PipelineLayout* mPresentPipelineLayout = nullptr;

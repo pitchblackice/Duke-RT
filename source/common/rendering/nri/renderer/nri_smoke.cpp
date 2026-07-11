@@ -233,7 +233,7 @@ void NRISmokeSystem::AppendSyntheticCommand(NRIRenderer& renderer)
 	mPendingCommands.push_back(command);
 }
 
-bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible)
+bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, const TArray<PathTracingWeaponLightEvent>& weaponEvents)
 {
 	mSettings = BuildNRISmokeSettingsFromCVars();
 	mStatus.enabled = mSettings.enabled;
@@ -264,7 +264,7 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible)
 		}
 	}
 	const uint32_t previousGeneration = mEmitters.GetGeneration();
-	mEmitters.Gather(mStatus.simulationEpoch, mStyles, mPendingCommands, mNextCommandSerial, mSettings.traceMode);
+	mEmitters.Gather(mStatus.simulationEpoch, weaponEvents, mStyles, mPendingCommands, mNextCommandSerial, mSettings.traceMode);
 	if (previousGeneration != 0 && previousGeneration != mEmitters.GetGeneration())
 	{
 		mStatus.simulationEpoch = std::max(1u, mStatus.simulationEpoch + 1u);

@@ -1893,6 +1893,7 @@ void NRIRenderer::Shutdown()
 	{
 		mSmoke->Shutdown(*this);
 	}
+	mWeaponEventBatch.Reset();
 	ResetMuzzleFlashOverlayState("renderer-shutdown");
 	mLastResolvedLightOverlayGeneration = 0;
 
@@ -2017,6 +2018,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 
 	DestroyCachedTextures();
 	ResetPersistentDynamicEmissiveCache();
+	mWeaponEventBatch.Reset();
 	ResetMuzzleFlashOverlayState("level-unload");
 	mLastResolvedLightOverlayGeneration = 0;
 
@@ -2146,6 +2148,7 @@ void NRIRenderer::OnLevelUnloadComplete(const LevelTransitionInfo& info)
 
 void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 {
+	mWeaponEventBatch.Reset();
 	if (info.oldLevel != info.newLevel)
 	{
 		nri_scene::ResetPersistentVoxelActorCache("level-load");
@@ -2329,15 +2332,7 @@ void NRIRenderer::TraceStartupMutationProbe(const char* event) const
 
 void NRIRenderer::ResetMuzzleFlashOverlayState(const char* reason)
 {
-	uint32_t discardedEventCount = 0;
-	if (mFrameBuffer != nullptr)
-	{
-		TArray<PathTracingWeaponLightEvent> discardedEvents;
-		mFrameBuffer->ConsumePathTracingWeaponLightEvents(discardedEvents);
-		discardedEventCount = (uint32_t)discardedEvents.Size();
-	}
-
-	mSceneLights.ResetMuzzleFlashOverlayState(reason, discardedEventCount, nri_ptdebug > 0);
+	mSceneLights.ResetMuzzleFlashOverlayState(reason, 0, nri_ptdebug > 0);
 }
 
 void NRIRenderer::ResetPerfTraceStats()

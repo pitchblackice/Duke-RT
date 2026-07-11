@@ -971,6 +971,7 @@ private:
 	std::unordered_map<std::string, ResolvedLightOverlayMuzzleFlashRule> mResolvedMuzzleFlashRuleLookup;
 	std::vector<TransientMuzzleFlashSlot> mTransientMuzzleFlashSlots;
 	std::vector<SceneAnalyticLight> mTransientMuzzleFlashLights;
+	uint64_t mLastMuzzleFlashEventSerial = 0;
 	bool mEmissiveSectorResponseTraceCacheValid = false;
 	uint64_t mEmissiveSectorResponseTraceHash = 0;
 	bool mEmissiveSectorResponseNotifyCacheValid = false;

@@ -862,7 +862,7 @@ namespace
 					if (stricmp(sc.String, "spawn")) sc.ScriptMessage("Invalid smoke trigger '%s'; expected spawn", sc.String);
 				}
 				else if (sc.Compare("style")) { sc.MustGetString(); rule.styleId = sc.String; }
-				else if (sc.Compare("count")) { sc.MustGetNumber(); rule.count = (uint32_t)std::max(sc.Number, 1); }
+				else if (sc.Compare("count")) { sc.MustGetNumber(); rule.count = (uint32_t)std::clamp(sc.Number, 1, 256); }
 				else if (sc.Compare("spawnradius")) { sc.MustGetFloat(); rule.spawnRadius = std::max(0.0f, (float)sc.Float); }
 				else SkipUnknownField("smokeactorrule", sc.String);
 			}
@@ -881,7 +881,7 @@ namespace
 			{
 				sc.MustGetString();
 				if (sc.Compare("style")) { sc.MustGetString(); rule.styleId = sc.String; }
-				else if (sc.Compare("count")) { sc.MustGetNumber(); rule.count = (uint32_t)std::max(sc.Number, 1); }
+				else if (sc.Compare("count")) { sc.MustGetNumber(); rule.count = (uint32_t)std::clamp(sc.Number, 1, 256); }
 				else if (sc.Compare("offset")) MustParseVector3(rule.offset);
 				else if (sc.Compare("spawnradius")) { sc.MustGetFloat(); rule.spawnRadius = std::max(0.0f, (float)sc.Float); }
 				else if (sc.Compare("densityscale")) { sc.MustGetFloat(); rule.densityScale = std::max(0.0f, (float)sc.Float); }

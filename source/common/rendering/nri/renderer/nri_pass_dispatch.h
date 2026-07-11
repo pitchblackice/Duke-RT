@@ -207,10 +207,11 @@ public:
 
 	struct SmokeService
 	{
-		using PrepareFrameFn = bool (*)(void* user, bool mainViewEligible);
+		using PrepareFrameFn = bool (*)(void* user, bool mainViewEligible, const TArray<PathTracingWeaponLightEvent>& weaponEvents);
 		using DispatchRouteFn = bool (*)(void* user, const NRISmokeRouteDesc& route);
 
 		void* user = nullptr;
+		const TArray<PathTracingWeaponLightEvent>* weaponEvents = nullptr;
 		PrepareFrameFn prepareFrame = nullptr;
 		DispatchRouteFn dispatchRoute = nullptr;
 

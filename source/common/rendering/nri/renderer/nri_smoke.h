@@ -4,6 +4,7 @@
 #include "nri_resources.h"
 #include "nri_smoke_contracts.h"
 #include "nri_smoke_emitters.h"
+#include "v_video.h"
 
 #include <array>
 #include <cstdint>
@@ -51,7 +52,7 @@ class NRISmokeSystem
 {
 public:
 	bool Initialize(NRIRenderer& renderer);
-	bool PrepareFrame(NRIRenderer& renderer, bool mainViewEligible);
+	bool PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, const TArray<PathTracingWeaponLightEvent>& weaponEvents);
 	bool DispatchRoute(NRIRenderer& renderer, const NRISmokeRouteDesc& route);
 	void Reset(const char* reason);
 	void Shutdown(NRIRenderer& renderer);

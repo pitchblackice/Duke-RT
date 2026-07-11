@@ -214,10 +214,11 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext(bool mainViewEligib
 	{
 		NRIPassDispatchContext::SmokeService service = {};
 		service.user = this;
-		service.prepareFrame = [](void* user, bool eligible) -> bool
+		service.weaponEvents = &mWeaponEventBatch.Events();
+		service.prepareFrame = [](void* user, bool eligible, const TArray<PathTracingWeaponLightEvent>& weaponEvents) -> bool
 		{
 			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
-			return renderer->mSmoke == nullptr || renderer->mSmoke->PrepareFrame(*renderer, eligible);
+			return renderer->mSmoke == nullptr || renderer->mSmoke->PrepareFrame(*renderer, eligible, weaponEvents);
 		};
 		service.dispatchRoute = [](void* user, const NRISmokeRouteDesc& route) -> bool
 		{

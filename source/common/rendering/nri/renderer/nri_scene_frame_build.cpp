@@ -466,6 +466,10 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	const bool bootstrapCapturedBaseColor = inputs.bootstrapCapturedBaseColor;
 	const bool rawTraceDirectScene = inputs.rawTraceDirectScene;
 	const bool preserveHistory = inputs.preserveHistory;
+	if (!preserveHistory)
+	{
+		mWeaponEventBatch.Capture(*mFrameBuffer, mFrameIndex);
+	}
 	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
 	const bool allowStaticMapScene = !bootstrapCapturedView && !rawTraceDirectScene && mMapWorld.valid;
 	nri_scene::SceneView& capturedSceneView = frame.capturedSceneView;
@@ -1654,7 +1658,8 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		sceneLightDynamicMaterials,
 		hasSurfaceLightOverlayForFrame ? &surfaceLightSceneView : nullptr,
 		hasSurfaceLightOverlayForFrame ? &surfaceLightMaterialBridge : nullptr,
-		appendPersistentVoxelSceneLights);
+		appendPersistentVoxelSceneLights,
+		preserveHistory ? nullptr : &mWeaponEventBatch.Events());
 
 	bool refreshedSceneDataAfterLightRebuild = false;
 	if (mGpuSceneHasDynamicOverlay &&

@@ -733,6 +733,48 @@ namespace
 		return nullptr;
 	}
 
+	static FString DescribeResolvedSmokeEventRuleIds(const ResolvedLightOverlaySet& resolvedSet, uint32_t limit = 16u)
+	{
+		if (resolvedSet.smokeEventRules.Size() == 0)
+		{
+			return "none";
+		}
+
+		TArray<FString> ids;
+		ids.Reserve(resolvedSet.smokeEventRules.Size());
+		for (const auto& rule : resolvedSet.smokeEventRules)
+		{
+			ids.Push(rule.id);
+		}
+		std::sort(ids.begin(), ids.end(), [](const FString& a, const FString& b)
+		{
+			return a.CompareNoCase(b) < 0;
+		});
+
+		FString result;
+		const uint32_t printCount = std::min<uint32_t>((uint32_t)ids.Size(), limit);
+		for (uint32_t i = 0; i < printCount; ++i)
+		{
+			if (!result.IsEmpty()) result << ",";
+			result << ids[i];
+		}
+		if (printCount < (uint32_t)ids.Size())
+		{
+			result.AppendFormat(",...(+%u)", (uint32_t)ids.Size() - printCount);
+		}
+		return result;
+	}
+
+	static const ResolvedLightOverlaySmokeEventRule* FindResolvedSmokeEventRule(const ResolvedLightOverlaySet& resolvedSet, const char* eventId)
+	{
+		if (eventId == nullptr || *eventId == '\0') return nullptr;
+		for (const auto& rule : resolvedSet.smokeEventRules)
+		{
+			if (rule.id.CompareNoCase(eventId) == 0) return &rule;
+		}
+		return nullptr;
+	}
+
 	static bool BuildLocalPlayerWeaponLightEvent(const char* eventId, float forwardOffset, PathTracingWeaponLightEvent& outEvent, FString& outError)
 	{
 		if (eventId == nullptr || *eventId == '\0')
@@ -1747,11 +1789,48 @@ CCMD(nri_ptsmokereset)
 
 CCMD(nri_ptsmoke_test)
 {
-	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	auto* frameBuffer = GetActiveNRIRenderDevice();
+	if (frameBuffer == nullptr)
+	{
+		Printf("nri_ptsmoke_test is only available while using the NRI renderer.\n");
+		return;
+	}
+	if (argv.argc() < 2)
 	{
 		frameBuffer->QueueSyntheticPathTracingSmoke();
-		Printf("NRI PT smoke synthetic injection queued.\n");
+		Printf("NRI PT smoke synthetic injection queued. Use nri_ptsmoke_test <event_rule_id> to test authored weapon-event fan-out.\n");
+		return;
 	}
+
+	const ResolvedLightOverlaySet& resolvedSet = GetResolvedLightOverlaySet();
+	const char* ruleId = argv[1];
+	const ResolvedLightOverlaySmokeEventRule* rule = FindResolvedSmokeEventRule(resolvedSet, ruleId);
+	if (rule == nullptr || !rule->styleResolved)
+	{
+		Printf("nri_ptsmoke_test: no resolved smoke-event rule '%s'. available=%s\n",
+			ruleId,
+			DescribeResolvedSmokeEventRuleIds(resolvedSet).GetChars());
+		return;
+	}
+
+	PathTracingWeaponLightEvent event;
+	FString error;
+	if (!BuildLocalPlayerWeaponLightEvent(rule->id.GetChars(), DefaultPtTestLightOffset, event, error))
+	{
+		Printf("nri_ptsmoke_test: %s.\n", error.GetChars());
+		return;
+	}
+
+	frameBuffer->EmitPathTracingWeaponLightEvent(event);
+	Printf("NRI PT smoke event test queued: event=%s actor=%d world_pos=(%.3f, %.3f, %.3f) time=%.4f pending=%u source=%s\n",
+		event.eventId.GetChars(),
+		event.emitterActorIndex,
+		event.worldPosition.X,
+		event.worldPosition.Y,
+		event.worldPosition.Z,
+		event.absoluteTimeSeconds,
+		frameBuffer->GetPendingPathTracingWeaponLightEventCount(),
+		rule->source.sourceName.GetChars());
 }
 
 CCMD(nri_ptchunkdump)

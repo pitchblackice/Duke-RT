@@ -2641,7 +2641,8 @@ void NRIRenderer::RefreshSceneLightSystem(
 	const nri_scene::MaterialBridgeData* dynamicMaterials,
 	const nri_scene::SceneView* surfaceLightSceneView,
 	const nri_scene::MaterialBridgeData* surfaceLightMaterials,
-	bool appendPersistentVoxelSceneLights)
+	bool appendPersistentVoxelSceneLights,
+	const TArray<PathTracingWeaponLightEvent>* weaponEvents)
 {
 	nri_runtime_mutation::ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneLightsMs);
 	SceneLightSystem::FrameAssemblyInput assemblyInput = {};
@@ -2738,12 +2739,11 @@ void NRIRenderer::RefreshSceneLightSystem(
 	}
 	const uint32_t gameplayLightTimeIndex = GetGameplayLightTimeIndexForSceneLights();
 	const double currentTimeSeconds = GetCurrentGameplayTimeSecondsForSceneLights();
-	TArray<PathTracingWeaponLightEvent> pendingMuzzleFlashEvents;
-	if (mFrameBuffer != nullptr)
-	{
-		mFrameBuffer->ConsumePathTracingWeaponLightEvents(pendingMuzzleFlashEvents);
-	}
-	mSceneLights.RefreshTransientMuzzleFlashLights(currentTimeSeconds, pendingMuzzleFlashEvents, nri_ptdebug > 0);
+	static const TArray<PathTracingWeaponLightEvent> emptyWeaponEvents;
+	mSceneLights.RefreshTransientMuzzleFlashLights(
+		currentTimeSeconds,
+		weaponEvents != nullptr ? *weaponEvents : emptyWeaponEvents,
+		nri_ptdebug > 0 || (int)nri_ptsmoketrace > 0);
 
 	{
 		nri_runtime_mutation::ScopedPtPerfTimer rebuildTimer(mLastPerfShellTraceStats.sceneLightAnalyticMs);
@@ -2904,6 +2904,7 @@ void SceneLightSystem::Reset()
 	mResolvedMuzzleFlashRuleLookup.clear();
 	mTransientMuzzleFlashSlots.clear();
 	mTransientMuzzleFlashLights.clear();
+	mLastMuzzleFlashEventSerial = 0;
 	ResetEmissiveSectorResponseCaches();
 }
 
@@ -2972,6 +2973,7 @@ void SceneLightSystem::ResetLevelState()
 	mResolvedMuzzleFlashRuleLookup.clear();
 	mTransientMuzzleFlashSlots.clear();
 	mTransientMuzzleFlashLights.clear();
+	mLastMuzzleFlashEventSerial = 0;
 	ResetEmissiveSectorResponseCaches();
 }
 
@@ -5585,6 +5587,7 @@ void SceneLightSystem::RefreshResolvedMuzzleFlashRuleLookup(const ResolvedLightO
 void SceneLightSystem::ResetMuzzleFlashOverlayState(const char* reason, uint32_t discardedEventCount, bool debug)
 {
 	mResolvedMuzzleFlashRuleLookup.clear();
+	mLastMuzzleFlashEventSerial = 0;
 	for (TransientMuzzleFlashSlot& slot : mTransientMuzzleFlashSlots)
 	{
 		slot.ruleId = 0;
@@ -5669,6 +5672,11 @@ void SceneLightSystem::RefreshTransientMuzzleFlashLights(double currentTimeSecon
 
 	for (const PathTracingWeaponLightEvent& event : pendingEvents)
 	{
+		if (event.serial != 0 && event.serial <= mLastMuzzleFlashEventSerial)
+		{
+			continue;
+		}
+		mLastMuzzleFlashEventSerial = std::max(mLastMuzzleFlashEventSerial, event.serial);
 		const std::string key = BuildNormalizedMuzzleFlashEventKey(event.eventId);
 		const auto ruleIt = key.empty() ? mResolvedMuzzleFlashRuleLookup.end() : mResolvedMuzzleFlashRuleLookup.find(key);
 		if (ruleIt == mResolvedMuzzleFlashRuleLookup.end())

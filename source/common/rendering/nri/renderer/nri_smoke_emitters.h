@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nri_smoke_contracts.h"
+#include "v_video.h"
 
 #include <cstdint>
 #include <unordered_set>
@@ -9,7 +10,9 @@
 class NRISmokeEmitterSystem
 {
 public:
-	void Gather(uint32_t epoch, std::vector<NRISmokeStyleGpu>& styles, std::vector<NRISmokeInjectionCommandGpu>& commands, uint32_t& nextSerial, uint32_t traceMode);
+	void Gather(uint32_t epoch, const TArray<PathTracingWeaponLightEvent>& weaponEvents,
+		std::vector<NRISmokeStyleGpu>& styles, std::vector<NRISmokeInjectionCommandGpu>& commands,
+		uint32_t& nextSerial, uint32_t traceMode);
 	void Reset();
 	uint32_t GetGeneration() const { return mGeneration; }
 
