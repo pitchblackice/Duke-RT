@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <vector>
 
@@ -64,6 +65,43 @@ namespace
 		input.payloadStride = payloadStride;
 		return input;
 	}
+
+	static uint64_t HashEmissiveStabilityValue(uint64_t hash, uint64_t value)
+	{
+		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6u) + (hash >> 2u));
+	}
+
+	static uint32_t EmissiveStabilityFloatBits(float value)
+	{
+		uint32_t bits = 0;
+		std::memcpy(&bits, &value, sizeof(bits));
+		return bits;
+	}
+
+	static uint64_t HashEmissiveStabilityKeys(const std::vector<uint64_t>& keys)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		for (uint64_t key : keys)
+		{
+			hash = HashEmissiveStabilityValue(hash, key);
+		}
+		return hash;
+	}
+
+	static uint64_t SelectEmissiveStabilityKey(
+		const std::vector<uint64_t>& keys,
+		const std::vector<float>& cdf,
+		float value)
+	{
+		if (keys.empty() || cdf.empty())
+		{
+			return 0;
+		}
+
+		const auto it = std::lower_bound(cdf.begin(), cdf.end(), value);
+		const size_t index = std::min((size_t)std::distance(cdf.begin(), it), keys.size() - 1u);
+		return keys[index];
+	}
 }
 bool NRIRenderer::UpdateEmissiveSamplingBuffers(
 	const EmissiveSamplingBuildContext& context,
@@ -76,6 +114,13 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(
 	const bool sectorResponseChanged =
 		mEmissiveSectorResponsePayloadCacheValid &&
 		mEmissiveSectorResponsePayloadHash != sectorResponsePayloadHash;
+	const bool stabilityTraceEnabled = (bool)nri_ptemissivestabilitytrace;
+	if (!stabilityTraceEnabled)
+	{
+		mEmissiveStabilityTraceValid = false;
+		mEmissiveStabilityOrderedKeys.clear();
+		mEmissiveStabilityCdf.clear();
+	}
 	NRISceneDataFrameSlot* frameSlot =
 		allowSceneDataFrameSlot && ShouldUseSceneDataFrameRing() ? &GetCurrentSceneDataFrameSlot() : nullptr;
 	NRIBufferResource& emissivePrimitiveHeaderBuffer =
@@ -98,6 +143,16 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(
 		frameSlot != nullptr ?
 			frameSlot->emissiveSamplingPayloadValid && frameSlot->emissiveSamplingPayloadHash == payloadHash :
 			mEmissiveSamplingPayloadCacheValid && mEmissiveSamplingPayloadHash == payloadHash;
+	NRIEmissivePrimitiveHeaderGpuData emissiveHeader = {};
+	std::vector<NRIEmissivePrimitiveGpuData> emissivePrimitives;
+	std::vector<float> emissiveCdf;
+	std::vector<NRIEmissiveMaterialResponseGpuData> emissiveMaterialResponses;
+	std::vector<NRIEmissivePrimitiveDebugRecord> emissiveDebugRecords;
+	SceneLightSystem::EmissiveSamplingUploadStats emissiveStats = {};
+	if (stabilityTraceEnabled)
+	{
+		mSceneLights.BuildEmissiveSamplingUpload(context, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveMaterialResponses, emissiveDebugRecords, &emissiveStats);
+	}
 
 	const auto commitEmissiveDescriptors = [&]()
 	{
@@ -125,6 +180,117 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(
 		}
 	};
 
+	const auto emitStabilityTrace = [&](uint32_t uploadWaitCount)
+	{
+		if (!stabilityTraceEnabled)
+		{
+			return;
+		}
+
+		std::vector<uint64_t> orderedKeys;
+		orderedKeys.reserve(emissiveDebugRecords.size());
+		uint64_t livePowerHash = 1469598103934665603ull;
+		uint64_t proposalWeightHash = 1469598103934665603ull;
+		uint64_t cdfHash = 1469598103934665603ull;
+		uint32_t activeCount = 0;
+		for (size_t i = 0; i < emissiveDebugRecords.size(); ++i)
+		{
+			const uint64_t stableKey = emissiveDebugRecords[i].stableKey;
+			orderedKeys.push_back(stableKey);
+			livePowerHash = HashEmissiveStabilityValue(livePowerHash, stableKey);
+			livePowerHash = HashEmissiveStabilityValue(livePowerHash, EmissiveStabilityFloatBits(emissivePrimitives[i].powerEstimate));
+			livePowerHash = HashEmissiveStabilityValue(livePowerHash, EmissiveStabilityFloatBits(emissivePrimitives[i].emissionScale));
+			proposalWeightHash = HashEmissiveStabilityValue(proposalWeightHash, stableKey);
+			proposalWeightHash = HashEmissiveStabilityValue(proposalWeightHash, EmissiveStabilityFloatBits(emissivePrimitives[i].selectionWeight));
+			if (emissivePrimitives[i].powerEstimate > 0.0f && emissivePrimitives[i].emissionScale > 0.0f)
+			{
+				activeCount++;
+			}
+		}
+		for (float cdfValue : emissiveCdf)
+		{
+			cdfHash = HashEmissiveStabilityValue(cdfHash, EmissiveStabilityFloatBits(cdfValue));
+		}
+
+		std::vector<uint64_t> topologyKeys = orderedKeys;
+		std::sort(topologyKeys.begin(), topologyKeys.end());
+		const uint64_t topologyHash = HashEmissiveStabilityKeys(topologyKeys);
+		const uint64_t orderedKeyHash = HashEmissiveStabilityKeys(orderedKeys);
+		const bool topologyChanged = !mEmissiveStabilityTraceValid || topologyHash != mEmissiveStabilityTopologyHash;
+		const bool propertiesChanged = !mEmissiveStabilityTraceValid || livePowerHash != mEmissiveStabilityLivePowerHash;
+		const bool proposalChanged =
+			!mEmissiveStabilityTraceValid ||
+			orderedKeyHash != mEmissiveStabilityOrderedKeyHash ||
+			proposalWeightHash != mEmissiveStabilityProposalWeightHash ||
+			cdfHash != mEmissiveStabilityCdfHash;
+		if (topologyChanged)
+		{
+			mEmissiveStabilityTopologyEpoch++;
+		}
+		if (proposalChanged)
+		{
+			mEmissiveStabilityDistributionEpoch++;
+		}
+
+		float cdfMaxDelta = 0.0f;
+		uint32_t remapCount = 0;
+		constexpr uint32_t FixedGridSampleCount = 4096u;
+		if (mEmissiveStabilityTraceValid)
+		{
+			if (emissiveCdf.size() != mEmissiveStabilityCdf.size())
+			{
+				cdfMaxDelta = 1.0f;
+			}
+			else
+			{
+				for (size_t i = 0; i < emissiveCdf.size(); ++i)
+				{
+					cdfMaxDelta = std::max(cdfMaxDelta, std::fabs(emissiveCdf[i] - mEmissiveStabilityCdf[i]));
+				}
+			}
+			for (uint32_t i = 0; i < FixedGridSampleCount; ++i)
+			{
+				const float value = ((float)i + 0.5f) / (float)FixedGridSampleCount;
+				if (SelectEmissiveStabilityKey(orderedKeys, emissiveCdf, value) !=
+					SelectEmissiveStabilityKey(mEmissiveStabilityOrderedKeys, mEmissiveStabilityCdf, value))
+				{
+					remapCount++;
+				}
+			}
+		}
+
+		Printf("PERF pt emissive stability NRI: frame=%u topology_epoch=%llu distribution_epoch=%llu candidate_count=%u active_count=%u retained_dark_count=0 topology_key_hash=0x%016llx ordered_key_hash=0x%016llx live_power_hash=0x%016llx proposal_weight_hash=0x%016llx cdf_hash=0x%016llx cdf_max_delta=%.9g fixed_grid_remap_count=%u fixed_grid_sample_count=%u topology_changed=%u properties_changed=%u proposal_changed=%u upload_wait=%u frame_gap_ms=%.3f reset_history=%u reset_reason=%s\n",
+			mFrameIndex,
+			(unsigned long long)mEmissiveStabilityTopologyEpoch,
+			(unsigned long long)mEmissiveStabilityDistributionEpoch,
+			(uint32_t)orderedKeys.size(),
+			activeCount,
+			(unsigned long long)topologyHash,
+			(unsigned long long)orderedKeyHash,
+			(unsigned long long)livePowerHash,
+			(unsigned long long)proposalWeightHash,
+			(unsigned long long)cdfHash,
+			cdfMaxDelta,
+			remapCount,
+			FixedGridSampleCount,
+			topologyChanged ? 1u : 0u,
+			propertiesChanged ? 1u : 0u,
+			proposalChanged ? 1u : 0u,
+			uploadWaitCount,
+			mHasPendingFrameGenerationRealFrameTime ? mPendingFrameGenerationRealFrameTimeMs : 0.0f,
+			mResetHistory ? 1u : 0u,
+			mResetHistory ? mLastHistoryResetReason.c_str() : "none");
+
+		mEmissiveStabilityTraceValid = true;
+		mEmissiveStabilityTopologyHash = topologyHash;
+		mEmissiveStabilityOrderedKeyHash = orderedKeyHash;
+		mEmissiveStabilityLivePowerHash = livePowerHash;
+		mEmissiveStabilityProposalWeightHash = proposalWeightHash;
+		mEmissiveStabilityCdfHash = cdfHash;
+		mEmissiveStabilityOrderedKeys = std::move(orderedKeys);
+		mEmissiveStabilityCdf = emissiveCdf;
+	};
+
 	if (destinationCacheValid &&
 		emissivePrimitiveHeaderBuffer.shaderView != nullptr &&
 		emissivePrimitiveBuffer.shaderView != nullptr &&
@@ -147,16 +313,14 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(
 		}
 		mEmissiveSectorResponsePayloadCacheValid = true;
 		mEmissiveSectorResponsePayloadHash = sectorResponsePayloadHash;
+		emitStabilityTrace(0);
 		return true;
 	}
 
-	NRIEmissivePrimitiveHeaderGpuData emissiveHeader = {};
-	std::vector<NRIEmissivePrimitiveGpuData> emissivePrimitives;
-	std::vector<float> emissiveCdf;
-	std::vector<NRIEmissiveMaterialResponseGpuData> emissiveMaterialResponses;
-	std::vector<NRIEmissivePrimitiveDebugRecord> emissiveDebugRecords;
-	SceneLightSystem::EmissiveSamplingUploadStats emissiveStats = {};
-	mSceneLights.BuildEmissiveSamplingUpload(context, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveMaterialResponses, emissiveDebugRecords, &emissiveStats);
+	if (!stabilityTraceEnabled)
+	{
+		mSceneLights.BuildEmissiveSamplingUpload(context, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveMaterialResponses, emissiveDebugRecords, &emissiveStats);
+	}
 	mLastPerfShellTraceStats.emissiveSamplingSurfaceStatic = emissiveStats.surfaceStatic;
 	mLastPerfShellTraceStats.emissiveSamplingSurfaceCaptured = emissiveStats.surfaceCaptured;
 	mLastPerfShellTraceStats.emissiveSamplingSurfaceRuntimeMutation = emissiveStats.surfaceRuntimeMutation;
@@ -255,6 +419,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(
 	mBoundEmissiveDominantFlags = emissiveHeader.dominantIndex != UINT32_MAX && emissiveHeader.dominantIndex < emissivePrimitives.size() ? emissivePrimitives[emissiveHeader.dominantIndex].sourceFlags : 0u;
 	mBoundEmissiveDominantDataSource = emissiveHeader.dominantIndex != UINT32_MAX && emissiveHeader.dominantIndex < emissivePrimitives.size() ? emissivePrimitives[emissiveHeader.dominantIndex].dataSource : 0u;
 	mBoundEmissiveDominantPower = emissiveHeader.dominantIndex != UINT32_MAX && emissiveHeader.dominantIndex < emissivePrimitives.size() ? emissivePrimitives[emissiveHeader.dominantIndex].powerEstimate : 0.0f;
+	emitStabilityTrace(waitCount);
 	mBoundEmissivePrimitiveRecords = std::move(emissiveDebugRecords);
 
 	commitEmissiveDescriptors();

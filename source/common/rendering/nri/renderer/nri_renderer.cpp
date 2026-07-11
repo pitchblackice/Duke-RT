@@ -2050,6 +2050,16 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mBoundEmissiveDominantDataSource = 0;
 	mEmissiveSamplingPayloadCacheValid = false;
 	mEmissiveSamplingPayloadHash = 0;
+	mEmissiveStabilityTraceValid = false;
+	mEmissiveStabilityTopologyEpoch = 0;
+	mEmissiveStabilityDistributionEpoch = 0;
+	mEmissiveStabilityTopologyHash = 0;
+	mEmissiveStabilityOrderedKeyHash = 0;
+	mEmissiveStabilityLivePowerHash = 0;
+	mEmissiveStabilityProposalWeightHash = 0;
+	mEmissiveStabilityCdfHash = 0;
+	mEmissiveStabilityOrderedKeys.clear();
+	mEmissiveStabilityCdf.clear();
 	mEmissiveSectorResponsePayloadCacheValid = false;
 	mEmissiveSectorResponsePayloadHash = 0;
 	mSceneLights.ResetEmissiveSectorResponseCaches();

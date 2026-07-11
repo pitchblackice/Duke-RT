@@ -2752,6 +2752,16 @@ private:
 	uint32_t mBoundEmissiveDominantDataSource = 0;
 	bool mEmissiveSamplingPayloadCacheValid = false;
 	uint64_t mEmissiveSamplingPayloadHash = 0;
+	bool mEmissiveStabilityTraceValid = false;
+	uint64_t mEmissiveStabilityTopologyEpoch = 0;
+	uint64_t mEmissiveStabilityDistributionEpoch = 0;
+	uint64_t mEmissiveStabilityTopologyHash = 0;
+	uint64_t mEmissiveStabilityOrderedKeyHash = 0;
+	uint64_t mEmissiveStabilityLivePowerHash = 0;
+	uint64_t mEmissiveStabilityProposalWeightHash = 0;
+	uint64_t mEmissiveStabilityCdfHash = 0;
+	std::vector<uint64_t> mEmissiveStabilityOrderedKeys;
+	std::vector<float> mEmissiveStabilityCdf;
 	bool mEmissiveSectorResponsePayloadCacheValid = false;
 	uint64_t mEmissiveSectorResponsePayloadHash = 0;
 	uint32_t mEmissiveTlasInstanceCount = 0;
