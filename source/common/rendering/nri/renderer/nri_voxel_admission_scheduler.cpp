@@ -143,7 +143,7 @@ NRIVoxelAdmissionResult NRIVoxelAdmissionScheduler::Admit(const NRIVoxelAdmissio
 		m_snapshot.rejectedJobs++;
 		return { NRIVoxelAdmissionResultCode::StaleGeneration, 0 };
 	}
-	const bool oversizedExclusive =
+	const bool oversizedExclusive = request.forceExclusive ||
 		(m_limits.oversizedReservationBytes != 0 && totalBytes > m_limits.oversizedReservationBytes) ||
 		(m_limits.oversizedBlasBytes != 0 && blasBytes > m_limits.oversizedBlasBytes);
 
@@ -339,13 +339,19 @@ bool NRIVoxelAdmissionScheduler::MarkDependenciesReady(uint64_t tokenId)
 bool NRIVoxelAdmissionScheduler::CanAcquire(const Token& token, bool compute) const
 {
 	const uint32_t inFlight = compute ? m_snapshot.computeInFlight : m_snapshot.blasInFlight;
+	const uint32_t otherInFlight = compute ? m_snapshot.blasInFlight : m_snapshot.computeInFlight;
 	const uint32_t maximum = compute ? m_limits.maxComputeSlots : m_limits.maxBlasLanes;
 	const uint64_t oversizedToken = compute ? m_oversizedComputeToken : m_oversizedBlasToken;
-	if (maximum == 0 || inFlight >= maximum || oversizedToken != 0)
+	const uint64_t otherOversizedToken = compute ? m_oversizedBlasToken : m_oversizedComputeToken;
+	if (maximum == 0 || inFlight >= maximum || oversizedToken != 0 || otherOversizedToken != 0)
 	{
 		return false;
 	}
-	if (token.oversizedExclusive && inFlight != 0)
+	if (token.oversizedExclusive && (inFlight != 0 || otherInFlight != 0))
+	{
+		return false;
+	}
+	if (!token.oversizedExclusive && HasQueuedExclusiveToken())
 	{
 		return false;
 	}
@@ -360,6 +366,20 @@ bool NRIVoxelAdmissionScheduler::CanAcquire(const Token& token, bool compute) co
 		}
 	}
 	return true;
+}
+
+bool NRIVoxelAdmissionScheduler::HasQueuedExclusiveToken() const
+{
+	for (const auto& pair : m_tokens)
+	{
+		const Token& token = pair.second;
+		if (token.oversizedExclusive &&
+			(token.stage == NRIVoxelAdmissionStage::ComputeQueued || token.stage == NRIVoxelAdmissionStage::BlasQueued))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 NRIVoxelAdmissionScheduler::Token* NRIVoxelAdmissionScheduler::SelectQueuedToken(std::deque<uint64_t>& queue, bool compute)

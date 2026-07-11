@@ -324,6 +324,8 @@ CVAR(Int, nri_ptvoxelcomputealgorithm, 1, 0)
 
 CVAR(Int, nri_ptvoxelcomputemaxjobs, 2, 0)
 
+CVAR(Int, nri_ptvoxelcomputeruntimemaxjobs, 2, 0)
+
 CVAR(Int, nri_ptvoxelcomputedirectmaxprimitives, 0, 0)
 
 CVAR(Int, nri_ptvoxelcomputetrace, 0, 0)
@@ -348,7 +350,7 @@ CVAR(Int, nri_ptvoxelcomputerawpreloadmaxbytes, 64 * 1024 * 1024, 0)
 
 CVAR(Bool, nri_ptvoxelcomputepreload, false, 0)
 
-CVAR(Bool, nri_ptvoxelcomputepreloaddryrun, true, 0)
+CVAR(Bool, nri_ptvoxelcomputepreloaddryrun, false, 0)
 
 CVAR(Int, nri_ptvoxelcomputepreloadtrace, 0, 0)
 

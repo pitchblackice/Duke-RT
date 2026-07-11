@@ -3885,6 +3885,11 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		IsNRIVoxelComputePreloadRuntimeTailReleased(residencyLastBuildSerial);
 	const bool runtimeProbeRequest = IsNRIVoxelComputePreloadRuntimeProbeMesh(residencyLastBuildSerial, meshResourceKey);
 	const bool directOnlyAdmission = variant.directOnlyAdmission && ShouldDirectPublishNRIVoxelComputeMeshing();
+	const uint32_t computeMaxJobs = (uint32_t)std::max(1, (int)nri_ptvoxelcomputemaxjobs);
+	const uint32_t runtimeComputeMaxJobs = (uint32_t)std::clamp(
+		(int)nri_ptvoxelcomputeruntimemaxjobs,
+		1,
+		(int)computeMaxJobs);
 	if ((!directOnlyAdmission && variant.surface == nullptr) ||
 		variant.meshKeyHash == 0 ||
 		meshResourceKey == 0 ||
@@ -4062,6 +4067,16 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		variant.model != nullptr &&
 		variant.primitiveCount != 0)
 	{
+		const NRIVoxelAdmissionSnapshot schedulerSnapshot = admissionScheduler.GetSnapshot();
+		const uint32_t activeRuntimeJobs = schedulerSnapshot.activeFairnessCounts[
+			(size_t)NRIVoxelAdmissionFairnessClass::VisibleNoFallback];
+		if (entry.runtimeRequested && activeRuntimeJobs >= runtimeComputeMaxJobs)
+		{
+			outInProgress = true;
+			entry.state = PersistentVoxelAdmissionState::Deferred;
+			entry.lastReason = "runtime-compute-capacity";
+			return true;
+		}
 		NRIVoxelAdmissionRequest schedulerRequest = {};
 		schedulerRequest.mesh = { residencyMapGeneration, meshResourceKey };
 		schedulerRequest.pairKey = entry.pairKey;
@@ -4086,6 +4101,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		schedulerRequest.age = entry.firstQueuedFrame != UINT32_MAX && frameIndex >= entry.firstQueuedFrame ?
 			(uint64_t)(frameIndex - entry.firstQueuedFrame) : 0u;
 		schedulerRequest.dependenciesReady = true;
+		schedulerRequest.forceExclusive = isolateBlasBuild;
 		const NRIVoxelAdmissionResult schedulerResult = admissionScheduler.Admit(schedulerRequest);
 		if (schedulerResult.code != NRIVoxelAdmissionResultCode::Accepted &&
 			schedulerResult.code != NRIVoxelAdmissionResultCode::BindingAttached &&
@@ -4733,7 +4749,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				entry.lastReason = "direct-publish-shared-pending";
 				return true;
 			}
-			const uint32_t maxDirectJobs = (uint32_t)std::max(0, (int)nri_ptvoxelcomputemaxjobs);
+			const uint32_t maxDirectJobs = computeMaxJobs;
 			const uint32_t queuedDirectJobs = GetNRIVoxelComputeMemoryUsage().queuedJobCount;
 			if (maxDirectJobs != 0 && queuedDirectJobs >= maxDirectJobs)
 			{

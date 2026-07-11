@@ -138,6 +138,7 @@ struct NRIVoxelAdmissionRequest
 	NRIVoxelAdmissionFairnessClass fairnessClass = NRIVoxelAdmissionFairnessClass::OptionalLoading;
 	uint64_t age = 0;
 	bool dependenciesReady = false;
+	bool forceExclusive = false;
 };
 
 struct NRIVoxelAdmissionResult
@@ -273,6 +274,7 @@ private:
 	const Token* FindToken(uint64_t tokenId) const;
 	Token* SelectQueuedToken(std::deque<uint64_t>& queue, bool compute);
 	bool CanAcquire(const Token& token, bool compute) const;
+	bool HasQueuedExclusiveToken() const;
 	void CountStageTransition(NRIVoxelAdmissionStage from, NRIVoxelAdmissionStage to);
 
 	NRIVoxelAdmissionLimits m_limits;
