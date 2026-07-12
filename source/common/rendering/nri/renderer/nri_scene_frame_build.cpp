@@ -61,19 +61,6 @@ namespace
 		return (uint32_t)std::max(0, std::min((int)nri_ptbootstrapmode, 13));
 	}
 
-	static bool HasPlainMirrorMaterialSurfaces(const nri_scene::PTMapWorld& mapWorld)
-	{
-		for (const nri_scene::PTMapSurface& surface : mapWorld.surfaces)
-		{
-			if ((surface.surface.material.flags & nri_scene::MaterialFlag_PlainMirror) != 0)
-			{
-				return true;
-			}
-		}
-
-		return false;
-	}
-
 	static void RecordDynamicOverlayBlasModelStats(
 		NRIRenderer::PerfShellTraceStats& stats,
 		const std::vector<NRIRenderer::SceneBufferUploadDomainSpan>& uploadSpans)
@@ -671,9 +658,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				mLastPerfShellTraceStats.dynamicCaptureStatsMs += captureStats.statsMs;
 				return captured;
 			}();
-		const bool shouldCaptureReflectionPlayer =
-			!deferOverlayThisFrame &&
-			HasPlainMirrorMaterialSurfaces(mMapWorld);
+		const bool shouldCaptureReflectionPlayer = !deferOverlayThisFrame;
 		const bool hasLocalPlayerReflectionScene = shouldCaptureReflectionPlayer && [&]()
 		{
 			ScopedPtPerfTimer localPlayerReflectionTimer(mLastPerfShellTraceStats.localPlayerReflectionCaptureMs);
