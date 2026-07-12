@@ -63,6 +63,10 @@ struct NRISmokeStatusSnapshot
 	uint32_t wideSelectionLosses = 0;
 	uint32_t globalSelectionLosses = 0;
 	uint32_t maximumDepthSpan = 0;
+	uint32_t occupiedCount = 0;
+	uint32_t occupiedOverflow = 0;
+	uint32_t mediumCandidateTests = 0;
+	uint32_t pointFroxelsProcessed = 0;
 	uint32_t lightCandidatesTested = 0;
 	uint32_t lightDistanceRejected = 0;
 	uint32_t lightShadowRays = 0;
@@ -125,7 +129,7 @@ private:
 	NRISmokeSettings mSettings = {};
 	NRISmokeStatusSnapshot mStatus = {};
 	nri::PipelineLayout* mPipelineLayout = nullptr;
-	std::array<nri::Pipeline*, 7> mPipelines = {};
+	std::array<nri::Pipeline*, 8> mPipelines = {};
 	std::vector<CommandSlot> mCommandSlots;
 	NRIBufferResource mStyleBuffer;
 	NRIBufferResource mParticles;
@@ -136,8 +140,11 @@ private:
 	NRIBufferResource mWideCellIndices;
 	NRIBufferResource mGlobalDepthCounts;
 	NRIBufferResource mGlobalDepthIndices;
-	NRIBufferResource mFroxelLocal;
+	NRIBufferResource mFroxelMedium;
 	NRIBufferResource mFroxelIntegrated;
+	NRIBufferResource mFroxelPhase;
+	NRIBufferResource mFroxelSource;
+	NRIBufferResource mOccupiedFroxelIndices;
 	NRISmokeEmitterSystem mEmitters;
 	std::vector<NRISmokeStyleGpu> mStyles;
 	std::vector<NRISmokeInjectionCommandGpu> mPendingCommands;

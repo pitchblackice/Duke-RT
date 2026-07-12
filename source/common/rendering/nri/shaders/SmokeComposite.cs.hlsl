@@ -8,11 +8,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gSmokeConstants.FroxelWidth == 0u || gSmokeConstants.FroxelHeight == 0u || gSmokeConstants.FroxelDepth == 0u)
 		return;
 	uint sceneWidth, sceneHeight, viewZWidth, viewZHeight, outputWidth, outputHeight;
-	uint localFroxelCount, integratedFroxelCount, ignoredStride;
+	uint mediumFroxelCount, integratedFroxelCount, ignoredStride;
 	gSmokeSceneInput.GetDimensions(sceneWidth, sceneHeight);
 	gSmokeViewZInput.GetDimensions(viewZWidth, viewZHeight);
 	gSmokeOutput.GetDimensions(outputWidth, outputHeight);
-	gSmokeFroxelLocal.GetDimensions(localFroxelCount, ignoredStride);
+	gSmokeFroxelMedium.GetDimensions(mediumFroxelCount, ignoredStride);
 	gSmokeFroxelIntegrated.GetDimensions(integratedFroxelCount, ignoredStride);
 	const uint2 inputDimensions = min(uint2(gSmokeConstants.RenderWidth, gSmokeConstants.RenderHeight), min(uint2(sceneWidth, sceneHeight), uint2(viewZWidth, viewZHeight)));
 	const uint2 outputDimensions = min(uint2(gSmokeConstants.OutputWidth, gSmokeConstants.OutputHeight), uint2(outputWidth, outputHeight));
@@ -30,7 +30,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint depthSlice = SmokeDepthSlice(viewDepth);
 	const uint froxelIndex = SmokeFroxelIndex(froxelColumn.x, froxelColumn.y, depthSlice);
 	const float4 scene = gSmokeSceneInput.Load(int3(inputPixel, 0));
-	if (froxelIndex >= min(localFroxelCount, integratedFroxelCount))
+	if (froxelIndex >= min(mediumFroxelCount, integratedFroxelCount))
 	{
 		gSmokeOutput[outputPixel] = scene;
 		return;

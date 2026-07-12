@@ -129,6 +129,10 @@ struct SmokeControl
 	uint DepthSpanFiveToSixteen;
 	uint DepthSpanOverSixteen;
 	uint MaximumCandidatesPerFroxel;
+	uint OccupiedCount;
+	uint OccupiedOverflow;
+	uint MediumCandidateTests;
+	uint PointFroxelsProcessed;
 	uint3 Padding;
 };
 
@@ -139,12 +143,15 @@ RWStructuredBuffer<SmokeParticle> gSmokeParticles : register(u0, space1);
 RWStructuredBuffer<SmokeControl> gSmokeControl : register(u1, space1);
 RWStructuredBuffer<uint> gSmokeFineCellCounts : register(u2, space1);
 RWStructuredBuffer<uint> gSmokeFineCellIndices : register(u3, space1);
-RWStructuredBuffer<float4> gSmokeFroxelLocal : register(u4, space1);
+RWStructuredBuffer<float4> gSmokeFroxelMedium : register(u4, space1);
 RWStructuredBuffer<float4> gSmokeFroxelIntegrated : register(u5, space1);
 RWStructuredBuffer<uint> gSmokeWideCellCounts : register(u6, space1);
 RWStructuredBuffer<uint> gSmokeWideCellIndices : register(u7, space1);
 RWStructuredBuffer<uint> gSmokeGlobalDepthCounts : register(u8, space1);
 RWStructuredBuffer<uint> gSmokeGlobalDepthIndices : register(u9, space1);
+RWStructuredBuffer<float4> gSmokeFroxelPhase : register(u10, space1);
+RWStructuredBuffer<float4> gSmokeFroxelSource : register(u11, space1);
+RWStructuredBuffer<uint> gSmokeOccupiedFroxelIndices : register(u12, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);
@@ -157,6 +164,29 @@ uint SmokeFroxelIndex(uint x, uint y, uint z)
 	return (z * gSmokeConstants.FroxelHeight + y) * gSmokeConstants.FroxelWidth + x;
 }
 
+uint SmokeFroxelCount()
+{
+	return gSmokeConstants.FroxelWidth * gSmokeConstants.FroxelHeight * gSmokeConstants.FroxelDepth;
+}
+
+uint3 SmokeFroxelCoordinates(uint froxelIndex)
+{
+	const uint planeSize = gSmokeConstants.FroxelWidth * gSmokeConstants.FroxelHeight;
+	const uint z = froxelIndex / max(planeSize, 1u);
+	const uint planeIndex = froxelIndex - z * planeSize;
+	const uint y = planeIndex / max(gSmokeConstants.FroxelWidth, 1u);
+	return uint3(planeIndex - y * gSmokeConstants.FroxelWidth, y, z);
+}
+
+float3 SmokeFroxelRay(uint2 froxelPosition)
+{
+	const float2 uv = (float2(froxelPosition) + 0.5) / float2(gSmokeConstants.FroxelWidth, gSmokeConstants.FroxelHeight);
+	const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+	return gSmokeConstants.CameraForward +
+		gSmokeConstants.CameraRight * (ndc.x * gSmokeConstants.TanHalfFovX) +
+		gSmokeConstants.CameraUp * (ndc.y * gSmokeConstants.TanHalfFovY);
+}
+
 uint SmokeWideCellIndex(uint x, uint y, uint z)
 {
 	return (z * NRI_SMOKE_WIDE_GRID_Y + y) * NRI_SMOKE_WIDE_GRID_X + x;
@@ -166,6 +196,18 @@ float SmokeSliceFarDepth(uint z)
 {
 	const float normalizedDepth = (float)(z + 1u) / max((float)gSmokeConstants.FroxelDepth, 1.0);
 	return gSmokeConstants.FroxelMaxDistance * pow(normalizedDepth, max(gSmokeConstants.DepthExponent, 0.001));
+}
+
+float SmokeSliceNearDepth(uint z)
+{
+	return z == 0u ? 0.0 : SmokeSliceFarDepth(z - 1u);
+}
+
+float3 SmokeFroxelCenter(uint3 froxelPosition, float3 ray)
+{
+	const float nearDepth = SmokeSliceNearDepth(froxelPosition.z);
+	const float farDepth = SmokeSliceFarDepth(froxelPosition.z);
+	return gSmokeConstants.CameraPosition + ray * ((nearDepth + farDepth) * 0.5);
 }
 
 uint SmokeDepthSlice(float viewDepth)

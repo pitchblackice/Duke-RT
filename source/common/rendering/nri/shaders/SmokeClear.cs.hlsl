@@ -7,7 +7,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint froxelCount = gSmokeConstants.FroxelWidth * gSmokeConstants.FroxelHeight * gSmokeConstants.FroxelDepth;
 	const uint expectedWideCellCount = NRI_SMOKE_WIDE_CELL_COUNT * gSmokeConstants.FroxelDepth;
 	uint controlCount, particleCount, fineCellCount, fineCellIndexCount, wideCellCount, wideCellIndexCount;
-	uint globalDepthCount, globalDepthIndexCount, localFroxelCount, integratedFroxelCount, ignoredStride;
+	uint globalDepthCount, globalDepthIndexCount, mediumFroxelCount, integratedFroxelCount, phaseFroxelCount, sourceFroxelCount, ignoredStride;
 	gSmokeControl.GetDimensions(controlCount, ignoredStride);
 	gSmokeParticles.GetDimensions(particleCount, ignoredStride);
 	gSmokeFineCellCounts.GetDimensions(fineCellCount, ignoredStride);
@@ -16,8 +16,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	gSmokeWideCellIndices.GetDimensions(wideCellIndexCount, ignoredStride);
 	gSmokeGlobalDepthCounts.GetDimensions(globalDepthCount, ignoredStride);
 	gSmokeGlobalDepthIndices.GetDimensions(globalDepthIndexCount, ignoredStride);
-	gSmokeFroxelLocal.GetDimensions(localFroxelCount, ignoredStride);
+	gSmokeFroxelMedium.GetDimensions(mediumFroxelCount, ignoredStride);
 	gSmokeFroxelIntegrated.GetDimensions(integratedFroxelCount, ignoredStride);
+	gSmokeFroxelPhase.GetDimensions(phaseFroxelCount, ignoredStride);
+	gSmokeFroxelSource.GetDimensions(sourceFroxelCount, ignoredStride);
 
 	const bool clearWorld = (gSmokeConstants.Flags & 1u) != 0u;
 	if (index == 0u && controlCount != 0u)
@@ -59,6 +61,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gSmokeControl[0].DepthSpanFiveToSixteen = 0u;
 			gSmokeControl[0].DepthSpanOverSixteen = 0u;
 			gSmokeControl[0].MaximumCandidatesPerFroxel = NRI_SMOKE_MAX_CANDIDATES_PER_FROXEL;
+			gSmokeControl[0].OccupiedCount = 0u;
+			gSmokeControl[0].OccupiedOverflow = 0u;
+			gSmokeControl[0].MediumCandidateTests = 0u;
+			gSmokeControl[0].PointFroxelsProcessed = 0u;
 			gSmokeControl[0].LightCandidatesTested = 0u;
 			gSmokeControl[0].LightDistanceRejected = 0u;
 			gSmokeControl[0].LightShadowRays = 0u;
@@ -120,9 +126,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gSmokeGlobalDepthIndices[candidateIndex] = 0u;
 		}
 	}
-	if (index < min(froxelCount, min(localFroxelCount, integratedFroxelCount)))
+	if (index < min(froxelCount, min(mediumFroxelCount, min(integratedFroxelCount, min(phaseFroxelCount, sourceFroxelCount)))))
 	{
-		gSmokeFroxelLocal[index] = 0.0;
+		gSmokeFroxelMedium[index] = 0.0;
 		gSmokeFroxelIntegrated[index] = float4(0.0, 0.0, 0.0, 1.0);
+		gSmokeFroxelPhase[index] = 0.0;
+		gSmokeFroxelSource[index] = 0.0;
 	}
 }

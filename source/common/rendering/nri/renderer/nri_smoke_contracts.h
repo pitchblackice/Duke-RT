@@ -9,7 +9,8 @@ enum class NRISmokePass : uint32_t
 	Simulate,
 	Spawn,
 	Bin,
-	Evaluate,
+	EvaluateMedium,
+	LightPoint,
 	Integrate,
 	Composite,
 };
@@ -120,13 +121,17 @@ struct NRISmokeControlGpu
 	uint32_t depthSpanFiveToSixteen = 0;
 	uint32_t depthSpanOverSixteen = 0;
 	uint32_t maximumCandidatesPerFroxel = 0;
+	uint32_t occupiedCount = 0;
+	uint32_t occupiedOverflow = 0;
+	uint32_t mediumCandidateTests = 0;
+	uint32_t pointFroxelsProcessed = 0;
 	uint32_t padding[3] = {};
 };
 
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
 static_assert(sizeof(NRISmokeStyleGpu) == 80);
 static_assert(sizeof(NRISmokeInjectionCommandGpu) == 64);
-static_assert(sizeof(NRISmokeControlGpu) == 224);
+static_assert(sizeof(NRISmokeControlGpu) == 240);
 
 struct NRISmokeConstants
 {
