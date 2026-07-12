@@ -351,8 +351,8 @@ void FGameConfigFile::DoGlobalSetup ()
 		var->SetGenericRep(false, CVAR_Bool);
 	}
 	// These CVars affect NRI device creation, before normal + commands execute.
-	// Apply explicit overrides after the legacy cleanup above. Startup recovery
-	// deliberately runs later, so Safe Mode remains authoritative after a failed run.
+	// Apply explicit overrides after the legacy cleanup above. If startup recovery
+	// applies Safe Mode later, it reapplies only these explicitly requested diagnostics.
 	ApplyEarlyNriDiagnosticOverrides();
 	if (SetSection ("LastRun"))
 	{

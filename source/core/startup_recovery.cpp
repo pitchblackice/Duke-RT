@@ -388,6 +388,24 @@ void ApplySafeProfile()
 	NRIApplySafeSettingsProfileForRecovery();
 #endif
 }
+
+void ApplyExplicitDiagnosticOverrides()
+{
+	static constexpr const char* diagnosticCvars[] = {
+		"nri_validation",
+		"nri_apivalidation",
+		"nri_dred",
+	};
+	for (const char* name : diagnosticCvars)
+	{
+		const char* value = FindStartupSetOverride(name);
+		FBaseCVar* cvar = value != nullptr ? FindCVar(name, nullptr) : nullptr;
+		if (cvar != nullptr)
+		{
+			cvar->SetGenericRep(value, CVAR_String);
+		}
+	}
+}
 }
 
 void StartupRecovery_Begin()
@@ -415,6 +433,9 @@ void StartupRecovery_Begin()
 			CaptureLastUnsafeSettings(previousReason);
 		}
 		ApplySafeProfile();
+		// Safe Mode owns all recovered settings except diagnostics the user
+		// explicitly requested for this launch.
+		ApplyExplicitDiagnosticOverrides();
 		Printf(PRINT_NOTIFY,
 			"Startup recovery: previous run state=%s stage=%s reason=%s; applying Safe Mode profile and selecting NRI API '%s'.\n",
 			previousState != nullptr ? previousState : "unknown",
