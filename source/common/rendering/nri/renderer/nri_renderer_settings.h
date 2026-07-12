@@ -95,8 +95,10 @@ struct NRISmokeSettings
 	uint32_t columnCapacity = 64;
 	uint32_t simulationRate = 60;
 	uint32_t maxSubsteps = 4;
+	bool pointLights = true;
 	uint32_t lightMode = 1;
 	uint32_t lightSamples = 1;
+	uint32_t maxLightCandidates = 8;
 	uint32_t debugMode = 0;
 	uint32_t traceMode = 0;
 	float froxelMaxDistance = 4096.0f;

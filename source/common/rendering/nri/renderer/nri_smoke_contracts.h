@@ -75,12 +75,20 @@ struct NRISmokeControlGpu
 	uint32_t spawned = 0;
 	uint32_t expired = 0;
 	uint32_t reserved = 0;
+	uint32_t lightCandidatesTested = 0;
+	uint32_t lightDistanceRejected = 0;
+	uint32_t lightShadowRays = 0;
+	uint32_t lightShadowVisible = 0;
+	uint32_t lightShadowOccluded = 0;
+	uint32_t lightSoftSamples = 0;
+	uint32_t lightRadianceClamps = 0;
+	uint32_t lightingReserved = 0;
 };
 
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
 static_assert(sizeof(NRISmokeStyleGpu) == 80);
 static_assert(sizeof(NRISmokeInjectionCommandGpu) == 64);
-static_assert(sizeof(NRISmokeControlGpu) == 32);
+static_assert(sizeof(NRISmokeControlGpu) == 64);
 
 struct NRISmokeConstants
 {
@@ -128,7 +136,19 @@ struct NRISmokeConstants
 
 	float wind[3] = {};
 	float windPad = 0.0f;
+
+	uint32_t lightMode = 0;
+	uint32_t lightSamples = 1;
+	uint32_t maxLightCandidates = 8;
+	uint32_t runtimeLightCount = 0;
+
+	uint32_t runtimeLightTileCountX = 0;
+	uint32_t runtimeLightTileCountY = 0;
+	uint32_t pointLightsEnabled = 1;
+	uint32_t lightingPad = 0;
 };
 
-static_assert(sizeof(NRISmokeConstants) == 176, "NRISmokeConstants must match SmokeConstants.hlsli");
+static_assert(sizeof(NRISmokeConstants) == 208, "NRISmokeConstants must match SmokeConstants.hlsli");
 static_assert(offsetof(NRISmokeConstants, cameraPosition) == 96, "NRISmokeConstants camera offset must match HLSL");
+static_assert(offsetof(NRISmokeConstants, lightMode) == 176, "NRISmokeConstants lighting offset must match HLSL");
+static_assert(offsetof(NRISmokeConstants, runtimeLightTileCountX) == 192, "NRISmokeConstants runtime-light tile offset must match HLSL");

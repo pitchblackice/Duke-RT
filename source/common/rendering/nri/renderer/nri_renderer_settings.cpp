@@ -213,8 +213,10 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.columnCapacity = (uint32_t)std::clamp((int)nri_ptsmokecolumncapacity, 8, 256);
 	settings.simulationRate = (uint32_t)std::clamp((int)nri_ptsmokesimrate, 15, 240);
 	settings.maxSubsteps = (uint32_t)std::clamp((int)nri_ptsmokemaxsubsteps, 1, 8);
+	settings.pointLights = (bool)nri_ptsmokepointlights;
 	settings.lightMode = (uint32_t)std::clamp((int)nri_ptsmokelightmode, 0, 3);
 	settings.lightSamples = (uint32_t)std::clamp((int)nri_ptsmokelightsamples, 1, 4);
+	settings.maxLightCandidates = (uint32_t)std::clamp((int)nri_ptsmokemaxlightcandidates, 1, 32);
 	settings.debugMode = (uint32_t)std::clamp((int)nri_ptsmokedebug, 0, 7);
 	settings.traceMode = (uint32_t)std::clamp((int)nri_ptsmoketrace, 0, 2);
 	settings.froxelMaxDistance = std::clamp((float)nri_ptsmokefroxelmaxdistance, 64.0f, 32768.0f);

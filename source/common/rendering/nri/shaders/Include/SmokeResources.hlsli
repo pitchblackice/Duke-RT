@@ -8,7 +8,8 @@
 #define NRI_SMOKE_SET_BUFFERS 1
 #define NRI_SMOKE_SET_TEXTURES 2
 #define NRI_SMOKE_SET_OUTPUT 3
-#define NRI_SMOKE_SET_ROOT 4
+#define NRI_SMOKE_SET_LIGHTS 4
+#define NRI_SMOKE_SET_ROOT 5
 
 // Hard ceilings keep overlapping or near-camera effects from turning smoke into
 // an unbounded per-frame workload.
@@ -78,6 +79,14 @@ struct SmokeControl
 	uint Spawned;
 	uint Expired;
 	uint Reserved;
+	uint LightCandidatesTested;
+	uint LightDistanceRejected;
+	uint LightShadowRays;
+	uint LightShadowVisible;
+	uint LightShadowOccluded;
+	uint LightSoftSamples;
+	uint LightRadianceClamps;
+	uint LightingReserved;
 };
 
 StructuredBuffer<SmokeStyle> gSmokeStyles : register(t0, space0);

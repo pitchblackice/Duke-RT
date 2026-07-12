@@ -1,6 +1,7 @@
 #define NRI_ENABLE_PERSISTENT_VOXEL_SCENE 1
 #include "Include/Shared.hlsli"
 #include "Include/RaytracingShared.hlsli"
+#include "Include/AnalyticLightSampling.hlsli"
 
 uint Hash32(uint value)
 {
@@ -60,15 +61,7 @@ float2 SampleUniformDisk(inout uint rngState)
 float3 SampleRuntimePointEmitter(RuntimePointLightData light, float3 centerDir, inout uint rngState)
 {
 	const float emitterRadius = max(light.emitterRadius, 0.0);
-	if (emitterRadius <= 0.0)
-	{
-		return light.position;
-	}
-
-	const float2 disk = SampleUniformDisk(rngState) * emitterRadius;
-	const float3 tangent = BuildOrthonormalTangent(centerDir);
-	const float3 bitangent = normalize(cross(centerDir, tangent));
-	return light.position + tangent * disk.x + bitangent * disk.y;
+	return SampleAnalyticReceiverFacingDisk(light.position, emitterRadius, centerDir, SampleUniformDisk(rngState));
 }
 
 float3 SampleSpecularLobe(float3 reflectionDir, float roughness, inout uint rngState)
@@ -242,20 +235,6 @@ float3 EvaluateSunSpecular(float3 albedo, float metalness, float3 normal, float3
 	const float3 specularColor = lerp(dielectricF0, float3(1.0, 1.0, 1.0), fresnel);
 	const float specularTerm = pow(ndoth, 12.0) * shadow * (0.5 + 0.5 * lambert);
 	return specularColor * specularTerm * 0.85;
-}
-
-float EvaluatePointLightAttenuation(float distance, float radius, float intensity)
-{
-	if (radius <= 0.0 || distance >= radius)
-	{
-		return 0.0;
-	}
-
-	const float normalizedDistance = saturate(distance / radius);
-	const float softRange = 1.0 - normalizedDistance;
-	const float smoothRange = softRange * softRange * (3.0 - 2.0 * softRange);
-	const float shapedFalloff = rcp(1.0 + 4.0 * normalizedDistance * normalizedDistance);
-	return intensity * smoothRange * smoothRange * shapedFalloff;
 }
 
 RuntimeLightTileHeaderData GetRuntimeLightTileHeader(uint2 pixelPos)
@@ -900,7 +879,7 @@ float3 EvaluatePlainMirrorSurfaceGlint(HitData mirrorHit, float3 mirrorPlaneNorm
 			continue;
 		}
 
-		const float attenuation = EvaluatePointLightAttenuation(lightDistance, runtimeLight.radius, runtimeLight.intensity);
+		const float attenuation = EvaluateAnalyticPointLightAttenuation(lightDistance, runtimeLight.radius, runtimeLight.intensity);
 		sourceRadiance += runtimeLight.color * attenuation * (0.35 + 0.65 * lightFacing) * runtimeShadow;
 	}
 
@@ -1235,7 +1214,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 						TraceShaderStatAdd(TRACE_STAT_RUNTIME_SOFT_SHADOW_SAMPLES, 1u);
 					}
 
-					const float attenuation = EvaluatePointLightAttenuation(centerLightDistance, runtimeLight.radius, runtimeLight.intensity);
+					const float attenuation = EvaluateAnalyticPointLightAttenuation(centerLightDistance, runtimeLight.radius, runtimeLight.intensity);
 					if (attenuation <= 0.0)
 					{
 						continue;

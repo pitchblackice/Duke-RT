@@ -46,6 +46,13 @@ struct NRISmokeStatusSnapshot
 	uint32_t expiredParticles = 0;
 	uint32_t liveEvictions = 0;
 	uint32_t columnOverflow = 0;
+	uint32_t lightCandidatesTested = 0;
+	uint32_t lightDistanceRejected = 0;
+	uint32_t lightShadowRays = 0;
+	uint32_t lightShadowVisible = 0;
+	uint32_t lightShadowOccluded = 0;
+	uint32_t lightSoftSamples = 0;
+	uint32_t lightRadianceClamps = 0;
 };
 
 class NRISmokeSystem
@@ -71,6 +78,7 @@ private:
 		nri::DescriptorSet* bufferSet = nullptr;
 		nri::DescriptorSet* textureSet = nullptr;
 		nri::DescriptorSet* outputSet = nullptr;
+		nri::DescriptorSet* lightSet = nullptr;
 		bool readbackPending = false;
 		bool initialized = false;
 		bool readbackInitialized = false;

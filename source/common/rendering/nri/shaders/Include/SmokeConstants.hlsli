@@ -47,6 +47,16 @@ struct SmokeConstants
 
     float3 Wind;
     float WindPad;
+
+    uint LightMode;
+    uint LightSamples;
+    uint MaxLightCandidates;
+    uint RuntimeLightCount;
+
+    uint RuntimeLightTileCountX;
+    uint RuntimeLightTileCountY;
+    uint PointLightsEnabled;
+    uint LightingPad;
 };
 
 #endif

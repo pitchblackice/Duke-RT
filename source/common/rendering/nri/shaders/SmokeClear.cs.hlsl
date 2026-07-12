@@ -15,7 +15,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const bool clearWorld = (gSmokeConstants.Flags & 1u) != 0u;
 	if (index == 0u && controlCount != 0u)
+	{
 		gSmokeControl[0].Reserved = 0u;
+		gSmokeControl[0].LightCandidatesTested = 0u;
+		gSmokeControl[0].LightDistanceRejected = 0u;
+		gSmokeControl[0].LightShadowRays = 0u;
+		gSmokeControl[0].LightShadowVisible = 0u;
+		gSmokeControl[0].LightShadowOccluded = 0u;
+		gSmokeControl[0].LightSoftSamples = 0u;
+		gSmokeControl[0].LightRadianceClamps = 0u;
+	}
 	if (clearWorld && index == 0u && controlCount != 0u)
 	{
 		SmokeControl control = (SmokeControl)0;
