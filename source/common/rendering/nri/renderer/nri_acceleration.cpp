@@ -252,14 +252,7 @@ bool NRIAccelerationStructureManager::BuildBottomLevel(
 	NRIBufferResource& scratchBuffer = buildScratchBuffer != nullptr ? *buildScratchBuffer : renderer.mScratchBuffer;
 	if (scratchBuffer.buffer == nullptr || scratchBuffer.size < requiredScratchSize)
 	{
-		if (buildScratchBuffer != nullptr)
-		{
-			renderer.RetireResidentBufferResource(scratchBuffer);
-		}
-		else
-		{
-			renderer.DestroyBufferResource(scratchBuffer);
-		}
+		renderer.RetireResidentBufferResource(scratchBuffer);
 		{
 			ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.dynamicAsScratchMs);
 			if (updateDynamicPerfStats)
