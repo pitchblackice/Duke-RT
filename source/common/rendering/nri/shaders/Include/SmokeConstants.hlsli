@@ -59,7 +59,6 @@ struct SmokeConstants
     uint FilteredVisibilityEnabled;
 
     float2 CurrentJitter;
-    float2 CurrentJitterPad;
 };
 
 #endif
