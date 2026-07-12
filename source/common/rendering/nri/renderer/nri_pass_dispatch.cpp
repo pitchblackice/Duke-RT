@@ -507,8 +507,10 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	{
 		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueCommandMs);
 		context.mTraceShaderStats.ResetBuffer(context.mResources.BuildResourceServices(), ShouldCollectTraceShaderStats());
+		context.mCommands.core->CmdBeginAnnotation(*context.mCommands.commandBuffer, "Raze.TraceOpaque.Dispatch", nri::BGRA_UNUSED);
 		context.mCommands.SetPipeline(context.mPipelines.Get(NRIRenderer::PipelineSlot::TraceOpaque));
 		context.mCommands.Dispatch(dispatchX, dispatchY, dispatchZ);
+		context.mCommands.core->CmdEndAnnotation(*context.mCommands.commandBuffer);
 	}
 	{
 		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueStatsCopyMs);

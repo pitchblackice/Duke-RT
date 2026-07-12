@@ -709,7 +709,9 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 	tlasBuild.scratchOffset = 0;
 	{
 		ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.worldTlasBuildMs);
+		renderer.mFrameBuffer->mCore.CmdBeginAnnotation(*renderer.mFrameBuffer->mCommandBuffer, "Raze.WorldTLAS.Build", nri::BGRA_UNUSED);
 		renderer.mFrameBuffer->mRayTracing.CmdBuildTopLevelAccelerationStructures(*renderer.mFrameBuffer->mCommandBuffer, &tlasBuild, 1);
+		renderer.mFrameBuffer->mCore.CmdEndAnnotation(*renderer.mFrameBuffer->mCommandBuffer);
 	}
 
 	nri::BufferBarrierDesc tlasBarrier = {};
