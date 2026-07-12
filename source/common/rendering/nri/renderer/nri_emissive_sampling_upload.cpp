@@ -460,7 +460,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(
 			emissivePrimitiveCdfStats.overwriteEventsLastFrame +
 			emissiveMaterialResponseStats.overwriteEventsLastFrame;
 		const uint64_t payloadBytes = headerBytes + primitiveBytes + cdfBytes + materialResponseBytes;
-		Printf("NRI PT emissive sampling upload: frame=%u destination=%s slot=%u payload_hash=0x%016llx bytes=%llu grow=%u replace=%u wait=%u wait_reason=%s source=static:%u,captured:%u,mutation:%u,dynamic:%u,persistent_voxel:%u output=static:%u,dynamic:%u,persistent_voxel:%u skipped_persistent=%u\n",
+		Printf("NRI PT emissive sampling upload: frame=%u destination=%s slot=%u payload_hash=0x%016llx bytes=%llu grow=%u replace=%u wait=%u wait_reason=%s source=static:%u,captured:%u,mutation:%u,dynamic:%u,persistent_voxel:%u output=static:%u,dynamic:%u,persistent_voxel:%u persistent_primitives_represented=%llu skipped_persistent=%u\n",
 			mFrameIndex,
 			frameSlot != nullptr ? "frame-slot" : "shared",
 			frameSlot != nullptr ? GetCurrentQueuedFrameIndex() : UINT32_MAX,
@@ -478,6 +478,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(
 			emissiveStats.outputStaticRecords,
 			emissiveStats.outputDynamicRecords,
 			emissiveStats.outputPersistentVoxelRecords,
+			(unsigned long long)emissiveStats.outputPersistentVoxelPrimitivesRepresented,
 			emissiveStats.skippedPersistentVoxelSurfaces);
 	}
 	if (sectorResponseChanged && nri_runtime_mutation::ShouldTracePtPerf())

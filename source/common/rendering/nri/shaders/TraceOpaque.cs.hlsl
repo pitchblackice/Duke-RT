@@ -396,18 +396,69 @@ uint SampleEmissivePrimitiveIndex(inout uint rngState)
 	return low;
 }
 
-float3 SamplePointOnPrimitive(uint dataSource, PrimitiveData primitive, inout uint rngState, out float2 outUv, out float3 outNormal)
+bool SamplePointOnEmissiveCandidate(
+	EmissivePrimitiveData candidate,
+	inout uint rngState,
+	out uint outPrimitiveIndex,
+	out uint outMaterialIndex,
+	out float3 outPosition,
+	out float2 outUv,
+	out float3 outNormal,
+	out float outEffectiveArea)
 {
-	const SceneVertex v0 = GetVertexData(dataSource, primitive.indices.x);
-	const SceneVertex v1 = GetVertexData(dataSource, primitive.indices.y);
-	const SceneVertex v2 = GetVertexData(dataSource, primitive.indices.z);
+	outPrimitiveIndex = candidate.primitiveIndex;
+	outMaterialIndex = 0xffffffffu;
+	outPosition = 0.0;
+	outUv = 0.0;
+	outNormal = 0.0;
+	outEffectiveArea = 0.0;
+	const bool placedRange = candidate.sceneInstanceIndex != 0xffffffffu;
+	SceneInstanceData instanceData = (SceneInstanceData)0;
+	if (placedRange)
+	{
+		if (candidate.dataSource != SCENE_DATA_SOURCE_PERSISTENT_VOXEL || candidate.primitiveCount == 0u || candidate.sceneInstanceIndex >= gTraceConstants.SceneInstanceCount)
+			return false;
+		instanceData = GetSceneInstanceData(candidate.sceneInstanceIndex);
+		if (instanceData.dataSource != SCENE_DATA_SOURCE_PERSISTENT_VOXEL ||
+			instanceData.primitiveBase != candidate.primitiveIndex ||
+			instanceData.metadata0 != candidate.occurrenceKeyLo ||
+			instanceData.metadata1 != candidate.occurrenceKeyHi ||
+			instanceData.metadata2 != candidate.occurrenceGeneration)
+			return false;
+		const uint persistentPrimitiveCount = GetPersistentVoxelPrimitiveCount();
+		if (candidate.primitiveIndex >= persistentPrimitiveCount || candidate.primitiveCount > persistentPrimitiveCount - candidate.primitiveIndex)
+			return false;
+		outPrimitiveIndex = candidate.primitiveIndex + min((uint)(RandomFloat01(rngState) * candidate.primitiveCount), candidate.primitiveCount - 1u);
+	}
+	const PrimitiveData primitive = GetPrimitiveData(candidate.dataSource, outPrimitiveIndex);
+	outMaterialIndex = placedRange ? ResolvePrimitiveMaterialIndex(instanceData, primitive) : primitive.materialIndex;
+	SceneVertex v0 = GetVertexData(candidate.dataSource, primitive.indices.x);
+	SceneVertex v1 = GetVertexData(candidate.dataSource, primitive.indices.y);
+	SceneVertex v2 = GetVertexData(candidate.dataSource, primitive.indices.z);
+	if (placedRange)
+	{
+		v0.position = TransformSceneInstancePoint(instanceData, v0.position, false);
+		v1.position = TransformSceneInstancePoint(instanceData, v1.position, false);
+		v2.position = TransformSceneInstancePoint(instanceData, v2.position, false);
+		const float3 areaVector = cross(v1.position - v0.position, v2.position - v0.position);
+		const float areaVectorLength = length(areaVector);
+		if (areaVectorLength <= 1e-8)
+			return false;
+		outNormal = areaVector / areaVectorLength;
+		outEffectiveArea = 0.5 * areaVectorLength * candidate.primitiveCount;
+	}
+	else
+	{
+		outNormal = normalize(primitive.normal);
+		outEffectiveArea = candidate.primitiveArea;
+	}
 	const float u1 = RandomFloat01(rngState);
 	const float u2 = RandomFloat01(rngState);
 	const float rootU1 = sqrt(saturate(u1));
 	const float3 barycentrics = float3(1.0 - rootU1, rootU1 * (1.0 - u2), rootU1 * u2);
 	outUv = primitive.uv0 * barycentrics.x + primitive.uv1 * barycentrics.y + primitive.uv2 * barycentrics.z;
-	outNormal = normalize(primitive.normal);
-	return v0.position * barycentrics.x + v1.position * barycentrics.y + v2.position * barycentrics.z;
+	outPosition = v0.position * barycentrics.x + v1.position * barycentrics.y + v2.position * barycentrics.z;
+	return true;
 }
 
 void EvaluateSampledEmissiveLighting(
@@ -443,15 +494,20 @@ void EvaluateSampledEmissiveLighting(
 	}
 
 	const EmissivePrimitiveData candidate = gEmissivePrimitives[candidateIndex];
-	outPrimitiveIndex = candidate.primitiveIndex;
 	outDataSource = candidate.dataSource;
-	const PrimitiveData primitive = GetPrimitiveData(candidate.dataSource, candidate.primitiveIndex);
 	float2 lightUv = 0.0;
 	float3 lightNormal = 0.0;
-	const float3 lightPosition = SamplePointOnPrimitive(candidate.dataSource, primitive, rngState, lightUv, lightNormal);
+	float3 lightPosition = 0.0;
+	float effectiveArea = 0.0;
+	uint materialIndex = 0xffffffffu;
+	if (!SamplePointOnEmissiveCandidate(candidate, rngState, outPrimitiveIndex, materialIndex, lightPosition, lightUv, lightNormal, effectiveArea))
+	{
+		TraceShaderStatAdd(TRACE_STAT_EMISSIVE_CANDIDATE_NONE, 1u);
+		return;
+	}
 	outEmitterUv = lightUv;
-	const MaterialData lightMaterial = GetMaterialData(primitive.materialIndex, candidate.dataSource);
-	const float3 lightColor = SampleMaterialEmissionSource(primitive.materialIndex, candidate.dataSource, lightUv) * lightMaterial.emissiveIntensity * max(candidate.emissionScale, 0.0);
+	const MaterialData lightMaterial = GetMaterialData(materialIndex, candidate.dataSource);
+	const float3 lightColor = SampleMaterialEmissionSource(materialIndex, candidate.dataSource, lightUv) * lightMaterial.emissiveIntensity * max(candidate.emissionScale, 0.0);
 	const float falloffScale = max(lightMaterial.emissiveMaskScale, 0.25);
 	outEmitterRadiance = lightColor;
 	if (all(lightColor <= 0.0))
@@ -505,7 +561,7 @@ void EvaluateSampledEmissiveLighting(
 	}
 
 	const float pdf = max(candidate.selectionPdf, 1e-4);
-	const float projectedArea = max(candidate.primitiveArea * emitterLambert, 0.001);
+	const float projectedArea = max(effectiveArea * emitterLambert, 0.001);
 	const float attenuatedDistanceSq = pow(max(lightDistanceSq, 0.01), falloffScale);
 	const float solidAngleEstimate = min(projectedArea / max(12.56637061436 * attenuatedDistanceSq, 0.01), 1.0);
 	const float sampleWeight = min(solidAngleEstimate / pdf, 16.0);

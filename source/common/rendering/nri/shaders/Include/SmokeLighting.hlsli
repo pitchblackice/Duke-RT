@@ -404,17 +404,82 @@ uint SmokeSampleEmissivePrimitive(inout uint randomState)
 	return low;
 }
 
-float3 SmokeSamplePointOnEmissive(EmissivePrimitiveData candidate, PrimitiveData primitive, inout uint randomState, out float2 uv, out float3 normal)
+float3 SmokeTransformPoint(SceneInstanceData instanceData, float3 localPosition)
 {
-	const SceneVertex v0 = SmokeGetVertex(candidate.dataSource, primitive.indices.x);
-	const SceneVertex v1 = SmokeGetVertex(candidate.dataSource, primitive.indices.y);
-	const SceneVertex v2 = SmokeGetVertex(candidate.dataSource, primitive.indices.z);
+	const float4 p = float4(localPosition, 1.0);
+	return float3(
+		dot(instanceData.currentTransformRow0, p),
+		dot(instanceData.currentTransformRow1, p),
+		dot(instanceData.currentTransformRow2, p));
+}
+
+bool SmokeSamplePointOnEmissive(
+	EmissivePrimitiveData candidate,
+	inout uint randomState,
+	out uint primitiveIndex,
+	out PrimitiveData primitive,
+	out MaterialData material,
+	out float3 position,
+	out float2 uv,
+	out float3 normal,
+	out float effectiveArea)
+{
+	primitiveIndex = candidate.primitiveIndex;
+	primitive = (PrimitiveData)0;
+	material = (MaterialData)0;
+	position = 0.0;
+	uv = 0.0;
+	normal = 0.0;
+	effectiveArea = 0.0;
+	const bool placedRange = candidate.sceneInstanceIndex != 0xffffffffu;
+	SceneInstanceData instanceData = (SceneInstanceData)0;
+	if (placedRange)
+	{
+		uint sceneInstanceCount, sceneInstanceStride, persistentPrimitiveCount, persistentPrimitiveStride;
+		gSmokeSceneInstances.GetDimensions(sceneInstanceCount, sceneInstanceStride);
+		gSmokePersistentPrimitives.GetDimensions(persistentPrimitiveCount, persistentPrimitiveStride);
+		if (candidate.dataSource != NRI_SMOKE_SCENE_DATA_SOURCE_PERSISTENT_VOXEL ||
+			candidate.primitiveCount == 0u || candidate.sceneInstanceIndex >= sceneInstanceCount ||
+			candidate.primitiveIndex >= persistentPrimitiveCount || candidate.primitiveCount > persistentPrimitiveCount - candidate.primitiveIndex)
+			return false;
+		instanceData = gSmokeSceneInstances[candidate.sceneInstanceIndex];
+		if (instanceData.dataSource != NRI_SMOKE_SCENE_DATA_SOURCE_PERSISTENT_VOXEL ||
+			instanceData.primitiveBase != candidate.primitiveIndex ||
+			instanceData.metadata0 != candidate.occurrenceKeyLo ||
+			instanceData.metadata1 != candidate.occurrenceKeyHi ||
+			instanceData.metadata2 != candidate.occurrenceGeneration)
+			return false;
+		primitiveIndex = candidate.primitiveIndex + min((uint)(SmokeRandom01(randomState) * candidate.primitiveCount), candidate.primitiveCount - 1u);
+	}
+	primitive = SmokeGetPrimitive(candidate.dataSource, primitiveIndex);
+	const uint materialIndex = placedRange ? SmokeResolveMaterialIndex(instanceData, primitive) : primitive.materialIndex;
+	material = SmokeGetMaterial(candidate.dataSource, materialIndex);
+	SceneVertex v0 = SmokeGetVertex(candidate.dataSource, primitive.indices.x);
+	SceneVertex v1 = SmokeGetVertex(candidate.dataSource, primitive.indices.y);
+	SceneVertex v2 = SmokeGetVertex(candidate.dataSource, primitive.indices.z);
+	if (placedRange)
+	{
+		v0.position = SmokeTransformPoint(instanceData, v0.position);
+		v1.position = SmokeTransformPoint(instanceData, v1.position);
+		v2.position = SmokeTransformPoint(instanceData, v2.position);
+		const float3 areaVector = cross(v1.position - v0.position, v2.position - v0.position);
+		const float areaVectorLength = length(areaVector);
+		if (areaVectorLength <= 1e-8)
+			return false;
+		normal = areaVector / areaVectorLength;
+		effectiveArea = 0.5 * areaVectorLength * candidate.primitiveCount;
+	}
+	else
+	{
+		normal = normalize(primitive.normal);
+		effectiveArea = candidate.primitiveArea;
+	}
 	const float rootU = sqrt(saturate(SmokeRandom01(randomState)));
 	const float v = SmokeRandom01(randomState);
 	const float3 bary = float3(1.0 - rootU, rootU * (1.0 - v), rootU * v);
 	uv = primitive.uv0 * bary.x + primitive.uv1 * bary.y + primitive.uv2 * bary.z;
-	normal = normalize(primitive.normal);
-	return v0.position * bary.x + v1.position * bary.y + v2.position * bary.z;
+	position = v0.position * bary.x + v1.position * bary.y + v2.position * bary.z;
+	return true;
 }
 
 uint SmokeLightRandomSeed(uint3 froxel, RuntimePointLightData light, uint sampleIndex)

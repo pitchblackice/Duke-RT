@@ -148,7 +148,14 @@ struct NRIEmissivePrimitiveGpuData
 	float emissionScale = 1.0f;
 	uint32_t stableKeyLo = 0;
 	uint32_t stableKeyHi = 0;
+	uint32_t sceneInstanceIndex = UINT32_MAX;
+	uint32_t primitiveCount = 1;
+	uint32_t occurrenceKeyLo = 0;
+	uint32_t occurrenceKeyHi = 0;
+	uint32_t occurrenceGeneration = 0;
 };
+
+static_assert(sizeof(NRIEmissivePrimitiveGpuData) == 64);
 
 struct NRIEmissiveMaterialResponseGpuData
 {
@@ -164,6 +171,8 @@ struct NRIEmissivePrimitiveDebugRecord
 	uint64_t surfaceStableKey = 0;
 	uint32_t dataSource = 0;
 	uint32_t primitiveIndex = UINT32_MAX;
+	uint32_t primitiveCount = 1;
+	uint32_t sceneInstanceIndex = UINT32_MAX;
 	uint32_t materialIndex = UINT32_MAX;
 	uint32_t sourceFlags = 0;
 	uint32_t sourceRuleId = 0;
@@ -438,6 +447,12 @@ public:
 			float materialResponseMax = 1.0f;
 			float powerEstimate = 0.0f;
 			bool sectorResponseEnabled = true;
+			uint32_t placedPrimitiveBase = 0;
+			uint32_t placedPrimitiveCount = 0;
+			uint32_t sceneInstanceIndex = UINT32_MAX;
+			uint32_t occurrenceKeyLo = 0;
+			uint32_t occurrenceKeyHi = 0;
+			uint32_t occurrenceGeneration = 0;
 		};
 
 		std::vector<EmissiveHeuristicRule> textureRules;
@@ -583,6 +598,12 @@ public:
 		float surfaceArea = 0.0f;
 		nri_scene::SurfaceProvenance provenance = {};
 		nri_scene::MaterialLightingMetadata material = {};
+		uint32_t placedPrimitiveBase = 0;
+		uint32_t placedPrimitiveCount = 0;
+		uint32_t sceneInstanceIndex = UINT32_MAX;
+		uint32_t occurrenceKeyLo = 0;
+		uint32_t occurrenceKeyHi = 0;
+		uint32_t occurrenceGeneration = 0;
 	};
 
 	struct FrameAppendStats
@@ -791,6 +812,7 @@ public:
 		uint32_t outputStaticRecords = 0;
 		uint32_t outputDynamicRecords = 0;
 		uint32_t outputPersistentVoxelRecords = 0;
+		uint64_t outputPersistentVoxelPrimitivesRepresented = 0;
 		uint32_t skippedPersistentVoxelSurfaces = 0;
 		uint32_t proposalBoundGrowthCount = 0;
 		uint64_t lastProposalBoundGrowthStableKey = 0;

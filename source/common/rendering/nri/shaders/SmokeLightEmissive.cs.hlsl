@@ -60,11 +60,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 
 		const EmissivePrimitiveData candidate = gSmokeEmissivePrimitives[candidateIndex];
-		const PrimitiveData primitive = SmokeGetPrimitive(candidate.dataSource, candidate.primitiveIndex);
-		const MaterialData material = SmokeGetMaterial(candidate.dataSource, primitive.materialIndex);
+		PrimitiveData primitive = (PrimitiveData)0;
+		MaterialData material = (MaterialData)0;
+		uint sampledPrimitiveIndex = candidate.primitiveIndex;
 		float2 lightUv;
 		float3 lightNormal;
-		const float3 lightPosition = SmokeSamplePointOnEmissive(candidate, primitive, randomState, lightUv, lightNormal);
+		float3 lightPosition;
+		float effectiveArea;
+		if (!SmokeSamplePointOnEmissive(candidate, randomState, sampledPrimitiveIndex, primitive, material, lightPosition, lightUv, lightNormal, effectiveArea))
+		{
+			if (diagnostics)
+				InterlockedAdd(gSmokeControl[0].EmissiveCandidateMisses, 1u);
+			continue;
+		}
 		float3 lightRadiance = SmokeSampleMaterialEmission(material, lightUv) * max(material.emissiveIntensity, 0.0);
 		lightRadiance *= max(candidate.emissionScale, 0.0);
 		if (!any(lightRadiance > 0.0))
@@ -106,7 +114,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 
 		const float pdf = max(candidate.selectionPdf, 1e-4);
-		const float projectedArea = max(candidate.primitiveArea * emitterCosine, 0.001);
+		const float projectedArea = max(effectiveArea * emitterCosine, 0.001);
 		const float falloffScale = max(material.emissiveMaskScale, 0.25);
 		const float attenuatedDistanceSquared = pow(max(distanceSquared, 0.01), falloffScale);
 		const float solidAngle = min(projectedArea / max(12.56637061436 * attenuatedDistanceSquared, 0.01), 1.0);

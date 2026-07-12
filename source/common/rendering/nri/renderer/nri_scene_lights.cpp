@@ -1604,6 +1604,12 @@ namespace
 		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.materialIndex);
 		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.emissiveMode);
 		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.emissiveTextureIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.placedPrimitiveBase);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.placedPrimitiveCount);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.sceneInstanceIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.occurrenceKeyLo);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.occurrenceKeyHi);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.occurrenceGeneration);
 		return hash;
 	}
 
@@ -4484,6 +4490,12 @@ void SceneLightSystem::RebuildEmissiveSurfaces(
 			}
 		}
 		emissive.powerEstimate = record.surfaceArea * resolvedLuminance * emissive.emissiveIntensity;
+		emissive.placedPrimitiveBase = record.placedPrimitiveBase;
+		emissive.placedPrimitiveCount = record.placedPrimitiveCount;
+		emissive.sceneInstanceIndex = record.sceneInstanceIndex;
+		emissive.occurrenceKeyLo = record.occurrenceKeyLo;
+		emissive.occurrenceKeyHi = record.occurrenceKeyHi;
+		emissive.occurrenceGeneration = record.occurrenceGeneration;
 		if (emissive.powerEstimate < minPower)
 		{
 			continue;
@@ -5169,6 +5181,74 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 			}
 		}
 	};
+	auto appendPlacedVoxelRange = [&](const EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface)
+	{
+		if (surface.sceneInstanceIndex == UINT32_MAX || surface.placedPrimitiveCount == 0u)
+		{
+			localStats.skippedPersistentVoxelSurfaces++;
+			return;
+		}
+		const float samplingScale = ResolveGlowSamplingScale(surface.sourceFlags, surface.emissiveMode, settings) * std::max(surface.reachScale, 0.0f);
+		const bool sectorResponseEligible = IsEmissiveSurfaceSectorResponseEligible(surface);
+		bool sectorResponseApplied = false;
+		const float sectorRawResponseScale = ResolveSectorEmissionScale(surface, sectorResponseApplied);
+		const float sectorResponseScale = sectorResponseApplied ? ResolveSectorEmissionIntensityScale(surface, sectorRawResponseScale) : 1.0f;
+		const float sectorReachScale = sectorResponseApplied ? ResolveSectorEmissionReachScale(surface, sectorRawResponseScale) : 1.0f;
+		bool materialResponseApplied = false;
+		const float materialResponseScale = ResolveEmissiveMaterialResponseScale(surface, materialResponseApplied);
+		const float sectorReachBound = sectorResponseEligible ?
+			(surface.hasSectorResponseReachMax ?
+				std::max(std::max(0.0f, surface.sectorResponseReachMin), surface.sectorResponseReachMax) :
+				std::max(std::max(0.0f, (float)nri_ptsectoremissionreachmin), (float)nri_ptsectoremissionreachmax)) :
+			1.0f;
+
+		BuiltCandidate candidate = {};
+		candidate.gpu.dataSource = nri_diag::SceneDataSourcePersistentVoxel;
+		candidate.gpu.primitiveIndex = surface.placedPrimitiveBase;
+		candidate.gpu.primitiveCount = surface.placedPrimitiveCount;
+		candidate.gpu.sceneInstanceIndex = surface.sceneInstanceIndex;
+		candidate.gpu.occurrenceKeyLo = surface.occurrenceKeyLo;
+		candidate.gpu.occurrenceKeyHi = surface.occurrenceKeyHi;
+		candidate.gpu.occurrenceGeneration = surface.occurrenceGeneration;
+		candidate.gpu.sourceFlags = surface.sourceFlags;
+		candidate.gpu.textureId = surface.textureId;
+		candidate.gpu.primitiveArea = std::max(surface.surfaceArea, 0.0f);
+		candidate.gpu.powerEstimate = std::max(surface.powerEstimate, 0.0f) * sectorResponseScale * materialResponseScale;
+		candidate.gpu.selectionWeight = std::max(surface.powerEstimate, 0.0f) * samplingScale * sectorReachScale * materialResponseScale;
+		candidate.gpu.emissionScale = sectorResponseScale * materialResponseScale;
+		candidate.referenceProposalWeight = std::max(surface.powerEstimate, 0.0f) * samplingScale * sectorReachBound * materialResponseScale;
+		candidate.hasReferenceProposalWeight = sectorResponseEligible;
+
+		candidate.debug.stableKey = nri_scene::HashCombine64(surface.stableKey, 0x504C41434544564Full);
+		candidate.debug.surfaceStableKey = surface.stableKey;
+		candidate.debug.dataSource = candidate.gpu.dataSource;
+		candidate.debug.primitiveIndex = candidate.gpu.primitiveIndex;
+		candidate.debug.primitiveCount = candidate.gpu.primitiveCount;
+		candidate.debug.sceneInstanceIndex = candidate.gpu.sceneInstanceIndex;
+		candidate.debug.materialIndex = surface.materialIndex;
+		candidate.debug.sourceFlags = surface.sourceFlags;
+		candidate.debug.sourceRuleId = surface.sourceRuleId;
+		candidate.debug.overrideRuleId = surface.overrideRuleId;
+		candidate.debug.textureId = surface.textureId;
+		candidate.debug.emissiveMode = surface.emissiveMode;
+		candidate.debug.emissiveTextureIndex = surface.emissiveTextureIndex;
+		candidate.debug.actorIndex = surface.actorIndex;
+		candidate.debug.sectorIndex = surface.sectorIndex;
+		candidate.debug.primitiveArea = candidate.gpu.primitiveArea;
+		candidate.debug.powerEstimate = candidate.gpu.powerEstimate;
+		candidate.debug.selectionWeight = candidate.gpu.selectionWeight;
+		candidate.debug.emissiveIntensity = surface.emissiveIntensity * sectorResponseScale * materialResponseScale;
+		candidate.debug.sectorResponseScale = sectorResponseScale;
+		candidate.debug.sectorReachScale = sectorReachScale;
+		candidate.debug.materialResponseEnabled = IsEmissiveSurfaceMaterialResponseEligible(surface);
+		candidate.debug.materialResponseScale = materialResponseScale;
+		candidate.debug.sectorResponseApplied = sectorResponseApplied;
+		Copy3f(surface.center, candidate.debug.center);
+		Copy3f(surface.emissiveColor, candidate.debug.emissiveColor);
+		candidate.gpu.stableKeyLo = (uint32_t)(candidate.debug.stableKey & 0xffffffffu);
+		candidate.gpu.stableKeyHi = (uint32_t)(candidate.debug.stableKey >> 32u);
+		candidates.push_back(candidate);
+	};
 
 	for (const auto& surface : activeSurfaces)
 	{
@@ -5196,7 +5276,7 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 			break;
 		case SceneLightRecordSource::PersistentVoxelScene:
 			localStats.surfacePersistentVoxel++;
-			localStats.skippedPersistentVoxelSurfaces++;
+			appendPlacedVoxelRange(surface);
 			break;
 		default:
 			break;
@@ -5213,8 +5293,8 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 			candidate.debug.stableKey,
 			(uint64_t)candidate.debug.emissiveMode);
 		distributionCandidate.tieBreakKey = nri_scene::HashCombine64(
-			(uint64_t)candidate.gpu.dataSource,
-			(uint64_t)candidate.gpu.primitiveIndex);
+			nri_scene::HashCombine64((uint64_t)candidate.gpu.dataSource, (uint64_t)candidate.gpu.primitiveIndex),
+			(uint64_t)candidate.gpu.sceneInstanceIndex);
 		distributionCandidate.proposalWeight = candidate.gpu.selectionWeight;
 		distributionCandidate.referenceProposalWeight = candidate.referenceProposalWeight;
 		distributionCandidate.hasReferenceProposalWeight = candidate.hasReferenceProposalWeight;
@@ -5268,6 +5348,7 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 		else if (candidate.debug.dataSource == nri_diag::SceneDataSourcePersistentVoxel)
 		{
 			localStats.outputPersistentVoxelRecords++;
+			localStats.outputPersistentVoxelPrimitivesRepresented += candidate.gpu.primitiveCount;
 		}
 		totalPower += candidate.gpu.powerEstimate;
 		if (candidate.gpu.powerEstimate > dominantPower)
@@ -5299,22 +5380,9 @@ uint64_t SceneLightSystem::BuildEmissiveSamplingPayloadHash(const EmissiveSampli
 	hash = nri_scene::HashCombine64(hash, HashGeometryForEmissiveSampling(context.surfaceLightOverlayGeometry));
 	hash = nri_scene::HashCombine64(hash, (uint64_t)context.surfaceLightOverlayPrimitiveBaseOffset);
 
-	uint32_t sampledSurfaceCount = 0;
+	hash = nri_scene::HashCombine64(hash, (uint64_t)mEmissiveSurfaces.activeSurfaces.size());
 	for (const auto& surface : mEmissiveSurfaces.activeSurfaces)
 	{
-		if (surface.source == SceneLightRecordSource::PersistentVoxelScene)
-		{
-			continue;
-		}
-		sampledSurfaceCount++;
-	}
-	hash = nri_scene::HashCombine64(hash, (uint64_t)sampledSurfaceCount);
-	for (const auto& surface : mEmissiveSurfaces.activeSurfaces)
-	{
-		if (surface.source == SceneLightRecordSource::PersistentVoxelScene)
-		{
-			continue;
-		}
 		hash = nri_scene::HashCombine64(hash, surface.stableKey);
 
 		const auto propertyIt = mEmissiveSurfaces.activePropertyHashes.find(surface.stableKey);

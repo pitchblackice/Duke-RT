@@ -29,6 +29,11 @@ struct EmissivePrimitiveData
 	float emissionScale;
 	uint stableKeyLo;
 	uint stableKeyHi;
+	uint sceneInstanceIndex;
+	uint primitiveCount;
+	uint occurrenceKeyLo;
+	uint occurrenceKeyHi;
+	uint occurrenceGeneration;
 };
 
 struct EmissiveMaterialResponseData

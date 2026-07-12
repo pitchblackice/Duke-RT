@@ -41,6 +41,8 @@ struct PersistentVoxelBatch
 		int32_t resolvedVoxelIndex = -1;
 		uint32_t visibilityChunkIndex = UINT32_MAX;
 		uint32_t worldTlasFrameIndex = UINT32_MAX;
+		uint32_t worldTlasInstanceIndex = UINT32_MAX;
+		uint32_t worldTlasOccurrenceGeneration = 0;
 		bool capturedThisFrame = false;
 		bool inWorldTlasThisFrame = false;
 		bool active = true;

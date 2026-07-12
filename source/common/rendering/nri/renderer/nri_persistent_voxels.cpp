@@ -1592,6 +1592,8 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 	for (PersistentVoxelBatch::ActorEntry& actor : batch.actors)
 	{
 		actor.inWorldTlasThisFrame = false;
+		actor.worldTlasInstanceIndex = UINT32_MAX;
+		actor.worldTlasOccurrenceGeneration = 0u;
 		if (actor.active)
 		{
 			persistentVoxelTlasActors.push_back(&actor);
@@ -2335,12 +2337,20 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 		sceneInstance.materialBase = actor.materialOffset;
 		sceneInstance.materialCount = actor.materialCount;
 		sceneInstance.visibilityChunk = actor.visibilityChunkIndex;
+		uint64_t occurrenceBindingHash = nri_scene::HashCombine64(actor.identityKey, actor.meshResourceKey);
+		occurrenceBindingHash = nri_scene::HashCombine64(occurrenceBindingHash, ((uint64_t)actor.primitiveOffset << 32u) | actor.primitiveCount);
+		occurrenceBindingHash = nri_scene::HashCombine64(occurrenceBindingHash, ((uint64_t)actor.materialOffset << 32u) | actor.materialCount);
+		actor.worldTlasOccurrenceGeneration = (uint32_t)(occurrenceBindingHash ^ (occurrenceBindingHash >> 32u));
+		sceneInstance.metadata0 = (uint32_t)(actor.identityKey & 0xffffffffu);
+		sceneInstance.metadata1 = (uint32_t)(actor.identityKey >> 32u);
+		sceneInstance.metadata2 = actor.worldTlasOccurrenceGeneration;
 		for (uint32_t i = 0; i < 12; ++i)
 		{
 			sceneInstance.currentTransform[i] = actor.instanceTransform[i];
 			sceneInstance.previousTransform[i] = actor.previousInstanceTransform[i];
 		}
 		persistentVoxelInstance.instanceId = raySceneBuilder.AddLegacyInstance(persistentVoxelInstance, sceneInstance);
+		actor.worldTlasInstanceIndex = persistentVoxelInstance.instanceId;
 		actor.inWorldTlasThisFrame = true;
 		actor.worldTlasFrameIndex = frameIndex;
 		if (meshResourceFirstPublish)
@@ -2686,7 +2696,9 @@ NRIPersistentVoxelLightAppendStats NRIPersistentVoxelResidency::AppendSceneLight
 		}
 		if (!actor.inWorldTlasThisFrame ||
 			actor.worldTlasFrameIndex != frameIndex ||
-			committedWorldTlasFrameIndex != frameIndex)
+			committedWorldTlasFrameIndex != frameIndex ||
+			actor.worldTlasInstanceIndex == UINT32_MAX ||
+			actor.primitiveCount == 0u)
 		{
 			stats.skippedActors++;
 			stats.skippedRecords += (uint32_t)actor.lightRecords.size();
@@ -2702,7 +2714,17 @@ NRIPersistentVoxelLightAppendStats NRIPersistentVoxelResidency::AppendSceneLight
 			continue;
 		}
 
-		sceneLights.AppendSurfaceRecords(actor.lightRecords, actor.materialOffset);
+		std::vector<SceneLightSystem::SurfaceRecord> placedRecords = actor.lightRecords;
+		for (SceneLightSystem::SurfaceRecord& record : placedRecords)
+		{
+			record.placedPrimitiveBase = actor.primitiveOffset;
+			record.placedPrimitiveCount = actor.primitiveCount;
+			record.sceneInstanceIndex = actor.worldTlasInstanceIndex;
+			record.occurrenceKeyLo = (uint32_t)(actor.identityKey & 0xffffffffu);
+			record.occurrenceKeyHi = (uint32_t)(actor.identityKey >> 32u);
+			record.occurrenceGeneration = actor.worldTlasOccurrenceGeneration;
+		}
+		sceneLights.AppendSurfaceRecords(placedRecords, actor.materialOffset);
 		stats.appendedActors++;
 		stats.appendedRecords += (uint32_t)actor.lightRecords.size();
 	}
