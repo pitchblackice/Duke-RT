@@ -737,6 +737,15 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 		const float bounceRoughness = GetSurfaceRoughness(bounceMaterial, bounceHit.uv);
 		const float bounceMetalness = GetSurfaceMetalness(bounceMaterial, bounceHit.uv);
 		const float4 bounceAlbedo = SampleMaterialBaseColor(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.uv);
+		if ((bounceMaterial.flags & MATERIAL_FLAG_FULLBRIGHT) != 0u)
+		{
+			const float3 visibleRadiance =
+				IsMaterialEmissive(bounceMaterial) && (bounceMaterial.flags & MATERIAL_FLAG_TINT_EMISSION) != 0u ?
+					EvaluateVisibleMaterialEmission(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.primitiveIndex, bounceMaterial, bounceAlbedo.rgb, bounceHit.uv) :
+					bounceAlbedo.rgb * max(bounceMaterial.emissiveReserved, 1.0);
+			indirectRadiance += throughput * visibleRadiance;
+			break;
+		}
 		if (IsMaterialEmissive(bounceMaterial))
 		{
 			indirectRadiance += throughput * EvaluateMaterialEmission(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.primitiveIndex, bounceMaterial, bounceHit.uv);
