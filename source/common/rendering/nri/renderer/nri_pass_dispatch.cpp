@@ -100,6 +100,11 @@ namespace
 		return std::max(0.0f, std::min(value, 1.0f));
 	}
 
+	static uint32_t PackVoxelNormalBlend8(float value)
+	{
+		return (uint32_t)std::lround(Clamp01(value) * 255.0f) << NRI_VOXEL_NORMAL_BLEND_SHIFT;
+	}
+
 	static float GetBaseAmbient()
 	{
 		return std::max(0.0f, (float)nri_ptbaseambient);
@@ -289,7 +294,8 @@ bool NRIPassDispatcher::DispatchBootstrapView(NRIPassDispatchContext& context)
 		NRI_FLAG_BOOTSTRAP_VIEW |
 		(context.mFrame.resetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 		(context.mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
-		(context.mDirectionalLightState.enabled && context.mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u);
+		(context.mDirectionalLightState.enabled && context.mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u) |
+		PackVoxelNormalBlend8(nri_ptvoxelnormalblend);
 	constants.StaticMaterialCount = context.mSceneStats.staticMaterialCount;
 	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.BootstrapMode = bootstrapMode;
@@ -432,7 +438,8 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		(nri_ptvisiblechunkgate ? NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS : 0u) |
 		(ShouldCollectTraceShaderStats() ? NRI_FLAG_TRACE_SHADER_STATS : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u) |
-		NRIPackTemporalJitterPhaseCount(jitterPhaseCount);
+		NRIPackTemporalJitterPhaseCount(jitterPhaseCount) |
+		PackVoxelNormalBlend8(nri_ptvoxelnormalblend);
 	constants.StaticMaterialCount = context.mSceneStats.staticMaterialCount;
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = context.mSceneStats.dynamicMaterialCount;

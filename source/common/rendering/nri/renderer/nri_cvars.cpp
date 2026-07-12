@@ -80,6 +80,14 @@ namespace
 		}
 	}
 
+	void NotifyActiveVoxelNormalBlendChange()
+	{
+		if (NRIRenderDevice* frameBuffer = GetActiveNriRenderDeviceForCVar())
+		{
+			frameBuffer->NotifyPathTracingCameraCut("voxel-normal-blend-change");
+		}
+	}
+
 	void NotifyActiveAnalyticLightSettingsChange()
 	{
 		if (NRIRenderDevice* frameBuffer = GetActiveNriRenderDeviceForCVar())
@@ -1288,6 +1296,19 @@ CUSTOM_CVAR(Float, nri_voxelemissionboost, 3.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG
 		self = 0.0f;
 	}
 	NotifyActiveMaterialLightingCalibrationChange();
+}
+
+CUSTOM_CVAR(Float, nri_ptvoxelnormalblend, 0.35f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	else if (self > 1.0f)
+	{
+		self = 1.0f;
+	}
+	NotifyActiveVoxelNormalBlendChange();
 }
 
 CUSTOM_CVAR(Float, nri_ptfullbrightboost, 1.50781f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

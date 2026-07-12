@@ -457,7 +457,8 @@ float3 ResolveHitNormal(uint materialIndex, uint dataSource, uint primitiveIndex
 	float3 smoothNormal = resolvedNormal;
 	if (TryResolveSmoothVertexNormal(primitive, weights, resolvedNormal, smoothNormal))
 	{
-		resolvedNormal = normalize(lerp(resolvedNormal, smoothNormal, 0.35f));
+		const float blend = (float)((gTraceConstants.Flags >> NRI_VOXEL_NORMAL_BLEND_SHIFT) & 0xffu) * (1.0f / 255.0f);
+		resolvedNormal = normalize(lerp(resolvedNormal, smoothNormal, blend));
 	}
 	if (material.normalTextureIndex == 0xffffffffu)
 	{
