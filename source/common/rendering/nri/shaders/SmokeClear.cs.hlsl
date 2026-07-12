@@ -112,7 +112,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (index < min(froxelCount, fineCellCount))
 	{
 		gSmokeFineCellCounts[index] = 0u;
-		[unroll]
+		[loop]
 		for (uint bucket = 0u; bucket < NRI_SMOKE_FINE_CELL_CAPACITY; ++bucket)
 		{
 			const uint candidateIndex = index * NRI_SMOKE_FINE_CELL_CAPACITY + bucket;
@@ -123,7 +123,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (index < min(expectedWideCellCount, wideCellCount))
 	{
 		gSmokeWideCellCounts[index] = 0u;
-		[unroll]
+		[loop]
 		for (uint bucket = 0u; bucket < NRI_SMOKE_WIDE_CELL_CAPACITY; ++bucket)
 		{
 			const uint candidateIndex = index * NRI_SMOKE_WIDE_CELL_CAPACITY + bucket;
@@ -134,7 +134,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (index < min(gSmokeConstants.FroxelDepth, globalDepthCount))
 	{
 		gSmokeGlobalDepthCounts[index] = 0u;
-		[unroll]
+		[loop]
 		for (uint bucket = 0u; bucket < NRI_SMOKE_GLOBAL_DEPTH_CAPACITY; ++bucket)
 		{
 			const uint candidateIndex = index * NRI_SMOKE_GLOBAL_DEPTH_CAPACITY + bucket;

@@ -17,8 +17,9 @@ namespace
 	constexpr uint32_t kMaxCommands = 256;
 	constexpr uint32_t kFineCellCapacity = 8u;
 	constexpr uint32_t kWideCellCount = 16u * 9u;
-	constexpr uint32_t kWideCellCapacity = 16u;
-	constexpr uint32_t kGlobalDepthCapacity = 16u;
+	constexpr uint32_t kWideCellCapacity = 32u;
+	constexpr uint32_t kGlobalDepthCapacity = 96u;
+	constexpr uint32_t kMaximumCandidatesPerFroxel = kFineCellCapacity + kWideCellCapacity + kGlobalDepthCapacity;
 	constexpr uint32_t kSmokeStorageBufferCount = 13u;
 	constexpr uint32_t kSmokeFilteredSceneBufferCount = 8u;
 	constexpr uint32_t kSmokeEmissiveSceneBufferCount = 7u;
@@ -902,7 +903,7 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 	const char* placement = mStatus.routePlacement == (uint32_t)NRISmokeRoutePlacement::DlrrPostUpscale ? "dlrr_post_upscale" : "standard_pre_upscale";
 	const char* inputName = mStatus.inputSlot < (uint32_t)NRIRenderer::FrameTextureSlot::Count ? renderer.GetFrameTextureSlotName((NRIRenderer::FrameTextureSlot)mStatus.inputSlot) : "none";
 	const char* outputName = mStatus.outputSlot < (uint32_t)NRIRenderer::FrameTextureSlot::Count ? renderer.GetFrameTextureSlotName((NRIRenderer::FrameTextureSlot)mStatus.outputSlot) : "none";
-	Printf("NRI PT smoke status: enabled=%s epoch=%u main_view=%s route_supported=%s placement=%s input=%s output=%s extent=%ux%u froxels=%ux%ux%u particles=%u styles=%u commands=%u commands_total=%llu dropped=%u substeps=%u light_mode=%u light_samples=%u light_candidates_max=%u point_lights=%s filtered_visibility=%s runtime_lights=%u gpu_stats=%s active=%u spawned=%u expired=%u evictions=%u column_overflow=%u wide_projected=%u wide_global_drops=%u fine_refs=%u wide_refs=%u global_refs=%u tier_particles=%u/%u/%u occupied_cells=%u/%u/%u selection_collisions=%u selection_replacements=%u selection_losses=%u/%u/%u depth_span_max=%u carrier_candidates_max=40 medium_occupied=%u occupied_overflow=%u medium_candidate_tests=%u point_froxels=%u light_candidates=%u light_distance_rejected=%u light_shadow_rays=%u light_visible=%u light_occluded=%u light_soft_samples=%u light_clamps=%u filter_hits=%u filter_alpha=%u filter_no_shadow=%u filter_one_way=%u filter_reflection=%u filter_portals=%u filter_blockers=%u filter_misses=%u filter_skip_limit=%u filter_continuation_limit=%u filter_downgrades=%u resident_mib=%.2f particle_readback=0 control_readback=%llu reset=%s\n",
+	Printf("NRI PT smoke status: enabled=%s epoch=%u main_view=%s route_supported=%s placement=%s input=%s output=%s extent=%ux%u froxels=%ux%ux%u particles=%u styles=%u commands=%u commands_total=%llu dropped=%u substeps=%u light_mode=%u light_samples=%u light_candidates_max=%u point_lights=%s filtered_visibility=%s runtime_lights=%u gpu_stats=%s active=%u spawned=%u expired=%u evictions=%u column_overflow=%u wide_projected=%u wide_global_drops=%u fine_refs=%u wide_refs=%u global_refs=%u tier_particles=%u/%u/%u occupied_cells=%u/%u/%u selection_collisions=%u selection_replacements=%u selection_full_drops=%u/%u/%u depth_span_max=%u carrier_candidates_max=%u medium_occupied=%u occupied_overflow=%u medium_candidate_tests=%u point_froxels=%u light_candidates=%u light_distance_rejected=%u light_shadow_rays=%u light_visible=%u light_occluded=%u light_soft_samples=%u light_clamps=%u filter_hits=%u filter_alpha=%u filter_no_shadow=%u filter_one_way=%u filter_reflection=%u filter_portals=%u filter_blockers=%u filter_misses=%u filter_skip_limit=%u filter_continuation_limit=%u filter_downgrades=%u resident_mib=%.2f particle_readback=0 control_readback=%llu reset=%s\n",
 		mStatus.enabled ? "yes" : "no", mStatus.simulationEpoch, mStatus.mainViewEligible ? "yes" : "no", mStatus.routeSupported ? "yes" : "no", placement,
 		inputName, outputName, mStatus.routeWidth, mStatus.routeHeight, mStatus.froxelWidth, mStatus.froxelHeight, mStatus.froxelDepth,
 		mStatus.particleCapacity, mStatus.styleCount, mStatus.commandsUploaded, (unsigned long long)mStatus.commandsUploadedTotal, mStatus.commandsDropped, mStatus.simulationSubsteps,
@@ -910,7 +911,7 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.gpuStatsValid ? "valid" : "disabled", mStatus.activeParticles, mStatus.spawnedParticles, mStatus.expiredParticles, mStatus.liveEvictions, mStatus.columnOverflow,
 		mStatus.wideParticlesProjected, mStatus.wideGlobalDrops, mStatus.fineColumnReferences, mStatus.wideCellReferences, mStatus.globalDepthReferences,
 		mStatus.fineTierParticles, mStatus.wideTierParticles, mStatus.globalTierParticles, mStatus.fineOccupiedCells, mStatus.wideOccupiedCells, mStatus.globalOccupiedSlices,
-		mStatus.selectionCollisions, mStatus.selectionReplacements, mStatus.fineSelectionLosses, mStatus.wideSelectionLosses, mStatus.globalSelectionLosses, mStatus.maximumDepthSpan,
+		mStatus.selectionCollisions, mStatus.selectionReplacements, mStatus.fineSelectionLosses, mStatus.wideSelectionLosses, mStatus.globalSelectionLosses, mStatus.maximumDepthSpan, kMaximumCandidatesPerFroxel,
 		mStatus.occupiedCount, mStatus.occupiedOverflow, mStatus.mediumCandidateTests, mStatus.pointFroxelsProcessed,
 		mStatus.lightCandidatesTested, mStatus.lightDistanceRejected, mStatus.lightShadowRays, mStatus.lightShadowVisible, mStatus.lightShadowOccluded, mStatus.lightSoftSamples, mStatus.lightRadianceClamps,
 		mStatus.filterCandidateHits, mStatus.filterAlphaRejects, mStatus.filterNoShadowRejects, mStatus.filterOneWayRejects, mStatus.filterReflectionRejects,

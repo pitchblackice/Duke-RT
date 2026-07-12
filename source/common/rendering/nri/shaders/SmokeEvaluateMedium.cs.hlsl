@@ -92,8 +92,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float weightedAnisotropy = 0.0;
 	float anisotropyWeight = 0.0;
 	uint contributingCandidates = 0u;
-	const uint fineCandidateCount = gSmokeFineCellCounts[froxelIndex] > 0u ? NRI_SMOKE_FINE_CELL_CAPACITY : 0u;
-	[unroll]
+	const uint fineCandidateCount = min(gSmokeFineCellCounts[froxelIndex], NRI_SMOKE_FINE_CELL_CAPACITY);
+	[loop]
 	for (uint i = 0u; i < fineCandidateCount; ++i)
 	{
 		const uint candidateIndex = froxelIndex * NRI_SMOKE_FINE_CELL_CAPACITY + i;
@@ -108,8 +108,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		dispatchThreadId.y * NRI_SMOKE_WIDE_GRID_Y / gSmokeConstants.FroxelHeight),
 		uint2(NRI_SMOKE_WIDE_GRID_X - 1u, NRI_SMOKE_WIDE_GRID_Y - 1u));
 	const uint wideCellIndex = SmokeWideCellIndex(wideCellPosition.x, wideCellPosition.y, dispatchThreadId.z);
-	const uint wideCandidateCount = wideCellIndex < wideCellCount && gSmokeWideCellCounts[wideCellIndex] > 0u ? NRI_SMOKE_WIDE_CELL_CAPACITY : 0u;
-	[unroll]
+	const uint wideCandidateCount = wideCellIndex < wideCellCount ? min(gSmokeWideCellCounts[wideCellIndex], NRI_SMOKE_WIDE_CELL_CAPACITY) : 0u;
+	[loop]
 	for (uint i = 0u; i < wideCandidateCount; ++i)
 	{
 		const uint candidateIndex = wideCellIndex * NRI_SMOKE_WIDE_CELL_CAPACITY + i;
@@ -119,9 +119,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			sliceNearDepth, sliceFarDepth, diagnostics, extinction, scatteringCoefficient, weightedAnisotropy, anisotropyWeight, contributingCandidates);
 	}
 
-	const uint globalCandidateCount = dispatchThreadId.z < globalDepthCount && gSmokeGlobalDepthCounts[dispatchThreadId.z] > 0u
-		? NRI_SMOKE_GLOBAL_DEPTH_CAPACITY : 0u;
-	[unroll]
+	const uint globalCandidateCount = dispatchThreadId.z < globalDepthCount
+		? min(gSmokeGlobalDepthCounts[dispatchThreadId.z], NRI_SMOKE_GLOBAL_DEPTH_CAPACITY) : 0u;
+	[loop]
 	for (uint i = 0u; i < globalCandidateCount; ++i)
 	{
 		const uint candidateIndex = dispatchThreadId.z * NRI_SMOKE_GLOBAL_DEPTH_CAPACITY + i;

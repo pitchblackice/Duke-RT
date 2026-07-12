@@ -1,6 +1,99 @@
 #include "Include/SmokeResources.hlsli"
 #include "Include/SmokeFroxel.hlsli"
 
+#define NRI_SMOKE_CANDIDATE_TIER_FINE 0u
+#define NRI_SMOKE_CANDIDATE_TIER_WIDE 1u
+#define NRI_SMOKE_CANDIDATE_TIER_GLOBAL 2u
+
+void SmokeInterlockedMaxTierCandidate(uint tier, uint index, uint value, out uint originalValue)
+{
+	if (tier == NRI_SMOKE_CANDIDATE_TIER_FINE)
+		InterlockedMax(gSmokeFineCellIndices[index], value, originalValue);
+	else if (tier == NRI_SMOKE_CANDIDATE_TIER_WIDE)
+		InterlockedMax(gSmokeWideCellIndices[index], value, originalValue);
+	else
+		InterlockedMax(gSmokeGlobalDepthIndices[index], value, originalValue);
+}
+
+void SmokeRecordTierCollision(uint tier)
+{
+	InterlockedAdd(gSmokeControl[0].SelectionCollisions, 1u);
+	if (tier == NRI_SMOKE_CANDIDATE_TIER_FINE)
+		InterlockedAdd(gSmokeControl[0].FineSelectionCollisions, 1u);
+	else if (tier == NRI_SMOKE_CANDIDATE_TIER_WIDE)
+		InterlockedAdd(gSmokeControl[0].WideSelectionCollisions, 1u);
+	else
+		InterlockedAdd(gSmokeControl[0].GlobalSelectionCollisions, 1u);
+}
+
+void SmokeRecordTierFullDrop(uint tier, bool replaced)
+{
+	if (tier == NRI_SMOKE_CANDIDATE_TIER_FINE)
+	{
+		InterlockedAdd(gSmokeControl[0].FineSelectionLosses, 1u);
+		if (replaced) InterlockedAdd(gSmokeControl[0].FineSelectionReplacements, 1u);
+	}
+	else if (tier == NRI_SMOKE_CANDIDATE_TIER_WIDE)
+	{
+		InterlockedAdd(gSmokeControl[0].WideSelectionLosses, 1u);
+		if (replaced) InterlockedAdd(gSmokeControl[0].WideSelectionReplacements, 1u);
+	}
+	else
+	{
+		InterlockedAdd(gSmokeControl[0].GlobalSelectionLosses, 1u);
+		if (replaced) InterlockedAdd(gSmokeControl[0].GlobalSelectionReplacements, 1u);
+	}
+	if (replaced)
+		InterlockedAdd(gSmokeControl[0].SelectionReplacements, 1u);
+}
+
+bool SmokeInsertTierCandidate(
+	uint tier,
+	uint baseIndex,
+	uint capacity,
+	uint indexCount,
+	uint packedCandidate,
+	bool diagnostics,
+	out bool invalidTarget)
+{
+	invalidTarget = capacity == 0u || baseIndex >= indexCount || capacity > indexCount - baseIndex;
+	if (invalidTarget)
+		return false;
+
+	uint carry = packedCandidate;
+	bool collided = false;
+	[loop]
+	for (uint probe = 0u; probe < capacity; ++probe)
+	{
+		uint originalValue = 0u;
+		SmokeInterlockedMaxTierCandidate(tier, baseIndex + probe, carry, originalValue);
+		if (originalValue == 0u)
+		{
+			if (diagnostics && collided)
+				SmokeRecordTierCollision(tier);
+			return true;
+		}
+		if (originalValue == carry)
+		{
+			if (diagnostics && collided)
+				SmokeRecordTierCollision(tier);
+			return true;
+		}
+		collided = true;
+		carry = min(carry, originalValue);
+	}
+
+	if (diagnostics)
+	{
+		SmokeRecordTierCollision(tier);
+		SmokeRecordTierFullDrop(tier, carry != packedCandidate);
+	}
+	// Every atomic conserves max(slot, carry) in the slot and forwards the
+	// lower value. Reaching capacity means exactly one weakest reference is
+	// discarded; the incoming candidate survived iff a different value fell out.
+	return carry != packedCandidate;
+}
+
 [numthreads(64, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -72,7 +165,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (useFineTier)
 	{
 		if (diagnostics) InterlockedAdd(gSmokeControl[0].FineTierParticles, 1u);
-		const uint bucket = particleIndex % NRI_SMOKE_FINE_CELL_CAPACITY;
 		[loop]
 		for (uint z = minimumDepthSlice; z <= maximumDepthSlice; ++z)
 		{
@@ -83,31 +175,22 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				for (int x = minimumColumn.x; x <= maximumColumn.x; ++x)
 				{
 					const uint cellIndex = SmokeFroxelIndex((uint)x, (uint)y, z);
-					const uint targetIndex = cellIndex * NRI_SMOKE_FINE_CELL_CAPACITY + bucket;
-					if (cellIndex >= fineCellCount || targetIndex >= fineCellIndexCount)
+					const uint baseIndex = cellIndex * NRI_SMOKE_FINE_CELL_CAPACITY;
+					if (cellIndex >= fineCellCount)
 					{
 						invalidTarget = true;
 						continue;
 					}
 					uint previousCount = 0u;
 					InterlockedAdd(gSmokeFineCellCounts[cellIndex], 1u, previousCount);
-					uint previous = 0u;
-					InterlockedMax(gSmokeFineCellIndices[targetIndex], packedCandidate, previous);
+					bool insertionInvalid = false;
+					SmokeInsertTierCandidate(NRI_SMOKE_CANDIDATE_TIER_FINE, baseIndex, NRI_SMOKE_FINE_CELL_CAPACITY,
+						fineCellIndexCount, packedCandidate, diagnostics, insertionInvalid);
+					invalidTarget = invalidTarget || insertionInvalid;
 					if (diagnostics)
 					{
 						InterlockedAdd(gSmokeControl[0].FineColumnReferences, 1u);
 						if (previousCount == 0u) InterlockedAdd(gSmokeControl[0].FineOccupiedCells, 1u);
-						if (previous != 0u)
-						{
-							InterlockedAdd(gSmokeControl[0].SelectionCollisions, 1u);
-							InterlockedAdd(gSmokeControl[0].FineSelectionCollisions, 1u);
-							InterlockedAdd(gSmokeControl[0].FineSelectionLosses, 1u);
-							if (packedCandidate > previous)
-							{
-								InterlockedAdd(gSmokeControl[0].SelectionReplacements, 1u);
-								InterlockedAdd(gSmokeControl[0].FineSelectionReplacements, 1u);
-							}
-						}
 					}
 				}
 			}
@@ -120,7 +203,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			InterlockedAdd(gSmokeControl[0].WideParticlesProjected, 1u);
 			InterlockedAdd(gSmokeControl[0].WideTierParticles, 1u);
 		}
-		const uint bucket = particleIndex % NRI_SMOKE_WIDE_CELL_CAPACITY;
 		[loop]
 		for (uint z = minimumDepthSlice; z <= maximumDepthSlice; ++z)
 		{
@@ -131,31 +213,22 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				for (uint x = minimumWideCell.x; x <= maximumWideCell.x; ++x)
 				{
 					const uint cellIndex = SmokeWideCellIndex(x, y, z);
-					const uint targetIndex = cellIndex * NRI_SMOKE_WIDE_CELL_CAPACITY + bucket;
-					if (cellIndex >= wideCellCount || targetIndex >= wideCellIndexCount)
+					const uint baseIndex = cellIndex * NRI_SMOKE_WIDE_CELL_CAPACITY;
+					if (cellIndex >= wideCellCount)
 					{
 						invalidTarget = true;
 						continue;
 					}
 					uint previousCount = 0u;
 					InterlockedAdd(gSmokeWideCellCounts[cellIndex], 1u, previousCount);
-					uint previous = 0u;
-					InterlockedMax(gSmokeWideCellIndices[targetIndex], packedCandidate, previous);
+					bool insertionInvalid = false;
+					SmokeInsertTierCandidate(NRI_SMOKE_CANDIDATE_TIER_WIDE, baseIndex, NRI_SMOKE_WIDE_CELL_CAPACITY,
+						wideCellIndexCount, packedCandidate, diagnostics, insertionInvalid);
+					invalidTarget = invalidTarget || insertionInvalid;
 					if (diagnostics)
 					{
 						InterlockedAdd(gSmokeControl[0].WideCellReferences, 1u);
 						if (previousCount == 0u) InterlockedAdd(gSmokeControl[0].WideOccupiedCells, 1u);
-						if (previous != 0u)
-						{
-							InterlockedAdd(gSmokeControl[0].SelectionCollisions, 1u);
-							InterlockedAdd(gSmokeControl[0].WideSelectionCollisions, 1u);
-							InterlockedAdd(gSmokeControl[0].WideSelectionLosses, 1u);
-							if (packedCandidate > previous)
-							{
-								InterlockedAdd(gSmokeControl[0].SelectionReplacements, 1u);
-								InterlockedAdd(gSmokeControl[0].WideSelectionReplacements, 1u);
-							}
-						}
 					}
 				}
 			}
@@ -164,35 +237,25 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	else
 	{
 		if (diagnostics) InterlockedAdd(gSmokeControl[0].GlobalTierParticles, 1u);
-		const uint bucket = particleIndex % NRI_SMOKE_GLOBAL_DEPTH_CAPACITY;
 		[loop]
 		for (uint z = minimumDepthSlice; z <= maximumDepthSlice; ++z)
 		{
-			const uint targetIndex = z * NRI_SMOKE_GLOBAL_DEPTH_CAPACITY + bucket;
-			if (z >= globalDepthCount || targetIndex >= globalDepthIndexCount)
+			const uint baseIndex = z * NRI_SMOKE_GLOBAL_DEPTH_CAPACITY;
+			if (z >= globalDepthCount)
 			{
 				invalidTarget = true;
 				continue;
 			}
 			uint previousCount = 0u;
 			InterlockedAdd(gSmokeGlobalDepthCounts[z], 1u, previousCount);
-			uint previous = 0u;
-			InterlockedMax(gSmokeGlobalDepthIndices[targetIndex], packedCandidate, previous);
+			bool insertionInvalid = false;
+			SmokeInsertTierCandidate(NRI_SMOKE_CANDIDATE_TIER_GLOBAL, baseIndex, NRI_SMOKE_GLOBAL_DEPTH_CAPACITY,
+				globalDepthIndexCount, packedCandidate, diagnostics, insertionInvalid);
+			invalidTarget = invalidTarget || insertionInvalid;
 			if (diagnostics)
 			{
 				InterlockedAdd(gSmokeControl[0].GlobalDepthReferences, 1u);
 				if (previousCount == 0u) InterlockedAdd(gSmokeControl[0].GlobalOccupiedSlices, 1u);
-				if (previous != 0u)
-				{
-					InterlockedAdd(gSmokeControl[0].SelectionCollisions, 1u);
-					InterlockedAdd(gSmokeControl[0].GlobalSelectionCollisions, 1u);
-					InterlockedAdd(gSmokeControl[0].GlobalSelectionLosses, 1u);
-					if (packedCandidate > previous)
-					{
-						InterlockedAdd(gSmokeControl[0].SelectionReplacements, 1u);
-						InterlockedAdd(gSmokeControl[0].GlobalSelectionReplacements, 1u);
-					}
-				}
 			}
 		}
 	}
