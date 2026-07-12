@@ -2656,11 +2656,13 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 	double transitionRecordMs = 0.0;
 	if (parallelArchivedEmit)
 	{
-		auto dispatchStage = [&](NRIRenderer::PipelineSlot slot, const nri::DispatchDesc& dispatch, double& elapsedMs)
+		auto dispatchStage = [&](NRIRenderer::PipelineSlot slot, const char* annotation, const nri::DispatchDesc& dispatch, double& elapsedMs)
 		{
 			const auto start = std::chrono::steady_clock::now();
+			context.core->CmdBeginAnnotation(*context.commandBuffer, annotation, nri::BGRA_UNUSED);
 			context.core->CmdSetPipeline(*context.commandBuffer, *renderer.GetPipeline(slot));
 			context.core->CmdDispatch(*context.commandBuffer, dispatch);
+			context.core->CmdEndAnnotation(*context.commandBuffer);
 			elapsedMs = DurationMs(start, std::chrono::steady_clock::now());
 		};
 		auto storageBarrier = [&](nri::Buffer* const* buffers, uint32_t bufferCount)
@@ -2682,32 +2684,41 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 
 		dispatchStage(
 			NRIRenderer::PipelineSlot::VoxelComputeClassify,
+			"Raze.VoxelCompute.Classify",
 			{ parallelPlan.classifyEmitGroupCountX, parallelPlan.jobCount, 1 },
 			classifyRecordMs);
-			nri::Buffer* classifyBuffers[] = { slot.slabScratchBuffer.buffer };
+		nri::Buffer* classifyBuffers[] = { slot.slabScratchBuffer.buffer };
 		storageBarrier(classifyBuffers, (uint32_t)std::size(classifyBuffers));
 		dispatchStage(
 			NRIRenderer::PipelineSlot::VoxelComputeScan,
+			"Raze.VoxelCompute.Scan",
 			{ parallelPlan.jobCount, 1, 1 },
 			scanRecordMs);
 		nri::Buffer* scanBuffers[] = { slot.slabScratchBuffer.buffer, slot.resultBuffer.buffer };
 		storageBarrier(scanBuffers, (uint32_t)std::size(scanBuffers));
 		dispatchStage(
 			NRIRenderer::PipelineSlot::VoxelComputeEmitParallel,
+			"Raze.VoxelCompute.EmitParallel",
 			{ parallelPlan.classifyEmitGroupCountX, parallelPlan.jobCount, 1 },
 			emitRecordMs);
 		nri::Buffer* emitBuffers[] = { slot.resultBuffer.buffer };
 		storageBarrier(emitBuffers, (uint32_t)std::size(emitBuffers));
 		dispatchStage(
 			NRIRenderer::PipelineSlot::VoxelComputeFinalize,
+			"Raze.VoxelCompute.Finalize",
 			{ parallelPlan.jobCount, 1, 1 },
 			finalizeRecordMs);
 	}
 	else
 	{
 		const auto start = std::chrono::steady_clock::now();
+		context.core->CmdBeginAnnotation(
+			*context.commandBuffer,
+			emit ? "Raze.VoxelCompute.EmitSerial" : "Raze.VoxelCompute.CountSerial",
+			nri::BGRA_UNUSED);
 		context.core->CmdSetPipeline(*context.commandBuffer, *renderer.GetPipeline(emit ? NRIRenderer::PipelineSlot::VoxelComputeEmit : NRIRenderer::PipelineSlot::VoxelComputeCount));
 		context.core->CmdDispatch(*context.commandBuffer, { (uint32_t)gpuJobs.size(), 1, 1 });
+		context.core->CmdEndAnnotation(*context.commandBuffer);
 		emitRecordMs = DurationMs(start, std::chrono::steady_clock::now());
 	}
 	if (IsTraceEnabled())

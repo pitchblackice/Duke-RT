@@ -78,18 +78,10 @@ bool NRISceneUploadManager::CreateStructuredBuffer(
 		resourceContext.core->UnmapBuffer(*resource.buffer);
 	}
 
-	if (resourceContext.commandBuffer != nullptr && after.access != nri::AccessBits::NONE)
-	{
-		nri::BufferBarrierDesc barrier = {};
-		barrier.buffer = resource.buffer;
-		barrier.before = {};
-		barrier.after = after;
-
-		nri::BarrierDesc barrierDesc = {};
-		barrierDesc.buffers = &barrier;
-		barrierDesc.bufferNum = 1;
-		resourceContext.core->CmdBarrier(*resourceContext.commandBuffer, barrierDesc);
-	}
+	// DEVICE_UPLOAD buffers remain in their backend-defined, GPU-readable state.
+	// Queue submission makes completed host writes available to GPU reads; issuing
+	// a transition from an invented COMMON state is invalid on D3D12 upload heaps.
+	(void)after;
 
 	return true;
 }
@@ -221,18 +213,8 @@ bool NRISceneUploadManager::EnsureStructuredBuffer(
 		resourceContext.core->UnmapBuffer(*resource.buffer);
 	}
 
-	if (resourceContext.commandBuffer != nullptr && after.access != nri::AccessBits::NONE)
-	{
-		nri::BufferBarrierDesc barrier = {};
-		barrier.buffer = resource.buffer;
-		barrier.before = {};
-		barrier.after = after;
-
-		nri::BarrierDesc barrierDesc = {};
-		barrierDesc.buffers = &barrier;
-		barrierDesc.bufferNum = 1;
-		resourceContext.core->CmdBarrier(*resourceContext.commandBuffer, barrierDesc);
-	}
+	// See CreateStructuredBuffer: mapped upload buffers are not transitioned.
+	(void)after;
 
 	return true;
 }
@@ -326,6 +308,8 @@ bool NRISceneUploadManager::UpdateStructuredBufferRange(
 	nri::AccessStage after)
 {
 	if (resource.buffer == nullptr ||
+		(resource.memoryLocation != nri::MemoryLocation::DEVICE_UPLOAD &&
+		 resource.memoryLocation != nri::MemoryLocation::HOST_UPLOAD) ||
 		data == nullptr ||
 		size == 0 ||
 		byteOffset > resource.size ||
@@ -345,18 +329,8 @@ bool NRISceneUploadManager::UpdateStructuredBufferRange(
 	std::memcpy(mapped, data, (size_t)size);
 	resourceContext.core->UnmapBuffer(*resource.buffer);
 
-	if (resourceContext.commandBuffer != nullptr && after.access != nri::AccessBits::NONE)
-	{
-		nri::BufferBarrierDesc barrier = {};
-		barrier.buffer = resource.buffer;
-		barrier.before = {};
-		barrier.after = after;
-
-		nri::BarrierDesc barrierDesc = {};
-		barrierDesc.buffers = &barrier;
-		barrierDesc.bufferNum = 1;
-		resourceContext.core->CmdBarrier(*resourceContext.commandBuffer, barrierDesc);
-	}
+	// See CreateStructuredBuffer: mapped upload buffers are not transitioned.
+	(void)after;
 
 	return true;
 }

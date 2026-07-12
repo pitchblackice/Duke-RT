@@ -1644,18 +1644,9 @@ bool NRIRenderer::UploadSceneBuffers(
 				mFrameBuffer->mCore.UnmapBuffer(*resource.buffer);
 			}
 
-			if (result && mFrameBuffer->mCommandBuffer != nullptr && afterAccess.access != nri::AccessBits::NONE)
-			{
-				nri::BufferBarrierDesc barrier = {};
-				barrier.buffer = resource.buffer;
-				barrier.before = {};
-				barrier.after = afterAccess;
-
-				nri::BarrierDesc barrierDesc = {};
-				barrierDesc.buffers = &barrier;
-				barrierDesc.bufferNum = 1;
-				mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
-			}
+			// This path only updates persistently mapped DEVICE_UPLOAD buffers. Their
+			// native state is fixed and GPU-readable, so host writes need no transition.
+			(void)afterAccess;
 		}
 		if (!result)
 		{
@@ -2239,15 +2230,7 @@ void NRIRenderer::RetireTopLevelAccelerationStructure(NRIAccelerationStructureRe
 
 bool NRIRenderer::IsFrameFenceValueComplete(uint64_t fenceValue) const
 {
-	if (fenceValue == 0)
-	{
-		return true;
-	}
-	if (mFrameBuffer == nullptr || mFrameBuffer->mFrameFence == nullptr)
-	{
-		return false;
-	}
-	return mFrameBuffer->mCore.GetFenceValue(*mFrameBuffer->mFrameFence) >= fenceValue;
+	return mFrameBuffer != nullptr && mFrameBuffer->IsFrameFenceValueComplete(fenceValue);
 }
 
 bool NRIRenderer::IsCommandFenceValueComplete(uint64_t fenceValue) const

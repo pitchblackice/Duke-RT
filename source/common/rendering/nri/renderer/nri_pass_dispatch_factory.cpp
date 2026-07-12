@@ -99,6 +99,7 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext(bool mainViewEligib
 		NRIPassDispatchContext::CommandService service = {};
 		service.core = frameBuffer != nullptr ? frameBuffer->GetCoreInterface() : nullptr;
 		service.commandBuffer = frameBuffer != nullptr ? frameBuffer->GetCurrentCommandBuffer() : nullptr;
+		service.descriptorPool = frameBuffer != nullptr ? frameBuffer->mDescriptorPool : nullptr;
 		return service;
 	};
 

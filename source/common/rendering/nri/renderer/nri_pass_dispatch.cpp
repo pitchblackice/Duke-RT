@@ -507,8 +507,10 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	{
 		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueCommandMs);
 		context.mTraceShaderStats.ResetBuffer(context.mResources.BuildResourceServices(), ShouldCollectTraceShaderStats());
+		context.mCommands.core->CmdBeginAnnotation(*context.mCommands.commandBuffer, "Raze.TraceOpaque.Dispatch", nri::BGRA_UNUSED);
 		context.mCommands.SetPipeline(context.mPipelines.Get(NRIRenderer::PipelineSlot::TraceOpaque));
 		context.mCommands.Dispatch(dispatchX, dispatchY, dispatchZ);
+		context.mCommands.core->CmdEndAnnotation(*context.mCommands.commandBuffer);
 	}
 	{
 		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueStatsCopyMs);
@@ -576,7 +578,11 @@ bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 	desc.enableValidation = denoiserSettings.enableValidation;
 	desc.enableSigmaShadow = context.mUseSplitShadowDenoiser;
 	desc.traceTemporalInput = ShouldTracePtPerf();
-	return context.mNrd.Denoise(desc);
+	const bool denoised = context.mNrd.Denoise(desc);
+	// NRD binds its private descriptor pool while recording dispatches. Restore
+	// Raze's resource and sampler heaps before any subsequent pass binds our sets.
+	context.mCommands.RestoreDescriptorPool();
+	return denoised;
 }
 
 

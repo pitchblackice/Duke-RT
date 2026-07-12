@@ -252,14 +252,7 @@ bool NRIAccelerationStructureManager::BuildBottomLevel(
 	NRIBufferResource& scratchBuffer = buildScratchBuffer != nullptr ? *buildScratchBuffer : renderer.mScratchBuffer;
 	if (scratchBuffer.buffer == nullptr || scratchBuffer.size < requiredScratchSize)
 	{
-		if (buildScratchBuffer != nullptr)
-		{
-			renderer.RetireResidentBufferResource(scratchBuffer);
-		}
-		else
-		{
-			renderer.DestroyBufferResource(scratchBuffer);
-		}
+		renderer.RetireResidentBufferResource(scratchBuffer);
 		{
 			ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.dynamicAsScratchMs);
 			if (updateDynamicPerfStats)
@@ -709,7 +702,9 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 	tlasBuild.scratchOffset = 0;
 	{
 		ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.worldTlasBuildMs);
+		renderer.mFrameBuffer->mCore.CmdBeginAnnotation(*renderer.mFrameBuffer->mCommandBuffer, "Raze.WorldTLAS.Build", nri::BGRA_UNUSED);
 		renderer.mFrameBuffer->mRayTracing.CmdBuildTopLevelAccelerationStructures(*renderer.mFrameBuffer->mCommandBuffer, &tlasBuild, 1);
+		renderer.mFrameBuffer->mCore.CmdEndAnnotation(*renderer.mFrameBuffer->mCommandBuffer);
 	}
 
 	nri::BufferBarrierDesc tlasBarrier = {};

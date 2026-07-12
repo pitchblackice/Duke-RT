@@ -745,7 +745,12 @@ public:
 			NRIAccelerationStructureResource& outAccelerationStructure,
 			NRIBufferResource* buildScratchBuffer) -> bool
 		{
-			return static_cast<NRIRenderer*>(user)->BuildBottomLevelAccelerationStructure(
+			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			renderer->mFrameBuffer->mCore.CmdBeginAnnotation(
+				*renderer->mFrameBuffer->mCommandBuffer,
+				"Raze.Voxel.DirectBLAS.Build",
+				nri::BGRA_UNUSED);
+			const bool result = renderer->BuildBottomLevelAccelerationStructure(
 				vertexBuffer,
 				indexBuffer,
 				vertexOffset,
@@ -757,6 +762,8 @@ public:
 				false,
 				buildScratchBuffer,
 				GetPersistentVoxelBlasBuildFlags());
+			renderer->mFrameBuffer->mCore.CmdEndAnnotation(*renderer->mFrameBuffer->mCommandBuffer);
+			return result;
 		};
 		services.barrierBuildInputs = [](void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) -> bool
 		{
