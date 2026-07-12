@@ -2239,15 +2239,7 @@ void NRIRenderer::RetireTopLevelAccelerationStructure(NRIAccelerationStructureRe
 
 bool NRIRenderer::IsFrameFenceValueComplete(uint64_t fenceValue) const
 {
-	if (fenceValue == 0)
-	{
-		return true;
-	}
-	if (mFrameBuffer == nullptr || mFrameBuffer->mFrameFence == nullptr)
-	{
-		return false;
-	}
-	return mFrameBuffer->mCore.GetFenceValue(*mFrameBuffer->mFrameFence) >= fenceValue;
+	return mFrameBuffer != nullptr && mFrameBuffer->IsFrameFenceValueComplete(fenceValue);
 }
 
 bool NRIRenderer::IsCommandFenceValueComplete(uint64_t fenceValue) const

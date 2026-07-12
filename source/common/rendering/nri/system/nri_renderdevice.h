@@ -95,7 +95,8 @@ public:
 	bool HasActiveTarget() const;
 	bool IsPreloadCommandContextActive() const { return mPreloadCommandContextActive; }
 	uint64_t GetRecordingCommandFenceValue() const { return mCommandBufferOpen ? mRecordingCommandFenceValue : 0; }
-	bool IsCommandFenceValueComplete(uint64_t fenceValue) const;
+	bool IsFrameFenceValueComplete(uint64_t fenceValue);
+	bool IsCommandFenceValueComplete(uint64_t fenceValue);
 	bool IsCommandFenceValueAbandoned(uint64_t fenceValue) const;
 	nri::CoreInterface* GetCoreInterface() { return &mCore; }
 	nri::Device* GetDevice() const { return mDevice; }
@@ -244,6 +245,8 @@ private:
 	void DestroyRenderResources();
 	bool BeginCommandList(const char* reason, bool waitForSlotReuse = false);
 	void AbandonRecordingCommandFenceValue();
+	bool TryGetFenceValue(nri::Fence& fence, const char* context, uint64_t& outCompletedFenceValue);
+	bool WaitForFenceValue(nri::Fence& fence, uint64_t fenceValue, const char* context);
 	bool SubmitWaitAndRestartCommandList(const char* reason);
 	void MarkTerminalDeviceLoss(const char* context);
 	[[noreturn]] void FatalTerminalDeviceLoss(const char* context);

@@ -2540,6 +2540,10 @@ void NRIRenderDevice::BeginFrame()
 		ScopedNriTiming waitTiming(NriPTFrameWait, mLastFrameBoundaryStats.waitMs);
 		WaitForCommands(false);
 	}
+	if (mTerminalDeviceLoss)
+	{
+		FatalTerminalDeviceLoss("Wait(FrameFenceRecycle)");
+	}
 	ReleaseRetiredTextureResources(false);
 	SetViewportRects(nullptr);
 
@@ -3243,7 +3247,19 @@ void NRIRenderDevice::WaitForCommands(bool finish)
 
 	if (finish)
 	{
+		if (mTerminalDeviceLoss)
+		{
+			FatalTerminalDeviceLoss("DeviceWaitIdle");
+		}
 		mCore.DeviceWaitIdle(mDevice);
+		if (mCreatedDeviceApi == nri::GraphicsAPI::D3D12 &&
+			mNativeD3D12Device != nullptr &&
+			mNativeD3D12Device->GetDeviceRemovedReason() != S_OK)
+		{
+			MarkTerminalDeviceLoss("DeviceWaitIdle");
+			LogD3D12FailureDiagnostics("DeviceWaitIdle");
+			FatalTerminalDeviceLoss("DeviceWaitIdle");
+		}
 		return;
 	}
 
@@ -3260,11 +3276,62 @@ void NRIRenderDevice::WaitForCommands(bool finish)
 	const uint64_t recycleFenceValue = 1 + mFrameIndex - mQueuedFrames.size();
 	if (recycleFenceValue != 0)
 	{
-		mCore.Wait(*mFrameFence, recycleFenceValue);
+		WaitForFenceValue(*mFrameFence, recycleFenceValue, "Wait(FrameFenceRecycle)");
 	}
 }
 
-bool NRIRenderDevice::IsCommandFenceValueComplete(uint64_t fenceValue) const
+bool NRIRenderDevice::TryGetFenceValue(nri::Fence& fence, const char* context, uint64_t& outCompletedFenceValue)
+{
+	outCompletedFenceValue = 0;
+	if (mTerminalDeviceLoss)
+	{
+		return false;
+	}
+
+	outCompletedFenceValue = mCore.GetFenceValue(fence);
+	if (outCompletedFenceValue != UINT64_MAX)
+	{
+		return true;
+	}
+
+	MarkTerminalDeviceLoss(context);
+	LogD3D12FailureDiagnostics(context);
+	return false;
+}
+
+bool NRIRenderDevice::WaitForFenceValue(nri::Fence& fence, uint64_t fenceValue, const char* context)
+{
+	if (fenceValue == 0)
+	{
+		return true;
+	}
+	if (mTerminalDeviceLoss)
+	{
+		return false;
+	}
+
+	mCore.Wait(fence, fenceValue);
+
+	uint64_t completedFenceValue = 0;
+	if (!TryGetFenceValue(fence, context, completedFenceValue))
+	{
+		return false;
+	}
+	if (completedFenceValue >= fenceValue)
+	{
+		return true;
+	}
+
+	Printf(TEXTCOLOR_RED "NRI fence wait returned before completion: context=%s requested=%llu completed=%llu.\n",
+		context != nullptr ? context : "unknown",
+		(unsigned long long)fenceValue,
+		(unsigned long long)completedFenceValue);
+	MarkTerminalDeviceLoss(context);
+	LogD3D12FailureDiagnostics(context);
+	return false;
+}
+
+bool NRIRenderDevice::IsCommandFenceValueComplete(uint64_t fenceValue)
 {
 	if (fenceValue == 0)
 	{
@@ -3274,7 +3341,36 @@ bool NRIRenderDevice::IsCommandFenceValueComplete(uint64_t fenceValue) const
 	{
 		return false;
 	}
-	return mCommandCompletionFence != nullptr && mCore.GetFenceValue(*mCommandCompletionFence) >= fenceValue;
+	if (mCommandCompletionFence == nullptr)
+	{
+		return false;
+	}
+
+	uint64_t completedFenceValue = 0;
+	if (!TryGetFenceValue(*mCommandCompletionFence, "GetFenceValue(CommandCompletionFence)", completedFenceValue))
+	{
+		return false;
+	}
+	return completedFenceValue >= fenceValue;
+}
+
+bool NRIRenderDevice::IsFrameFenceValueComplete(uint64_t fenceValue)
+{
+	if (fenceValue == 0)
+	{
+		return true;
+	}
+	if (mFrameFence == nullptr)
+	{
+		return false;
+	}
+
+	uint64_t completedFenceValue = 0;
+	if (!TryGetFenceValue(*mFrameFence, "GetFenceValue(FrameFence)", completedFenceValue))
+	{
+		return false;
+	}
+	return completedFenceValue >= fenceValue;
 }
 
 bool NRIRenderDevice::IsCommandFenceValueAbandoned(uint64_t fenceValue) const
@@ -3343,13 +3439,18 @@ bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 		AbandonRecordingCommandFenceValue();
 	}
 	mLastSubmitAndWaitResult = submitResult;
+	bool waitSucceeded = submitResult == nri::Result::SUCCESS;
 	if (submitResult == nri::Result::SUCCESS)
 	{
-		mCore.Wait(*submitFence, signalFences[0].value);
+		waitSucceeded = WaitForFenceValue(*submitFence, signalFences[0].value, "Wait(SubmitFence)");
+		if (!waitSucceeded)
+		{
+			mLastSubmitAndWaitResult = nri::Result::DEVICE_LOST;
+		}
 	}
 
 	mCore.DestroyFence(submitFence);
-	return submitResult == nri::Result::SUCCESS;
+	return submitResult == nri::Result::SUCCESS && waitSucceeded;
 }
 
 bool NRIRenderDevice::IsPreloadSubmitBudgetHit() const
@@ -3374,8 +3475,15 @@ bool NRIRenderDevice::HasTerminalDeviceLoss() const
 
 void NRIRenderDevice::MarkTerminalDeviceLoss(const char* context)
 {
-	if (!mTerminalDeviceLoss || !mLoggedTerminalDeviceLoss)
+	if (mTerminalDeviceLoss)
 	{
+		return;
+	}
+
+	mTerminalDeviceLoss = true;
+	if (!mLoggedTerminalDeviceLoss)
+	{
+		mLoggedTerminalDeviceLoss = true;
 		Printf(TEXTCOLOR_RED "NRI terminal device loss: context=%s preload_pending=%u preload_context=%u command_open=%u submits=%u limit=%u.\n",
 			context != nullptr ? context : "unknown",
 			mPathTracingLevelPreloadPending ? 1u : 0u,
@@ -3383,9 +3491,7 @@ void NRIRenderDevice::MarkTerminalDeviceLoss(const char* context)
 			mCommandBufferOpen ? 1u : 0u,
 			mPreloadSubmitsThisTick,
 			mPreloadMaxSubmitsThisTick);
-		mLoggedTerminalDeviceLoss = true;
 	}
-	mTerminalDeviceLoss = true;
 	mPathTracingLevelPreloadPending = false;
 	StartupRecovery_MarkNriDeviceLost(context != nullptr ? context : "NRI");
 }
@@ -3497,6 +3603,10 @@ bool NRIRenderDevice::BeginPreloadCommandContext(const char* reason)
 
 	mCurrentQueuedFrameIndex = GetQueuedFrameIndex(mFrameIndex);
 	WaitForCommands(false);
+	if (mTerminalDeviceLoss)
+	{
+		FatalTerminalDeviceLoss("Wait(FrameFenceRecycle)");
+	}
 	ReleaseRetiredTextureResources(false);
 	mCurrentPresentTarget = nullptr;
 	mActiveTarget = nullptr;
@@ -8801,9 +8911,9 @@ bool NRIRenderDevice::CreateRenderResources()
 	poolDesc.descriptorSetMaxNum = 4096;
 	poolDesc.samplerMaxNum = 8;
 	poolDesc.textureMaxNum = 16384;
-	poolDesc.storageTextureMaxNum = 64;
+	poolDesc.storageTextureMaxNum = 128;
 	poolDesc.structuredBufferMaxNum = 512;
-	poolDesc.storageStructuredBufferMaxNum = 16;
+	poolDesc.storageStructuredBufferMaxNum = 64;
 	poolDesc.accelerationStructureMaxNum = 8;
 
 	if (mCore.CreateDescriptorPool(*mDevice, poolDesc, mDescriptorPool) != nri::Result::SUCCESS)
@@ -8932,7 +9042,10 @@ bool NRIRenderDevice::BeginCommandList(const char* reason, bool waitForSlotReuse
 		QueuedFrame& queuedFrame = mQueuedFrames[mCurrentQueuedFrameIndex];
 		if (queuedFrame.hasSubmittedWork && queuedFrame.lastSubmittedFenceValue != 0)
 		{
-			mCore.Wait(*mFrameFence, queuedFrame.lastSubmittedFenceValue);
+			if (!WaitForFenceValue(*mFrameFence, queuedFrame.lastSubmittedFenceValue, "Wait(FrameSlotReuse)"))
+			{
+				return false;
+			}
 		}
 	}
 
@@ -9475,7 +9588,12 @@ void NRIRenderDevice::FinishPendingScreenshotReadbacks(bool submitted, uint64_t 
 		return;
 	}
 
-	mCore.Wait(*mFrameFence, submittedFenceValue);
+	if (!WaitForFenceValue(*mFrameFence, submittedFenceValue, "Wait(ScreenshotReadback)"))
+	{
+		Printf(TEXTCOLOR_RED "NRI screenshot failed: frame-fence wait did not complete.\n");
+		ClearPendingScreenshotReadbacks();
+		return;
+	}
 
 	for (auto& capture : mPendingScreenshotCaptures)
 	{
@@ -9756,14 +9874,17 @@ void NRIRenderDevice::ReleaseRetiredTextureResources(bool finish)
 		return;
 	}
 
-	uint64_t completedFenceValue = UINT64_MAX;
+	uint64_t completedFenceValue = 0;
 	if (!finish)
 	{
 		if (mFrameFence == nullptr)
 		{
 			return;
 		}
-		completedFenceValue = mCore.GetFenceValue(*mFrameFence);
+		if (!TryGetFenceValue(*mFrameFence, "GetFenceValue(FrameFence)", completedFenceValue))
+		{
+			return;
+		}
 	}
 	else
 	{
@@ -10032,17 +10153,21 @@ bool NRIRenderDevice::CopyTextureToTexture(NRITextureResource& destination, NRIT
 	submitDesc.signalFences = &frameFence;
 	submitDesc.signalFenceNum = 1;
 	const nri::Result submitResult = mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
+	bool waitSucceeded = submitResult == nri::Result::SUCCESS;
 	if (submitResult == nri::Result::SUCCESS)
 	{
-		mCore.Wait(*copyFence, frameFence.value);
-		mRecordingCommandFenceValue = 0;
+		waitSucceeded = WaitForFenceValue(*copyFence, frameFence.value, "Wait(CopyTextureFence)");
+		if (waitSucceeded)
+		{
+			mRecordingCommandFenceValue = 0;
+		}
 	}
 	else
 	{
 		AbandonRecordingCommandFenceValue();
 	}
 	mCore.DestroyFence(copyFence);
-	return submitResult == nri::Result::SUCCESS;
+	return submitResult == nri::Result::SUCCESS && waitSucceeded;
 }
 
 bool NRIRenderDevice::CopyCurrentTargetToTexture(NRITextureResource& destination)
