@@ -14,7 +14,7 @@ struct SmokeConstants
     uint FroxelHeight;
 
     uint FroxelDepth;
-    uint ColumnCapacity;
+    uint DirectionalColorPacked;
     uint RenderWidth;
     uint RenderHeight;
 
@@ -37,16 +37,16 @@ struct SmokeConstants
     float TimeScale;
 
     float3 CameraForward;
-    float CameraForwardPad;
+    float DirectionalDirectionX;
 
     float3 CameraRight;
-    float CameraRightPad;
+    float DirectionalDirectionY;
 
     float3 CameraUp;
-    float CameraUpPad;
+    float DirectionalDirectionZ;
 
     float3 Wind;
-    float WindPad;
+    float DirectionalAngularSize;
 
     uint LightMode;
     uint LightSamples;
@@ -55,7 +55,7 @@ struct SmokeConstants
 
     uint RuntimeLightTileCountX;
     uint RuntimeLightTileCountY;
-    uint PointLightsEnabled;
+    uint LightSourceFlags;
     uint FilteredVisibilityEnabled;
 
     float2 CurrentJitter;

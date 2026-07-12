@@ -20,6 +20,17 @@ namespace
 	constexpr uint32_t kWideCellCapacity = 16u;
 	constexpr uint32_t kGlobalDepthCapacity = 16u;
 	constexpr uint32_t kSmokeStorageBufferCount = 13u;
+	constexpr uint32_t kSmokeFilteredSceneBufferCount = 8u;
+	constexpr uint32_t kSmokeEmissiveSceneBufferCount = 7u;
+
+	uint32_t PackDirectionalLightColor24(const float color[3])
+	{
+		auto packChannel = [](float value) -> uint32_t
+		{
+			return (uint32_t)std::clamp((int)std::lround((double)(std::clamp(value, 0.0f, 8.0f) * (255.0f / 8.0f))), 0, 255);
+		};
+		return packChannel(color[0]) | (packChannel(color[1]) << 8u) | (packChannel(color[2]) << 16u);
+	}
 
 	uint32_t Groups(uint64_t count)
 	{
@@ -119,22 +130,32 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 	lights.descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
 	lights.shaderStages = nri::StageBits::COMPUTE_SHADER;
 	lights.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-	nri::DescriptorRangeDesc filteredSceneRanges[3] = {};
+	nri::DescriptorRangeDesc filteredSceneRanges[5] = {};
 	filteredSceneRanges[0].baseRegisterIndex = 0;
-	filteredSceneRanges[0].descriptorNum = 8;
+	filteredSceneRanges[0].descriptorNum = kSmokeFilteredSceneBufferCount;
 	filteredSceneRanges[0].descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
 	filteredSceneRanges[0].shaderStages = nri::StageBits::COMPUTE_SHADER;
 	filteredSceneRanges[0].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-	filteredSceneRanges[1].baseRegisterIndex = 16;
-	filteredSceneRanges[1].descriptorNum = 512;
-	filteredSceneRanges[1].descriptorType = nri::DescriptorType::TEXTURE;
+	filteredSceneRanges[1].baseRegisterIndex = 8;
+	filteredSceneRanges[1].descriptorNum = kSmokeEmissiveSceneBufferCount;
+	filteredSceneRanges[1].descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
 	filteredSceneRanges[1].shaderStages = nri::StageBits::COMPUTE_SHADER;
 	filteredSceneRanges[1].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-	filteredSceneRanges[2].baseRegisterIndex = 0;
-	filteredSceneRanges[2].descriptorNum = 2;
-	filteredSceneRanges[2].descriptorType = nri::DescriptorType::SAMPLER;
+	filteredSceneRanges[2].baseRegisterIndex = 15;
+	filteredSceneRanges[2].descriptorNum = 513;
+	filteredSceneRanges[2].descriptorType = nri::DescriptorType::TEXTURE;
 	filteredSceneRanges[2].shaderStages = nri::StageBits::COMPUTE_SHADER;
 	filteredSceneRanges[2].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+	filteredSceneRanges[3].baseRegisterIndex = 0;
+	filteredSceneRanges[3].descriptorNum = 3;
+	filteredSceneRanges[3].descriptorType = nri::DescriptorType::SAMPLER;
+	filteredSceneRanges[3].shaderStages = nri::StageBits::COMPUTE_SHADER;
+	filteredSceneRanges[3].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+	filteredSceneRanges[4].baseRegisterIndex = 528;
+	filteredSceneRanges[4].descriptorNum = 1;
+	filteredSceneRanges[4].descriptorType = nri::DescriptorType::ACCELERATION_STRUCTURE;
+	filteredSceneRanges[4].shaderStages = nri::StageBits::COMPUTE_SHADER;
+	filteredSceneRanges[4].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
 	nri::DescriptorSetDesc sets[6] = {};
 	nri::DescriptorRangeDesc* ranges[] = { &input, &buffers, &textures, &output, &lights };
 	for (uint32_t i = 0; i < 5; ++i)
@@ -146,22 +167,16 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 	}
 	sets[5].registerSpace = 6;
 	sets[5].ranges = filteredSceneRanges;
-	sets[5].rangeNum = 3;
+	sets[5].rangeNum = 5;
 	sets[5].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
 	nri::RootConstantDesc root = {};
 	root.registerIndex = 0;
 	root.size = sizeof(NRISmokeConstants);
 	root.shaderStages = nri::StageBits::COMPUTE_SHADER;
-	nri::RootDescriptorDesc rootDescriptor = {};
-	rootDescriptor.registerIndex = 0;
-	rootDescriptor.descriptorType = nri::DescriptorType::ACCELERATION_STRUCTURE;
-	rootDescriptor.shaderStages = nri::StageBits::COMPUTE_SHADER;
 	nri::PipelineLayoutDesc layout = {};
 	layout.rootRegisterSpace = 5;
 	layout.rootConstants = &root;
 	layout.rootConstantNum = 1;
-	layout.rootDescriptors = &rootDescriptor;
-	layout.rootDescriptorNum = 1;
 	layout.descriptorSets = sets;
 	layout.descriptorSetNum = 6;
 	layout.shaderStages = nri::StageBits::COMPUTE_SHADER;
@@ -169,7 +184,7 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 		return false;
 
 	const bool d3d12 = renderer.mFrameBuffer->GetSelectedAPI() == nri::GraphicsAPI::D3D12;
-	const char* names[] = { "SmokeClear", "SmokeSimulate", "SmokeSpawn", "SmokeBin", "SmokeEvaluateMedium", "SmokeLightPoint", "SmokeIntegrate", "SmokeComposite" };
+	const char* names[] = { "SmokeClear", "SmokeSimulate", "SmokeSpawn", "SmokeBin", "SmokeEvaluateMedium", "SmokeLightPoint", "SmokeLightDirectional", "SmokeLightEmissive", "SmokeIntegrate", "SmokeComposite" };
 	for (uint32_t i = 0; i < (uint32_t)mPipelines.size(); ++i)
 	{
 		std::vector<uint8_t> blob;
@@ -348,6 +363,22 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 				mStatus.occupiedOverflow = control.occupiedOverflow;
 				mStatus.mediumCandidateTests = control.mediumCandidateTests;
 				mStatus.pointFroxelsProcessed = control.pointFroxelsProcessed;
+				mStatus.directionalFroxelsProcessed = control.directionalFroxelsProcessed;
+				mStatus.directionalSamples = control.directionalSamples;
+				mStatus.directionalShadowRays = control.directionalShadowRays;
+				mStatus.directionalShadowVisible = control.directionalShadowVisible;
+				mStatus.directionalShadowOccluded = control.directionalShadowOccluded;
+				mStatus.directionalRadianceClamps = control.directionalRadianceClamps;
+				mStatus.emissiveFroxelsProcessed = control.emissiveFroxelsProcessed;
+				mStatus.emissiveSamples = control.emissiveSamples;
+				mStatus.emissiveCandidateMisses = control.emissiveCandidateMisses;
+				mStatus.emissiveDistanceRejected = control.emissiveDistanceRejected;
+				mStatus.emissiveFacingRejected = control.emissiveFacingRejected;
+				mStatus.emissiveShadowRays = control.emissiveShadowRays;
+				mStatus.emissiveShadowVisible = control.emissiveShadowVisible;
+				mStatus.emissiveShadowOccluded = control.emissiveShadowOccluded;
+				mStatus.emissiveContributed = control.emissiveContributed;
+				mStatus.emissiveRadianceClamps = control.emissiveRadianceClamps;
 				mStatus.lightCandidatesTested = control.lightCandidatesTested;
 				mStatus.lightDistanceRejected = control.lightDistanceRejected;
 				mStatus.lightShadowRays = control.lightShadowRays;
@@ -470,7 +501,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	constants.froxelWidth = mResourceFroxelWidth;
 	constants.froxelHeight = mResourceFroxelHeight;
 	constants.froxelDepth = mResourceFroxelDepth;
-	constants.columnCapacity = kFineCellCapacity;
+	constants.directionalColorPacked = 0u;
 	constants.deltaTime = step;
 	constants.timeScale = mSettings.timeScale;
 	std::copy(mSettings.wind, mSettings.wind + 3, constants.wind);
@@ -561,13 +592,28 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		renderer.mSceneDataDescriptors[23], renderer.mSceneDataDescriptors[24],
 	};
 	const bool filteredBuffersReady = std::all_of(std::begin(filteredSceneBuffers), std::end(filteredSceneBuffers), [](const nri::Descriptor* descriptor) { return descriptor != nullptr; });
-	const bool filteredTexturesReady = renderer.mCurrentSceneTextureDescriptors.size() >= 514u;
+	const nri::Descriptor* emissiveSceneBuffers[] = {
+		renderer.mSceneDataDescriptors[0], renderer.mSceneDataDescriptors[4], renderer.mSceneDataDescriptors[21],
+		renderer.mSceneDataDescriptors[13], renderer.mSceneDataDescriptors[14], renderer.mSceneDataDescriptors[15],
+		renderer.mSceneDataDescriptors[25],
+	};
+	const bool emissiveBuffersReady = std::all_of(std::begin(emissiveSceneBuffers), std::end(emissiveSceneBuffers), [](const nri::Descriptor* descriptor) { return descriptor != nullptr; });
+	const bool filteredTexturesReady = renderer.mCurrentSceneTextureDescriptors.size() >= 514u && renderer.mCurrentSceneTextureDescriptors[0] != nullptr;
 	const bool filteredResourcesReady = filteredBuffersReady && filteredTexturesReady;
+	const bool emissiveResourcesReady = filteredResourcesReady && emissiveBuffersReady && renderer.mBoundEmissivePrimitiveCount > 0u;
+	const bool shadowReady = renderer.mTopLevelAS.descriptor != nullptr;
+	std::array<const nri::Descriptor*, 513> smokeSceneTextures = {};
+	if (filteredTexturesReady)
+	{
+		smokeSceneTextures[0] = renderer.mCurrentSceneTextureDescriptors[0];
+		std::copy(renderer.mCurrentSceneTextureDescriptors.begin() + 2, renderer.mCurrentSceneTextureDescriptors.begin() + 514, smokeSceneTextures.begin() + 1);
+	}
 	const nri::Descriptor* filteredSamplers[] = {
 		renderer.mFrameBuffer->mSamplers[(size_t)NRISamplerMode::WrapPoint],
 		renderer.mFrameBuffer->mSamplers[(size_t)NRISamplerMode::WrapLinear],
+		renderer.mFrameBuffer->mSamplers[(size_t)NRISamplerMode::ClampPoint],
 	};
-	nri::UpdateDescriptorRangeDesc updates[6] = {};
+	nri::UpdateDescriptorRangeDesc updates[8] = {};
 	updates[0].descriptorSet = slot.textureSet; updates[0].rangeIndex = 0; updates[0].descriptors = textures; updates[0].descriptorNum = 2;
 	updates[1].descriptorSet = slot.outputSet; updates[1].rangeIndex = 0; updates[1].descriptors = outputTexture; updates[1].descriptorNum = 1;
 	uint32_t updateCount = 2;
@@ -578,9 +624,18 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	}
 	if (filteredResourcesReady)
 	{
-		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 0; updates[updateCount].descriptors = filteredSceneBuffers; updates[updateCount].descriptorNum = 8; updateCount++;
-		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 1; updates[updateCount].descriptors = reinterpret_cast<const nri::Descriptor* const*>(renderer.mCurrentSceneTextureDescriptors.data() + 2); updates[updateCount].descriptorNum = 512; updateCount++;
-		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 2; updates[updateCount].descriptors = filteredSamplers; updates[updateCount].descriptorNum = 2; updateCount++;
+		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 0; updates[updateCount].descriptors = filteredSceneBuffers; updates[updateCount].descriptorNum = kSmokeFilteredSceneBufferCount; updateCount++;
+		if (emissiveBuffersReady)
+		{
+			updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 1; updates[updateCount].descriptors = emissiveSceneBuffers; updates[updateCount].descriptorNum = kSmokeEmissiveSceneBufferCount; updateCount++;
+		}
+		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 2; updates[updateCount].descriptors = smokeSceneTextures.data(); updates[updateCount].descriptorNum = (uint32_t)smokeSceneTextures.size(); updateCount++;
+		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 3; updates[updateCount].descriptors = filteredSamplers; updates[updateCount].descriptorNum = 3; updateCount++;
+	}
+	const nri::Descriptor* worldTlas[] = { renderer.mTopLevelAS.descriptor };
+	if (shadowReady)
+	{
+		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 4; updates[updateCount].descriptors = worldTlas; updates[updateCount].descriptorNum = 1; updateCount++;
 	}
 	renderer.mFrameBuffer->mCore.UpdateDescriptorRanges(updates, updateCount);
 
@@ -592,7 +647,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	constants.froxelWidth = mResourceFroxelWidth;
 	constants.froxelHeight = mResourceFroxelHeight;
 	constants.froxelDepth = mResourceFroxelDepth;
-	constants.columnCapacity = kFineCellCapacity;
+	constants.directionalColorPacked = PackDirectionalLightColor24(renderer.mDirectionalLightState.color);
 	constants.renderWidth = renderer.mRenderWidth;
 	constants.renderHeight = renderer.mRenderHeight;
 	constants.outputWidth = route.width;
@@ -607,11 +662,16 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	std::copy(renderer.mCurrentCameraForward, renderer.mCurrentCameraForward + 3, constants.cameraForward);
 	std::copy(renderer.mCurrentCameraRight, renderer.mCurrentCameraRight + 3, constants.cameraRight);
 	std::copy(renderer.mCurrentCameraUp, renderer.mCurrentCameraUp + 3, constants.cameraUp);
+	constants.directionalDirectionX = renderer.mDirectionalLightState.direction[0];
+	constants.directionalDirectionY = renderer.mDirectionalLightState.direction[1];
+	constants.directionalDirectionZ = renderer.mDirectionalLightState.direction[2];
+	constants.directionalAngularSize = std::clamp(renderer.mDirectionalLightState.angularSize, 0.001f, 1.2f);
 	std::copy(renderer.mCurrentJitter, renderer.mCurrentJitter + 2, constants.currentJitter);
 	constants.debugMode = mSettings.debugMode;
 	const bool pointLightsReady = mSettings.pointLights && lightBuffersReady && renderer.mBoundRuntimeLightCount > 0;
-	const bool shadowReady = renderer.mTopLevelAS.descriptor != nullptr;
-	constants.lightMode = pointLightsReady ? mSettings.lightMode : 0u;
+	const bool directionalLightReady = mSettings.directionalLight && renderer.mDirectionalLightState.enabled;
+	const bool emissiveLightsReady = mSettings.emissiveLights && emissiveResourcesReady;
+	constants.lightMode = (pointLightsReady || directionalLightReady || emissiveLightsReady) ? mSettings.lightMode : 0u;
 	if (constants.lightMode >= 2u && !shadowReady)
 		constants.lightMode = 1u;
 	if (constants.lightMode >= 2u && mSettings.filteredVisibility && !filteredResourcesReady)
@@ -621,7 +681,11 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	constants.runtimeLightCount = pointLightsReady ? renderer.mBoundRuntimeLightCount : 0u;
 	constants.runtimeLightTileCountX = pointLightsReady ? renderer.mBoundRuntimeLightTileCountX : 0u;
 	constants.runtimeLightTileCountY = pointLightsReady ? renderer.mBoundRuntimeLightTileCountY : 0u;
-	constants.pointLightsEnabled = pointLightsReady ? 1u : 0u;
+	constants.lightSourceFlags =
+		(pointLightsReady ? 0x1u : 0u) |
+		(directionalLightReady ? 0x2u : 0u) |
+		(directionalLightReady && renderer.mDirectionalLightState.shadow ? 0x4u : 0u) |
+		(emissiveLightsReady ? 0x8u : 0u);
 	constants.filteredVisibilityEnabled =
 		(mSettings.filteredVisibility ? 1u : 0u) |
 		(filteredResourcesReady ? 2u : 0u) |
@@ -652,10 +716,8 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 3, slot.outputSet, nri::BindPoint::COMPUTE });
 	if (lightBuffersReady)
 		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 4, slot.lightSet, nri::BindPoint::COMPUTE });
-	if (filteredResourcesReady)
+	if (filteredResourcesReady || shadowReady)
 		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 5, slot.filteredSceneSet, nri::BindPoint::COMPUTE });
-	if (shadowReady)
-		renderer.mFrameBuffer->mCore.CmdSetRootDescriptor(*renderer.mFrameBuffer->mCommandBuffer, { 0, renderer.mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
 	const uint64_t froxelCount = (uint64_t)mResourceFroxelWidth * mResourceFroxelHeight * mResourceFroxelDepth;
 	const uint64_t wideCellCount = (uint64_t)kWideCellCount * mResourceFroxelDepth;
 	dispatch(NRISmokePass::Clear, Groups(std::max({ froxelCount, wideCellCount, (uint64_t)mResourceFroxelDepth })), 1, 1);
@@ -665,6 +727,10 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	dispatch(NRISmokePass::EvaluateMedium, (mResourceFroxelWidth + 3) / 4, (mResourceFroxelHeight + 3) / 4, (mResourceFroxelDepth + 3) / 4);
 	storageBarrier();
 	dispatch(NRISmokePass::LightPoint, Groups(froxelCount), 1, 1);
+	storageBarrier();
+	dispatch(NRISmokePass::LightDirectional, Groups(froxelCount), 1, 1);
+	storageBarrier();
+	dispatch(NRISmokePass::LightEmissive, Groups(froxelCount), 1, 1);
 	storageBarrier();
 	dispatch(NRISmokePass::Integrate, (mResourceFroxelWidth + 7) / 8, (mResourceFroxelHeight + 7) / 8, 1);
 	storageBarrier();
@@ -748,6 +814,22 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.occupiedOverflow = 0;
 	mStatus.mediumCandidateTests = 0;
 	mStatus.pointFroxelsProcessed = 0;
+	mStatus.directionalFroxelsProcessed = 0;
+	mStatus.directionalSamples = 0;
+	mStatus.directionalShadowRays = 0;
+	mStatus.directionalShadowVisible = 0;
+	mStatus.directionalShadowOccluded = 0;
+	mStatus.directionalRadianceClamps = 0;
+	mStatus.emissiveFroxelsProcessed = 0;
+	mStatus.emissiveSamples = 0;
+	mStatus.emissiveCandidateMisses = 0;
+	mStatus.emissiveDistanceRejected = 0;
+	mStatus.emissiveFacingRejected = 0;
+	mStatus.emissiveShadowRays = 0;
+	mStatus.emissiveShadowVisible = 0;
+	mStatus.emissiveShadowOccluded = 0;
+	mStatus.emissiveContributed = 0;
+	mStatus.emissiveRadianceClamps = 0;
 	mStatus.lightCandidatesTested = 0;
 	mStatus.lightDistanceRejected = 0;
 	mStatus.lightShadowRays = 0;
@@ -834,4 +916,10 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.filterCandidateHits, mStatus.filterAlphaRejects, mStatus.filterNoShadowRejects, mStatus.filterOneWayRejects, mStatus.filterReflectionRejects,
 		mStatus.filterPortalContinuations, mStatus.filterAcceptedBlockers, mStatus.filterMisses, mStatus.filterSkipLimitExits, mStatus.filterContinuationLimitExits, mStatus.filterResourceDowngrades,
 		(double)mStatus.residentBytes / (1024.0 * 1024.0), (unsigned long long)mStatus.controlReadbackBytes, mStatus.resetReason);
+	Printf("NRI PT smoke lighting status: directional=%s resolved=%s shadow=%s directional_froxels=%u directional_samples=%u directional_shadow_rays=%u directional_visible=%u directional_occluded=%u directional_clamps=%u emissive=%s emissive_primitives=%u emissive_froxels=%u emissive_samples=%u emissive_no_candidate=%u emissive_distance_rejected=%u emissive_facing_rejected=%u emissive_shadow_rays=%u emissive_visible=%u emissive_occluded=%u emissive_contributed=%u emissive_clamps=%u\n",
+		mSettings.directionalLight ? "yes" : "no", renderer.mDirectionalLightState.enabled ? "yes" : "no", renderer.mDirectionalLightState.shadow ? "yes" : "no",
+		mStatus.directionalFroxelsProcessed, mStatus.directionalSamples, mStatus.directionalShadowRays, mStatus.directionalShadowVisible, mStatus.directionalShadowOccluded, mStatus.directionalRadianceClamps,
+		mSettings.emissiveLights ? "yes" : "no", renderer.mBoundEmissivePrimitiveCount, mStatus.emissiveFroxelsProcessed, mStatus.emissiveSamples,
+		mStatus.emissiveCandidateMisses, mStatus.emissiveDistanceRejected, mStatus.emissiveFacingRejected, mStatus.emissiveShadowRays,
+		mStatus.emissiveShadowVisible, mStatus.emissiveShadowOccluded, mStatus.emissiveContributed, mStatus.emissiveRadianceClamps);
 }

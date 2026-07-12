@@ -5118,10 +5118,10 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 			candidate.gpu.textureId = surface.textureId;
 			candidate.gpu.primitiveArea = primitiveArea;
 			const float basePowerEstimate = std::max(primitiveArea * representativeLuminance * surface.emissiveIntensity, 0.0f);
-			candidate.gpu.powerEstimate = basePowerEstimate * sectorResponseScale;
-			candidate.gpu.selectionWeight = basePowerEstimate * samplingScale * sectorReachScale;
-			candidate.gpu.emissionScale = sectorResponseScale;
-			candidate.referenceProposalWeight = basePowerEstimate * samplingScale * sectorReachBound;
+			candidate.gpu.powerEstimate = basePowerEstimate * sectorResponseScale * materialResponseScale;
+			candidate.gpu.selectionWeight = basePowerEstimate * samplingScale * sectorReachScale * materialResponseScale;
+			candidate.gpu.emissionScale = sectorResponseScale * materialResponseScale;
+			candidate.referenceProposalWeight = basePowerEstimate * samplingScale * sectorReachBound * materialResponseScale;
 			candidate.hasReferenceProposalWeight = sectorResponseEligible;
 
 			candidate.debug.stableKey = nri_scene::HashCombine64(surfacePrimitiveKey, ((uint64_t)dataSource << 32u) | localOffset);

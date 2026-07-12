@@ -5,6 +5,7 @@
 #include "NRD.hlsli"
 #include "TraceConstants.hlsli"
 #include "SceneShadowContracts.hlsli"
+#include "EmissiveLightContracts.hlsli"
 
 #define SET_SAMPLERS 0
 #define SET_SCENE_TEXTURES 1
@@ -21,44 +22,6 @@
 #define NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW 0x400u
 #define NRI_FLAG_TRACE_SHADER_STATS 0x800u
 #define NRI_TAA_JITTER_PHASE_COUNT 8u
-
-struct SceneVertex
-{
-	float3 position;
-	float3 prevPosition;
-	float2 uv;
-};
-
-struct EmissivePrimitiveHeaderData
-{
-	uint activeCount;
-	uint dominantIndex;
-	uint flags;
-	float totalPower;
-};
-
-struct EmissivePrimitiveData
-{
-	uint dataSource;
-	uint primitiveIndex;
-	uint sourceFlags;
-	uint textureId;
-	float primitiveArea;
-	float powerEstimate;
-	float selectionWeight;
-	float selectionPdf;
-	float emissionScale;
-	uint stableKeyLo;
-	uint stableKeyHi;
-};
-
-struct EmissiveMaterialResponseData
-{
-	uint dataSource;
-	uint primitiveIndex;
-	float materialScale;
-	uint flags;
-};
 
 struct SectorLightHeaderData
 {

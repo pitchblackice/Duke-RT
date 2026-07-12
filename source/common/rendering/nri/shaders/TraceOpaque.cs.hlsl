@@ -2,6 +2,7 @@
 #include "Include/Shared.hlsli"
 #include "Include/RaytracingShared.hlsli"
 #include "Include/AnalyticLightSampling.hlsli"
+#include "Include/DirectionalLightSampling.hlsli"
 
 uint Hash32(uint value)
 {
@@ -28,13 +29,10 @@ float3 BuildOrthonormalTangent(float3 n)
 float3 SampleSunDirection(float3 lightDir, uint2 pixelPos, uint frameIndex)
 {
 	uint rngState = pixelPos.x * 73856093u ^ pixelPos.y * 19349663u ^ (frameIndex + 1u) * 83492791u;
-	const float sunAngularRadius = GetDirectionalPlaceholderAngularSize();
-	const float cosTheta = lerp(cos(sunAngularRadius), 1.0, RandomFloat01(rngState));
-	const float sinTheta = sqrt(saturate(1.0 - cosTheta * cosTheta));
-	const float phi = 6.28318530718 * RandomFloat01(rngState);
-	const float3 tangent = BuildOrthonormalTangent(lightDir);
-	const float3 bitangent = normalize(cross(lightDir, tangent));
-	return normalize(lightDir * cosTheta + tangent * (cos(phi) * sinTheta) + bitangent * (sin(phi) * sinTheta));
+	return SampleUniformDirectionalCone(
+		lightDir,
+		GetDirectionalPlaceholderAngularSize(),
+		float2(RandomFloat01(rngState), RandomFloat01(rngState)));
 }
 
 float3 SampleCosineHemisphere(float3 normal, inout uint rngState)
@@ -382,7 +380,7 @@ uint SampleEmissivePrimitiveIndex(inout uint rngState)
 	uint low = 0u;
 	uint high = emissiveCount - 1u;
 	[unroll]
-	for (uint i = 0u; i < 12u && low < high; ++i)
+	for (uint i = 0u; i < 14u && low < high; ++i)
 	{
 		const uint mid = (low + high) >> 1u;
 		if (r <= gEmissivePrimitiveCdf[mid])

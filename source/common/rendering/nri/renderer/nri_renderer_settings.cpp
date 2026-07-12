@@ -214,6 +214,8 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.simulationRate = (uint32_t)std::clamp((int)nri_ptsmokesimrate, 15, 240);
 	settings.maxSubsteps = (uint32_t)std::clamp((int)nri_ptsmokemaxsubsteps, 1, 8);
 	settings.pointLights = (bool)nri_ptsmokepointlights;
+	settings.directionalLight = (bool)nri_ptsmokedirectionallight;
+	settings.emissiveLights = (bool)nri_ptsmokeemissivelights;
 	settings.lightMode = (uint32_t)std::clamp((int)nri_ptsmokelightmode, 0, 3);
 	settings.lightSamples = (uint32_t)std::clamp((int)nri_ptsmokelightsamples, 1, 4);
 	settings.maxLightCandidates = (uint32_t)std::clamp((int)nri_ptsmokemaxlightcandidates, 1, 32);

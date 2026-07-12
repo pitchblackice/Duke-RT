@@ -34,7 +34,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	// disabled or unavailable. Later light families add to this source field.
 	float3 scattering = medium.rgb * 0.18;
 	if (medium.a > 0.0 && any(medium.rgb > 0.0) &&
-		gSmokeConstants.LightMode > 0u && gSmokeConstants.PointLightsEnabled != 0u)
+		gSmokeConstants.LightMode > 0u && (gSmokeConstants.LightSourceFlags & NRI_SMOKE_LIGHT_SOURCE_POINT) != 0u)
 	{
 		const float3 viewRay = normalize(ray);
 		const RuntimeLightTileHeaderData tileHeader = SmokeGetRuntimeLightTileHeader(froxelPositionIndex.xy);

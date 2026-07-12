@@ -3,6 +3,8 @@
 
 #include "AnalyticLightSampling.hlsli"
 #include "SceneShadowContracts.hlsli"
+#include "EmissiveLightContracts.hlsli"
+#include "DirectionalLightSampling.hlsli"
 
 #define NRI_SMOKE_RUNTIME_LIGHT_TILE_SIZE 64u
 #define NRI_SMOKE_MAX_SELECTED_LIGHTS 32u
@@ -14,11 +16,14 @@
 #define NRI_SMOKE_FILTER_SKIP_LIMIT 64u
 #define NRI_SMOKE_FILTER_CONTINUATION_LIMIT 32u
 #define NRI_SMOKE_SCENE_TEXTURE_COUNT 512u
+#define NRI_SMOKE_LIGHT_SOURCE_POINT 0x1u
+#define NRI_SMOKE_LIGHT_SOURCE_DIRECTIONAL 0x2u
+#define NRI_SMOKE_LIGHT_SOURCE_DIRECTIONAL_SHADOW 0x4u
+#define NRI_SMOKE_LIGHT_SOURCE_EMISSIVE 0x8u
 
 StructuredBuffer<RuntimePointLightData> gSmokeRuntimePointLights : register(t0, space4);
 StructuredBuffer<RuntimeLightTileHeaderData> gSmokeRuntimeLightTileHeaders : register(t1, space4);
 StructuredBuffer<uint> gSmokeRuntimeLightTileIndices : register(t2, space4);
-RaytracingAccelerationStructure gSmokeWorldTlas : register(t0, space5);
 
 StructuredBuffer<PrimitiveData> gSmokeStaticPrimitives : register(t0, space6);
 StructuredBuffer<MaterialData> gSmokeStaticMaterials : register(t1, space6);
@@ -28,9 +33,19 @@ StructuredBuffer<SceneInstanceData> gSmokeSceneInstances : register(t4, space6);
 StructuredBuffer<PortalData> gSmokeScenePortals : register(t5, space6);
 StructuredBuffer<PrimitiveData> gSmokePersistentPrimitives : register(t6, space6);
 StructuredBuffer<MaterialData> gSmokePersistentMaterials : register(t7, space6);
+StructuredBuffer<SceneVertex> gSmokeStaticVertices : register(t8, space6);
+StructuredBuffer<SceneVertex> gSmokeDynamicVertices : register(t9, space6);
+StructuredBuffer<SceneVertex> gSmokePersistentVertices : register(t10, space6);
+StructuredBuffer<EmissivePrimitiveHeaderData> gSmokeEmissivePrimitiveHeaders : register(t11, space6);
+StructuredBuffer<EmissivePrimitiveData> gSmokeEmissivePrimitives : register(t12, space6);
+StructuredBuffer<float> gSmokeEmissivePrimitiveCdf : register(t13, space6);
+StructuredBuffer<EmissiveMaterialResponseData> gSmokeEmissiveMaterialResponses : register(t14, space6);
+Texture2D<float4> gSmokePaletteLookup : register(t15, space6);
 Texture2D<float4> gSmokeSceneTextures[NRI_SMOKE_SCENE_TEXTURE_COUNT] : register(t16, space6);
 SamplerState gSmokePointWrap : register(s0, space6);
 SamplerState gSmokeLinearWrap : register(s1, space6);
+SamplerState gSmokePointClamp : register(s2, space6);
+RaytracingAccelerationStructure gSmokeWorldTlas : register(t528, space6);
 
 struct SmokeFilterStats
 {
@@ -275,6 +290,131 @@ bool SmokePointLightVisible(float3 receiverPosition, float3 lightDirection, floa
 	query.TraceRayInline(gSmokeWorldTlas, rayFlags, NRI_TLAS_MASK_ALL_WORKLOADS, ray);
 	while (query.Proceed()) {}
 	return query.CommittedStatus() != COMMITTED_TRIANGLE_HIT;
+}
+
+float3 SmokeDirectionalColor()
+{
+	const uint packed = gSmokeConstants.DirectionalColorPacked;
+	return float3(
+		(float)(packed & 0xffu),
+		(float)((packed >> 8u) & 0xffu),
+		(float)((packed >> 16u) & 0xffu)) * (8.0 / 255.0);
+}
+
+float3 SmokeDirectionalDirection()
+{
+	return normalize(float3(
+		gSmokeConstants.DirectionalDirectionX,
+		gSmokeConstants.DirectionalDirectionY,
+		gSmokeConstants.DirectionalDirectionZ));
+}
+
+uint SmokeLightingRandomSeed(uint3 froxel, uint sampleIndex, uint familySalt)
+{
+	uint seed = SmokeHash(froxel.x ^ SmokeHash(froxel.y + 0x9e3779b9u));
+	seed ^= SmokeHash(froxel.z + 0x85ebca6bu);
+	seed ^= SmokeHash(gSmokeConstants.FrameIndex + 0xc2b2ae35u);
+	seed ^= SmokeHash(gSmokeConstants.SimulationEpoch + 0x27d4eb2fu);
+	seed ^= SmokeHash(familySalt);
+	return SmokeHash(seed ^ SmokeHash(sampleIndex + 1u));
+}
+
+float3 SmokeSampleDirectionalCone(float3 centerDirection, float angularRadius, inout uint randomState)
+{
+	return SampleUniformDirectionalCone(centerDirection, angularRadius, float2(SmokeRandom01(randomState), SmokeRandom01(randomState)));
+}
+
+SceneVertex SmokeGetVertex(uint dataSource, uint vertexIndex)
+{
+	uint count, stride;
+	if (dataSource == NRI_SMOKE_SCENE_DATA_SOURCE_DYNAMIC)
+	{
+		gSmokeDynamicVertices.GetDimensions(count, stride);
+		return gSmokeDynamicVertices[min(vertexIndex, max(count, 1u) - 1u)];
+	}
+	if (dataSource == NRI_SMOKE_SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+	{
+		gSmokePersistentVertices.GetDimensions(count, stride);
+		return gSmokePersistentVertices[min(vertexIndex, max(count, 1u) - 1u)];
+	}
+	gSmokeStaticVertices.GetDimensions(count, stride);
+	return gSmokeStaticVertices[min(vertexIndex, max(count, 1u) - 1u)];
+}
+
+float4 SmokeSampleMaterialColor(MaterialData material, uint textureIndex, float2 uv, bool indexed, bool applyPalette)
+{
+	if (textureIndex == 0xffffffffu)
+		return 0.0;
+	const uint safeTextureIndex = min(textureIndex, NRI_SMOKE_SCENE_TEXTURE_COUNT - 1u);
+	float4 color = (indexed || (material.flags & MATERIAL_FLAG_POINT_SAMPLED) != 0u)
+		? gSmokeSceneTextures[safeTextureIndex].SampleLevel(gSmokePointWrap, uv, 0.0)
+		: gSmokeSceneTextures[safeTextureIndex].SampleLevel(gSmokeLinearWrap, uv, 0.0);
+	if (indexed && applyPalette)
+	{
+		const float paletteValue = saturate(color.r) * 255.0;
+		const float2 paletteUv = float2((paletteValue + 0.5) / 256.0, ((float)material.paletteIndex + 0.5) / 256.0);
+		color = gSmokePaletteLookup.SampleLevel(gSmokePointClamp, paletteUv, 0.0);
+	}
+	return color;
+}
+
+float3 SmokeSampleMaterialEmission(MaterialData material, float2 uv)
+{
+	const float3 tint = (material.flags & MATERIAL_FLAG_TINT_EMISSION) != 0u ? material.emissiveColor : 1.0.xxx;
+	if (material.emissiveMode == 1u)
+	{
+		const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0u;
+		return SmokeSampleMaterialColor(material, material.textureIndex, uv, indexed, true).rgb * tint;
+	}
+	if (material.emissiveMode == 2u)
+		return material.emissiveColor;
+	if (material.emissiveMode == 3u)
+	{
+		if (material.emissiveTextureIndex == 0xffffffffu)
+			return material.emissiveColor;
+		const bool indexed = material.emissiveTextureIndex == material.textureIndex && (material.flags & MATERIAL_FLAG_INDEXED) != 0u;
+		return SmokeSampleMaterialColor(material, material.emissiveTextureIndex, uv, indexed, indexed).rgb * tint;
+	}
+	return 0.0;
+}
+
+uint SmokeSampleEmissivePrimitive(inout uint randomState)
+{
+	uint headerCount, headerStride, primitiveCount, primitiveStride, cdfCount, cdfStride;
+	gSmokeEmissivePrimitiveHeaders.GetDimensions(headerCount, headerStride);
+	gSmokeEmissivePrimitives.GetDimensions(primitiveCount, primitiveStride);
+	gSmokeEmissivePrimitiveCdf.GetDimensions(cdfCount, cdfStride);
+	if (headerCount == 0u)
+		return 0xffffffffu;
+	const uint activeCount = min(gSmokeEmissivePrimitiveHeaders[0].activeCount, min(primitiveCount, cdfCount));
+	if (activeCount == 0u)
+		return 0xffffffffu;
+	const float sample = SmokeRandom01(randomState);
+	uint low = 0u;
+	uint high = activeCount - 1u;
+	[unroll]
+	for (uint i = 0u; i < 14u && low < high; ++i)
+	{
+		const uint mid = (low + high) >> 1u;
+		if (sample <= gSmokeEmissivePrimitiveCdf[mid])
+			high = mid;
+		else
+			low = mid + 1u;
+	}
+	return low;
+}
+
+float3 SmokeSamplePointOnEmissive(EmissivePrimitiveData candidate, PrimitiveData primitive, inout uint randomState, out float2 uv, out float3 normal)
+{
+	const SceneVertex v0 = SmokeGetVertex(candidate.dataSource, primitive.indices.x);
+	const SceneVertex v1 = SmokeGetVertex(candidate.dataSource, primitive.indices.y);
+	const SceneVertex v2 = SmokeGetVertex(candidate.dataSource, primitive.indices.z);
+	const float rootU = sqrt(saturate(SmokeRandom01(randomState)));
+	const float v = SmokeRandom01(randomState);
+	const float3 bary = float3(1.0 - rootU, rootU * (1.0 - v), rootU * v);
+	uv = primitive.uv0 * bary.x + primitive.uv1 * bary.y + primitive.uv2 * bary.z;
+	normal = normalize(primitive.normal);
+	return v0.position * bary.x + v1.position * bary.y + v2.position * bary.z;
 }
 
 uint SmokeLightRandomSeed(uint3 froxel, RuntimePointLightData light, uint sampleIndex)

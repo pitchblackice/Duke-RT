@@ -133,6 +133,22 @@ struct SmokeControl
 	uint OccupiedOverflow;
 	uint MediumCandidateTests;
 	uint PointFroxelsProcessed;
+	uint DirectionalFroxelsProcessed;
+	uint DirectionalSamples;
+	uint DirectionalShadowRays;
+	uint DirectionalShadowVisible;
+	uint DirectionalShadowOccluded;
+	uint DirectionalRadianceClamps;
+	uint EmissiveFroxelsProcessed;
+	uint EmissiveSamples;
+	uint EmissiveCandidateMisses;
+	uint EmissiveDistanceRejected;
+	uint EmissiveFacingRejected;
+	uint EmissiveShadowRays;
+	uint EmissiveShadowVisible;
+	uint EmissiveShadowOccluded;
+	uint EmissiveContributed;
+	uint EmissiveRadianceClamps;
 	uint3 Padding;
 };
 

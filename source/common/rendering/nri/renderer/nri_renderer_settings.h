@@ -96,6 +96,8 @@ struct NRISmokeSettings
 	uint32_t simulationRate = 60;
 	uint32_t maxSubsteps = 4;
 	bool pointLights = true;
+	bool directionalLight = true;
+	bool emissiveLights = true;
 	uint32_t lightMode = 1;
 	uint32_t lightSamples = 1;
 	uint32_t maxLightCandidates = 8;

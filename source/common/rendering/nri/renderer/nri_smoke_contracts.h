@@ -11,6 +11,8 @@ enum class NRISmokePass : uint32_t
 	Bin,
 	EvaluateMedium,
 	LightPoint,
+	LightDirectional,
+	LightEmissive,
 	Integrate,
 	Composite,
 };
@@ -125,13 +127,29 @@ struct NRISmokeControlGpu
 	uint32_t occupiedOverflow = 0;
 	uint32_t mediumCandidateTests = 0;
 	uint32_t pointFroxelsProcessed = 0;
+	uint32_t directionalFroxelsProcessed = 0;
+	uint32_t directionalSamples = 0;
+	uint32_t directionalShadowRays = 0;
+	uint32_t directionalShadowVisible = 0;
+	uint32_t directionalShadowOccluded = 0;
+	uint32_t directionalRadianceClamps = 0;
+	uint32_t emissiveFroxelsProcessed = 0;
+	uint32_t emissiveSamples = 0;
+	uint32_t emissiveCandidateMisses = 0;
+	uint32_t emissiveDistanceRejected = 0;
+	uint32_t emissiveFacingRejected = 0;
+	uint32_t emissiveShadowRays = 0;
+	uint32_t emissiveShadowVisible = 0;
+	uint32_t emissiveShadowOccluded = 0;
+	uint32_t emissiveContributed = 0;
+	uint32_t emissiveRadianceClamps = 0;
 	uint32_t padding[3] = {};
 };
 
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
 static_assert(sizeof(NRISmokeStyleGpu) == 80);
 static_assert(sizeof(NRISmokeInjectionCommandGpu) == 64);
-static_assert(sizeof(NRISmokeControlGpu) == 240);
+static_assert(sizeof(NRISmokeControlGpu) == 304);
 
 struct NRISmokeConstants
 {
@@ -146,7 +164,9 @@ struct NRISmokeConstants
 	uint32_t froxelHeight = 0;
 
 	uint32_t froxelDepth = 0;
-	uint32_t columnCapacity = 0;
+	// 8-bit RGB channels packed over [0, 8]. The obsolete column-capacity
+	// constant was retired when smoke moved to fixed depth-local tier caps.
+	uint32_t directionalColorPacked = 0;
 	uint32_t renderWidth = 0;
 	uint32_t renderHeight = 0;
 
@@ -169,16 +189,16 @@ struct NRISmokeConstants
 	float timeScale = 1.0f;
 
 	float cameraForward[3] = {};
-	float cameraForwardPad = 0.0f;
+	float directionalDirectionX = 0.0f;
 
 	float cameraRight[3] = {};
-	float cameraRightPad = 0.0f;
+	float directionalDirectionY = 0.0f;
 
 	float cameraUp[3] = {};
-	float cameraUpPad = 0.0f;
+	float directionalDirectionZ = 0.0f;
 
 	float wind[3] = {};
-	float windPad = 0.0f;
+	float directionalAngularSize = 0.03f;
 
 	uint32_t lightMode = 0;
 	uint32_t lightSamples = 1;
@@ -187,7 +207,9 @@ struct NRISmokeConstants
 
 	uint32_t runtimeLightTileCountX = 0;
 	uint32_t runtimeLightTileCountY = 0;
-	uint32_t pointLightsEnabled = 1;
+	// bit 0: point, bit 1: directional, bit 2: directional shadow,
+	// bit 3: emissive.
+	uint32_t lightSourceFlags = 1;
 	// bit 0: filtered visibility requested, bit 1: resources ready,
 	// bits 8..15: portal traversal depth.
 	uint32_t filteredVisibilityEnabled = 0;
