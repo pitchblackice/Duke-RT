@@ -709,7 +709,7 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 	{
 		TraceShaderStatAdd(TRACE_STAT_INDIRECT_SPECULAR_BOUNCES, 1u);
 		float3 tracedDirection = direction;
-		const HitData bounceHit = TraceIndirectUngated(origin, direction, tracedDirection);
+		const HitData bounceHit = TraceReflectionUngated(origin, direction, tracedDirection);
 		if (!bounceHit.hit)
 		{
 			TraceShaderStatAdd(TRACE_STAT_INDIRECT_SPECULAR_MISSES, 1u);

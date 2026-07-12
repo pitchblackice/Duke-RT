@@ -1110,6 +1110,14 @@ HitData TraceIndirectUngated(float3 origin, float3 direction, out float3 exitDir
 	return hitData;
 }
 
+HitData TraceReflectionUngated(float3 origin, float3 direction, out float3 exitDirection)
+{
+	HitData hitData = MakeEmptyHitData();
+	const uint mirrorBudget = max(1u, (gTraceConstants.BounceCounts >> 4u) & 0xfu);
+	TraceScenePath(origin, direction, 100000.0, mirrorBudget, GetPortalTraversalDepth(), false, false, true, TRACE_STATS_KIND_UNGATED, hitData, exitDirection);
+	return hitData;
+}
+
 HitData TracePrimary(float3 origin, float3 direction)
 {
 	float3 exitDirection = direction;
