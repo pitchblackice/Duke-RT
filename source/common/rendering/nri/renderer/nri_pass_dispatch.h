@@ -93,8 +93,10 @@ public:
 	{
 		nri::CoreInterface* core = nullptr;
 		nri::CommandBuffer* commandBuffer = nullptr;
+		nri::DescriptorPool* descriptorPool = nullptr;
 
 		nri::CommandBuffer* GetCommandBuffer() const;
+		void RestoreDescriptorPool() const;
 		void SetPipelineLayout(nri::PipelineLayout* pipelineLayout) const;
 		void SetRootConstants(const void* data, uint32_t size) const;
 		void SetDescriptorSet(uint32_t setIndex, nri::DescriptorSet* descriptorSet) const;

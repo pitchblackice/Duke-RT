@@ -578,7 +578,11 @@ bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 	desc.enableValidation = denoiserSettings.enableValidation;
 	desc.enableSigmaShadow = context.mUseSplitShadowDenoiser;
 	desc.traceTemporalInput = ShouldTracePtPerf();
-	return context.mNrd.Denoise(desc);
+	const bool denoised = context.mNrd.Denoise(desc);
+	// NRD binds its private descriptor pool while recording dispatches. Restore
+	// Raze's resource and sampler heaps before any subsequent pass binds our sets.
+	context.mCommands.RestoreDescriptorPool();
+	return denoised;
 }
 
 

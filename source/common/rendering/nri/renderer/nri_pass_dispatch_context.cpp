@@ -69,6 +69,14 @@ nri::CommandBuffer* NRIPassDispatchContext::CommandService::GetCommandBuffer() c
 	return commandBuffer;
 }
 
+void NRIPassDispatchContext::CommandService::RestoreDescriptorPool() const
+{
+	if (core != nullptr && commandBuffer != nullptr && descriptorPool != nullptr)
+	{
+		core->CmdSetDescriptorPool(*commandBuffer, *descriptorPool);
+	}
+}
+
 void NRIPassDispatchContext::CommandService::SetPipelineLayout(nri::PipelineLayout* pipelineLayout) const
 {
 	core->CmdSetPipelineLayout(*commandBuffer, nri::BindPoint::COMPUTE, *pipelineLayout);
