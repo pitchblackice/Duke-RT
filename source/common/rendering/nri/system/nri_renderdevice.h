@@ -437,6 +437,7 @@ private:
 	bool mPreloadSubmitBudgetHit = false;
 	bool mTerminalDeviceLoss = false;
 	bool mLoggedTerminalDeviceLoss = false;
+	bool mShuttingDown = false;
 	FString mLastPreloadSubmitReason = "none";
 	bool mHasAcquiredSwapChainImage = false;
 	bool mHasPresentedSwapChainFrame = false;

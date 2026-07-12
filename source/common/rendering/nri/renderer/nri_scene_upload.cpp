@@ -1644,18 +1644,9 @@ bool NRIRenderer::UploadSceneBuffers(
 				mFrameBuffer->mCore.UnmapBuffer(*resource.buffer);
 			}
 
-			if (result && mFrameBuffer->mCommandBuffer != nullptr && afterAccess.access != nri::AccessBits::NONE)
-			{
-				nri::BufferBarrierDesc barrier = {};
-				barrier.buffer = resource.buffer;
-				barrier.before = {};
-				barrier.after = afterAccess;
-
-				nri::BarrierDesc barrierDesc = {};
-				barrierDesc.buffers = &barrier;
-				barrierDesc.bufferNum = 1;
-				mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
-			}
+			// This path only updates persistently mapped DEVICE_UPLOAD buffers. Their
+			// native state is fixed and GPU-readable, so host writes need no transition.
+			(void)afterAccess;
 		}
 		if (!result)
 		{

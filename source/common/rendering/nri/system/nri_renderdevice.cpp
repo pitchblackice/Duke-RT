@@ -2285,6 +2285,7 @@ NRIRenderDevice::NRIRenderDevice(void* hMonitor, bool fullscreen)
 
 NRIRenderDevice::~NRIRenderDevice()
 {
+	mShuttingDown = true;
 	WaitForCommands(true);
 
 	delete mVertexData;
@@ -3249,7 +3250,11 @@ void NRIRenderDevice::WaitForCommands(bool finish)
 	{
 		if (mTerminalDeviceLoss)
 		{
-			FatalTerminalDeviceLoss("DeviceWaitIdle");
+			if (!mShuttingDown)
+			{
+				FatalTerminalDeviceLoss("DeviceWaitIdle");
+			}
+			return;
 		}
 		mCore.DeviceWaitIdle(mDevice);
 		if (mCreatedDeviceApi == nri::GraphicsAPI::D3D12 &&
@@ -3258,7 +3263,10 @@ void NRIRenderDevice::WaitForCommands(bool finish)
 		{
 			MarkTerminalDeviceLoss("DeviceWaitIdle");
 			LogD3D12FailureDiagnostics("DeviceWaitIdle");
-			FatalTerminalDeviceLoss("DeviceWaitIdle");
+			if (!mShuttingDown)
+			{
+				FatalTerminalDeviceLoss("DeviceWaitIdle");
+			}
 		}
 		return;
 	}
@@ -8221,13 +8229,17 @@ bool NRIRenderDevice::CreateDevice()
 	creationDesc.enableGraphicsAPIValidation = enableGraphicsApiValidation;
 	creationDesc.enableNRIValidation = !!nri_validation;
 	creationDesc.disableVKRayTracing = false;
-	creationDesc.disableD3D12EnhancedBarriers = false;
+	// D3D12 ray-tracing builds assign acceleration-structure resources to the
+	// legacy state domain. Keep subsequent barriers in that same domain instead
+	// of illegally switching those resources to enhanced barriers.
+	creationDesc.disableD3D12EnhancedBarriers = selectedApi == nri::GraphicsAPI::D3D12;
 	creationDesc.vkBindingOffsets = {};
-	Printf("NRI CreateDevice config: api=%s nri_validation=%s api_validation=%s dred=%s\n",
+	Printf("NRI CreateDevice config: api=%s nri_validation=%s api_validation=%s dred=%s enhanced_barriers=%s\n",
 		startupApi,
 		nri_validation ? "on" : "off",
 		nri_apivalidation ? "on" : "off",
-		nri_dred ? "on" : "off");
+		nri_dred ? "on" : "off",
+		creationDesc.disableD3D12EnhancedBarriers ? "off" : "on");
 
 	const nri::Result createResult = mCreateDeviceFn(creationDesc, mDevice);
 	if (createResult != nri::Result::SUCCESS)
