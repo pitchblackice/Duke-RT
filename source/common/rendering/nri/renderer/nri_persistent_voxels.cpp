@@ -148,7 +148,7 @@ uint64_t BuildPersistentVoxelContentMeshResourceKey(uint64_t renderPrimitiveHash
 	(void)geometryContentHash;
 	if (renderPrimitiveHash != 0)
 	{
-		return nri_scene::HashCombine64(0x50564d4553485231ull, renderPrimitiveHash); // PVMESHR1
+		return nri_scene::HashCombine64(0x50564d4553485232ull, renderPrimitiveHash); // PVMESHR2: packed smooth-normal vertex payload
 	}
 	return 0;
 }

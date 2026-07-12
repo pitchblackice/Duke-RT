@@ -416,10 +416,49 @@ float3 SampleMaterialNormalMap(MaterialData material, float2 uv, float3 geometri
 	return mappedNormal;
 }
 
-float3 ResolveHitNormal(uint materialIndex, uint dataSource, uint primitiveIndex, float3 geometricNormal, float2 uv)
+float3 UnpackVoxelNormal(uint packedNormal)
+{
+	const float2 oct = float2(packedNormal & 255u, (packedNormal >> 8u) & 255u) * (2.0f / 255.0f) - 1.0f;
+	float3 normal = float3(oct, 1.0f - abs(oct.x) - abs(oct.y));
+	if (normal.z < 0.0f)
+	{
+		normal.xy = (1.0f - abs(normal.yx)) * float2(normal.x < 0.0f ? -1.0f : 1.0f, normal.y < 0.0f ? -1.0f : 1.0f);
+	}
+	return normalize(normal);
+}
+
+bool TryResolveSmoothVertexNormal(PrimitiveData primitive, float3 weights, float3 geometricNormal, out float3 smoothNormal)
+{
+	if ((primitive.smoothNormals.y & 0x80000000u) == 0u)
+	{
+		smoothNormal = geometricNormal;
+		return false;
+	}
+
+	const float3 interpolated =
+		UnpackVoxelNormal(primitive.smoothNormals.x & 0xffffu) * weights.x +
+		UnpackVoxelNormal(primitive.smoothNormals.x >> 16u) * weights.y +
+		UnpackVoxelNormal(primitive.smoothNormals.y & 0xffffu) * weights.z;
+	const float lengthSq = dot(interpolated, interpolated);
+	if (lengthSq <= 1.0e-8f)
+	{
+		smoothNormal = geometricNormal;
+		return false;
+	}
+
+	smoothNormal = interpolated * rsqrt(lengthSq);
+	return dot(smoothNormal, geometricNormal) > 1.0e-4f;
+}
+
+float3 ResolveHitNormal(uint materialIndex, uint dataSource, uint primitiveIndex, PrimitiveData primitive, float2 uv, float3 weights)
 {
 	const MaterialData material = GetMaterialData(materialIndex, dataSource);
-	float3 resolvedNormal = normalize(geometricNormal);
+	float3 resolvedNormal = normalize(primitive.normal);
+	float3 smoothNormal = resolvedNormal;
+	if (TryResolveSmoothVertexNormal(primitive, weights, resolvedNormal, smoothNormal))
+	{
+		resolvedNormal = normalize(lerp(resolvedNormal, smoothNormal, 0.35f));
+	}
 	if (material.normalTextureIndex == 0xffffffffu)
 	{
 		return resolvedNormal;
@@ -882,7 +921,7 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction, bool allowReflec
 		bestHit.distance = hitT;
 		bestHit.position = origin + direction * hitT;
 		bestHit.uv = uv;
-		bestHit.normal = ResolveHitNormal(primitive.materialIndex, SCENE_DATA_SOURCE_DYNAMIC, primitiveIndex, primitive.normal, uv);
+		bestHit.normal = ResolveHitNormal(primitive.materialIndex, SCENE_DATA_SOURCE_DYNAMIC, primitiveIndex, primitive, uv, barycentrics);
 		bestHit.materialIndex = primitive.materialIndex;
 	}
 
@@ -1013,7 +1052,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		hitData.distance = hitDistance;
 		hitData.position = startOrigin + direction * hitDistance;
 		hitData.uv = uv;
-		hitData.normal = TransformSceneInstanceNormal(instanceData, ResolveHitNormal(materialIndex, instanceData.dataSource, primitiveIndex, primitive.normal, uv), false);
+		hitData.normal = TransformSceneInstanceNormal(instanceData, ResolveHitNormal(materialIndex, instanceData.dataSource, primitiveIndex, primitive, uv, weights), false);
 		hitData.materialIndex = materialIndex;
 		TraceShaderStatSource(TRACE_STAT_ACCEPT_STATIC, TRACE_STAT_ACCEPT_DYNAMIC, TRACE_STAT_ACCEPT_VOXEL, instanceData.dataSource);
 		TraceShaderStatInstance(TRACE_STAT_INSTANCE_ACCEPTED_BASE, TRACE_STAT_INSTANCE_ACCEPTED_OVERFLOW, committedInstanceId);

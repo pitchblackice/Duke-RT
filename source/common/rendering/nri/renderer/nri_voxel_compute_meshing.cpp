@@ -802,6 +802,8 @@ namespace
 			target.flags = source.Flags;
 			target.portalIndex = source.PortalIndex;
 			target.reserved0 = source.Reserved0;
+			target.smoothNormals[0] = source.SmoothNormals[0];
+			target.smoothNormals[1] = source.SmoothNormals[1];
 		}
 
 		outGenerated.geometry = std::move(geometry);

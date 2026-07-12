@@ -389,6 +389,7 @@ struct NRIVoxelComputePrimitiveData
 	uint32_t Flags = 0;
 	uint32_t PortalIndex = UINT32_MAX;
 	uint32_t Reserved0 = UINT32_MAX;
+	uint32_t SmoothNormals[2] = {};
 };
 
 static_assert(sizeof(NRIVoxelComputeConstants) == 48, "NRIVoxelComputeConstants must match VoxelComputeConstants.hlsli.");
@@ -399,4 +400,4 @@ static_assert(sizeof(NRIVoxelComputeResult) == 48, "NRIVoxelComputeResult must m
 static_assert(sizeof(NRIVoxelComputeSlabScratch) == 16, "NRIVoxelComputeSlabScratch must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeFaceRecord) == 56, "NRIVoxelComputeFaceRecord must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeSceneVertex) == 32, "NRIVoxelComputeSceneVertex must match VoxelComputeConstants.hlsli.");
-static_assert(sizeof(NRIVoxelComputePrimitiveData) == 64, "NRIVoxelComputePrimitiveData must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputePrimitiveData) == 72, "NRIVoxelComputePrimitiveData must match VoxelComputeConstants.hlsli.");

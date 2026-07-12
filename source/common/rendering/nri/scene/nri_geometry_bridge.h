@@ -12,6 +12,7 @@ struct SceneVertex
 	float prevPosition[3] = {};
 	float uv[2] = {};
 };
+static_assert(sizeof(SceneVertex) == 32, "SceneVertex must match Shared.hlsli.");
 
 struct PrimitiveData
 {
@@ -24,7 +25,9 @@ struct PrimitiveData
 	uint32_t flags = 0;
 	uint32_t portalIndex = UINT32_MAX;
 	uint32_t reserved0 = UINT32_MAX;
+	uint32_t smoothNormals[2] = {};
 };
+static_assert(sizeof(PrimitiveData) == 72, "PrimitiveData must match Shared.hlsli.");
 
 struct GeometryData
 {
