@@ -24,6 +24,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gSmokeControl[0].LightShadowOccluded = 0u;
 		gSmokeControl[0].LightSoftSamples = 0u;
 		gSmokeControl[0].LightRadianceClamps = 0u;
+		gSmokeControl[0].FilterCandidateHits = 0u;
+		gSmokeControl[0].FilterAlphaRejects = 0u;
+		gSmokeControl[0].FilterNoShadowRejects = 0u;
+		gSmokeControl[0].FilterOneWayRejects = 0u;
+		gSmokeControl[0].FilterReflectionRejects = 0u;
+		gSmokeControl[0].FilterPortalContinuations = 0u;
+		gSmokeControl[0].FilterAcceptedBlockers = 0u;
+		gSmokeControl[0].FilterMisses = 0u;
+		gSmokeControl[0].FilterSkipLimitExits = 0u;
+		gSmokeControl[0].FilterContinuationLimitExits = 0u;
+		gSmokeControl[0].FilterResourceDowngrades = 0u;
+		if ((gSmokeConstants.FilteredVisibilityEnabled & 1u) != 0u && (gSmokeConstants.FilteredVisibilityEnabled & 2u) == 0u && gSmokeConstants.LightMode > 0u)
+			gSmokeControl[0].FilterResourceDowngrades = 1u;
 	}
 	if (clearWorld && index == 0u && controlCount != 0u)
 	{

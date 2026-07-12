@@ -56,7 +56,7 @@ struct SmokeConstants
     uint RuntimeLightTileCountX;
     uint RuntimeLightTileCountY;
     uint PointLightsEnabled;
-    uint LightingPad;
+    uint FilteredVisibilityEnabled;
 };
 
 #endif

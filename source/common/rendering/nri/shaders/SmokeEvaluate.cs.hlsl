@@ -168,7 +168,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				{
 					if (lightingDiagnostics)
 						InterlockedAdd(gSmokeControl[0].LightShadowRays, 1u);
-					visibility = SmokePointLightVisible(froxelPosition, lightDirection, sampledDistance) ? 1.0 : 0.0;
+					visibility = ((gSmokeConstants.FilteredVisibilityEnabled & 1u) != 0u
+						? SmokePointLightVisibleFiltered(froxelPosition, lightDirection, sampledDistance, lightingDiagnostics)
+						: SmokePointLightVisible(froxelPosition, lightDirection, sampledDistance, lightingDiagnostics)) ? 1.0 : 0.0;
 					if (lightingDiagnostics)
 					{
 						if (visibility > 0.0)

@@ -114,7 +114,23 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 	lights.descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
 	lights.shaderStages = nri::StageBits::COMPUTE_SHADER;
 	lights.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-	nri::DescriptorSetDesc sets[5] = {};
+	nri::DescriptorRangeDesc filteredSceneRanges[3] = {};
+	filteredSceneRanges[0].baseRegisterIndex = 0;
+	filteredSceneRanges[0].descriptorNum = 8;
+	filteredSceneRanges[0].descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
+	filteredSceneRanges[0].shaderStages = nri::StageBits::COMPUTE_SHADER;
+	filteredSceneRanges[0].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+	filteredSceneRanges[1].baseRegisterIndex = 16;
+	filteredSceneRanges[1].descriptorNum = 512;
+	filteredSceneRanges[1].descriptorType = nri::DescriptorType::TEXTURE;
+	filteredSceneRanges[1].shaderStages = nri::StageBits::COMPUTE_SHADER;
+	filteredSceneRanges[1].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+	filteredSceneRanges[2].baseRegisterIndex = 0;
+	filteredSceneRanges[2].descriptorNum = 2;
+	filteredSceneRanges[2].descriptorType = nri::DescriptorType::SAMPLER;
+	filteredSceneRanges[2].shaderStages = nri::StageBits::COMPUTE_SHADER;
+	filteredSceneRanges[2].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+	nri::DescriptorSetDesc sets[6] = {};
 	nri::DescriptorRangeDesc* ranges[] = { &input, &buffers, &textures, &output, &lights };
 	for (uint32_t i = 0; i < 5; ++i)
 	{
@@ -123,6 +139,10 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 		sets[i].rangeNum = 1;
 		sets[i].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
 	}
+	sets[5].registerSpace = 6;
+	sets[5].ranges = filteredSceneRanges;
+	sets[5].rangeNum = 3;
+	sets[5].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
 	nri::RootConstantDesc root = {};
 	root.registerIndex = 0;
 	root.size = sizeof(NRISmokeConstants);
@@ -138,7 +158,7 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 	layout.rootDescriptors = &rootDescriptor;
 	layout.rootDescriptorNum = 1;
 	layout.descriptorSets = sets;
-	layout.descriptorSetNum = 5;
+	layout.descriptorSetNum = 6;
 	layout.shaderStages = nri::StageBits::COMPUTE_SHADER;
 	if (renderer.mFrameBuffer->mCore.CreatePipelineLayout(*renderer.mFrameBuffer->mDevice, layout, mPipelineLayout) != nri::Result::SUCCESS)
 		return false;
@@ -172,6 +192,8 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 			renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *mPipelineLayout, 2, &slot.textureSet, 1, 0) != nri::Result::SUCCESS ||
 			renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *mPipelineLayout, 3, &slot.outputSet, 1, 0) != nri::Result::SUCCESS ||
 			renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *mPipelineLayout, 4, &slot.lightSet, 1, 0) != nri::Result::SUCCESS)
+			return false;
+		if (renderer.mFrameBuffer->mCore.AllocateDescriptorSets(*renderer.mFrameBuffer->mDescriptorPool, *mPipelineLayout, 5, &slot.filteredSceneSet, 1, 0) != nri::Result::SUCCESS)
 			return false;
 	}
 	return true;
@@ -278,6 +300,17 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 				mStatus.lightShadowOccluded = control.lightShadowOccluded;
 				mStatus.lightSoftSamples = control.lightSoftSamples;
 				mStatus.lightRadianceClamps = control.lightRadianceClamps;
+				mStatus.filterCandidateHits = control.filterCandidateHits;
+				mStatus.filterAlphaRejects = control.filterAlphaRejects;
+				mStatus.filterNoShadowRejects = control.filterNoShadowRejects;
+				mStatus.filterOneWayRejects = control.filterOneWayRejects;
+				mStatus.filterReflectionRejects = control.filterReflectionRejects;
+				mStatus.filterPortalContinuations = control.filterPortalContinuations;
+				mStatus.filterAcceptedBlockers = control.filterAcceptedBlockers;
+				mStatus.filterMisses = control.filterMisses;
+				mStatus.filterSkipLimitExits = control.filterSkipLimitExits;
+				mStatus.filterContinuationLimitExits = control.filterContinuationLimitExits;
+				mStatus.filterResourceDowngrades = control.filterResourceDowngrades;
 				mStatus.controlReadbackBytes += sizeof(NRISmokeControlGpu);
 			}
 			completedSlot.readbackPending = false;
@@ -433,7 +466,20 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		renderer.mSceneDataDescriptors[12],
 	};
 	const bool lightBuffersReady = lightBuffers[0] != nullptr && lightBuffers[1] != nullptr && lightBuffers[2] != nullptr;
-	nri::UpdateDescriptorRangeDesc updates[3] = {};
+	const nri::Descriptor* filteredSceneBuffers[] = {
+		renderer.mSceneDataDescriptors[2], renderer.mSceneDataDescriptors[3],
+		renderer.mSceneDataDescriptors[6], renderer.mSceneDataDescriptors[7],
+		renderer.mSceneDataDescriptors[8], renderer.mSceneDataDescriptors[9],
+		renderer.mSceneDataDescriptors[23], renderer.mSceneDataDescriptors[24],
+	};
+	const bool filteredBuffersReady = std::all_of(std::begin(filteredSceneBuffers), std::end(filteredSceneBuffers), [](const nri::Descriptor* descriptor) { return descriptor != nullptr; });
+	const bool filteredTexturesReady = renderer.mCurrentSceneTextureDescriptors.size() >= 514u;
+	const bool filteredResourcesReady = filteredBuffersReady && filteredTexturesReady;
+	const nri::Descriptor* filteredSamplers[] = {
+		renderer.mFrameBuffer->mSamplers[(size_t)NRISamplerMode::WrapPoint],
+		renderer.mFrameBuffer->mSamplers[(size_t)NRISamplerMode::WrapLinear],
+	};
+	nri::UpdateDescriptorRangeDesc updates[6] = {};
 	updates[0].descriptorSet = slot.textureSet; updates[0].rangeIndex = 0; updates[0].descriptors = textures; updates[0].descriptorNum = 2;
 	updates[1].descriptorSet = slot.outputSet; updates[1].rangeIndex = 0; updates[1].descriptors = outputTexture; updates[1].descriptorNum = 1;
 	uint32_t updateCount = 2;
@@ -441,6 +487,12 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	{
 		updates[2].descriptorSet = slot.lightSet; updates[2].rangeIndex = 0; updates[2].descriptors = lightBuffers; updates[2].descriptorNum = 3;
 		updateCount++;
+	}
+	if (filteredResourcesReady)
+	{
+		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 0; updates[updateCount].descriptors = filteredSceneBuffers; updates[updateCount].descriptorNum = 8; updateCount++;
+		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 1; updates[updateCount].descriptors = reinterpret_cast<const nri::Descriptor* const*>(renderer.mCurrentSceneTextureDescriptors.data() + 2); updates[updateCount].descriptorNum = 512; updateCount++;
+		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 2; updates[updateCount].descriptors = filteredSamplers; updates[updateCount].descriptorNum = 2; updateCount++;
 	}
 	renderer.mFrameBuffer->mCore.UpdateDescriptorRanges(updates, updateCount);
 
@@ -473,12 +525,18 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	constants.lightMode = pointLightsReady ? mSettings.lightMode : 0u;
 	if (constants.lightMode >= 2u && !shadowReady)
 		constants.lightMode = 1u;
+	if (constants.lightMode >= 2u && mSettings.filteredVisibility && !filteredResourcesReady)
+		constants.lightMode = 1u;
 	constants.lightSamples = mSettings.lightSamples;
 	constants.maxLightCandidates = mSettings.maxLightCandidates;
 	constants.runtimeLightCount = pointLightsReady ? renderer.mBoundRuntimeLightCount : 0u;
 	constants.runtimeLightTileCountX = pointLightsReady ? renderer.mBoundRuntimeLightTileCountX : 0u;
 	constants.runtimeLightTileCountY = pointLightsReady ? renderer.mBoundRuntimeLightTileCountY : 0u;
 	constants.pointLightsEnabled = pointLightsReady ? 1u : 0u;
+	constants.filteredVisibilityEnabled =
+		(mSettings.filteredVisibility ? 1u : 0u) |
+		(filteredResourcesReady ? 2u : 0u) |
+		(std::min(BuildNRITraceSettingsFromCVars().portalDepth, 8u) << 8u);
 	constants.flags = (mSettings.readback || mSettings.traceMode > 0u) ? 2u : 0u;
 	auto dispatch = [&](NRISmokePass pass, uint32_t x, uint32_t y, uint32_t z)
 	{
@@ -502,6 +560,8 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 3, slot.outputSet, nri::BindPoint::COMPUTE });
 	if (lightBuffersReady)
 		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 4, slot.lightSet, nri::BindPoint::COMPUTE });
+	if (filteredResourcesReady)
+		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 5, slot.filteredSceneSet, nri::BindPoint::COMPUTE });
 	if (shadowReady)
 		renderer.mFrameBuffer->mCore.CmdSetRootDescriptor(*renderer.mFrameBuffer->mCommandBuffer, { 0, renderer.mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
 	dispatch(NRISmokePass::Clear, Groups((uint64_t)mResourceFroxelWidth * mResourceFroxelHeight * mResourceFroxelDepth), 1, 1);
@@ -578,6 +638,17 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.lightShadowOccluded = 0;
 	mStatus.lightSoftSamples = 0;
 	mStatus.lightRadianceClamps = 0;
+	mStatus.filterCandidateHits = 0;
+	mStatus.filterAlphaRejects = 0;
+	mStatus.filterNoShadowRejects = 0;
+	mStatus.filterOneWayRejects = 0;
+	mStatus.filterReflectionRejects = 0;
+	mStatus.filterPortalContinuations = 0;
+	mStatus.filterAcceptedBlockers = 0;
+	mStatus.filterMisses = 0;
+	mStatus.filterSkipLimitExits = 0;
+	mStatus.filterContinuationLimitExits = 0;
+	mStatus.filterResourceDowngrades = 0;
 	mPendingCommands.clear();
 	mAccumulator = 0.0f;
 	mLastGameplaySeconds = -1.0;
@@ -622,12 +693,14 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 	const char* placement = mStatus.routePlacement == (uint32_t)NRISmokeRoutePlacement::DlrrPostUpscale ? "dlrr_post_upscale" : "standard_pre_upscale";
 	const char* inputName = mStatus.inputSlot < (uint32_t)NRIRenderer::FrameTextureSlot::Count ? renderer.GetFrameTextureSlotName((NRIRenderer::FrameTextureSlot)mStatus.inputSlot) : "none";
 	const char* outputName = mStatus.outputSlot < (uint32_t)NRIRenderer::FrameTextureSlot::Count ? renderer.GetFrameTextureSlotName((NRIRenderer::FrameTextureSlot)mStatus.outputSlot) : "none";
-	Printf("NRI PT smoke status: enabled=%s epoch=%u main_view=%s route_supported=%s placement=%s input=%s output=%s extent=%ux%u froxels=%ux%ux%u particles=%u styles=%u commands=%u commands_total=%llu dropped=%u substeps=%u light_mode=%u light_samples=%u light_candidates_max=%u point_lights=%s runtime_lights=%u gpu_stats=%s active=%u spawned=%u expired=%u evictions=%u column_overflow=%u light_candidates=%u light_distance_rejected=%u light_shadow_rays=%u light_visible=%u light_occluded=%u light_soft_samples=%u light_clamps=%u resident_mib=%.2f particle_readback=0 control_readback=%llu reset=%s\n",
+	Printf("NRI PT smoke status: enabled=%s epoch=%u main_view=%s route_supported=%s placement=%s input=%s output=%s extent=%ux%u froxels=%ux%ux%u particles=%u styles=%u commands=%u commands_total=%llu dropped=%u substeps=%u light_mode=%u light_samples=%u light_candidates_max=%u point_lights=%s filtered_visibility=%s runtime_lights=%u gpu_stats=%s active=%u spawned=%u expired=%u evictions=%u column_overflow=%u light_candidates=%u light_distance_rejected=%u light_shadow_rays=%u light_visible=%u light_occluded=%u light_soft_samples=%u light_clamps=%u filter_hits=%u filter_alpha=%u filter_no_shadow=%u filter_one_way=%u filter_reflection=%u filter_portals=%u filter_blockers=%u filter_misses=%u filter_skip_limit=%u filter_continuation_limit=%u filter_downgrades=%u resident_mib=%.2f particle_readback=0 control_readback=%llu reset=%s\n",
 		mStatus.enabled ? "yes" : "no", mStatus.simulationEpoch, mStatus.mainViewEligible ? "yes" : "no", mStatus.routeSupported ? "yes" : "no", placement,
 		inputName, outputName, mStatus.routeWidth, mStatus.routeHeight, mStatus.froxelWidth, mStatus.froxelHeight, mStatus.froxelDepth,
 		mStatus.particleCapacity, mStatus.styleCount, mStatus.commandsUploaded, (unsigned long long)mStatus.commandsUploadedTotal, mStatus.commandsDropped, mStatus.simulationSubsteps,
-		mSettings.lightMode, mSettings.lightSamples, mSettings.maxLightCandidates, mSettings.pointLights ? "yes" : "no", renderer.mBoundRuntimeLightCount,
+		mSettings.lightMode, mSettings.lightSamples, mSettings.maxLightCandidates, mSettings.pointLights ? "yes" : "no", mSettings.filteredVisibility ? "yes" : "no", renderer.mBoundRuntimeLightCount,
 		mStatus.gpuStatsValid ? "valid" : "disabled", mStatus.activeParticles, mStatus.spawnedParticles, mStatus.expiredParticles, mStatus.liveEvictions, mStatus.columnOverflow,
 		mStatus.lightCandidatesTested, mStatus.lightDistanceRejected, mStatus.lightShadowRays, mStatus.lightShadowVisible, mStatus.lightShadowOccluded, mStatus.lightSoftSamples, mStatus.lightRadianceClamps,
+		mStatus.filterCandidateHits, mStatus.filterAlphaRejects, mStatus.filterNoShadowRejects, mStatus.filterOneWayRejects, mStatus.filterReflectionRejects,
+		mStatus.filterPortalContinuations, mStatus.filterAcceptedBlockers, mStatus.filterMisses, mStatus.filterSkipLimitExits, mStatus.filterContinuationLimitExits, mStatus.filterResourceDowngrades,
 		(double)mStatus.residentBytes / (1024.0 * 1024.0), (unsigned long long)mStatus.controlReadbackBytes, mStatus.resetReason);
 }

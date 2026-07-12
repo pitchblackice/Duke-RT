@@ -53,6 +53,17 @@ struct NRISmokeStatusSnapshot
 	uint32_t lightShadowOccluded = 0;
 	uint32_t lightSoftSamples = 0;
 	uint32_t lightRadianceClamps = 0;
+	uint32_t filterCandidateHits = 0;
+	uint32_t filterAlphaRejects = 0;
+	uint32_t filterNoShadowRejects = 0;
+	uint32_t filterOneWayRejects = 0;
+	uint32_t filterReflectionRejects = 0;
+	uint32_t filterPortalContinuations = 0;
+	uint32_t filterAcceptedBlockers = 0;
+	uint32_t filterMisses = 0;
+	uint32_t filterSkipLimitExits = 0;
+	uint32_t filterContinuationLimitExits = 0;
+	uint32_t filterResourceDowngrades = 0;
 };
 
 class NRISmokeSystem
@@ -79,6 +90,7 @@ private:
 		nri::DescriptorSet* textureSet = nullptr;
 		nri::DescriptorSet* outputSet = nullptr;
 		nri::DescriptorSet* lightSet = nullptr;
+		nri::DescriptorSet* filteredSceneSet = nullptr;
 		bool readbackPending = false;
 		bool initialized = false;
 		bool readbackInitialized = false;

@@ -310,6 +310,7 @@ void NRIRenderer::DestroySceneBuffers()
 		initialized = 0u;
 	}
 	mSceneDataDescriptors.fill(nullptr);
+	mCurrentSceneTextureDescriptors.clear();
 	mBoundStaticPrimitiveCount = 0;
 	mBoundDynamicPrimitiveCount = 0;
 	mBoundStaticMaterialCount = 0;

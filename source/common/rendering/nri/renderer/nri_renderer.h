@@ -2639,6 +2639,10 @@ private:
 	NRIDirectionalLightState mDirectionalLightState = {};
 	NRIPTNightVisionState mNightVisionState = {};
 	std::array<nri::Descriptor*, 26> mSceneDataDescriptors = {};
+	// Retain the descriptor identities used by the current queued-frame scene
+	// texture set so focused GPU workloads can bind the same resident textures
+	// without duplicating or re-uploading texture payloads.
+	std::vector<nri::Descriptor*> mCurrentSceneTextureDescriptors;
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
 	std::vector<SceneInstanceData> mBoundSceneInstances;

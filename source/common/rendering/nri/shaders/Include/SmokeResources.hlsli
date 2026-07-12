@@ -87,6 +87,22 @@ struct SmokeControl
 	uint LightSoftSamples;
 	uint LightRadianceClamps;
 	uint LightingReserved;
+	uint FilterCandidateHits;
+	uint FilterAlphaRejects;
+	uint FilterNoShadowRejects;
+	uint FilterOneWayRejects;
+	uint FilterReflectionRejects;
+	uint FilterPortalContinuations;
+	uint FilterAcceptedBlockers;
+	uint FilterMisses;
+	uint FilterSkipLimitExits;
+	uint FilterContinuationLimitExits;
+	uint FilterResourceDowngrades;
+	uint FilterReserved0;
+	uint FilterReserved1;
+	uint FilterReserved2;
+	uint FilterReserved3;
+	uint FilterReserved4;
 };
 
 StructuredBuffer<SmokeStyle> gSmokeStyles : register(t0, space0);

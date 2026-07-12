@@ -83,12 +83,24 @@ struct NRISmokeControlGpu
 	uint32_t lightSoftSamples = 0;
 	uint32_t lightRadianceClamps = 0;
 	uint32_t lightingReserved = 0;
+	uint32_t filterCandidateHits = 0;
+	uint32_t filterAlphaRejects = 0;
+	uint32_t filterNoShadowRejects = 0;
+	uint32_t filterOneWayRejects = 0;
+	uint32_t filterReflectionRejects = 0;
+	uint32_t filterPortalContinuations = 0;
+	uint32_t filterAcceptedBlockers = 0;
+	uint32_t filterMisses = 0;
+	uint32_t filterSkipLimitExits = 0;
+	uint32_t filterContinuationLimitExits = 0;
+	uint32_t filterResourceDowngrades = 0;
+	uint32_t filterReserved[5] = {};
 };
 
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
 static_assert(sizeof(NRISmokeStyleGpu) == 80);
 static_assert(sizeof(NRISmokeInjectionCommandGpu) == 64);
-static_assert(sizeof(NRISmokeControlGpu) == 64);
+static_assert(sizeof(NRISmokeControlGpu) == 128);
 
 struct NRISmokeConstants
 {
@@ -145,7 +157,9 @@ struct NRISmokeConstants
 	uint32_t runtimeLightTileCountX = 0;
 	uint32_t runtimeLightTileCountY = 0;
 	uint32_t pointLightsEnabled = 1;
-	uint32_t lightingPad = 0;
+	// bit 0: filtered visibility requested, bit 1: resources ready,
+	// bits 8..15: portal traversal depth.
+	uint32_t filteredVisibilityEnabled = 0;
 };
 
 static_assert(sizeof(NRISmokeConstants) == 208, "NRISmokeConstants must match SmokeConstants.hlsli");

@@ -99,6 +99,7 @@ struct NRISmokeSettings
 	uint32_t lightMode = 1;
 	uint32_t lightSamples = 1;
 	uint32_t maxLightCandidates = 8;
+	bool filteredVisibility = true;
 	uint32_t debugMode = 0;
 	uint32_t traceMode = 0;
 	float froxelMaxDistance = 4096.0f;

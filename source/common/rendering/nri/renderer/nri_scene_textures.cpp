@@ -601,6 +601,7 @@ bool NRIRenderer::UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& des
 	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(descriptors.data());
 	update.descriptorNum = (uint32_t)descriptors.size();
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+	mCurrentSceneTextureDescriptors = descriptors;
 	TraceSharedDescriptorRewrite(
 		"scene_textures",
 		reason != nullptr ? reason : "unlabeled",
