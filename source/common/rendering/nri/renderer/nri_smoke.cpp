@@ -15,12 +15,9 @@ namespace
 {
 	constexpr uint32_t kThreads = 64;
 	constexpr uint32_t kMaxCommands = 256;
-	constexpr uint32_t kFineCellCapacity = 8u;
 	constexpr uint32_t kWideCellCount = 16u * 9u;
-	constexpr uint32_t kWideCellCapacity = 32u;
-	constexpr uint32_t kGlobalDepthCapacity = 96u;
-	constexpr uint32_t kMaximumCandidatesPerFroxel = kFineCellCapacity + kWideCellCapacity + kGlobalDepthCapacity;
-	constexpr uint32_t kSmokeStorageBufferCount = 13u;
+	constexpr uint32_t kMaximumReferencesPerParticle = 512u;
+	constexpr uint32_t kSmokeStorageBufferCount = 11u;
 	constexpr uint32_t kSmokeFilteredSceneBufferCount = 8u;
 	constexpr uint32_t kSmokeEmissiveSceneBufferCount = 7u;
 
@@ -226,9 +223,9 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 		mStyles.emplace_back();
 	const uint32_t fw = (renderer.mRenderWidth + mSettings.froxelPixelSize - 1) / mSettings.froxelPixelSize;
 	const uint32_t fh = (renderer.mRenderHeight + mSettings.froxelPixelSize - 1) / mSettings.froxelPixelSize;
-	const bool persistentReady = mParticles.buffer != nullptr && mResourceParticleCapacity == mSettings.particleCapacity &&
+	const bool persistentReady = mParticles.buffer != nullptr && mReferenceNext.buffer != nullptr && mResourceParticleCapacity == mSettings.particleCapacity &&
 		mResourceStyleCapacity == (uint32_t)mStyles.size();
-	const bool viewReady = mFineCellCounts.buffer != nullptr && mResourceFroxelWidth == fw &&
+	const bool viewReady = mFineCells.buffer != nullptr && mResourceFroxelWidth == fw &&
 		mResourceFroxelHeight == fh && mResourceFroxelDepth == mSettings.froxelDepth;
 	if (persistentReady && viewReady)
 		return true;
@@ -247,6 +244,7 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 	{
 		if (!CreateBuffer(renderer, mParticles, (uint64_t)mSettings.particleCapacity * sizeof(NRISmokeParticleGpu), sizeof(NRISmokeParticleGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
 			!CreateBuffer(renderer, mControl, sizeof(NRISmokeControlGpu), sizeof(NRISmokeControlGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
+			!CreateBuffer(renderer, mReferenceNext, (uint64_t)mSettings.particleCapacity * kMaximumReferencesPerParticle * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
 			!CreateBuffer(renderer, mStyleBuffer, std::max<size_t>(1, mStyles.size()) * sizeof(NRISmokeStyleGpu), sizeof(NRISmokeStyleGpu), copyDevice, nri::MemoryLocation::DEVICE, true, false))
 		{
 			DestroyResources(renderer);
@@ -267,12 +265,9 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 		mResourceStyleCapacity = (uint32_t)mStyles.size();
 		mNeedsClear = true;
 	}
-	if (!CreateBuffer(renderer, mFineCellCounts, froxels * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
-		!CreateBuffer(renderer, mFineCellIndices, froxels * kFineCellCapacity * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
-		!CreateBuffer(renderer, mWideCellCounts, wideCells * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
-		!CreateBuffer(renderer, mWideCellIndices, wideCells * kWideCellCapacity * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
-		!CreateBuffer(renderer, mGlobalDepthCounts, (uint64_t)mSettings.froxelDepth * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
-		!CreateBuffer(renderer, mGlobalDepthIndices, (uint64_t)mSettings.froxelDepth * kGlobalDepthCapacity * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
+	if (!CreateBuffer(renderer, mFineCells, froxels * sizeof(uint32_t) * 2u, sizeof(uint32_t) * 2u, storage, nri::MemoryLocation::DEVICE, false, true) ||
+		!CreateBuffer(renderer, mWideCells, wideCells * sizeof(uint32_t) * 2u, sizeof(uint32_t) * 2u, storage, nri::MemoryLocation::DEVICE, false, true) ||
+		!CreateBuffer(renderer, mGlobalDepthCells, (uint64_t)mSettings.froxelDepth * sizeof(uint32_t) * 2u, sizeof(uint32_t) * 2u, storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mFroxelMedium, froxels * 16, 16, storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mFroxelIntegrated, froxels * 16, 16, storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mFroxelPhase, froxels * 16, 16, storage, nri::MemoryLocation::DEVICE, false, true) ||
@@ -290,8 +285,8 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 	mStatus.froxelHeight = fh;
 	mStatus.froxelDepth = mSettings.froxelDepth;
 	mStatus.particleCapacity = mSettings.particleCapacity;
-	mStatus.residentBytes = mParticles.memorySize + mControl.memorySize + mFineCellCounts.memorySize + mFineCellIndices.memorySize +
-		mWideCellCounts.memorySize + mWideCellIndices.memorySize + mGlobalDepthCounts.memorySize + mGlobalDepthIndices.memorySize +
+	mStatus.residentBytes = mParticles.memorySize + mControl.memorySize + mReferenceNext.memorySize + mFineCells.memorySize +
+		mWideCells.memorySize + mGlobalDepthCells.memorySize +
 		mFroxelMedium.memorySize + mFroxelIntegrated.memorySize + mFroxelPhase.memorySize + mFroxelSource.memorySize +
 		mOccupiedFroxelIndices.memorySize + mStyleBuffer.memorySize;
 	for (const CommandSlot& slot : mCommandSlots)
@@ -348,18 +343,19 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 				mStatus.fineColumnReferences = control.fineColumnReferences;
 				mStatus.wideCellReferences = control.wideCellReferences;
 				mStatus.globalDepthReferences = control.globalDepthReferences;
-				mStatus.selectionCollisions = control.selectionCollisions;
-				mStatus.selectionReplacements = control.selectionReplacements;
+				mStatus.referenceInvalidLinks = control.referenceInvalidLinks;
+				mStatus.referenceTraversalLimitExits = control.referenceTraversalLimitExits;
 				mStatus.fineTierParticles = control.fineTierParticles;
 				mStatus.wideTierParticles = control.wideTierParticles;
 				mStatus.globalTierParticles = control.globalTierParticles;
 				mStatus.fineOccupiedCells = control.fineOccupiedCells;
 				mStatus.wideOccupiedCells = control.wideOccupiedCells;
 				mStatus.globalOccupiedSlices = control.globalOccupiedSlices;
-				mStatus.fineSelectionLosses = control.fineSelectionLosses;
-				mStatus.wideSelectionLosses = control.wideSelectionLosses;
-				mStatus.globalSelectionLosses = control.globalSelectionLosses;
+				mStatus.fineMaximumCellReferences = control.fineMaximumCellReferences;
+				mStatus.wideMaximumCellReferences = control.wideMaximumCellReferences;
+				mStatus.globalMaximumCellReferences = control.globalMaximumCellReferences;
 				mStatus.maximumDepthSpan = control.maximumDepthSpan;
+				mStatus.maximumCandidatesPerFroxel = control.maximumCandidatesPerFroxel;
 				mStatus.occupiedCount = control.occupiedCount;
 				mStatus.occupiedOverflow = control.occupiedOverflow;
 				mStatus.mediumCandidateTests = control.mediumCandidateTests;
@@ -458,9 +454,8 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 
 	nri::BufferBarrierDesc compute[2 + kSmokeStorageBufferCount] = {};
 	nri::Buffer* computeBuffers[] = { mStyleBuffer.buffer, slot.device.buffer, mParticles.buffer, mControl.buffer,
-		mFineCellCounts.buffer, mFineCellIndices.buffer, mFroxelMedium.buffer, mFroxelIntegrated.buffer,
-		mWideCellCounts.buffer, mWideCellIndices.buffer, mGlobalDepthCounts.buffer, mGlobalDepthIndices.buffer,
-		mFroxelPhase.buffer, mFroxelSource.buffer, mOccupiedFroxelIndices.buffer };
+		mFineCells.buffer, mReferenceNext.buffer, mFroxelMedium.buffer, mFroxelIntegrated.buffer,
+		mWideCells.buffer, mGlobalDepthCells.buffer, mFroxelPhase.buffer, mFroxelSource.buffer, mOccupiedFroxelIndices.buffer };
 	for (uint32_t i = 0; i < 2 + kSmokeStorageBufferCount; ++i)
 	{
 		compute[i].buffer = computeBuffers[i];
@@ -484,9 +479,8 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, computeBarrier);
 
 	const nri::Descriptor* inputs[] = { mStyleBuffer.shaderView, slot.device.shaderView };
-	const nri::Descriptor* outputs[] = { mParticles.storageView, mControl.storageView, mFineCellCounts.storageView, mFineCellIndices.storageView,
-		mFroxelMedium.storageView, mFroxelIntegrated.storageView, mWideCellCounts.storageView, mWideCellIndices.storageView,
-		mGlobalDepthCounts.storageView, mGlobalDepthIndices.storageView, mFroxelPhase.storageView,
+	const nri::Descriptor* outputs[] = { mParticles.storageView, mControl.storageView, mFineCells.storageView, mReferenceNext.storageView,
+		mFroxelMedium.storageView, mFroxelIntegrated.storageView, mWideCells.storageView, mGlobalDepthCells.storageView, mFroxelPhase.storageView,
 		mFroxelSource.storageView, mOccupiedFroxelIndices.storageView };
 	nri::UpdateDescriptorRangeDesc updates[2] = {};
 	updates[0].descriptorSet = slot.inputSet; updates[0].rangeIndex = 0; updates[0].descriptors = inputs; updates[0].descriptorNum = 2;
@@ -702,9 +696,8 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	auto storageBarrier = [&]()
 	{
 		nri::BufferBarrierDesc barriers[kSmokeStorageBufferCount] = {};
-		nri::Buffer* buffers[] = { mParticles.buffer, mControl.buffer, mFineCellCounts.buffer, mFineCellIndices.buffer,
-			mFroxelMedium.buffer, mFroxelIntegrated.buffer, mWideCellCounts.buffer, mWideCellIndices.buffer,
-			mGlobalDepthCounts.buffer, mGlobalDepthIndices.buffer, mFroxelPhase.buffer,
+		nri::Buffer* buffers[] = { mParticles.buffer, mControl.buffer, mFineCells.buffer, mReferenceNext.buffer,
+			mFroxelMedium.buffer, mFroxelIntegrated.buffer, mWideCells.buffer, mGlobalDepthCells.buffer, mFroxelPhase.buffer,
 			mFroxelSource.buffer, mOccupiedFroxelIndices.buffer };
 		for (uint32_t i = 0; i < kSmokeStorageBufferCount; ++i) { barriers[i].buffer = buffers[i]; barriers[i].before = StorageAccess(); barriers[i].after = StorageAccess(); }
 		nri::BarrierDesc barrier = {}; barrier.buffers = barriers; barrier.bufferNum = kSmokeStorageBufferCount;
@@ -799,18 +792,19 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.fineColumnReferences = 0;
 	mStatus.wideCellReferences = 0;
 	mStatus.globalDepthReferences = 0;
-	mStatus.selectionCollisions = 0;
-	mStatus.selectionReplacements = 0;
+	mStatus.referenceInvalidLinks = 0;
+	mStatus.referenceTraversalLimitExits = 0;
 	mStatus.fineTierParticles = 0;
 	mStatus.wideTierParticles = 0;
 	mStatus.globalTierParticles = 0;
 	mStatus.fineOccupiedCells = 0;
 	mStatus.wideOccupiedCells = 0;
 	mStatus.globalOccupiedSlices = 0;
-	mStatus.fineSelectionLosses = 0;
-	mStatus.wideSelectionLosses = 0;
-	mStatus.globalSelectionLosses = 0;
+	mStatus.fineMaximumCellReferences = 0;
+	mStatus.wideMaximumCellReferences = 0;
+	mStatus.globalMaximumCellReferences = 0;
 	mStatus.maximumDepthSpan = 0;
+	mStatus.maximumCandidatesPerFroxel = 0;
 	mStatus.occupiedCount = 0;
 	mStatus.occupiedOverflow = 0;
 	mStatus.mediumCandidateTests = 0;
@@ -861,8 +855,7 @@ void NRISmokeSystem::Reset(const char* reason)
 void NRISmokeSystem::DestroyViewResources(NRIRenderer& renderer)
 {
 	auto destroy = [&](NRIBufferResource& resource) { renderer.DestroyBufferResource(resource); };
-	destroy(mFineCellCounts); destroy(mFineCellIndices); destroy(mWideCellCounts); destroy(mWideCellIndices);
-	destroy(mGlobalDepthCounts); destroy(mGlobalDepthIndices); destroy(mFroxelMedium); destroy(mFroxelIntegrated);
+	destroy(mFineCells); destroy(mWideCells); destroy(mGlobalDepthCells); destroy(mFroxelMedium); destroy(mFroxelIntegrated);
 	destroy(mFroxelPhase); destroy(mFroxelSource); destroy(mOccupiedFroxelIndices);
 	mViewResourcesInitialized = false;
 	mResourceFroxelWidth = mResourceFroxelHeight = mResourceFroxelDepth = 0;
@@ -872,7 +865,7 @@ void NRISmokeSystem::DestroyResources(NRIRenderer& renderer)
 {
 	auto destroy = [&](NRIBufferResource& resource) { renderer.DestroyBufferResource(resource); };
 	DestroyViewResources(renderer);
-	destroy(mStyleBuffer); destroy(mParticles); destroy(mControl);
+	destroy(mStyleBuffer); destroy(mParticles); destroy(mControl); destroy(mReferenceNext);
 	for (CommandSlot& slot : mCommandSlots)
 	{
 		destroy(slot.upload); destroy(slot.device); destroy(slot.styleUpload); destroy(slot.controlReadback);
@@ -903,15 +896,16 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 	const char* placement = mStatus.routePlacement == (uint32_t)NRISmokeRoutePlacement::DlrrPostUpscale ? "dlrr_post_upscale" : "standard_pre_upscale";
 	const char* inputName = mStatus.inputSlot < (uint32_t)NRIRenderer::FrameTextureSlot::Count ? renderer.GetFrameTextureSlotName((NRIRenderer::FrameTextureSlot)mStatus.inputSlot) : "none";
 	const char* outputName = mStatus.outputSlot < (uint32_t)NRIRenderer::FrameTextureSlot::Count ? renderer.GetFrameTextureSlotName((NRIRenderer::FrameTextureSlot)mStatus.outputSlot) : "none";
-	Printf("NRI PT smoke status: enabled=%s epoch=%u main_view=%s route_supported=%s placement=%s input=%s output=%s extent=%ux%u froxels=%ux%ux%u particles=%u styles=%u commands=%u commands_total=%llu dropped=%u substeps=%u light_mode=%u light_samples=%u light_candidates_max=%u point_lights=%s filtered_visibility=%s runtime_lights=%u gpu_stats=%s active=%u spawned=%u expired=%u evictions=%u column_overflow=%u wide_projected=%u wide_global_drops=%u fine_refs=%u wide_refs=%u global_refs=%u tier_particles=%u/%u/%u occupied_cells=%u/%u/%u selection_collisions=%u selection_replacements=%u selection_full_drops=%u/%u/%u depth_span_max=%u carrier_candidates_max=%u medium_occupied=%u occupied_overflow=%u medium_candidate_tests=%u point_froxels=%u light_candidates=%u light_distance_rejected=%u light_shadow_rays=%u light_visible=%u light_occluded=%u light_soft_samples=%u light_clamps=%u filter_hits=%u filter_alpha=%u filter_no_shadow=%u filter_one_way=%u filter_reflection=%u filter_portals=%u filter_blockers=%u filter_misses=%u filter_skip_limit=%u filter_continuation_limit=%u filter_downgrades=%u resident_mib=%.2f particle_readback=0 control_readback=%llu reset=%s\n",
+	Printf("NRI PT smoke status: enabled=%s epoch=%u main_view=%s route_supported=%s placement=%s input=%s output=%s extent=%ux%u froxels=%ux%ux%u particles=%u styles=%u commands=%u commands_total=%llu dropped=%u substeps=%u light_mode=%u light_samples=%u light_candidates_max=%u point_lights=%s filtered_visibility=%s runtime_lights=%u gpu_stats=%s active=%u spawned=%u expired=%u evictions=%u column_overflow=%u reference_mode=complete reference_stride=512 invalid_links=%u traversal_limit=%u wide_projected=%u wide_global_drops=%u fine_refs=%u wide_refs=%u global_refs=%u tier_particles=%u/%u/%u occupied_cells=%u/%u/%u max_cell_refs=%u/%u/%u depth_span_max=%u carrier_candidates_max=%u medium_occupied=%u occupied_overflow=%u medium_candidate_tests=%u point_froxels=%u light_candidates=%u light_distance_rejected=%u light_shadow_rays=%u light_visible=%u light_occluded=%u light_soft_samples=%u light_clamps=%u filter_hits=%u filter_alpha=%u filter_no_shadow=%u filter_one_way=%u filter_reflection=%u filter_portals=%u filter_blockers=%u filter_misses=%u filter_skip_limit=%u filter_continuation_limit=%u filter_downgrades=%u resident_mib=%.2f particle_readback=0 control_readback=%llu reset=%s\n",
 		mStatus.enabled ? "yes" : "no", mStatus.simulationEpoch, mStatus.mainViewEligible ? "yes" : "no", mStatus.routeSupported ? "yes" : "no", placement,
 		inputName, outputName, mStatus.routeWidth, mStatus.routeHeight, mStatus.froxelWidth, mStatus.froxelHeight, mStatus.froxelDepth,
 		mStatus.particleCapacity, mStatus.styleCount, mStatus.commandsUploaded, (unsigned long long)mStatus.commandsUploadedTotal, mStatus.commandsDropped, mStatus.simulationSubsteps,
 		mSettings.lightMode, mSettings.lightSamples, mSettings.maxLightCandidates, mSettings.pointLights ? "yes" : "no", mSettings.filteredVisibility ? "yes" : "no", renderer.mBoundRuntimeLightCount,
 		mStatus.gpuStatsValid ? "valid" : "disabled", mStatus.activeParticles, mStatus.spawnedParticles, mStatus.expiredParticles, mStatus.liveEvictions, mStatus.columnOverflow,
+		mStatus.referenceInvalidLinks, mStatus.referenceTraversalLimitExits,
 		mStatus.wideParticlesProjected, mStatus.wideGlobalDrops, mStatus.fineColumnReferences, mStatus.wideCellReferences, mStatus.globalDepthReferences,
 		mStatus.fineTierParticles, mStatus.wideTierParticles, mStatus.globalTierParticles, mStatus.fineOccupiedCells, mStatus.wideOccupiedCells, mStatus.globalOccupiedSlices,
-		mStatus.selectionCollisions, mStatus.selectionReplacements, mStatus.fineSelectionLosses, mStatus.wideSelectionLosses, mStatus.globalSelectionLosses, mStatus.maximumDepthSpan, kMaximumCandidatesPerFroxel,
+		mStatus.fineMaximumCellReferences, mStatus.wideMaximumCellReferences, mStatus.globalMaximumCellReferences, mStatus.maximumDepthSpan, mStatus.maximumCandidatesPerFroxel,
 		mStatus.occupiedCount, mStatus.occupiedOverflow, mStatus.mediumCandidateTests, mStatus.pointFroxelsProcessed,
 		mStatus.lightCandidatesTested, mStatus.lightDistanceRejected, mStatus.lightShadowRays, mStatus.lightShadowVisible, mStatus.lightShadowOccluded, mStatus.lightSoftSamples, mStatus.lightRadianceClamps,
 		mStatus.filterCandidateHits, mStatus.filterAlphaRejects, mStatus.filterNoShadowRejects, mStatus.filterOneWayRejects, mStatus.filterReflectionRejects,

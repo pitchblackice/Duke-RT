@@ -33,26 +33,67 @@ void SmokeAccumulateCandidate(
 	contributingCandidates++;
 }
 
-void SmokeAccumulatePackedCandidate(
-	uint packedCandidate,
+void SmokeAccumulateReferenceList(
+	SmokeCellHeader cell,
 	uint particleCount,
 	uint styleCount,
 	float3 ray,
 	float sliceNearDepth,
 	float sliceFarDepth,
-	bool diagnostics,
+	inout uint remainingTraversal,
+	inout uint testedReferences,
+	inout bool invalidLink,
+	inout bool traversalLimitExit,
 	inout float extinction,
 	inout float3 scatteringCoefficient,
 	inout float weightedAnisotropy,
 	inout float anisotropyWeight,
 	inout uint contributingCandidates)
 {
-	if (packedCandidate == 0u)
+	if (cell.Head == NRI_SMOKE_REFERENCE_END || cell.Count == 0u || remainingTraversal == 0u)
+	{
+		if ((cell.Head == NRI_SMOKE_REFERENCE_END) != (cell.Count == 0u))
+			invalidLink = true;
+		if (cell.Head != NRI_SMOKE_REFERENCE_END && remainingTraversal == 0u)
+			traversalLimitExit = true;
 		return;
-	if (diagnostics)
-		InterlockedAdd(gSmokeControl[0].MediumCandidateTests, 1u);
-	SmokeAccumulateCandidate(SmokeUnpackCandidateIndex(packedCandidate), particleCount, styleCount, ray,
-		sliceNearDepth, sliceFarDepth, extinction, scatteringCoefficient, weightedAnisotropy, anisotropyWeight, contributingCandidates);
+	}
+
+	uint nodeCount, ignoredStride;
+	gSmokeReferenceNext.GetDimensions(nodeCount, ignoredStride);
+	uint nodeIndex = cell.Head;
+	uint traversed = 0u;
+	const uint traversalCount = min(cell.Count, remainingTraversal);
+	[loop]
+	while (traversed < traversalCount && nodeIndex != NRI_SMOKE_REFERENCE_END)
+	{
+		if (nodeIndex >= nodeCount)
+		{
+			invalidLink = true;
+			break;
+		}
+		const uint particleIndex = nodeIndex / NRI_SMOKE_MAX_TIER_REFERENCES;
+		SmokeAccumulateCandidate(particleIndex, particleCount, styleCount, ray, sliceNearDepth, sliceFarDepth,
+			extinction, scatteringCoefficient, weightedAnisotropy, anisotropyWeight, contributingCandidates);
+		nodeIndex = gSmokeReferenceNext[nodeIndex];
+		traversed++;
+		testedReferences++;
+		remainingTraversal--;
+	}
+
+	if (nodeIndex == NRI_SMOKE_REFERENCE_END)
+	{
+		if (traversed != cell.Count)
+			invalidLink = true;
+	}
+	else if (remainingTraversal == 0u)
+	{
+		traversalLimitExit = true;
+	}
+	else if (traversed >= cell.Count)
+	{
+		invalidLink = true;
+	}
 }
 
 [numthreads(4, 4, 4)]
@@ -63,14 +104,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (dispatchThreadId.x >= gSmokeConstants.FroxelWidth || dispatchThreadId.y >= gSmokeConstants.FroxelHeight || dispatchThreadId.z >= gSmokeConstants.FroxelDepth)
 		return;
 
-	uint fineCellCount, fineCellIndexCount, wideCellCount, wideCellIndexCount, globalDepthCount, globalDepthIndexCount;
+	uint fineCellCount, wideCellCount, globalDepthCount;
 	uint particleCount, styleCount, mediumCount, phaseCount, sourceCount, occupiedCapacity, controlCount, ignoredStride;
-	gSmokeFineCellCounts.GetDimensions(fineCellCount, ignoredStride);
-	gSmokeFineCellIndices.GetDimensions(fineCellIndexCount, ignoredStride);
-	gSmokeWideCellCounts.GetDimensions(wideCellCount, ignoredStride);
-	gSmokeWideCellIndices.GetDimensions(wideCellIndexCount, ignoredStride);
-	gSmokeGlobalDepthCounts.GetDimensions(globalDepthCount, ignoredStride);
-	gSmokeGlobalDepthIndices.GetDimensions(globalDepthIndexCount, ignoredStride);
+	gSmokeFineCells.GetDimensions(fineCellCount, ignoredStride);
+	gSmokeWideCells.GetDimensions(wideCellCount, ignoredStride);
+	gSmokeGlobalDepthCells.GetDimensions(globalDepthCount, ignoredStride);
 	gSmokeParticles.GetDimensions(particleCount, ignoredStride);
 	gSmokeStyles.GetDimensions(styleCount, ignoredStride);
 	gSmokeFroxelMedium.GetDimensions(mediumCount, ignoredStride);
@@ -92,43 +130,40 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float weightedAnisotropy = 0.0;
 	float anisotropyWeight = 0.0;
 	uint contributingCandidates = 0u;
-	const uint fineCandidateCount = min(gSmokeFineCellCounts[froxelIndex], NRI_SMOKE_FINE_CELL_CAPACITY);
-	[loop]
-	for (uint i = 0u; i < fineCandidateCount; ++i)
-	{
-		const uint candidateIndex = froxelIndex * NRI_SMOKE_FINE_CELL_CAPACITY + i;
-		if (candidateIndex >= fineCellIndexCount)
-			break;
-		SmokeAccumulatePackedCandidate(gSmokeFineCellIndices[candidateIndex], particleCount, styleCount, ray,
-			sliceNearDepth, sliceFarDepth, diagnostics, extinction, scatteringCoefficient, weightedAnisotropy, anisotropyWeight, contributingCandidates);
-	}
+	uint testedReferences = 0u;
+	uint remainingTraversal = min(gSmokeConstants.ParticleCapacity, particleCount);
+	bool invalidLink = false;
+	bool traversalLimitExit = false;
+
+	SmokeAccumulateReferenceList(gSmokeFineCells[froxelIndex], particleCount, styleCount, ray, sliceNearDepth, sliceFarDepth,
+		remainingTraversal, testedReferences, invalidLink, traversalLimitExit, extinction, scatteringCoefficient,
+		weightedAnisotropy, anisotropyWeight, contributingCandidates);
 
 	const uint2 wideCellPosition = min(uint2(
 		dispatchThreadId.x * NRI_SMOKE_WIDE_GRID_X / gSmokeConstants.FroxelWidth,
 		dispatchThreadId.y * NRI_SMOKE_WIDE_GRID_Y / gSmokeConstants.FroxelHeight),
 		uint2(NRI_SMOKE_WIDE_GRID_X - 1u, NRI_SMOKE_WIDE_GRID_Y - 1u));
 	const uint wideCellIndex = SmokeWideCellIndex(wideCellPosition.x, wideCellPosition.y, dispatchThreadId.z);
-	const uint wideCandidateCount = wideCellIndex < wideCellCount ? min(gSmokeWideCellCounts[wideCellIndex], NRI_SMOKE_WIDE_CELL_CAPACITY) : 0u;
-	[loop]
-	for (uint i = 0u; i < wideCandidateCount; ++i)
+	if (wideCellIndex < wideCellCount)
 	{
-		const uint candidateIndex = wideCellIndex * NRI_SMOKE_WIDE_CELL_CAPACITY + i;
-		if (candidateIndex >= wideCellIndexCount)
-			break;
-		SmokeAccumulatePackedCandidate(gSmokeWideCellIndices[candidateIndex], particleCount, styleCount, ray,
-			sliceNearDepth, sliceFarDepth, diagnostics, extinction, scatteringCoefficient, weightedAnisotropy, anisotropyWeight, contributingCandidates);
+		SmokeAccumulateReferenceList(gSmokeWideCells[wideCellIndex], particleCount, styleCount, ray, sliceNearDepth, sliceFarDepth,
+			remainingTraversal, testedReferences, invalidLink, traversalLimitExit, extinction, scatteringCoefficient,
+			weightedAnisotropy, anisotropyWeight, contributingCandidates);
 	}
 
-	const uint globalCandidateCount = dispatchThreadId.z < globalDepthCount
-		? min(gSmokeGlobalDepthCounts[dispatchThreadId.z], NRI_SMOKE_GLOBAL_DEPTH_CAPACITY) : 0u;
-	[loop]
-	for (uint i = 0u; i < globalCandidateCount; ++i)
+	if (dispatchThreadId.z < globalDepthCount)
 	{
-		const uint candidateIndex = dispatchThreadId.z * NRI_SMOKE_GLOBAL_DEPTH_CAPACITY + i;
-		if (candidateIndex >= globalDepthIndexCount)
-			break;
-		SmokeAccumulatePackedCandidate(gSmokeGlobalDepthIndices[candidateIndex], particleCount, styleCount, ray,
-			sliceNearDepth, sliceFarDepth, diagnostics, extinction, scatteringCoefficient, weightedAnisotropy, anisotropyWeight, contributingCandidates);
+		SmokeAccumulateReferenceList(gSmokeGlobalDepthCells[dispatchThreadId.z], particleCount, styleCount, ray, sliceNearDepth, sliceFarDepth,
+			remainingTraversal, testedReferences, invalidLink, traversalLimitExit, extinction, scatteringCoefficient,
+			weightedAnisotropy, anisotropyWeight, contributingCandidates);
+	}
+
+	if (diagnostics)
+	{
+		if (testedReferences > 0u) InterlockedAdd(gSmokeControl[0].MediumCandidateTests, testedReferences);
+		InterlockedMax(gSmokeControl[0].MaximumCandidatesPerFroxel, testedReferences);
+		if (invalidLink) InterlockedAdd(gSmokeControl[0].ReferenceInvalidLinks, 1u);
+		if (traversalLimitExit) InterlockedAdd(gSmokeControl[0].ReferenceTraversalLimitExits, 1u);
 	}
 
 	extinction = max(extinction, 0.0);

@@ -11,17 +11,14 @@
 #define NRI_SMOKE_SET_LIGHTS 4
 #define NRI_SMOKE_SET_ROOT 5
 
-// Hard ceilings keep overlapping or near-camera effects from turning smoke into
-// an unbounded per-frame workload.
+// Projection work is bounded per particle. Cell residency itself is complete:
+// every emitted reference receives a unique node in its selected tier.
 #define NRI_SMOKE_MAX_PARTICLES_PER_COMMAND 256u
-#define NRI_SMOKE_FINE_CELL_CAPACITY 8u
 #define NRI_SMOKE_WIDE_GRID_X 16u
 #define NRI_SMOKE_WIDE_GRID_Y 9u
 #define NRI_SMOKE_WIDE_CELL_COUNT (NRI_SMOKE_WIDE_GRID_X * NRI_SMOKE_WIDE_GRID_Y)
-#define NRI_SMOKE_WIDE_CELL_CAPACITY 32u
-#define NRI_SMOKE_GLOBAL_DEPTH_CAPACITY 96u
 #define NRI_SMOKE_MAX_TIER_REFERENCES 512u
-#define NRI_SMOKE_MAX_CANDIDATES_PER_FROXEL (NRI_SMOKE_FINE_CELL_CAPACITY + NRI_SMOKE_WIDE_CELL_CAPACITY + NRI_SMOKE_GLOBAL_DEPTH_CAPACITY)
+#define NRI_SMOKE_REFERENCE_END 0xffffffffu
 
 struct SmokeParticle
 {
@@ -74,6 +71,12 @@ struct SmokeInjectionCommand
 	uint2 Padding;
 };
 
+struct SmokeCellHeader
+{
+	uint Head;
+	uint Count;
+};
+
 struct SmokeControl
 {
 	uint WriteCursor;
@@ -105,8 +108,8 @@ struct SmokeControl
 	uint FilterResourceDowngrades;
 	uint FineColumnReferences;
 	uint WideCellReferences;
-	uint SelectionCollisions;
-	uint SelectionReplacements;
+	uint ReferenceInvalidLinks;
+	uint ReferenceTraversalLimitExits;
 	uint GlobalDepthReferences;
 	uint FineTierParticles;
 	uint WideTierParticles;
@@ -114,15 +117,11 @@ struct SmokeControl
 	uint FineOccupiedCells;
 	uint WideOccupiedCells;
 	uint GlobalOccupiedSlices;
-	uint FineSelectionCollisions;
-	uint WideSelectionCollisions;
-	uint GlobalSelectionCollisions;
-	uint FineSelectionReplacements;
-	uint WideSelectionReplacements;
-	uint GlobalSelectionReplacements;
-	uint FineSelectionLosses;
-	uint WideSelectionLosses;
-	uint GlobalSelectionLosses;
+	uint FineMaximumCellReferences;
+	uint WideMaximumCellReferences;
+	uint GlobalMaximumCellReferences;
+	uint3 ReferenceDiagnosticsPadding0;
+	uint3 ReferenceDiagnosticsPadding1;
 	uint MaximumDepthSpan;
 	uint DepthSpanOne;
 	uint DepthSpanTwoToFour;
@@ -157,17 +156,15 @@ StructuredBuffer<SmokeInjectionCommand> gSmokeCommands : register(t1, space0);
 
 RWStructuredBuffer<SmokeParticle> gSmokeParticles : register(u0, space1);
 RWStructuredBuffer<SmokeControl> gSmokeControl : register(u1, space1);
-RWStructuredBuffer<uint> gSmokeFineCellCounts : register(u2, space1);
-RWStructuredBuffer<uint> gSmokeFineCellIndices : register(u3, space1);
+RWStructuredBuffer<SmokeCellHeader> gSmokeFineCells : register(u2, space1);
+RWStructuredBuffer<uint> gSmokeReferenceNext : register(u3, space1);
 RWStructuredBuffer<float4> gSmokeFroxelMedium : register(u4, space1);
 RWStructuredBuffer<float4> gSmokeFroxelIntegrated : register(u5, space1);
-RWStructuredBuffer<uint> gSmokeWideCellCounts : register(u6, space1);
-RWStructuredBuffer<uint> gSmokeWideCellIndices : register(u7, space1);
-RWStructuredBuffer<uint> gSmokeGlobalDepthCounts : register(u8, space1);
-RWStructuredBuffer<uint> gSmokeGlobalDepthIndices : register(u9, space1);
-RWStructuredBuffer<float4> gSmokeFroxelPhase : register(u10, space1);
-RWStructuredBuffer<float4> gSmokeFroxelSource : register(u11, space1);
-RWStructuredBuffer<uint> gSmokeOccupiedFroxelIndices : register(u12, space1);
+RWStructuredBuffer<SmokeCellHeader> gSmokeWideCells : register(u6, space1);
+RWStructuredBuffer<SmokeCellHeader> gSmokeGlobalDepthCells : register(u7, space1);
+RWStructuredBuffer<float4> gSmokeFroxelPhase : register(u8, space1);
+RWStructuredBuffer<float4> gSmokeFroxelSource : register(u9, space1);
+RWStructuredBuffer<uint> gSmokeOccupiedFroxelIndices : register(u10, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);
@@ -188,21 +185,6 @@ float SmokeRandom01(inout uint state)
 {
 	state = SmokeHash(state);
 	return (float)(state & 0x00ffffffu) / 16777216.0;
-}
-
-uint SmokePackCandidate(SmokeParticle particle, uint particleIndex)
-{
-	// Positive IEEE-754 values retain their ordering as unsigned integers.
-	// Keep the upper 16 bits as a compact optical-importance key and use the
-	// particle index as a deterministic tie breaker and recoverable payload.
-	const float opticalImportance = max(particle.Density * particle.Radius, 1e-20);
-	const uint importance = max(asuint(opticalImportance) >> 16u, 1u);
-	return (importance << 16u) | (particleIndex & 0xffffu);
-}
-
-uint SmokeUnpackCandidateIndex(uint packedCandidate)
-{
-	return packedCandidate & 0xffffu;
 }
 
 #endif
