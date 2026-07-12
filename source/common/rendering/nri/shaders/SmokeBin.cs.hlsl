@@ -1,4 +1,5 @@
 #include "Include/SmokeResources.hlsli"
+#include "Include/SmokeFroxel.hlsli"
 
 [numthreads(64, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -33,42 +34,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	int2 minimumColumn = int2(0, 0);
 	int2 maximumColumn = int2(gSmokeConstants.FroxelWidth - 1u, gSmokeConstants.FroxelHeight - 1u);
-	// Project the sphere's camera-space AABB at its near and far depths. This is
-	// deliberately conservative; exact ray/sphere rejection remains in evaluate.
-	if (viewDepth > particle.Radius)
-	{
-		const float cameraX = dot(relativePosition, gSmokeConstants.CameraRight);
-		const float cameraY = dot(relativePosition, gSmokeConstants.CameraUp);
-		const float nearProjectionDepth = max(viewDepth - particle.Radius, 0.001);
-		const float farProjectionDepth = max(viewDepth + particle.Radius, nearProjectionDepth);
-		const float inverseTanX = rcp(max(gSmokeConstants.TanHalfFovX, 0.001));
-		const float inverseTanY = rcp(max(gSmokeConstants.TanHalfFovY, 0.001));
-		const float x0 = cameraX - particle.Radius;
-		const float x1 = cameraX + particle.Radius;
-		const float y0 = -(cameraY - particle.Radius);
-		const float y1 = -(cameraY + particle.Radius);
-		const float xNear0 = x0 / nearProjectionDepth * inverseTanX;
-		const float xNear1 = x1 / nearProjectionDepth * inverseTanX;
-		const float xFar0 = x0 / farProjectionDepth * inverseTanX;
-		const float xFar1 = x1 / farProjectionDepth * inverseTanX;
-		const float yNear0 = y0 / nearProjectionDepth * inverseTanY;
-		const float yNear1 = y1 / nearProjectionDepth * inverseTanY;
-		const float yFar0 = y0 / farProjectionDepth * inverseTanY;
-		const float yFar1 = y1 / farProjectionDepth * inverseTanY;
-		const float2 ndcMinimum = float2(
-			min(min(xNear0, xNear1), min(xFar0, xFar1)),
-			min(min(yNear0, yNear1), min(yFar0, yFar1)));
-		const float2 ndcMaximum = float2(
-			max(max(xNear0, xNear1), max(xFar0, xFar1)),
-			max(max(yNear0, yNear1), max(yFar0, yFar1)));
-		const int2 unclampedMinimum = int2(floor((ndcMinimum * 0.5 + 0.5) * float2(gSmokeConstants.FroxelWidth, gSmokeConstants.FroxelHeight)));
-		const int2 unclampedMaximum = int2(floor((ndcMaximum * 0.5 + 0.5) * float2(gSmokeConstants.FroxelWidth, gSmokeConstants.FroxelHeight)));
-		if (unclampedMaximum.x < 0 || unclampedMaximum.y < 0 ||
-			unclampedMinimum.x >= (int)gSmokeConstants.FroxelWidth || unclampedMinimum.y >= (int)gSmokeConstants.FroxelHeight)
-			return;
-		minimumColumn = max(unclampedMinimum, int2(0, 0));
-		maximumColumn = min(unclampedMaximum, int2(gSmokeConstants.FroxelWidth - 1u, gSmokeConstants.FroxelHeight - 1u));
-	}
+	if (!SmokeProjectSphereToFroxelBounds(particle.Position, particle.Radius, minimumColumn, maximumColumn))
+		return;
 	if (any(minimumColumn > maximumColumn))
 		return;
 

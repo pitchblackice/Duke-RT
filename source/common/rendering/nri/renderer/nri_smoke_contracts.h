@@ -191,9 +191,13 @@ struct NRISmokeConstants
 	// bit 0: filtered visibility requested, bit 1: resources ready,
 	// bits 8..15: portal traversal depth.
 	uint32_t filteredVisibilityEnabled = 0;
+
+	float currentJitter[2] = {};
+	float currentJitterPad[2] = {};
 };
 
-static_assert(sizeof(NRISmokeConstants) == 208, "NRISmokeConstants must match SmokeConstants.hlsli");
+static_assert(sizeof(NRISmokeConstants) == 224, "NRISmokeConstants must match SmokeConstants.hlsli");
 static_assert(offsetof(NRISmokeConstants, cameraPosition) == 96, "NRISmokeConstants camera offset must match HLSL");
 static_assert(offsetof(NRISmokeConstants, lightMode) == 176, "NRISmokeConstants lighting offset must match HLSL");
 static_assert(offsetof(NRISmokeConstants, runtimeLightTileCountX) == 192, "NRISmokeConstants runtime-light tile offset must match HLSL");
+static_assert(offsetof(NRISmokeConstants, currentJitter) == 208, "NRISmokeConstants jitter offset must match HLSL");

@@ -294,11 +294,7 @@ RuntimeLightTileHeaderData SmokeGetRuntimeLightTileHeader(uint2 froxelPosition)
 		gSmokeConstants.RuntimeLightTileCountX == 0u || gSmokeConstants.RuntimeLightTileCountY == 0u)
 		return emptyHeader;
 
-	const float2 froxelUv = (float2(froxelPosition) + 0.5) /
-		float2(max(gSmokeConstants.FroxelWidth, 1u), max(gSmokeConstants.FroxelHeight, 1u));
-	const uint2 pixelPosition = min(
-		(uint2)(froxelUv * float2(gSmokeConstants.RenderWidth, gSmokeConstants.RenderHeight)),
-		uint2(gSmokeConstants.RenderWidth - 1u, gSmokeConstants.RenderHeight - 1u));
+	const uint2 pixelPosition = SmokeNativeRenderPixel(froxelPosition);
 	const uint2 tilePosition = min(
 		pixelPosition / NRI_SMOKE_RUNTIME_LIGHT_TILE_SIZE,
 		uint2(gSmokeConstants.RuntimeLightTileCountX - 1u, gSmokeConstants.RuntimeLightTileCountY - 1u));

@@ -1,4 +1,5 @@
 #include "Include/SmokeResources.hlsli"
+#include "Include/SmokeFroxel.hlsli"
 
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -16,6 +17,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float transmittance = 1.0;
 	float3 radiance = 0.0;
 	float previousDepth = 0.0;
+	const float3 ray = SmokeFroxelRay(dispatchThreadId.xy);
 	for (uint z = 0u; z < gSmokeConstants.FroxelDepth; ++z)
 	{
 		const uint froxelIndex = SmokeFroxelIndex(dispatchThreadId.x, dispatchThreadId.y, z);
@@ -24,7 +26,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const float4 medium = gSmokeFroxelMedium[froxelIndex];
 		const float3 source = gSmokeFroxelSource[froxelIndex].rgb;
 		const float farDepth = SmokeSliceFarDepth(z);
-		const float stepLength = max(farDepth - previousDepth, 0.0);
+		const float stepLength = SmokeWorldSegmentLength(ray, previousDepth, farDepth);
 		const float stepTransmittance = exp(-medium.a * stepLength);
 		const float scatterIntegral = medium.a > 0.000001 ? (1.0 - stepTransmittance) / medium.a : stepLength;
 		radiance += transmittance * source * scatterIntegral;

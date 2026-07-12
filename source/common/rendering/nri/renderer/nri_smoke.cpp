@@ -522,6 +522,27 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	NRITextureResource& output = renderer.GetFrameTexture(route.outputSlot);
 	if (input.shaderView == nullptr || depth.shaderView == nullptr || output.storageView == nullptr)
 		return false;
+	const bool standardExtent = route.placement == NRISmokeRoutePlacement::StandardPreUpscale &&
+		route.width == renderer.mRenderWidth && route.height == renderer.mRenderHeight &&
+		input.width == route.width && input.height == route.height &&
+		depth.width == route.width && depth.height == route.height &&
+		output.width == route.width && output.height == route.height;
+	if (!standardExtent)
+	{
+		mStatus.routeSupported = false;
+		if (mSettings.traceMode > 0u)
+		{
+			Printf("NRI PT smoke route rejected: placement=%u route=%ux%u render=%ux%u input=%ux%u depth=%ux%u output=%ux%u\n",
+				(uint32_t)route.placement, route.width, route.height, renderer.mRenderWidth, renderer.mRenderHeight,
+				input.width, input.height, depth.width, depth.height, output.width, output.height);
+		}
+		if (input.width == output.width && input.height == output.height)
+		{
+			renderer.CopyTexture(input, output);
+			return true;
+		}
+		return false;
+	}
 	renderer.mFrameBuffer->TransitionTexture(input, { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER });
 	renderer.mFrameBuffer->TransitionTexture(depth, { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER });
 	renderer.mFrameBuffer->TransitionTexture(output, { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::Layout::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER });
@@ -586,6 +607,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	std::copy(renderer.mCurrentCameraForward, renderer.mCurrentCameraForward + 3, constants.cameraForward);
 	std::copy(renderer.mCurrentCameraRight, renderer.mCurrentCameraRight + 3, constants.cameraRight);
 	std::copy(renderer.mCurrentCameraUp, renderer.mCurrentCameraUp + 3, constants.cameraUp);
+	std::copy(renderer.mCurrentJitter, renderer.mCurrentJitter + 2, constants.currentJitter);
 	constants.debugMode = mSettings.debugMode;
 	const bool pointLightsReady = mSettings.pointLights && lightBuffersReady && renderer.mBoundRuntimeLightCount > 0;
 	const bool shadowReady = renderer.mTopLevelAS.descriptor != nullptr;

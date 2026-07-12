@@ -1,4 +1,5 @@
 #include "Include/SmokeResources.hlsli"
+#include "Include/SmokeFroxel.hlsli"
 #include "Include/SmokeLighting.hlsli"
 
 [numthreads(64, 1, 1)]

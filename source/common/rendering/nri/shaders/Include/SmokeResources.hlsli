@@ -159,64 +159,6 @@ RWTexture2D<float4> gSmokeOutput : register(u0, space3);
 
 NRI_ROOT_CONSTANTS(SmokeConstants, gSmokeConstants, 0, NRI_SMOKE_SET_ROOT);
 
-uint SmokeFroxelIndex(uint x, uint y, uint z)
-{
-	return (z * gSmokeConstants.FroxelHeight + y) * gSmokeConstants.FroxelWidth + x;
-}
-
-uint SmokeFroxelCount()
-{
-	return gSmokeConstants.FroxelWidth * gSmokeConstants.FroxelHeight * gSmokeConstants.FroxelDepth;
-}
-
-uint3 SmokeFroxelCoordinates(uint froxelIndex)
-{
-	const uint planeSize = gSmokeConstants.FroxelWidth * gSmokeConstants.FroxelHeight;
-	const uint z = froxelIndex / max(planeSize, 1u);
-	const uint planeIndex = froxelIndex - z * planeSize;
-	const uint y = planeIndex / max(gSmokeConstants.FroxelWidth, 1u);
-	return uint3(planeIndex - y * gSmokeConstants.FroxelWidth, y, z);
-}
-
-float3 SmokeFroxelRay(uint2 froxelPosition)
-{
-	const float2 uv = (float2(froxelPosition) + 0.5) / float2(gSmokeConstants.FroxelWidth, gSmokeConstants.FroxelHeight);
-	const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
-	return gSmokeConstants.CameraForward +
-		gSmokeConstants.CameraRight * (ndc.x * gSmokeConstants.TanHalfFovX) +
-		gSmokeConstants.CameraUp * (ndc.y * gSmokeConstants.TanHalfFovY);
-}
-
-uint SmokeWideCellIndex(uint x, uint y, uint z)
-{
-	return (z * NRI_SMOKE_WIDE_GRID_Y + y) * NRI_SMOKE_WIDE_GRID_X + x;
-}
-
-float SmokeSliceFarDepth(uint z)
-{
-	const float normalizedDepth = (float)(z + 1u) / max((float)gSmokeConstants.FroxelDepth, 1.0);
-	return gSmokeConstants.FroxelMaxDistance * pow(normalizedDepth, max(gSmokeConstants.DepthExponent, 0.001));
-}
-
-float SmokeSliceNearDepth(uint z)
-{
-	return z == 0u ? 0.0 : SmokeSliceFarDepth(z - 1u);
-}
-
-float3 SmokeFroxelCenter(uint3 froxelPosition, float3 ray)
-{
-	const float nearDepth = SmokeSliceNearDepth(froxelPosition.z);
-	const float farDepth = SmokeSliceFarDepth(froxelPosition.z);
-	return gSmokeConstants.CameraPosition + ray * ((nearDepth + farDepth) * 0.5);
-}
-
-uint SmokeDepthSlice(float viewDepth)
-{
-	const float normalizedDepth = saturate(viewDepth / max(gSmokeConstants.FroxelMaxDistance, 0.001));
-	const float slice = pow(normalizedDepth, 1.0 / max(gSmokeConstants.DepthExponent, 0.001));
-	return min((uint)(slice * gSmokeConstants.FroxelDepth), gSmokeConstants.FroxelDepth - 1u);
-}
-
 uint SmokeHash(uint value)
 {
 	value ^= value >> 16u;
