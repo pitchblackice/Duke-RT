@@ -13,13 +13,15 @@
 
 // Hard ceilings keep overlapping or near-camera effects from turning smoke into
 // an unbounded per-frame workload.
-#define NRI_SMOKE_MAX_BIN_COLUMNS_PER_AXIS 8u
 #define NRI_SMOKE_MAX_PARTICLES_PER_COMMAND 256u
-#define NRI_SMOKE_MAX_EVALUATED_PARTICLES_PER_COLUMN 32u
+#define NRI_SMOKE_FINE_CELL_CAPACITY 8u
 #define NRI_SMOKE_WIDE_GRID_X 16u
 #define NRI_SMOKE_WIDE_GRID_Y 9u
 #define NRI_SMOKE_WIDE_CELL_COUNT (NRI_SMOKE_WIDE_GRID_X * NRI_SMOKE_WIDE_GRID_Y)
-#define NRI_SMOKE_WIDE_CELL_CAPACITY 32u
+#define NRI_SMOKE_WIDE_CELL_CAPACITY 16u
+#define NRI_SMOKE_GLOBAL_DEPTH_CAPACITY 16u
+#define NRI_SMOKE_MAX_TIER_REFERENCES 512u
+#define NRI_SMOKE_MAX_CANDIDATES_PER_FROXEL (NRI_SMOKE_FINE_CELL_CAPACITY + NRI_SMOKE_WIDE_CELL_CAPACITY + NRI_SMOKE_GLOBAL_DEPTH_CAPACITY)
 
 struct SmokeParticle
 {
@@ -105,7 +107,29 @@ struct SmokeControl
 	uint WideCellReferences;
 	uint SelectionCollisions;
 	uint SelectionReplacements;
-	uint SelectionReserved;
+	uint GlobalDepthReferences;
+	uint FineTierParticles;
+	uint WideTierParticles;
+	uint GlobalTierParticles;
+	uint FineOccupiedCells;
+	uint WideOccupiedCells;
+	uint GlobalOccupiedSlices;
+	uint FineSelectionCollisions;
+	uint WideSelectionCollisions;
+	uint GlobalSelectionCollisions;
+	uint FineSelectionReplacements;
+	uint WideSelectionReplacements;
+	uint GlobalSelectionReplacements;
+	uint FineSelectionLosses;
+	uint WideSelectionLosses;
+	uint GlobalSelectionLosses;
+	uint MaximumDepthSpan;
+	uint DepthSpanOne;
+	uint DepthSpanTwoToFour;
+	uint DepthSpanFiveToSixteen;
+	uint DepthSpanOverSixteen;
+	uint MaximumCandidatesPerFroxel;
+	uint3 Padding;
 };
 
 StructuredBuffer<SmokeStyle> gSmokeStyles : register(t0, space0);
@@ -113,12 +137,14 @@ StructuredBuffer<SmokeInjectionCommand> gSmokeCommands : register(t1, space0);
 
 RWStructuredBuffer<SmokeParticle> gSmokeParticles : register(u0, space1);
 RWStructuredBuffer<SmokeControl> gSmokeControl : register(u1, space1);
-RWStructuredBuffer<uint> gSmokeColumnCounts : register(u2, space1);
-RWStructuredBuffer<uint> gSmokeColumnIndices : register(u3, space1);
+RWStructuredBuffer<uint> gSmokeFineCellCounts : register(u2, space1);
+RWStructuredBuffer<uint> gSmokeFineCellIndices : register(u3, space1);
 RWStructuredBuffer<float4> gSmokeFroxelLocal : register(u4, space1);
 RWStructuredBuffer<float4> gSmokeFroxelIntegrated : register(u5, space1);
 RWStructuredBuffer<uint> gSmokeWideCellCounts : register(u6, space1);
 RWStructuredBuffer<uint> gSmokeWideCellIndices : register(u7, space1);
+RWStructuredBuffer<uint> gSmokeGlobalDepthCounts : register(u8, space1);
+RWStructuredBuffer<uint> gSmokeGlobalDepthIndices : register(u9, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);
@@ -131,18 +157,9 @@ uint SmokeFroxelIndex(uint x, uint y, uint z)
 	return (z * gSmokeConstants.FroxelHeight + y) * gSmokeConstants.FroxelWidth + x;
 }
 
-void SmokeLimitColumnRange(inout int minimumColumn, inout int maximumColumn)
+uint SmokeWideCellIndex(uint x, uint y, uint z)
 {
-	const int maximumSpan = (int)NRI_SMOKE_MAX_BIN_COLUMNS_PER_AXIS;
-	const int span = maximumColumn - minimumColumn + 1;
-	if (span <= maximumSpan)
-		return;
-
-	const int originalMinimum = minimumColumn;
-	const int originalMaximum = maximumColumn;
-	const int center = (originalMinimum + originalMaximum) / 2;
-	minimumColumn = clamp(center - maximumSpan / 2, originalMinimum, originalMaximum - maximumSpan + 1);
-	maximumColumn = minimumColumn + maximumSpan - 1;
+	return (z * NRI_SMOKE_WIDE_GRID_Y + y) * NRI_SMOKE_WIDE_GRID_X + x;
 }
 
 float SmokeSliceFarDepth(uint z)
@@ -171,11 +188,6 @@ float SmokeRandom01(inout uint state)
 {
 	state = SmokeHash(state);
 	return (float)(state & 0x00ffffffu) / 16777216.0;
-}
-
-uint SmokeSelectionBucketCount()
-{
-	return min(gSmokeConstants.ColumnCapacity, NRI_SMOKE_MAX_EVALUATED_PARTICLES_PER_COLUMN);
 }
 
 uint SmokePackCandidate(SmokeParticle particle, uint particleIndex)

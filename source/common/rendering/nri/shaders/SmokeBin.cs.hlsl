@@ -3,14 +3,19 @@
 [numthreads(64, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-	if (gSmokeConstants.FroxelWidth == 0u || gSmokeConstants.FroxelHeight == 0u || gSmokeConstants.ColumnCapacity == 0u)
+	if (gSmokeConstants.FroxelWidth == 0u || gSmokeConstants.FroxelHeight == 0u || gSmokeConstants.FroxelDepth == 0u)
 		return;
 
-	uint particleCount, controlCount, actualColumnCount, columnIndexCount, ignoredStride;
+	uint particleCount, controlCount, fineCellCount, fineCellIndexCount, wideCellCount, wideCellIndexCount;
+	uint globalDepthCount, globalDepthIndexCount, ignoredStride;
 	gSmokeParticles.GetDimensions(particleCount, ignoredStride);
 	gSmokeControl.GetDimensions(controlCount, ignoredStride);
-	gSmokeColumnCounts.GetDimensions(actualColumnCount, ignoredStride);
-	gSmokeColumnIndices.GetDimensions(columnIndexCount, ignoredStride);
+	gSmokeFineCellCounts.GetDimensions(fineCellCount, ignoredStride);
+	gSmokeFineCellIndices.GetDimensions(fineCellIndexCount, ignoredStride);
+	gSmokeWideCellCounts.GetDimensions(wideCellCount, ignoredStride);
+	gSmokeWideCellIndices.GetDimensions(wideCellIndexCount, ignoredStride);
+	gSmokeGlobalDepthCounts.GetDimensions(globalDepthCount, ignoredStride);
+	gSmokeGlobalDepthIndices.GetDimensions(globalDepthIndexCount, ignoredStride);
 	const uint particleIndex = dispatchThreadId.x;
 	if (particleIndex >= min(gSmokeConstants.ParticleCapacity, particleCount))
 		return;
@@ -21,109 +26,213 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const float3 relativePosition = particle.Position - gSmokeConstants.CameraPosition;
 	const float viewDepth = dot(relativePosition, gSmokeConstants.CameraForward);
-	if (viewDepth + particle.Radius <= 0.0 || viewDepth - particle.Radius >= gSmokeConstants.FroxelMaxDistance)
+	const float minimumViewDepth = viewDepth - particle.Radius;
+	const float maximumViewDepth = viewDepth + particle.Radius;
+	if (maximumViewDepth <= 0.0 || minimumViewDepth >= gSmokeConstants.FroxelMaxDistance)
 		return;
+
 	int2 minimumColumn = int2(0, 0);
 	int2 maximumColumn = int2(gSmokeConstants.FroxelWidth - 1u, gSmokeConstants.FroxelHeight - 1u);
-	// A sphere crossing the camera plane can cover any screen column. Avoid the
-	// unstable projected-center approximation used by the original path.
+	// Project the sphere's camera-space AABB at its near and far depths. This is
+	// deliberately conservative; exact ray/sphere rejection remains in evaluate.
 	if (viewDepth > particle.Radius)
 	{
-		const float projectionDepth = max(viewDepth, 0.001);
-		const float2 ndcCenter = float2(
-			dot(relativePosition, gSmokeConstants.CameraRight) / max(projectionDepth * gSmokeConstants.TanHalfFovX, 0.001),
-			-dot(relativePosition, gSmokeConstants.CameraUp) / max(projectionDepth * gSmokeConstants.TanHalfFovY, 0.001));
-		const float2 uvCenter = ndcCenter * 0.5 + 0.5;
-		const float2 uvRadius = float2(
-			particle.Radius / max(projectionDepth * gSmokeConstants.TanHalfFovX, 0.001),
-			particle.Radius / max(projectionDepth * gSmokeConstants.TanHalfFovY, 0.001)) * 0.5;
-		minimumColumn = max(int2(floor((uvCenter - uvRadius) * float2(gSmokeConstants.FroxelWidth, gSmokeConstants.FroxelHeight))), int2(0, 0));
-		maximumColumn = min(int2(floor((uvCenter + uvRadius) * float2(gSmokeConstants.FroxelWidth, gSmokeConstants.FroxelHeight))), int2(gSmokeConstants.FroxelWidth - 1u, gSmokeConstants.FroxelHeight - 1u));
+		const float cameraX = dot(relativePosition, gSmokeConstants.CameraRight);
+		const float cameraY = dot(relativePosition, gSmokeConstants.CameraUp);
+		const float nearProjectionDepth = max(viewDepth - particle.Radius, 0.001);
+		const float farProjectionDepth = max(viewDepth + particle.Radius, nearProjectionDepth);
+		const float inverseTanX = rcp(max(gSmokeConstants.TanHalfFovX, 0.001));
+		const float inverseTanY = rcp(max(gSmokeConstants.TanHalfFovY, 0.001));
+		const float x0 = cameraX - particle.Radius;
+		const float x1 = cameraX + particle.Radius;
+		const float y0 = -(cameraY - particle.Radius);
+		const float y1 = -(cameraY + particle.Radius);
+		const float xNear0 = x0 / nearProjectionDepth * inverseTanX;
+		const float xNear1 = x1 / nearProjectionDepth * inverseTanX;
+		const float xFar0 = x0 / farProjectionDepth * inverseTanX;
+		const float xFar1 = x1 / farProjectionDepth * inverseTanX;
+		const float yNear0 = y0 / nearProjectionDepth * inverseTanY;
+		const float yNear1 = y1 / nearProjectionDepth * inverseTanY;
+		const float yFar0 = y0 / farProjectionDepth * inverseTanY;
+		const float yFar1 = y1 / farProjectionDepth * inverseTanY;
+		const float2 ndcMinimum = float2(
+			min(min(xNear0, xNear1), min(xFar0, xFar1)),
+			min(min(yNear0, yNear1), min(yFar0, yFar1)));
+		const float2 ndcMaximum = float2(
+			max(max(xNear0, xNear1), max(xFar0, xFar1)),
+			max(max(yNear0, yNear1), max(yFar0, yFar1)));
+		const int2 unclampedMinimum = int2(floor((ndcMinimum * 0.5 + 0.5) * float2(gSmokeConstants.FroxelWidth, gSmokeConstants.FroxelHeight)));
+		const int2 unclampedMaximum = int2(floor((ndcMaximum * 0.5 + 0.5) * float2(gSmokeConstants.FroxelWidth, gSmokeConstants.FroxelHeight)));
+		if (unclampedMaximum.x < 0 || unclampedMaximum.y < 0 ||
+			unclampedMinimum.x >= (int)gSmokeConstants.FroxelWidth || unclampedMinimum.y >= (int)gSmokeConstants.FroxelHeight)
+			return;
+		minimumColumn = max(unclampedMinimum, int2(0, 0));
+		maximumColumn = min(unclampedMaximum, int2(gSmokeConstants.FroxelWidth - 1u, gSmokeConstants.FroxelHeight - 1u));
 	}
 	if (any(minimumColumn > maximumColumn))
 		return;
+
+	const uint minimumDepthSlice = SmokeDepthSlice(max(minimumViewDepth, 0.0));
+	const uint maximumDepthSlice = SmokeDepthSlice(min(maximumViewDepth, gSmokeConstants.FroxelMaxDistance));
+	const uint depthSpan = maximumDepthSlice - minimumDepthSlice + 1u;
+	const uint fineWidth = (uint)(maximumColumn.x - minimumColumn.x + 1);
+	const uint fineHeight = (uint)(maximumColumn.y - minimumColumn.y + 1);
+	const uint fineXYReferences = fineWidth * fineHeight;
+	const bool useFineTier = fineXYReferences <= NRI_SMOKE_MAX_TIER_REFERENCES / depthSpan;
+	const uint2 minimumWideCell = min(uint2(
+		(uint)minimumColumn.x * NRI_SMOKE_WIDE_GRID_X / gSmokeConstants.FroxelWidth,
+		(uint)minimumColumn.y * NRI_SMOKE_WIDE_GRID_Y / gSmokeConstants.FroxelHeight),
+		uint2(NRI_SMOKE_WIDE_GRID_X - 1u, NRI_SMOKE_WIDE_GRID_Y - 1u));
+	const uint2 maximumWideCell = min(uint2(
+		(uint)maximumColumn.x * NRI_SMOKE_WIDE_GRID_X / gSmokeConstants.FroxelWidth,
+		(uint)maximumColumn.y * NRI_SMOKE_WIDE_GRID_Y / gSmokeConstants.FroxelHeight),
+		uint2(NRI_SMOKE_WIDE_GRID_X - 1u, NRI_SMOKE_WIDE_GRID_Y - 1u));
+	const uint wideXYReferences = (maximumWideCell.x - minimumWideCell.x + 1u) * (maximumWideCell.y - minimumWideCell.y + 1u);
+	const bool useWideTier = !useFineTier && wideXYReferences <= NRI_SMOKE_MAX_TIER_REFERENCES / depthSpan;
 	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u && controlCount > 0u;
 	const uint packedCandidate = SmokePackCandidate(particle, particleIndex);
-	const bool wideParticle = maximumColumn.x - minimumColumn.x + 1 > (int)NRI_SMOKE_MAX_BIN_COLUMNS_PER_AXIS ||
-		maximumColumn.y - minimumColumn.y + 1 > (int)NRI_SMOKE_MAX_BIN_COLUMNS_PER_AXIS;
-	if (wideParticle)
+	bool invalidTarget = false;
+
+	if (diagnostics)
 	{
-		uint wideCellCount, wideIndexCount;
-		gSmokeWideCellCounts.GetDimensions(wideCellCount, ignoredStride);
-		gSmokeWideCellIndices.GetDimensions(wideIndexCount, ignoredStride);
-		if (diagnostics)
-			InterlockedAdd(gSmokeControl[0].WideParticlesProjected, 1u);
-		const uint2 minimumCell = min(uint2(
-			(uint)minimumColumn.x * NRI_SMOKE_WIDE_GRID_X / gSmokeConstants.FroxelWidth,
-			(uint)minimumColumn.y * NRI_SMOKE_WIDE_GRID_Y / gSmokeConstants.FroxelHeight),
-			uint2(NRI_SMOKE_WIDE_GRID_X - 1u, NRI_SMOKE_WIDE_GRID_Y - 1u));
-		const uint2 maximumCell = min(uint2(
-			(uint)maximumColumn.x * NRI_SMOKE_WIDE_GRID_X / gSmokeConstants.FroxelWidth,
-			(uint)maximumColumn.y * NRI_SMOKE_WIDE_GRID_Y / gSmokeConstants.FroxelHeight),
-			uint2(NRI_SMOKE_WIDE_GRID_X - 1u, NRI_SMOKE_WIDE_GRID_Y - 1u));
-		const uint bucket = particleIndex % NRI_SMOKE_WIDE_CELL_CAPACITY;
-		bool invalidTarget = false;
+		InterlockedMax(gSmokeControl[0].MaximumDepthSpan, depthSpan);
+		if (depthSpan == 1u) InterlockedAdd(gSmokeControl[0].DepthSpanOne, 1u);
+		else if (depthSpan <= 4u) InterlockedAdd(gSmokeControl[0].DepthSpanTwoToFour, 1u);
+		else if (depthSpan <= 16u) InterlockedAdd(gSmokeControl[0].DepthSpanFiveToSixteen, 1u);
+		else InterlockedAdd(gSmokeControl[0].DepthSpanOverSixteen, 1u);
+	}
+
+	if (useFineTier)
+	{
+		if (diagnostics) InterlockedAdd(gSmokeControl[0].FineTierParticles, 1u);
+		const uint bucket = particleIndex % NRI_SMOKE_FINE_CELL_CAPACITY;
 		[loop]
-		for (uint cellY = minimumCell.y; cellY <= maximumCell.y; ++cellY)
+		for (uint z = minimumDepthSlice; z <= maximumDepthSlice; ++z)
 		{
 			[loop]
-			for (uint cellX = minimumCell.x; cellX <= maximumCell.x; ++cellX)
+			for (int y = minimumColumn.y; y <= maximumColumn.y; ++y)
 			{
-				const uint cellIndex = cellY * NRI_SMOKE_WIDE_GRID_X + cellX;
-				const uint targetIndex = cellIndex * NRI_SMOKE_WIDE_CELL_CAPACITY + bucket;
-				if (cellIndex >= wideCellCount || targetIndex >= wideIndexCount)
+				[loop]
+				for (int x = minimumColumn.x; x <= maximumColumn.x; ++x)
 				{
-					invalidTarget = true;
-					continue;
-				}
-				InterlockedAdd(gSmokeWideCellCounts[cellIndex], 1u);
-				uint previous = 0u;
-				InterlockedMax(gSmokeWideCellIndices[targetIndex], packedCandidate, previous);
-				if (diagnostics)
-				{
-					InterlockedAdd(gSmokeControl[0].WideCellReferences, 1u);
-					if (previous != 0u) InterlockedAdd(gSmokeControl[0].SelectionCollisions, 1u);
-					if (previous != 0u && packedCandidate > previous) InterlockedAdd(gSmokeControl[0].SelectionReplacements, 1u);
+					const uint cellIndex = SmokeFroxelIndex((uint)x, (uint)y, z);
+					const uint targetIndex = cellIndex * NRI_SMOKE_FINE_CELL_CAPACITY + bucket;
+					if (cellIndex >= fineCellCount || targetIndex >= fineCellIndexCount)
+					{
+						invalidTarget = true;
+						continue;
+					}
+					uint previousCount = 0u;
+					InterlockedAdd(gSmokeFineCellCounts[cellIndex], 1u, previousCount);
+					uint previous = 0u;
+					InterlockedMax(gSmokeFineCellIndices[targetIndex], packedCandidate, previous);
+					if (diagnostics)
+					{
+						InterlockedAdd(gSmokeControl[0].FineColumnReferences, 1u);
+						if (previousCount == 0u) InterlockedAdd(gSmokeControl[0].FineOccupiedCells, 1u);
+						if (previous != 0u)
+						{
+							InterlockedAdd(gSmokeControl[0].SelectionCollisions, 1u);
+							InterlockedAdd(gSmokeControl[0].FineSelectionCollisions, 1u);
+							InterlockedAdd(gSmokeControl[0].FineSelectionLosses, 1u);
+							if (packedCandidate > previous)
+							{
+								InterlockedAdd(gSmokeControl[0].SelectionReplacements, 1u);
+								InterlockedAdd(gSmokeControl[0].FineSelectionReplacements, 1u);
+							}
+						}
+					}
 				}
 			}
 		}
-		if (invalidTarget && controlCount > 0u)
-			InterlockedAdd(gSmokeControl[0].ColumnOverflow, 1u);
-		return;
 	}
-
-	SmokeLimitColumnRange(minimumColumn.x, maximumColumn.x);
-	SmokeLimitColumnRange(minimumColumn.y, maximumColumn.y);
-
-	const uint bucketCount = SmokeSelectionBucketCount();
-	if (bucketCount == 0u)
-		return;
-	const uint bucket = particleIndex % bucketCount;
-	bool invalidTarget = false;
-	for (int y = minimumColumn.y; y <= maximumColumn.y; ++y)
+	else if (useWideTier)
 	{
-		for (int x = minimumColumn.x; x <= maximumColumn.x; ++x)
+		if (diagnostics)
 		{
-			const uint columnIndex = (uint)y * gSmokeConstants.FroxelWidth + (uint)x;
-			if (columnIndex >= actualColumnCount)
-				continue;
-			InterlockedAdd(gSmokeColumnCounts[columnIndex], 1u);
-			const uint targetIndex = columnIndex * gSmokeConstants.ColumnCapacity + bucket;
-			if (targetIndex >= columnIndexCount)
+			InterlockedAdd(gSmokeControl[0].WideParticlesProjected, 1u);
+			InterlockedAdd(gSmokeControl[0].WideTierParticles, 1u);
+		}
+		const uint bucket = particleIndex % NRI_SMOKE_WIDE_CELL_CAPACITY;
+		[loop]
+		for (uint z = minimumDepthSlice; z <= maximumDepthSlice; ++z)
+		{
+			[loop]
+			for (uint y = minimumWideCell.y; y <= maximumWideCell.y; ++y)
+			{
+				[loop]
+				for (uint x = minimumWideCell.x; x <= maximumWideCell.x; ++x)
+				{
+					const uint cellIndex = SmokeWideCellIndex(x, y, z);
+					const uint targetIndex = cellIndex * NRI_SMOKE_WIDE_CELL_CAPACITY + bucket;
+					if (cellIndex >= wideCellCount || targetIndex >= wideCellIndexCount)
+					{
+						invalidTarget = true;
+						continue;
+					}
+					uint previousCount = 0u;
+					InterlockedAdd(gSmokeWideCellCounts[cellIndex], 1u, previousCount);
+					uint previous = 0u;
+					InterlockedMax(gSmokeWideCellIndices[targetIndex], packedCandidate, previous);
+					if (diagnostics)
+					{
+						InterlockedAdd(gSmokeControl[0].WideCellReferences, 1u);
+						if (previousCount == 0u) InterlockedAdd(gSmokeControl[0].WideOccupiedCells, 1u);
+						if (previous != 0u)
+						{
+							InterlockedAdd(gSmokeControl[0].SelectionCollisions, 1u);
+							InterlockedAdd(gSmokeControl[0].WideSelectionCollisions, 1u);
+							InterlockedAdd(gSmokeControl[0].WideSelectionLosses, 1u);
+							if (packedCandidate > previous)
+							{
+								InterlockedAdd(gSmokeControl[0].SelectionReplacements, 1u);
+								InterlockedAdd(gSmokeControl[0].WideSelectionReplacements, 1u);
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	else
+	{
+		if (diagnostics) InterlockedAdd(gSmokeControl[0].GlobalTierParticles, 1u);
+		const uint bucket = particleIndex % NRI_SMOKE_GLOBAL_DEPTH_CAPACITY;
+		[loop]
+		for (uint z = minimumDepthSlice; z <= maximumDepthSlice; ++z)
+		{
+			const uint targetIndex = z * NRI_SMOKE_GLOBAL_DEPTH_CAPACITY + bucket;
+			if (z >= globalDepthCount || targetIndex >= globalDepthIndexCount)
 			{
 				invalidTarget = true;
 				continue;
 			}
+			uint previousCount = 0u;
+			InterlockedAdd(gSmokeGlobalDepthCounts[z], 1u, previousCount);
 			uint previous = 0u;
-			InterlockedMax(gSmokeColumnIndices[targetIndex], packedCandidate, previous);
+			InterlockedMax(gSmokeGlobalDepthIndices[targetIndex], packedCandidate, previous);
 			if (diagnostics)
 			{
-				InterlockedAdd(gSmokeControl[0].FineColumnReferences, 1u);
-				if (previous != 0u) InterlockedAdd(gSmokeControl[0].SelectionCollisions, 1u);
-				if (previous != 0u && packedCandidate > previous) InterlockedAdd(gSmokeControl[0].SelectionReplacements, 1u);
+				InterlockedAdd(gSmokeControl[0].GlobalDepthReferences, 1u);
+				if (previousCount == 0u) InterlockedAdd(gSmokeControl[0].GlobalOccupiedSlices, 1u);
+				if (previous != 0u)
+				{
+					InterlockedAdd(gSmokeControl[0].SelectionCollisions, 1u);
+					InterlockedAdd(gSmokeControl[0].GlobalSelectionCollisions, 1u);
+					InterlockedAdd(gSmokeControl[0].GlobalSelectionLosses, 1u);
+					if (packedCandidate > previous)
+					{
+						InterlockedAdd(gSmokeControl[0].SelectionReplacements, 1u);
+						InterlockedAdd(gSmokeControl[0].GlobalSelectionReplacements, 1u);
+					}
+				}
 			}
 		}
 	}
+
 	if (invalidTarget && controlCount != 0u)
+	{
 		InterlockedAdd(gSmokeControl[0].ColumnOverflow, 1u);
+		if (!useFineTier && !useWideTier) InterlockedAdd(gSmokeControl[0].WideGlobalDrops, 1u);
+	}
 }

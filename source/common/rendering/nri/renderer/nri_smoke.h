@@ -50,8 +50,19 @@ struct NRISmokeStatusSnapshot
 	uint32_t wideGlobalDrops = 0;
 	uint32_t fineColumnReferences = 0;
 	uint32_t wideCellReferences = 0;
+	uint32_t globalDepthReferences = 0;
 	uint32_t selectionCollisions = 0;
 	uint32_t selectionReplacements = 0;
+	uint32_t fineTierParticles = 0;
+	uint32_t wideTierParticles = 0;
+	uint32_t globalTierParticles = 0;
+	uint32_t fineOccupiedCells = 0;
+	uint32_t wideOccupiedCells = 0;
+	uint32_t globalOccupiedSlices = 0;
+	uint32_t fineSelectionLosses = 0;
+	uint32_t wideSelectionLosses = 0;
+	uint32_t globalSelectionLosses = 0;
+	uint32_t maximumDepthSpan = 0;
 	uint32_t lightCandidatesTested = 0;
 	uint32_t lightDistanceRejected = 0;
 	uint32_t lightShadowRays = 0;
@@ -107,6 +118,7 @@ private:
 	bool UploadBytes(NRIRenderer& renderer, NRIBufferResource& upload, const void* data, uint64_t size);
 	bool RecordSimulation(NRIRenderer& renderer);
 	bool RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc& route);
+	void DestroyViewResources(NRIRenderer& renderer);
 	void DestroyResources(NRIRenderer& renderer);
 	void AppendSyntheticCommand(NRIRenderer& renderer);
 
@@ -118,10 +130,12 @@ private:
 	NRIBufferResource mStyleBuffer;
 	NRIBufferResource mParticles;
 	NRIBufferResource mControl;
-	NRIBufferResource mColumnCounts;
-	NRIBufferResource mColumnIndices;
+	NRIBufferResource mFineCellCounts;
+	NRIBufferResource mFineCellIndices;
 	NRIBufferResource mWideCellCounts;
 	NRIBufferResource mWideCellIndices;
+	NRIBufferResource mGlobalDepthCounts;
+	NRIBufferResource mGlobalDepthIndices;
 	NRIBufferResource mFroxelLocal;
 	NRIBufferResource mFroxelIntegrated;
 	NRISmokeEmitterSystem mEmitters;
@@ -131,7 +145,6 @@ private:
 	uint32_t mResourceFroxelWidth = 0;
 	uint32_t mResourceFroxelHeight = 0;
 	uint32_t mResourceFroxelDepth = 0;
-	uint32_t mResourceColumnCapacity = 0;
 	uint32_t mResourceStyleCapacity = 0;
 	uint32_t mLastPreparedFrame = UINT32_MAX;
 	uint32_t mLastSimulatedFrame = UINT32_MAX;
@@ -142,4 +155,5 @@ private:
 	bool mNeedsClear = true;
 	bool mControlCopyPending = false;
 	bool mResourcesInitialized = false;
+	bool mViewResourcesInitialized = false;
 };

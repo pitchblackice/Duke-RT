@@ -38,26 +38,28 @@ void SmokeAccumulateCandidate(
 [numthreads(4, 4, 4)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-	if (gSmokeConstants.FroxelWidth == 0u || gSmokeConstants.FroxelHeight == 0u || gSmokeConstants.FroxelDepth == 0u || gSmokeConstants.ColumnCapacity == 0u)
+	if (gSmokeConstants.FroxelWidth == 0u || gSmokeConstants.FroxelHeight == 0u || gSmokeConstants.FroxelDepth == 0u)
 		return;
 
 	if (dispatchThreadId.x >= gSmokeConstants.FroxelWidth || dispatchThreadId.y >= gSmokeConstants.FroxelHeight || dispatchThreadId.z >= gSmokeConstants.FroxelDepth)
 		return;
-	uint actualColumnCount, columnIndexCount, wideCellCount, wideCellIndexCount, particleCount, styleCount, localFroxelCount, controlCount, ignoredStride;
-	gSmokeColumnCounts.GetDimensions(actualColumnCount, ignoredStride);
-	gSmokeColumnIndices.GetDimensions(columnIndexCount, ignoredStride);
+	uint fineCellCount, fineCellIndexCount, wideCellCount, wideCellIndexCount, globalDepthCount, globalDepthIndexCount;
+	uint particleCount, styleCount, localFroxelCount, controlCount, ignoredStride;
+	gSmokeFineCellCounts.GetDimensions(fineCellCount, ignoredStride);
+	gSmokeFineCellIndices.GetDimensions(fineCellIndexCount, ignoredStride);
 	gSmokeWideCellCounts.GetDimensions(wideCellCount, ignoredStride);
 	gSmokeWideCellIndices.GetDimensions(wideCellIndexCount, ignoredStride);
+	gSmokeGlobalDepthCounts.GetDimensions(globalDepthCount, ignoredStride);
+	gSmokeGlobalDepthIndices.GetDimensions(globalDepthIndexCount, ignoredStride);
 	gSmokeParticles.GetDimensions(particleCount, ignoredStride);
 	gSmokeStyles.GetDimensions(styleCount, ignoredStride);
 	gSmokeFroxelLocal.GetDimensions(localFroxelCount, ignoredStride);
 	gSmokeControl.GetDimensions(controlCount, ignoredStride);
 
-	const uint columnIndex = dispatchThreadId.y * gSmokeConstants.FroxelWidth + dispatchThreadId.x;
 	const uint froxelIndex = SmokeFroxelIndex(dispatchThreadId.x, dispatchThreadId.y, dispatchThreadId.z);
-	if (columnIndex >= actualColumnCount || froxelIndex >= localFroxelCount)
+	if (froxelIndex >= fineCellCount || froxelIndex >= localFroxelCount)
 		return;
-	const uint fineCandidateCount = gSmokeColumnCounts[columnIndex] > 0u ? SmokeSelectionBucketCount() : 0u;
+	const uint fineCandidateCount = gSmokeFineCellCounts[froxelIndex] > 0u ? NRI_SMOKE_FINE_CELL_CAPACITY : 0u;
 	const float sliceNearDepth = dispatchThreadId.z == 0u ? 0.0 : SmokeSliceFarDepth(dispatchThreadId.z - 1u);
 	const float sliceFarDepth = SmokeSliceFarDepth(dispatchThreadId.z);
 	const float2 uv = (float2(dispatchThreadId.xy) + 0.5) / float2(gSmokeConstants.FroxelWidth, gSmokeConstants.FroxelHeight);
@@ -77,10 +79,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float anisotropyWeight = 0.0;
 	for (uint i = 0u; i < fineCandidateCount; ++i)
 	{
-		const uint candidateIndex = columnIndex * gSmokeConstants.ColumnCapacity + i;
-		if (candidateIndex >= columnIndexCount)
+		const uint candidateIndex = froxelIndex * NRI_SMOKE_FINE_CELL_CAPACITY + i;
+		if (candidateIndex >= fineCellIndexCount)
 			break;
-		const uint packedCandidate = gSmokeColumnIndices[candidateIndex];
+		const uint packedCandidate = gSmokeFineCellIndices[candidateIndex];
 		if (packedCandidate != 0u)
 			SmokeAccumulateCandidate(SmokeUnpackCandidateIndex(packedCandidate), particleCount, styleCount, ray, inverseRayLengthSquared,
 				sliceNearDepth, sliceFarDepth, sliceLength, extinction, scatteringCoefficient, weightedAnisotropy, anisotropyWeight);
@@ -89,7 +91,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		dispatchThreadId.x * NRI_SMOKE_WIDE_GRID_X / gSmokeConstants.FroxelWidth,
 		dispatchThreadId.y * NRI_SMOKE_WIDE_GRID_Y / gSmokeConstants.FroxelHeight),
 		uint2(NRI_SMOKE_WIDE_GRID_X - 1u, NRI_SMOKE_WIDE_GRID_Y - 1u));
-	const uint wideCellIndex = wideCellPosition.y * NRI_SMOKE_WIDE_GRID_X + wideCellPosition.x;
+	const uint wideCellIndex = SmokeWideCellIndex(wideCellPosition.x, wideCellPosition.y, dispatchThreadId.z);
 	const uint wideCandidateCount = wideCellIndex < wideCellCount && gSmokeWideCellCounts[wideCellIndex] > 0u ? NRI_SMOKE_WIDE_CELL_CAPACITY : 0u;
 	[loop]
 	for (uint i = 0u; i < wideCandidateCount; ++i)
@@ -98,6 +100,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		if (candidateIndex >= wideCellIndexCount)
 			break;
 		const uint packedCandidate = gSmokeWideCellIndices[candidateIndex];
+		if (packedCandidate != 0u)
+			SmokeAccumulateCandidate(SmokeUnpackCandidateIndex(packedCandidate), particleCount, styleCount, ray, inverseRayLengthSquared,
+				sliceNearDepth, sliceFarDepth, sliceLength, extinction, scatteringCoefficient, weightedAnisotropy, anisotropyWeight);
+	}
+	const uint globalCandidateCount = dispatchThreadId.z < globalDepthCount && gSmokeGlobalDepthCounts[dispatchThreadId.z] > 0u
+		? NRI_SMOKE_GLOBAL_DEPTH_CAPACITY : 0u;
+	[loop]
+	for (uint i = 0u; i < globalCandidateCount; ++i)
+	{
+		const uint candidateIndex = dispatchThreadId.z * NRI_SMOKE_GLOBAL_DEPTH_CAPACITY + i;
+		if (candidateIndex >= globalDepthIndexCount)
+			break;
+		const uint packedCandidate = gSmokeGlobalDepthIndices[candidateIndex];
 		if (packedCandidate != 0u)
 			SmokeAccumulateCandidate(SmokeUnpackCandidateIndex(packedCandidate), particleCount, styleCount, ray, inverseRayLengthSquared,
 				sliceNearDepth, sliceFarDepth, sliceLength, extinction, scatteringCoefficient, weightedAnisotropy, anisotropyWeight);

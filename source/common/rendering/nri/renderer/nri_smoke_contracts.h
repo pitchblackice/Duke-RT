@@ -98,13 +98,35 @@ struct NRISmokeControlGpu
 	uint32_t wideCellReferences = 0;
 	uint32_t selectionCollisions = 0;
 	uint32_t selectionReplacements = 0;
-	uint32_t selectionReserved = 0;
+	uint32_t globalDepthReferences = 0;
+	uint32_t fineTierParticles = 0;
+	uint32_t wideTierParticles = 0;
+	uint32_t globalTierParticles = 0;
+	uint32_t fineOccupiedCells = 0;
+	uint32_t wideOccupiedCells = 0;
+	uint32_t globalOccupiedSlices = 0;
+	uint32_t fineSelectionCollisions = 0;
+	uint32_t wideSelectionCollisions = 0;
+	uint32_t globalSelectionCollisions = 0;
+	uint32_t fineSelectionReplacements = 0;
+	uint32_t wideSelectionReplacements = 0;
+	uint32_t globalSelectionReplacements = 0;
+	uint32_t fineSelectionLosses = 0;
+	uint32_t wideSelectionLosses = 0;
+	uint32_t globalSelectionLosses = 0;
+	uint32_t maximumDepthSpan = 0;
+	uint32_t depthSpanOne = 0;
+	uint32_t depthSpanTwoToFour = 0;
+	uint32_t depthSpanFiveToSixteen = 0;
+	uint32_t depthSpanOverSixteen = 0;
+	uint32_t maximumCandidatesPerFroxel = 0;
+	uint32_t padding[3] = {};
 };
 
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
 static_assert(sizeof(NRISmokeStyleGpu) == 80);
 static_assert(sizeof(NRISmokeInjectionCommandGpu) == 64);
-static_assert(sizeof(NRISmokeControlGpu) == 128);
+static_assert(sizeof(NRISmokeControlGpu) == 224);
 
 struct NRISmokeConstants
 {
