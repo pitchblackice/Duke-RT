@@ -74,7 +74,7 @@ struct NRISmokeControlGpu
 	uint32_t epoch = 0;
 	uint32_t spawned = 0;
 	uint32_t expired = 0;
-	uint32_t reserved = 0;
+	uint32_t wideParticlesProjected = 0;
 	uint32_t lightCandidatesTested = 0;
 	uint32_t lightDistanceRejected = 0;
 	uint32_t lightShadowRays = 0;
@@ -82,7 +82,7 @@ struct NRISmokeControlGpu
 	uint32_t lightShadowOccluded = 0;
 	uint32_t lightSoftSamples = 0;
 	uint32_t lightRadianceClamps = 0;
-	uint32_t lightingReserved = 0;
+	uint32_t wideGlobalDrops = 0;
 	uint32_t filterCandidateHits = 0;
 	uint32_t filterAlphaRejects = 0;
 	uint32_t filterNoShadowRejects = 0;
@@ -94,7 +94,11 @@ struct NRISmokeControlGpu
 	uint32_t filterSkipLimitExits = 0;
 	uint32_t filterContinuationLimitExits = 0;
 	uint32_t filterResourceDowngrades = 0;
-	uint32_t filterReserved[5] = {};
+	uint32_t fineColumnReferences = 0;
+	uint32_t wideCellReferences = 0;
+	uint32_t selectionCollisions = 0;
+	uint32_t selectionReplacements = 0;
+	uint32_t selectionReserved = 0;
 };
 
 static_assert(sizeof(NRISmokeParticleGpu) == 64);

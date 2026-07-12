@@ -46,6 +46,12 @@ struct NRISmokeStatusSnapshot
 	uint32_t expiredParticles = 0;
 	uint32_t liveEvictions = 0;
 	uint32_t columnOverflow = 0;
+	uint32_t wideParticlesProjected = 0;
+	uint32_t wideGlobalDrops = 0;
+	uint32_t fineColumnReferences = 0;
+	uint32_t wideCellReferences = 0;
+	uint32_t selectionCollisions = 0;
+	uint32_t selectionReplacements = 0;
 	uint32_t lightCandidatesTested = 0;
 	uint32_t lightDistanceRejected = 0;
 	uint32_t lightShadowRays = 0;
@@ -114,6 +120,8 @@ private:
 	NRIBufferResource mControl;
 	NRIBufferResource mColumnCounts;
 	NRIBufferResource mColumnIndices;
+	NRIBufferResource mWideCellCounts;
+	NRIBufferResource mWideCellIndices;
 	NRIBufferResource mFroxelLocal;
 	NRIBufferResource mFroxelIntegrated;
 	NRISmokeEmitterSystem mEmitters;

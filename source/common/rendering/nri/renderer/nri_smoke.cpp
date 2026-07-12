@@ -15,6 +15,8 @@ namespace
 {
 	constexpr uint32_t kThreads = 64;
 	constexpr uint32_t kMaxCommands = 256;
+	constexpr uint32_t kWideCellCount = 16u * 9u;
+	constexpr uint32_t kWideCellCapacity = 32u;
 
 	uint32_t Groups(uint64_t count)
 	{
@@ -92,7 +94,7 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 	input.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
 	nri::DescriptorRangeDesc buffers = {};
 	buffers.baseRegisterIndex = 0;
-	buffers.descriptorNum = 6;
+	buffers.descriptorNum = 8;
 	buffers.descriptorType = nri::DescriptorType::STORAGE_STRUCTURED_BUFFER;
 	buffers.shaderStages = nri::StageBits::COMPUTE_SHADER;
 	buffers.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
@@ -218,6 +220,8 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 		!CreateBuffer(renderer, mControl, sizeof(NRISmokeControlGpu), sizeof(NRISmokeControlGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mColumnCounts, columns * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mColumnIndices, columns * mSettings.columnCapacity * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
+		!CreateBuffer(renderer, mWideCellCounts, kWideCellCount * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
+		!CreateBuffer(renderer, mWideCellIndices, kWideCellCount * kWideCellCapacity * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mFroxelLocal, froxels * 16, 16, storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mFroxelIntegrated, froxels * 16, 16, storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mStyleBuffer, std::max<size_t>(1, mStyles.size()) * sizeof(NRISmokeStyleGpu), sizeof(NRISmokeStyleGpu), copyDevice, nri::MemoryLocation::DEVICE, true, false))
@@ -242,7 +246,7 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 	mStatus.froxelHeight = fh;
 	mStatus.froxelDepth = mSettings.froxelDepth;
 	mStatus.particleCapacity = mSettings.particleCapacity;
-	mStatus.residentBytes = mParticles.memorySize + mControl.memorySize + mColumnCounts.memorySize + mColumnIndices.memorySize +
+	mStatus.residentBytes = mParticles.memorySize + mControl.memorySize + mColumnCounts.memorySize + mColumnIndices.memorySize + mWideCellCounts.memorySize + mWideCellIndices.memorySize +
 		mFroxelLocal.memorySize + mFroxelIntegrated.memorySize + mStyleBuffer.memorySize;
 	for (const CommandSlot& slot : mCommandSlots)
 		mStatus.residentBytes += slot.upload.memorySize + slot.device.memorySize + slot.styleUpload.memorySize + slot.controlReadback.memorySize;
@@ -293,6 +297,12 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 				mStatus.expiredParticles = control.expired;
 				mStatus.liveEvictions = control.liveEvictions;
 				mStatus.columnOverflow = control.columnOverflow;
+				mStatus.wideParticlesProjected = control.wideParticlesProjected;
+				mStatus.wideGlobalDrops = control.wideGlobalDrops;
+				mStatus.fineColumnReferences = control.fineColumnReferences;
+				mStatus.wideCellReferences = control.wideCellReferences;
+				mStatus.selectionCollisions = control.selectionCollisions;
+				mStatus.selectionReplacements = control.selectionReplacements;
 				mStatus.lightCandidatesTested = control.lightCandidatesTested;
 				mStatus.lightDistanceRejected = control.lightDistanceRejected;
 				mStatus.lightShadowRays = control.lightShadowRays;
@@ -369,9 +379,9 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	if (commandCount > 0)
 		renderer.mFrameBuffer->mCore.CmdCopyBuffer(*renderer.mFrameBuffer->mCommandBuffer, *slot.device.buffer, 0, *slot.upload.buffer, 0, (uint64_t)commandCount * sizeof(NRISmokeInjectionCommandGpu));
 
-	nri::BufferBarrierDesc compute[8] = {};
-	nri::Buffer* computeBuffers[] = { mStyleBuffer.buffer, slot.device.buffer, mParticles.buffer, mControl.buffer, mColumnCounts.buffer, mColumnIndices.buffer, mFroxelLocal.buffer, mFroxelIntegrated.buffer };
-	for (uint32_t i = 0; i < 8; ++i)
+	nri::BufferBarrierDesc compute[10] = {};
+	nri::Buffer* computeBuffers[] = { mStyleBuffer.buffer, slot.device.buffer, mParticles.buffer, mControl.buffer, mColumnCounts.buffer, mColumnIndices.buffer, mFroxelLocal.buffer, mFroxelIntegrated.buffer, mWideCellCounts.buffer, mWideCellIndices.buffer };
+	for (uint32_t i = 0; i < 10; ++i)
 	{
 		compute[i].buffer = computeBuffers[i];
 		compute[i].after = i < 2 ? NRIResourceComputeShaderResourceAccess() : StorageAccess();
@@ -380,7 +390,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	compute[1].before = NRIResourceCopyDestinationAccess();
 	if (!firstWorldUse)
 	{
-		for (uint32_t i = 2; i < 8; ++i) compute[i].before = StorageAccess();
+		for (uint32_t i = 2; i < 10; ++i) compute[i].before = StorageAccess();
 		if (mControlCopyPending) compute[3].before = NRIResourceCopySourceAccess();
 	}
 	mControlCopyPending = false;
@@ -390,10 +400,10 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, computeBarrier);
 
 	const nri::Descriptor* inputs[] = { mStyleBuffer.shaderView, slot.device.shaderView };
-	const nri::Descriptor* outputs[] = { mParticles.storageView, mControl.storageView, mColumnCounts.storageView, mColumnIndices.storageView, mFroxelLocal.storageView, mFroxelIntegrated.storageView };
+	const nri::Descriptor* outputs[] = { mParticles.storageView, mControl.storageView, mColumnCounts.storageView, mColumnIndices.storageView, mFroxelLocal.storageView, mFroxelIntegrated.storageView, mWideCellCounts.storageView, mWideCellIndices.storageView };
 	nri::UpdateDescriptorRangeDesc updates[2] = {};
 	updates[0].descriptorSet = slot.inputSet; updates[0].rangeIndex = 0; updates[0].descriptors = inputs; updates[0].descriptorNum = 2;
-	updates[1].descriptorSet = slot.bufferSet; updates[1].rangeIndex = 0; updates[1].descriptors = outputs; updates[1].descriptorNum = 6;
+	updates[1].descriptorSet = slot.bufferSet; updates[1].rangeIndex = 0; updates[1].descriptors = outputs; updates[1].descriptorNum = 8;
 	renderer.mFrameBuffer->mCore.UpdateDescriptorRanges(updates, 2);
 
 	NRISmokeConstants constants = {};
@@ -418,9 +428,9 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	};
 	auto storageBarrier = [&]()
 	{
-		nri::BufferBarrierDesc barriers[6] = {};
-		for (uint32_t i = 0; i < 6; ++i) { barriers[i].buffer = computeBuffers[i + 2]; barriers[i].before = StorageAccess(); barriers[i].after = StorageAccess(); }
-		nri::BarrierDesc barrier = {}; barrier.buffers = barriers; barrier.bufferNum = 6;
+		nri::BufferBarrierDesc barriers[8] = {};
+		for (uint32_t i = 0; i < 8; ++i) { barriers[i].buffer = computeBuffers[i + 2]; barriers[i].before = StorageAccess(); barriers[i].after = StorageAccess(); }
+		nri::BarrierDesc barrier = {}; barrier.buffers = barriers; barrier.bufferNum = 8;
 		renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, barrier);
 	};
 	renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
@@ -547,10 +557,10 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	};
 	auto storageBarrier = [&]()
 	{
-		nri::BufferBarrierDesc barriers[6] = {};
-		nri::Buffer* buffers[] = { mParticles.buffer, mControl.buffer, mColumnCounts.buffer, mColumnIndices.buffer, mFroxelLocal.buffer, mFroxelIntegrated.buffer };
-		for (uint32_t i = 0; i < 6; ++i) { barriers[i].buffer = buffers[i]; barriers[i].before = StorageAccess(); barriers[i].after = StorageAccess(); }
-		nri::BarrierDesc barrier = {}; barrier.buffers = barriers; barrier.bufferNum = 6;
+		nri::BufferBarrierDesc barriers[8] = {};
+		nri::Buffer* buffers[] = { mParticles.buffer, mControl.buffer, mColumnCounts.buffer, mColumnIndices.buffer, mFroxelLocal.buffer, mFroxelIntegrated.buffer, mWideCellCounts.buffer, mWideCellIndices.buffer };
+		for (uint32_t i = 0; i < 8; ++i) { barriers[i].buffer = buffers[i]; barriers[i].before = StorageAccess(); barriers[i].after = StorageAccess(); }
+		nri::BarrierDesc barrier = {}; barrier.buffers = barriers; barrier.bufferNum = 8;
 		renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, barrier);
 	};
 	renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
@@ -631,6 +641,12 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.expiredParticles = 0;
 	mStatus.liveEvictions = 0;
 	mStatus.columnOverflow = 0;
+	mStatus.wideParticlesProjected = 0;
+	mStatus.wideGlobalDrops = 0;
+	mStatus.fineColumnReferences = 0;
+	mStatus.wideCellReferences = 0;
+	mStatus.selectionCollisions = 0;
+	mStatus.selectionReplacements = 0;
 	mStatus.lightCandidatesTested = 0;
 	mStatus.lightDistanceRejected = 0;
 	mStatus.lightShadowRays = 0;
@@ -662,7 +678,7 @@ void NRISmokeSystem::DestroyResources(NRIRenderer& renderer)
 {
 	auto destroy = [&](NRIBufferResource& resource) { renderer.DestroyBufferResource(resource); };
 	destroy(mStyleBuffer); destroy(mParticles); destroy(mControl); destroy(mColumnCounts);
-	destroy(mColumnIndices); destroy(mFroxelLocal); destroy(mFroxelIntegrated);
+	destroy(mColumnIndices); destroy(mWideCellCounts); destroy(mWideCellIndices); destroy(mFroxelLocal); destroy(mFroxelIntegrated);
 	for (CommandSlot& slot : mCommandSlots)
 	{
 		destroy(slot.upload); destroy(slot.device); destroy(slot.styleUpload); destroy(slot.controlReadback);
@@ -693,12 +709,13 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 	const char* placement = mStatus.routePlacement == (uint32_t)NRISmokeRoutePlacement::DlrrPostUpscale ? "dlrr_post_upscale" : "standard_pre_upscale";
 	const char* inputName = mStatus.inputSlot < (uint32_t)NRIRenderer::FrameTextureSlot::Count ? renderer.GetFrameTextureSlotName((NRIRenderer::FrameTextureSlot)mStatus.inputSlot) : "none";
 	const char* outputName = mStatus.outputSlot < (uint32_t)NRIRenderer::FrameTextureSlot::Count ? renderer.GetFrameTextureSlotName((NRIRenderer::FrameTextureSlot)mStatus.outputSlot) : "none";
-	Printf("NRI PT smoke status: enabled=%s epoch=%u main_view=%s route_supported=%s placement=%s input=%s output=%s extent=%ux%u froxels=%ux%ux%u particles=%u styles=%u commands=%u commands_total=%llu dropped=%u substeps=%u light_mode=%u light_samples=%u light_candidates_max=%u point_lights=%s filtered_visibility=%s runtime_lights=%u gpu_stats=%s active=%u spawned=%u expired=%u evictions=%u column_overflow=%u light_candidates=%u light_distance_rejected=%u light_shadow_rays=%u light_visible=%u light_occluded=%u light_soft_samples=%u light_clamps=%u filter_hits=%u filter_alpha=%u filter_no_shadow=%u filter_one_way=%u filter_reflection=%u filter_portals=%u filter_blockers=%u filter_misses=%u filter_skip_limit=%u filter_continuation_limit=%u filter_downgrades=%u resident_mib=%.2f particle_readback=0 control_readback=%llu reset=%s\n",
+	Printf("NRI PT smoke status: enabled=%s epoch=%u main_view=%s route_supported=%s placement=%s input=%s output=%s extent=%ux%u froxels=%ux%ux%u particles=%u styles=%u commands=%u commands_total=%llu dropped=%u substeps=%u light_mode=%u light_samples=%u light_candidates_max=%u point_lights=%s filtered_visibility=%s runtime_lights=%u gpu_stats=%s active=%u spawned=%u expired=%u evictions=%u column_overflow=%u wide_projected=%u wide_global_drops=%u fine_refs=%u wide_refs=%u selection_collisions=%u selection_replacements=%u light_candidates=%u light_distance_rejected=%u light_shadow_rays=%u light_visible=%u light_occluded=%u light_soft_samples=%u light_clamps=%u filter_hits=%u filter_alpha=%u filter_no_shadow=%u filter_one_way=%u filter_reflection=%u filter_portals=%u filter_blockers=%u filter_misses=%u filter_skip_limit=%u filter_continuation_limit=%u filter_downgrades=%u resident_mib=%.2f particle_readback=0 control_readback=%llu reset=%s\n",
 		mStatus.enabled ? "yes" : "no", mStatus.simulationEpoch, mStatus.mainViewEligible ? "yes" : "no", mStatus.routeSupported ? "yes" : "no", placement,
 		inputName, outputName, mStatus.routeWidth, mStatus.routeHeight, mStatus.froxelWidth, mStatus.froxelHeight, mStatus.froxelDepth,
 		mStatus.particleCapacity, mStatus.styleCount, mStatus.commandsUploaded, (unsigned long long)mStatus.commandsUploadedTotal, mStatus.commandsDropped, mStatus.simulationSubsteps,
 		mSettings.lightMode, mSettings.lightSamples, mSettings.maxLightCandidates, mSettings.pointLights ? "yes" : "no", mSettings.filteredVisibility ? "yes" : "no", renderer.mBoundRuntimeLightCount,
 		mStatus.gpuStatsValid ? "valid" : "disabled", mStatus.activeParticles, mStatus.spawnedParticles, mStatus.expiredParticles, mStatus.liveEvictions, mStatus.columnOverflow,
+		mStatus.wideParticlesProjected, mStatus.wideGlobalDrops, mStatus.fineColumnReferences, mStatus.wideCellReferences, mStatus.selectionCollisions, mStatus.selectionReplacements,
 		mStatus.lightCandidatesTested, mStatus.lightDistanceRejected, mStatus.lightShadowRays, mStatus.lightShadowVisible, mStatus.lightShadowOccluded, mStatus.lightSoftSamples, mStatus.lightRadianceClamps,
 		mStatus.filterCandidateHits, mStatus.filterAlphaRejects, mStatus.filterNoShadowRejects, mStatus.filterOneWayRejects, mStatus.filterReflectionRejects,
 		mStatus.filterPortalContinuations, mStatus.filterAcceptedBlockers, mStatus.filterMisses, mStatus.filterSkipLimitExits, mStatus.filterContinuationLimitExits, mStatus.filterResourceDowngrades,

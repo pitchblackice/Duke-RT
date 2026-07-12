@@ -6,17 +6,26 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint index = dispatchThreadId.x;
 	const uint columnCount = gSmokeConstants.FroxelWidth * gSmokeConstants.FroxelHeight;
 	const uint froxelCount = columnCount * gSmokeConstants.FroxelDepth;
-	uint controlCount, particleCount, actualColumnCount, localFroxelCount, integratedFroxelCount, ignoredStride;
+	uint controlCount, particleCount, actualColumnCount, columnIndexCount, wideCellCount, wideCellIndexCount, localFroxelCount, integratedFroxelCount, ignoredStride;
 	gSmokeControl.GetDimensions(controlCount, ignoredStride);
 	gSmokeParticles.GetDimensions(particleCount, ignoredStride);
 	gSmokeColumnCounts.GetDimensions(actualColumnCount, ignoredStride);
+	gSmokeColumnIndices.GetDimensions(columnIndexCount, ignoredStride);
+	gSmokeWideCellCounts.GetDimensions(wideCellCount, ignoredStride);
+	gSmokeWideCellIndices.GetDimensions(wideCellIndexCount, ignoredStride);
 	gSmokeFroxelLocal.GetDimensions(localFroxelCount, ignoredStride);
 	gSmokeFroxelIntegrated.GetDimensions(integratedFroxelCount, ignoredStride);
 
 	const bool clearWorld = (gSmokeConstants.Flags & 1u) != 0u;
 	if (index == 0u && controlCount != 0u)
 	{
-		gSmokeControl[0].Reserved = 0u;
+		gSmokeControl[0].WideParticlesProjected = 0u;
+		gSmokeControl[0].WideGlobalDrops = 0u;
+		gSmokeControl[0].FineColumnReferences = 0u;
+		gSmokeControl[0].WideCellReferences = 0u;
+		gSmokeControl[0].SelectionCollisions = 0u;
+		gSmokeControl[0].SelectionReplacements = 0u;
+		gSmokeControl[0].SelectionReserved = 0u;
 		gSmokeControl[0].LightCandidatesTested = 0u;
 		gSmokeControl[0].LightDistanceRejected = 0u;
 		gSmokeControl[0].LightShadowRays = 0u;
@@ -53,7 +62,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (index < min(columnCount, actualColumnCount))
 	{
 		gSmokeColumnCounts[index] = 0u;
+		const uint bucketCount = SmokeSelectionBucketCount();
+		[loop]
+		for (uint bucket = 0u; bucket < bucketCount; ++bucket)
+		{
+			const uint candidateIndex = index * gSmokeConstants.ColumnCapacity + bucket;
+			if (candidateIndex < columnIndexCount)
+				gSmokeColumnIndices[candidateIndex] = 0u;
+		}
 	}
+	if (index < min(NRI_SMOKE_WIDE_CELL_COUNT, wideCellCount))
+		gSmokeWideCellCounts[index] = 0u;
+	if (index < min(NRI_SMOKE_WIDE_CELL_COUNT * NRI_SMOKE_WIDE_CELL_CAPACITY, wideCellIndexCount))
+		gSmokeWideCellIndices[index] = 0u;
 	if (index < min(froxelCount, min(localFroxelCount, integratedFroxelCount)))
 	{
 		gSmokeFroxelLocal[index] = 0.0;

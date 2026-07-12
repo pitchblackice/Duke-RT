@@ -1,6 +1,40 @@
 #include "Include/SmokeResources.hlsli"
 #include "Include/SmokeLighting.hlsli"
 
+void SmokeAccumulateCandidate(
+	uint particleIndex,
+	uint particleCount,
+	uint styleCount,
+	float3 ray,
+	float inverseRayLengthSquared,
+	float sliceNearDepth,
+	float sliceFarDepth,
+	float sliceLength,
+	inout float extinction,
+	inout float3 scatteringCoefficient,
+	inout float weightedAnisotropy,
+	inout float anisotropyWeight)
+{
+	if (particleIndex >= min(gSmokeConstants.ParticleCapacity, particleCount))
+		return;
+	const SmokeParticle particle = gSmokeParticles[particleIndex];
+	if (particle.Active == 0u || particle.Epoch != gSmokeConstants.SimulationEpoch || particle.StyleIndex >= min(gSmokeConstants.StyleCount, styleCount))
+		return;
+	const SmokeStyle style = gSmokeStyles[particle.StyleIndex];
+	const float closestDepth = clamp(dot(particle.Position - gSmokeConstants.CameraPosition, ray) * inverseRayLengthSquared, sliceNearDepth, sliceFarDepth);
+	const float3 particleSamplePosition = gSmokeConstants.CameraPosition + ray * closestDepth;
+	const float normalizedDistance = length(particleSamplePosition - particle.Position) / max(particle.Radius, 0.001);
+	const float axialCoverage = saturate((2.0 * particle.Radius) / sliceLength);
+	const float weight = saturate(1.0 - normalizedDistance * normalizedDistance) * axialCoverage;
+	const float localExtinction = weight * particle.Density * style.Extinction * gSmokeConstants.DensityScale;
+	extinction += localExtinction;
+	const float3 localScattering = localExtinction * saturate(style.Albedo);
+	scatteringCoefficient += localScattering;
+	const float localScatteringWeight = dot(localScattering, float3(0.2126, 0.7152, 0.0722));
+	weightedAnisotropy += clamp(style.Anisotropy, -0.95, 0.95) * localScatteringWeight;
+	anisotropyWeight += localScatteringWeight;
+}
+
 [numthreads(4, 4, 4)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -9,9 +43,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	if (dispatchThreadId.x >= gSmokeConstants.FroxelWidth || dispatchThreadId.y >= gSmokeConstants.FroxelHeight || dispatchThreadId.z >= gSmokeConstants.FroxelDepth)
 		return;
-	uint actualColumnCount, columnIndexCount, particleCount, styleCount, localFroxelCount, controlCount, ignoredStride;
+	uint actualColumnCount, columnIndexCount, wideCellCount, wideCellIndexCount, particleCount, styleCount, localFroxelCount, controlCount, ignoredStride;
 	gSmokeColumnCounts.GetDimensions(actualColumnCount, ignoredStride);
 	gSmokeColumnIndices.GetDimensions(columnIndexCount, ignoredStride);
+	gSmokeWideCellCounts.GetDimensions(wideCellCount, ignoredStride);
+	gSmokeWideCellIndices.GetDimensions(wideCellIndexCount, ignoredStride);
 	gSmokeParticles.GetDimensions(particleCount, ignoredStride);
 	gSmokeStyles.GetDimensions(styleCount, ignoredStride);
 	gSmokeFroxelLocal.GetDimensions(localFroxelCount, ignoredStride);
@@ -21,7 +57,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint froxelIndex = SmokeFroxelIndex(dispatchThreadId.x, dispatchThreadId.y, dispatchThreadId.z);
 	if (columnIndex >= actualColumnCount || froxelIndex >= localFroxelCount)
 		return;
-	const uint candidateCount = min(min(gSmokeColumnCounts[columnIndex], gSmokeConstants.ColumnCapacity), NRI_SMOKE_MAX_EVALUATED_PARTICLES_PER_COLUMN);
+	const uint fineCandidateCount = gSmokeColumnCounts[columnIndex] > 0u ? SmokeSelectionBucketCount() : 0u;
 	const float sliceNearDepth = dispatchThreadId.z == 0u ? 0.0 : SmokeSliceFarDepth(dispatchThreadId.z - 1u);
 	const float sliceFarDepth = SmokeSliceFarDepth(dispatchThreadId.z);
 	const float2 uv = (float2(dispatchThreadId.xy) + 0.5) / float2(gSmokeConstants.FroxelWidth, gSmokeConstants.FroxelHeight);
@@ -39,30 +75,32 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float3 scatteringCoefficient = 0.0;
 	float weightedAnisotropy = 0.0;
 	float anisotropyWeight = 0.0;
-	for (uint i = 0u; i < candidateCount; ++i)
+	for (uint i = 0u; i < fineCandidateCount; ++i)
 	{
 		const uint candidateIndex = columnIndex * gSmokeConstants.ColumnCapacity + i;
 		if (candidateIndex >= columnIndexCount)
 			break;
-		const uint particleIndex = gSmokeColumnIndices[candidateIndex];
-		if (particleIndex >= min(gSmokeConstants.ParticleCapacity, particleCount))
-			continue;
-		const SmokeParticle particle = gSmokeParticles[particleIndex];
-		if (particle.Active == 0u || particle.Epoch != gSmokeConstants.SimulationEpoch || particle.StyleIndex >= min(gSmokeConstants.StyleCount, styleCount))
-			continue;
-		const SmokeStyle style = gSmokeStyles[particle.StyleIndex];
-		const float closestDepth = clamp(dot(particle.Position - gSmokeConstants.CameraPosition, ray) * inverseRayLengthSquared, sliceNearDepth, sliceFarDepth);
-		const float3 particleSamplePosition = gSmokeConstants.CameraPosition + ray * closestDepth;
-		const float normalizedDistance = length(particleSamplePosition - particle.Position) / max(particle.Radius, 0.001);
-		const float axialCoverage = saturate((2.0 * particle.Radius) / sliceLength);
-		const float weight = saturate(1.0 - normalizedDistance * normalizedDistance) * axialCoverage;
-		const float localExtinction = weight * particle.Density * style.Extinction * gSmokeConstants.DensityScale;
-		extinction += localExtinction;
-		const float3 localScattering = localExtinction * saturate(style.Albedo);
-		scatteringCoefficient += localScattering;
-		const float localScatteringWeight = dot(localScattering, float3(0.2126, 0.7152, 0.0722));
-		weightedAnisotropy += clamp(style.Anisotropy, -0.95, 0.95) * localScatteringWeight;
-		anisotropyWeight += localScatteringWeight;
+		const uint packedCandidate = gSmokeColumnIndices[candidateIndex];
+		if (packedCandidate != 0u)
+			SmokeAccumulateCandidate(SmokeUnpackCandidateIndex(packedCandidate), particleCount, styleCount, ray, inverseRayLengthSquared,
+				sliceNearDepth, sliceFarDepth, sliceLength, extinction, scatteringCoefficient, weightedAnisotropy, anisotropyWeight);
+	}
+	const uint2 wideCellPosition = min(uint2(
+		dispatchThreadId.x * NRI_SMOKE_WIDE_GRID_X / gSmokeConstants.FroxelWidth,
+		dispatchThreadId.y * NRI_SMOKE_WIDE_GRID_Y / gSmokeConstants.FroxelHeight),
+		uint2(NRI_SMOKE_WIDE_GRID_X - 1u, NRI_SMOKE_WIDE_GRID_Y - 1u));
+	const uint wideCellIndex = wideCellPosition.y * NRI_SMOKE_WIDE_GRID_X + wideCellPosition.x;
+	const uint wideCandidateCount = wideCellIndex < wideCellCount && gSmokeWideCellCounts[wideCellIndex] > 0u ? NRI_SMOKE_WIDE_CELL_CAPACITY : 0u;
+	[loop]
+	for (uint i = 0u; i < wideCandidateCount; ++i)
+	{
+		const uint candidateIndex = wideCellIndex * NRI_SMOKE_WIDE_CELL_CAPACITY + i;
+		if (candidateIndex >= wideCellIndexCount)
+			break;
+		const uint packedCandidate = gSmokeWideCellIndices[candidateIndex];
+		if (packedCandidate != 0u)
+			SmokeAccumulateCandidate(SmokeUnpackCandidateIndex(packedCandidate), particleCount, styleCount, ray, inverseRayLengthSquared,
+				sliceNearDepth, sliceFarDepth, sliceLength, extinction, scatteringCoefficient, weightedAnisotropy, anisotropyWeight);
 	}
 
 	// Preserve the Phase 2 ambient fallback in every lighting mode. Empty

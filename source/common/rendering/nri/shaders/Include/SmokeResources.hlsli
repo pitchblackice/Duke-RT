@@ -16,7 +16,10 @@
 #define NRI_SMOKE_MAX_BIN_COLUMNS_PER_AXIS 8u
 #define NRI_SMOKE_MAX_PARTICLES_PER_COMMAND 256u
 #define NRI_SMOKE_MAX_EVALUATED_PARTICLES_PER_COLUMN 32u
-#define NRI_SMOKE_MAX_WIDE_PARTICLES 8u
+#define NRI_SMOKE_WIDE_GRID_X 16u
+#define NRI_SMOKE_WIDE_GRID_Y 9u
+#define NRI_SMOKE_WIDE_CELL_COUNT (NRI_SMOKE_WIDE_GRID_X * NRI_SMOKE_WIDE_GRID_Y)
+#define NRI_SMOKE_WIDE_CELL_CAPACITY 32u
 
 struct SmokeParticle
 {
@@ -78,7 +81,7 @@ struct SmokeControl
 	uint Epoch;
 	uint Spawned;
 	uint Expired;
-	uint Reserved;
+	uint WideParticlesProjected;
 	uint LightCandidatesTested;
 	uint LightDistanceRejected;
 	uint LightShadowRays;
@@ -86,7 +89,7 @@ struct SmokeControl
 	uint LightShadowOccluded;
 	uint LightSoftSamples;
 	uint LightRadianceClamps;
-	uint LightingReserved;
+	uint WideGlobalDrops;
 	uint FilterCandidateHits;
 	uint FilterAlphaRejects;
 	uint FilterNoShadowRejects;
@@ -98,11 +101,11 @@ struct SmokeControl
 	uint FilterSkipLimitExits;
 	uint FilterContinuationLimitExits;
 	uint FilterResourceDowngrades;
-	uint FilterReserved0;
-	uint FilterReserved1;
-	uint FilterReserved2;
-	uint FilterReserved3;
-	uint FilterReserved4;
+	uint FineColumnReferences;
+	uint WideCellReferences;
+	uint SelectionCollisions;
+	uint SelectionReplacements;
+	uint SelectionReserved;
 };
 
 StructuredBuffer<SmokeStyle> gSmokeStyles : register(t0, space0);
@@ -114,6 +117,8 @@ RWStructuredBuffer<uint> gSmokeColumnCounts : register(u2, space1);
 RWStructuredBuffer<uint> gSmokeColumnIndices : register(u3, space1);
 RWStructuredBuffer<float4> gSmokeFroxelLocal : register(u4, space1);
 RWStructuredBuffer<float4> gSmokeFroxelIntegrated : register(u5, space1);
+RWStructuredBuffer<uint> gSmokeWideCellCounts : register(u6, space1);
+RWStructuredBuffer<uint> gSmokeWideCellIndices : register(u7, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);
@@ -166,6 +171,26 @@ float SmokeRandom01(inout uint state)
 {
 	state = SmokeHash(state);
 	return (float)(state & 0x00ffffffu) / 16777216.0;
+}
+
+uint SmokeSelectionBucketCount()
+{
+	return min(gSmokeConstants.ColumnCapacity, NRI_SMOKE_MAX_EVALUATED_PARTICLES_PER_COLUMN);
+}
+
+uint SmokePackCandidate(SmokeParticle particle, uint particleIndex)
+{
+	// Positive IEEE-754 values retain their ordering as unsigned integers.
+	// Keep the upper 16 bits as a compact optical-importance key and use the
+	// particle index as a deterministic tie breaker and recoverable payload.
+	const float opticalImportance = max(particle.Density * particle.Radius, 1e-20);
+	const uint importance = max(asuint(opticalImportance) >> 16u, 1u);
+	return (importance << 16u) | (particleIndex & 0xffffu);
+}
+
+uint SmokeUnpackCandidateIndex(uint packedCandidate)
+{
+	return packedCandidate & 0xffffu;
 }
 
 #endif
