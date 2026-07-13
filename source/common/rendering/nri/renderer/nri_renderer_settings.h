@@ -101,6 +101,8 @@ struct NRISmokeSettings
 	uint32_t emissiveReuseMode = 2;
 	bool emissiveReference = false;
 	float emissiveSourceClamp = 32.0f;
+	uint32_t directReuseMode = 2;
+	uint32_t directReferenceMode = 0;
 	bool volumeHistory = true;
 	uint32_t dlrrMode = 1;
 	bool indirect = true;

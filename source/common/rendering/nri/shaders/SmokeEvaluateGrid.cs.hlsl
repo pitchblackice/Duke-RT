@@ -1,6 +1,5 @@
 #include "Include/SmokeResources.hlsli"
 #include "Include/SmokeFroxel.hlsli"
-#include "Include/SmokeLighting.hlsli"
 
 bool SmokeRenderGridLookup(int3 coordinate, out uint brickIndex)
 {
@@ -73,47 +72,6 @@ void SmokeRenderGridSample(float3 worldPosition, float cellSize, out float4 scal
 	optical = lerp(lerp(o00, o10, blend.y), lerp(o01, o11, blend.y), blend.z);
 }
 
-float SmokeRenderGridDirectionalVisibility(float3 worldPosition, bool diagnostics)
-{
-	if (gSmokeConstants.LightMode == 0u ||
-		(gSmokeConstants.LightSourceFlags & NRI_SMOKE_LIGHT_SOURCE_DIRECTIONAL) == 0u)
-		return 0.0;
-	const bool castsShadow = (gSmokeConstants.LightSourceFlags & NRI_SMOKE_LIGHT_SOURCE_DIRECTIONAL_SHADOW) != 0u;
-	if (gSmokeConstants.LightMode < 2u || !castsShadow)
-		return 1.0;
-	if (!SmokeShadowTracingReady())
-		return 0.0;
-	const float3 centerDirection = SmokeDirectionalDirection();
-	const uint sampleCount = gSmokeConstants.LightMode >= 3u ? clamp(gSmokeConstants.LightSamples, 1u, 4u) : 1u;
-	float visibleSamples = 0.0;
-	[loop]
-	for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
-	{
-		uint randomState = SmokeDirectionalStableRandomSeed(sampleIndex,
-			SmokeHash(asuint(worldPosition.x)) ^ SmokeHash(asuint(worldPosition.y)) ^ SmokeHash(asuint(worldPosition.z)) ^
-			gSmokeConstants.DirectionalColorPacked);
-		const float3 lightDirection = gSmokeConstants.LightMode >= 3u
-			? SmokeSampleDirectionalCone(centerDirection, gSmokeConstants.DirectionalAngularSize, randomState)
-			: centerDirection;
-		if (diagnostics)
-		{
-			InterlockedAdd(gSmokeControl[0].DirectionalSamples, 1u);
-			InterlockedAdd(gSmokeControl[0].DirectionalShadowRays, 1u);
-		}
-		const bool visible = SmokeFilteredVisibilityEffective()
-			? SmokePointLightVisibleFiltered(worldPosition, lightDirection, 100000.0, diagnostics)
-			: SmokePointLightVisible(worldPosition, lightDirection, 100000.0, diagnostics);
-		if (visible)
-		{
-			visibleSamples += 1.0;
-			if (diagnostics) InterlockedAdd(gSmokeControl[0].DirectionalShadowVisible, 1u);
-		}
-		else if (diagnostics)
-			InterlockedAdd(gSmokeControl[0].DirectionalShadowOccluded, 1u);
-	}
-	return visibleSamples / (float)sampleCount;
-}
-
 [numthreads(4, 4, 4)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -146,15 +104,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 	const float anisotropy = optical.w > 1e-6 ? clamp(scalar.w / optical.w, -0.95, 0.95) : 0.0;
 	gSmokeFroxelMedium[froxelIndex] = float4(scattering, extinction);
-	gSmokeFroxelPhase[froxelIndex] = float4(anisotropy, optical.w, 1.0, 1.0);
+	// The fourth phase lane identifies grid materialization to the shared direct
+	// light passes. Particle evaluation retains the value 1.
+	gSmokeFroxelPhase[froxelIndex] = float4(anisotropy, optical.w, 1.0, 2.0);
 	gSmokeFroxelSource[froxelIndex] = 0.0;
-	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;
-	const float visibility = SmokeRenderGridDirectionalVisibility(worldPosition, diagnostics);
-	SmokeIndirectCacheRecord directional = (SmokeIndirectCacheRecord)0;
-	directional.Radiance = scattering * visibility;
-	directional.WorldPosition = worldPosition;
-	directional.SigmaT = extinction;
-	gSmokeIndirectScratch[froxelIndex] = directional;
 	uint occupiedCapacity;
 	gSmokeOccupiedFroxelIndices.GetDimensions(occupiedCapacity, ignoredStride);
 	uint occupiedSlot = 0u;

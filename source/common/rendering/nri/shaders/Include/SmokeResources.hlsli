@@ -25,8 +25,6 @@
 #define NRI_SMOKE_DIRECTIONAL_PROBE_HALF_AXIS 10
 #define NRI_SMOKE_DIRECTIONAL_PROBES_PER_PARTICLE 8000u
 #define NRI_SMOKE_DIRECTIONAL_PROBE_CELL_SIZE 2.0
-#define NRI_SMOKE_FLAG_COMPARE_REPRESENTATION 0x10000u
-
 int3 SmokeDirectionalProbeWindowMinCell(float3 particlePosition)
 {
 	const int3 anchorCell = (int3)floor(particlePosition / NRI_SMOKE_DIRECTIONAL_PROBE_CELL_SIZE);
@@ -56,6 +54,14 @@ struct SmokeCellHeader
 };
 
 struct SmokeIndirectCacheRecord
+{
+	float3 Radiance;
+	float SigmaT;
+	float3 WorldPosition;
+	uint Metadata;
+};
+
+struct SmokeDirectCacheRecord
 {
 	float3 Radiance;
 	float SigmaT;
@@ -182,6 +188,18 @@ struct SmokeControl
 	uint IndirectCacheMaximumAge;
 	uint IndirectCacheClamps;
 	uint IndirectCacheResolved;
+	uint DirectReceiverSamples;
+	uint DirectFractionalVisibility;
+	uint DirectVisibilityZero;
+	uint DirectVisibilityOne;
+	uint DirectTemporalAccepted;
+	uint DirectTemporalRejected;
+	uint DirectSpatialAccepted;
+	uint DirectSpatialRejected;
+	uint DirectHistoryMaximumAge;
+	uint DirectHistoryResolved;
+	uint DirectHistoryClamps;
+	uint DirectNanRejects;
 };
 
 StructuredBuffer<SmokeStyle> gSmokeStyles : register(t0, space0);
@@ -215,6 +233,8 @@ RWStructuredBuffer<float4> gSmokeRenderGridOpticalA : register(u24, space1);
 RWStructuredBuffer<float4> gSmokeRenderGridOpticalB : register(u25, space1);
 RWStructuredBuffer<float4> gSmokeRenderGridDynamicsA : register(u26, space1);
 RWStructuredBuffer<float4> gSmokeRenderGridDynamicsB : register(u27, space1);
+RWStructuredBuffer<SmokeDirectCacheRecord> gSmokeDirectCurrent : register(u28, space1);
+RWStructuredBuffer<SmokeDirectCacheRecord> gSmokeDirectHistory : register(u29, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);

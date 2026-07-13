@@ -1,6 +1,7 @@
 #include "Include/SmokeResources.hlsli"
 #include "Include/SmokeFroxel.hlsli"
 #include "Include/SmokeLighting.hlsli"
+#include "Include/SmokeDirectCache.hlsli"
 
 [numthreads(64, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -8,12 +9,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (gSmokeConstants.FroxelWidth == 0u || gSmokeConstants.FroxelHeight == 0u || gSmokeConstants.FroxelDepth == 0u)
 		return;
 
-	uint controlCount, occupiedCapacity, mediumCount, phaseCount, sourceCount, ignoredStride;
+	uint controlCount, occupiedCapacity, mediumCount, phaseCount, sourceCount, directCurrentCount, ignoredStride;
 	gSmokeControl.GetDimensions(controlCount, ignoredStride);
 	gSmokeOccupiedFroxelIndices.GetDimensions(occupiedCapacity, ignoredStride);
 	gSmokeFroxelMedium.GetDimensions(mediumCount, ignoredStride);
 	gSmokeFroxelPhase.GetDimensions(phaseCount, ignoredStride);
 	gSmokeFroxelSource.GetDimensions(sourceCount, ignoredStride);
+	gSmokeDirectCurrent.GetDimensions(directCurrentCount, ignoredStride);
 	if (controlCount == 0u || dispatchThreadId.x >= min(gSmokeControl[0].OccupiedCount, occupiedCapacity))
 		return;
 
@@ -25,7 +27,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float3 ray = SmokeFroxelRay(froxelPositionIndex.xy);
 	const float3 froxelPosition = SmokeFroxelCenter(froxelPositionIndex, ray);
 	const float4 medium = gSmokeFroxelMedium[froxelIndex];
-	const float anisotropy = gSmokeFroxelPhase[froxelIndex].x;
+	const float4 phaseRecord = gSmokeFroxelPhase[froxelIndex];
+	const float anisotropy = phaseRecord.x;
+	const bool gridDirect = SmokeDirectFroxelIsGrid(phaseRecord);
+	if (gridDirect && froxelIndex >= directCurrentCount)
+		return;
 	const bool lightingDiagnostics = (gSmokeConstants.Flags & 2u) != 0u;
 	if (lightingDiagnostics)
 		InterlockedAdd(gSmokeControl[0].PointFroxelsProcessed, 1u);
@@ -34,6 +40,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	// dark surfaces appear uniformly brighter anywhere smoke overlaps them.
 	// Explicit point, directional, and emissive families add real in-scattering.
 	float3 scattering = 0.0;
+	float visibleWeight = 0.0;
+	float unshadowedWeight = 0.0;
+	uint receiverSamples = 0u;
 	if (medium.a > 0.0 && any(medium.rgb > 0.0) &&
 		gSmokeConstants.LightMode > 0u && (gSmokeConstants.LightSourceFlags & NRI_SMOKE_LIGHT_SOURCE_POINT) != 0u)
 	{
@@ -104,21 +113,34 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const float attenuation = EvaluateAnalyticPointLightAttenuation(centerDistance, light.radius, light.intensity);
 			if (attenuation <= 0.0)
 				continue;
-			const float3 centerDirection = toLightCenter / centerDistance;
-			const uint sampleCount = gSmokeConstants.LightMode >= 3u ? clamp(gSmokeConstants.LightSamples, 1u, 4u) : 1u;
+			const uint sampleCount = gridDirect ? SmokeDirectReceiverSampleCount() :
+				(gSmokeConstants.LightMode >= 3u ? clamp(gSmokeConstants.LightSamples, 1u, 4u) : 1u);
+			if (gridDirect)
+				receiverSamples += sampleCount;
 			float3 sampledContribution = 0.0;
 			[loop]
 			for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
 			{
+				const float3 receiverPosition = gridDirect
+					? SmokeDirectReceiverPosition(froxelPositionIndex, sampleIndex, sampleCount)
+					: froxelPosition;
+				const float3 receiverToLightCenter = light.position - receiverPosition;
+				const float receiverCenterDistanceSquared = dot(receiverToLightCenter, receiverToLightCenter);
+				if (receiverCenterDistanceSquared <= 1e-4)
+					continue;
+				const float receiverCenterDistance = sqrt(receiverCenterDistanceSquared);
+				const float3 receiverCenterDirection = receiverToLightCenter / receiverCenterDistance;
 				float3 sampledPosition = light.position;
-				if (gSmokeConstants.LightMode >= 3u)
+				if (gSmokeConstants.LightMode >= 3u || (gridDirect && sampleCount > 1u && light.emitterRadius > 0.0))
 				{
-					uint randomState = SmokeLightRandomSeed(froxelPositionIndex, light, sampleIndex);
-					sampledPosition = SmokeSampleReceiverFacingEmitter(light, centerDirection, randomState);
+					uint randomState = gridDirect
+						? SmokeDirectRandomSeed(receiverPosition, light.stableKeyLo, light.stableKeyHi, sampleIndex)
+						: SmokeLightRandomSeed(froxelPositionIndex, light, sampleIndex);
+					sampledPosition = SmokeSampleReceiverFacingEmitter(light, receiverCenterDirection, randomState);
 					if (lightingDiagnostics && light.emitterRadius > 0.0)
 						InterlockedAdd(gSmokeControl[0].LightSoftSamples, 1u);
 				}
-				const float3 toSampledLight = sampledPosition - froxelPosition;
+				const float3 toSampledLight = sampledPosition - receiverPosition;
 				const float sampledDistanceSquared = dot(toSampledLight, toSampledLight);
 				if (sampledDistanceSquared <= 1e-4)
 					continue;
@@ -133,8 +155,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					if (lightingDiagnostics)
 						InterlockedAdd(gSmokeControl[0].LightShadowRays, 1u);
 					visibility = (SmokeFilteredVisibilityEffective()
-						? SmokePointLightVisibleFiltered(froxelPosition, lightDirection, sampledDistance, lightingDiagnostics)
-						: SmokePointLightVisible(froxelPosition, lightDirection, sampledDistance, lightingDiagnostics)) ? 1.0 : 0.0;
+						? SmokePointLightVisibleFiltered(receiverPosition, lightDirection, sampledDistance, lightingDiagnostics)
+						: SmokePointLightVisible(receiverPosition, lightDirection, sampledDistance, lightingDiagnostics)) ? 1.0 : 0.0;
 					if (lightingDiagnostics)
 					{
 						if (visibility > 0.0)
@@ -143,16 +165,41 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 							InterlockedAdd(gSmokeControl[0].LightShadowOccluded, 1u);
 					}
 				}
-				const float phase = SmokeHenyeyGreenstein(dot(lightDirection, viewRay), anisotropy);
-				const float3 unclampedLightRadiance = max(light.color, 0.0) * attenuation;
+				const float receiverAttenuation = EvaluateAnalyticPointLightAttenuation(
+					receiverCenterDistance, light.radius, light.intensity);
+				const float3 receiverViewRay = gridDirect ? normalize(receiverPosition - gSmokeConstants.CameraPosition) : viewRay;
+				const float phase = SmokeHenyeyGreenstein(dot(lightDirection, receiverViewRay), anisotropy);
+				const float3 unclampedLightRadiance = max(light.color, 0.0) * receiverAttenuation;
 				if (lightingDiagnostics && any(unclampedLightRadiance > 32.0))
 					InterlockedAdd(gSmokeControl[0].LightRadianceClamps, 1u);
 				const float3 lightRadiance = min(unclampedLightRadiance, 32.0);
-				sampledContribution += lightRadiance * (phase * visibility);
+				const float3 unshadowedContribution = lightRadiance * phase;
+				sampledContribution += unshadowedContribution * visibility;
+				if (gridDirect)
+				{
+					const float sampleWeight = dot(max(unshadowedContribution, 0.0), float3(0.2126, 0.7152, 0.0722));
+					unshadowedWeight += sampleWeight;
+					visibleWeight += sampleWeight * visibility;
+				}
 			}
 			scattering += medium.rgb * (sampledContribution / (float)sampleCount);
 		}
 	}
-	const float3 source = gSmokeFroxelSource[froxelIndex].rgb + scattering * gSmokeConstants.RadianceScale;
-	gSmokeFroxelSource[froxelIndex] = float4(source, 0.0);
+	if (gridDirect)
+	{
+		const float visibility = unshadowedWeight > 1e-6 ? visibleWeight / unshadowedWeight : 0.0;
+		SmokeDirectCacheRecord record;
+		record.Radiance = max(scattering, 0.0);
+		record.SigmaT = medium.a;
+		record.WorldPosition = froxelPosition;
+		record.Metadata = SmokeDirectPackMetadata(1u, gSmokeConstants.FrameIndex, visibility);
+		gSmokeDirectCurrent[froxelIndex] = record;
+		if (receiverSamples > 0u)
+			SmokeDirectAccumulateVisibilityDiagnostics(visibility, receiverSamples, lightingDiagnostics);
+	}
+	else
+	{
+		const float3 source = gSmokeFroxelSource[froxelIndex].rgb + scattering * gSmokeConstants.RadianceScale;
+		gSmokeFroxelSource[froxelIndex] = float4(source, 0.0);
+	}
 }

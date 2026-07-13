@@ -21,12 +21,19 @@ namespace
 	constexpr uint32_t kDirectionalProbeThreadGroupWidth = 64u;
 	constexpr uint32_t kDirectionalParticleThreadGroupHeight = 2u;
 	constexpr uint32_t kSmokeCoreStorageBufferCount = 17u;
-	constexpr uint32_t kSmokeStorageDescriptorCount = kSmokeCoreStorageBufferCount + NRISmokeGrid::EvaluationDescriptorCount;
+	constexpr uint32_t kSmokeDirectStorageBufferCount = 2u;
+	constexpr uint32_t kSmokeBarrierBufferCount = kSmokeCoreStorageBufferCount + kSmokeDirectStorageBufferCount;
+	constexpr uint32_t kSmokeStorageDescriptorCount = kSmokeCoreStorageBufferCount + NRISmokeGrid::EvaluationDescriptorCount + kSmokeDirectStorageBufferCount;
 	constexpr uint32_t kSmokeFilteredSceneBufferCount = 8u;
 	constexpr uint32_t kSmokeEmissiveSceneBufferCount = 7u;
 	constexpr uint32_t kSmokeExtendedSceneBufferCount = 10u;
-	const char* const kSmokePipelineNames[] = { "SmokeClear", "SmokeSimulate", "SmokeSpawn", "SmokeBin", "SmokeLightDirectionalCarriers", "SmokeEvaluateMedium", "SmokeEvaluateGrid", "SmokeLightPoint", "SmokeLightDirectional", "SmokeLightEmissive", "SmokeLightEmissiveTemporal", "SmokeLightEmissiveSpatial", "SmokeLightIndirectReference", "SmokeLightIndirectTemporal", "SmokeLightIndirectSpatial", "SmokeIntegrate", "SmokeResolveVolume", "SmokeTemporalVolume", "SmokeComposite" };
-	static_assert(std::size(kSmokePipelineNames) == 19u);
+	constexpr uint32_t kSmokeFlagDirectReuseShift = 14u;
+	constexpr uint32_t kSmokeFlagCompareRepresentation = 0x10000u;
+	constexpr uint32_t kSmokeFlagGridRepresentation = 0x20000u;
+	constexpr uint32_t kSmokeFlagDirectHistoryValid = 0x40000u;
+	constexpr uint32_t kSmokeFlagDirectReferenceShift = 19u;
+	const char* const kSmokePipelineNames[] = { "SmokeClear", "SmokeSimulate", "SmokeSpawn", "SmokeBin", "SmokeLightDirectionalCarriers", "SmokeEvaluateMedium", "SmokeEvaluateGrid", "SmokeLightPoint", "SmokeLightDirectional", "SmokeLightDirectTemporal", "SmokeLightDirectSpatial", "SmokeLightEmissive", "SmokeLightEmissiveTemporal", "SmokeLightEmissiveSpatial", "SmokeLightIndirectReference", "SmokeLightIndirectTemporal", "SmokeLightIndirectSpatial", "SmokeIntegrate", "SmokeResolveVolume", "SmokeTemporalVolume", "SmokeComposite" };
+	static_assert(std::size(kSmokePipelineNames) == 21u);
 
 	uint32_t PackDirectionalLightColor24(const float color[3])
 	{
@@ -40,6 +47,19 @@ namespace
 	uint32_t Groups(uint64_t count)
 	{
 		return (uint32_t)std::max<uint64_t>(1, (count + kThreads - 1) / kThreads);
+	}
+
+	uint32_t FloatBits(float value)
+	{
+		uint32_t bits = 0;
+		std::memcpy(&bits, &value, sizeof(bits));
+		return bits;
+	}
+
+	uint64_t HashCombine64(uint64_t hash, uint64_t value)
+	{
+		hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6u) + (hash >> 2u);
+		return hash;
 	}
 
 }
@@ -261,7 +281,7 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 	const uint32_t fh = (renderer.mRenderHeight + mSettings.froxelPixelSize - 1) / mSettings.froxelPixelSize;
 	const bool persistentReady = mParticles.buffer != nullptr && mReferenceNext.buffer != nullptr && mParticleDirectionalVisibility.buffer != nullptr && mResourceParticleCapacity == mSettings.particleCapacity &&
 		mResourceStyleCapacity == (uint32_t)mStyles.size();
-	const bool viewReady = mFineCells.buffer != nullptr && mResourceFroxelWidth == fw &&
+	const bool viewReady = mFineCells.buffer != nullptr && mDirectCurrent.buffer != nullptr && mDirectHistory.buffer != nullptr && mResourceFroxelWidth == fw &&
 		mResourceFroxelHeight == fh && mResourceFroxelDepth == mSettings.froxelDepth;
 	if (persistentReady && viewReady)
 		return true;
@@ -314,7 +334,9 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 		!CreateBuffer(renderer, mIndirectScratch, froxels * sizeof(NRISmokeIndirectCacheGpu), sizeof(NRISmokeIndirectCacheGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mEmissiveCurrent, froxels * sizeof(NRISmokeEmissiveReservoirGpu), sizeof(NRISmokeEmissiveReservoirGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mEmissiveTemporal, froxels * sizeof(NRISmokeEmissiveReservoirGpu), sizeof(NRISmokeEmissiveReservoirGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
-		!CreateBuffer(renderer, mEmissiveHistory, froxels * sizeof(NRISmokeEmissiveReservoirGpu), sizeof(NRISmokeEmissiveReservoirGpu), storage, nri::MemoryLocation::DEVICE, false, true))
+		!CreateBuffer(renderer, mEmissiveHistory, froxels * sizeof(NRISmokeEmissiveReservoirGpu), sizeof(NRISmokeEmissiveReservoirGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
+		!CreateBuffer(renderer, mDirectCurrent, froxels * sizeof(NRISmokeDirectCacheGpu), sizeof(NRISmokeDirectCacheGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
+		!CreateBuffer(renderer, mDirectHistory, froxels * sizeof(NRISmokeDirectCacheGpu), sizeof(NRISmokeDirectCacheGpu), storage, nri::MemoryLocation::DEVICE, false, true))
 	{
 		DestroyViewResources(renderer);
 		return false;
@@ -325,6 +347,10 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 	mViewResourcesInitialized = false;
 	mIndirectHistoryValid = false;
 	mEmissiveHistoryValid = false;
+	mDirectHistoryValid = false;
+	mLastDirectFrame = UINT32_MAX;
+	mStatus.directHistoryValid = false;
+	mStatus.directHistoryResetReason = "view-resources";
 	mStatus.froxelWidth = fw;
 	mStatus.froxelHeight = fh;
 	mStatus.froxelDepth = mSettings.froxelDepth;
@@ -333,9 +359,11 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 		mWideCells.memorySize + mGlobalDepthCells.memorySize +
 		mFroxelMedium.memorySize + mFroxelIntegrated.memorySize + mFroxelPhase.memorySize + mFroxelSource.memorySize +
 		mOccupiedFroxelIndices.memorySize + mIndirectHistory.memorySize + mIndirectScratch.memorySize +
-		mEmissiveCurrent.memorySize + mEmissiveTemporal.memorySize + mEmissiveHistory.memorySize + mStyleBuffer.memorySize;
+		mEmissiveCurrent.memorySize + mEmissiveTemporal.memorySize + mEmissiveHistory.memorySize +
+		mDirectCurrent.memorySize + mDirectHistory.memorySize + mStyleBuffer.memorySize;
 	mStatus.indirectCacheBytes = mIndirectHistory.memorySize + mIndirectScratch.memorySize;
 	mStatus.emissiveReservoirBytes = mEmissiveCurrent.memorySize + mEmissiveTemporal.memorySize + mEmissiveHistory.memorySize;
+	mStatus.directHistoryBytes = mDirectCurrent.memorySize + mDirectHistory.memorySize;
 	for (const CommandSlot& slot : mCommandSlots)
 		mStatus.residentBytes += slot.upload.memorySize + slot.device.memorySize + slot.styleUpload.memorySize + slot.controlReadback.memorySize;
 	return true;
@@ -463,6 +491,18 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 				mStatus.indirectCacheMaximumAge = control.indirectCacheMaximumAge;
 				mStatus.indirectCacheClamps = control.indirectCacheClamps;
 				mStatus.indirectCacheResolved = control.indirectCacheResolved;
+				mStatus.directReceiverSamples = control.directReceiverSamples;
+				mStatus.directFractionalVisibility = control.directFractionalVisibility;
+				mStatus.directVisibilityZero = control.directVisibilityZero;
+				mStatus.directVisibilityOne = control.directVisibilityOne;
+				mStatus.directTemporalAccepted = control.directTemporalAccepted;
+				mStatus.directTemporalRejected = control.directTemporalRejected;
+				mStatus.directSpatialAccepted = control.directSpatialAccepted;
+				mStatus.directSpatialRejected = control.directSpatialRejected;
+				mStatus.directHistoryMaximumAge = control.directHistoryMaximumAge;
+				mStatus.directHistoryResolved = control.directHistoryResolved;
+				mStatus.directHistoryClamps = control.directHistoryClamps;
+				mStatus.directNanRejects = control.directNanRejects;
 				mStatus.lightCandidatesTested = control.lightCandidatesTested;
 				mStatus.lightDistanceRejected = control.lightDistanceRejected;
 				mStatus.lightShadowRays = control.lightShadowRays;
@@ -561,13 +601,14 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	if (commandCount > 0)
 		renderer.mFrameBuffer->mCore.CmdCopyBuffer(*renderer.mFrameBuffer->mCommandBuffer, *slot.device.buffer, 0, *slot.upload.buffer, 0, (uint64_t)commandCount * sizeof(NRISmokeInjectionCommandGpu));
 
-	nri::BufferBarrierDesc compute[2 + kSmokeCoreStorageBufferCount] = {};
+	nri::BufferBarrierDesc compute[2 + kSmokeBarrierBufferCount] = {};
 	nri::Buffer* computeBuffers[] = { mStyleBuffer.buffer, slot.device.buffer, mParticles.buffer, mControl.buffer,
 		mFineCells.buffer, mReferenceNext.buffer, mFroxelMedium.buffer, mFroxelIntegrated.buffer,
 		mWideCells.buffer, mGlobalDepthCells.buffer, mFroxelPhase.buffer, mFroxelSource.buffer, mOccupiedFroxelIndices.buffer,
 		mIndirectHistory.buffer, mIndirectScratch.buffer, mParticleDirectionalVisibility.buffer,
-		mEmissiveCurrent.buffer, mEmissiveTemporal.buffer, mEmissiveHistory.buffer };
-	for (uint32_t i = 0; i < 2 + kSmokeCoreStorageBufferCount; ++i)
+		mEmissiveCurrent.buffer, mEmissiveTemporal.buffer, mEmissiveHistory.buffer,
+		mDirectCurrent.buffer, mDirectHistory.buffer };
+	for (uint32_t i = 0; i < 2 + kSmokeBarrierBufferCount; ++i)
 	{
 		compute[i].buffer = computeBuffers[i];
 		compute[i].after = i < 2 ? NRIResourceComputeShaderResourceAccess() : StorageAccess();
@@ -581,12 +622,12 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		if (mControlCopyPending) compute[3].before = NRIResourceCopySourceAccess();
 	}
 	if (mViewResourcesInitialized)
-		for (uint32_t i = 4; i < 2 + kSmokeCoreStorageBufferCount; ++i) compute[i].before = StorageAccess();
+		for (uint32_t i = 4; i < 2 + kSmokeBarrierBufferCount; ++i) compute[i].before = StorageAccess();
 	mControlCopyPending = false;
 	slot.initialized = true;
 	mResourcesInitialized = true;
 	mViewResourcesInitialized = true;
-	nri::BarrierDesc computeBarrier = {}; computeBarrier.buffers = compute; computeBarrier.bufferNum = 2 + kSmokeCoreStorageBufferCount;
+	nri::BarrierDesc computeBarrier = {}; computeBarrier.buffers = compute; computeBarrier.bufferNum = 2 + kSmokeBarrierBufferCount;
 	renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, computeBarrier);
 
 	const nri::Descriptor* inputs[] = { mStyleBuffer.shaderView, slot.device.shaderView };
@@ -598,6 +639,8 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	if (!mGrid.GetEvaluationStorageDescriptors(gridDescriptors))
 		gridDescriptors.fill(mControl.storageView);
 	std::copy(gridDescriptors.begin(), gridDescriptors.end(), outputs.begin() + kSmokeCoreStorageBufferCount);
+	outputs[kSmokeCoreStorageBufferCount + NRISmokeGrid::EvaluationDescriptorCount] = mDirectCurrent.storageView;
+	outputs[kSmokeCoreStorageBufferCount + NRISmokeGrid::EvaluationDescriptorCount + 1u] = mDirectHistory.storageView;
 	nri::UpdateDescriptorRangeDesc updates[2] = {};
 	updates[0].descriptorSet = slot.inputSet; updates[0].rangeIndex = 0; updates[0].descriptors = inputs; updates[0].descriptorNum = 2;
 	updates[1].descriptorSet = slot.bufferSet; updates[1].rangeIndex = 0; updates[1].descriptors = outputs.data(); updates[1].descriptorNum = kSmokeStorageDescriptorCount;
@@ -628,9 +671,9 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	};
 	auto storageBarrier = [&]()
 	{
-		nri::BufferBarrierDesc barriers[kSmokeCoreStorageBufferCount] = {};
-		for (uint32_t i = 0; i < kSmokeCoreStorageBufferCount; ++i) { barriers[i].buffer = computeBuffers[i + 2]; barriers[i].before = StorageAccess(); barriers[i].after = StorageAccess(); }
-		nri::BarrierDesc barrier = {}; barrier.buffers = barriers; barrier.bufferNum = kSmokeCoreStorageBufferCount;
+		nri::BufferBarrierDesc barriers[kSmokeBarrierBufferCount] = {};
+		for (uint32_t i = 0; i < kSmokeBarrierBufferCount; ++i) { barriers[i].buffer = computeBuffers[i + 2]; barriers[i].before = StorageAccess(); barriers[i].after = StorageAccess(); }
+		nri::BarrierDesc barrier = {}; barrier.buffers = barriers; barrier.bufferNum = kSmokeBarrierBufferCount;
 		renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, barrier);
 	};
 	renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
@@ -892,9 +935,33 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		mLastIndirectCacheMode == effectiveIndirectCacheMode &&
 		mLastIndirectSectorHash == indirectSectorHash && mLastIndirectSkyKey == indirectSkyKey &&
 		mLastIndirectEmissiveHash == indirectEmissiveHash;
+	uint64_t directDirectionalHash = 1469598103934665603ull;
+	directDirectionalHash = HashCombine64(directDirectionalHash, constants.directionalColorPacked);
+	directDirectionalHash = HashCombine64(directDirectionalHash, FloatBits(constants.directionalDirectionX));
+	directDirectionalHash = HashCombine64(directDirectionalHash, FloatBits(constants.directionalDirectionY));
+	directDirectionalHash = HashCombine64(directDirectionalHash, FloatBits(constants.directionalDirectionZ));
+	directDirectionalHash = HashCombine64(directDirectionalHash, FloatBits(constants.directionalAngularSize));
+	directDirectionalHash = HashCombine64(directDirectionalHash, constants.lightSourceFlags & 0x7u);
+	const bool gridRepresentationActive = mStatus.representationEffective != 0u;
+	const uint32_t effectiveDirectReuseMode = gridRepresentationActive ? mSettings.directReuseMode : 0u;
+	const uint32_t directVisibilityBackend = constants.filteredVisibilityEnabled & 0xfu;
+	const bool directHistoryCompatible = gridRepresentationActive && mDirectHistoryValid &&
+		!renderer.mResetHistory && mLastDirectFrame + 1u == renderer.mFrameIndex &&
+		mLastDirectReuseMode == effectiveDirectReuseMode &&
+		mLastDirectReferenceMode == mSettings.directReferenceMode &&
+		mLastDirectQuality == std::min(mSettings.quality, 2u) &&
+		mLastDirectLightMode == constants.lightMode &&
+		mLastDirectLightSamples == constants.lightSamples && mLastDirectSimulationEpoch == mStatus.simulationEpoch &&
+		mLastDirectVisibilityBackend == directVisibilityBackend && mLastDirectDirectionalHash == directDirectionalHash;
 	constants.flags = (mSettings.readback || mSettings.traceMode > 0u) ? 2u : 0u;
 	if (mStatus.representationEffective == 2u)
-		constants.flags |= 0x10000u;
+		constants.flags |= kSmokeFlagCompareRepresentation;
+	if (gridRepresentationActive)
+		constants.flags |= kSmokeFlagGridRepresentation;
+	constants.flags |= (effectiveDirectReuseMode & 3u) << kSmokeFlagDirectReuseShift;
+	constants.flags |= (mSettings.directReferenceMode & 3u) << kSmokeFlagDirectReferenceShift;
+	if (directHistoryCompatible)
+		constants.flags |= kSmokeFlagDirectHistoryValid;
 	constants.flags |= (effectiveIndirectCacheMode & 3u) << 2u;
 	constants.flags |= (std::min(mSettings.quality, 2u) & 3u) << 5u;
 	if (indirectHistoryCompatible)
@@ -914,6 +981,26 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	mStatus.emissiveReuseModeEffective = emissiveLightsReady ? mSettings.emissiveReuseMode : 0u;
 	mStatus.emissiveReference = emissiveLightsReady && mSettings.emissiveReference;
 	mStatus.emissiveHistoryValid = emissiveHistoryCompatible;
+	mStatus.directReuseModeRequested = mSettings.directReuseMode;
+	mStatus.directReuseModeEffective = effectiveDirectReuseMode;
+	mStatus.directReferenceMode = gridRepresentationActive ? mSettings.directReferenceMode : 0u;
+	mStatus.directHistoryValid = directHistoryCompatible;
+	if (directHistoryCompatible)
+		mStatus.directHistoryResetReason = "none";
+	else if (!gridRepresentationActive)
+		mStatus.directHistoryResetReason = "particle-backend";
+	else if (renderer.mResetHistory)
+		mStatus.directHistoryResetReason = "renderer-reset";
+	else if (!mDirectHistoryValid)
+		mStatus.directHistoryResetReason = "uninitialized";
+	else if (mLastDirectFrame + 1u != renderer.mFrameIndex)
+		mStatus.directHistoryResetReason = "frame-gap";
+	else if (mLastDirectSimulationEpoch != mStatus.simulationEpoch)
+		mStatus.directHistoryResetReason = "smoke-reset";
+	else if (mLastDirectDirectionalHash != directDirectionalHash)
+		mStatus.directHistoryResetReason = "directional-change";
+	else
+		mStatus.directHistoryResetReason = "mode-change";
 	// Ordinary emissive payload churn is handled by current-frame reservoir
 	// evaluation and the volume neighborhood clamp. Resetting the final
 	// volume layer for every animated/dynamic emissive would prevent history
@@ -973,13 +1060,14 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	};
 	auto storageBarrier = [&]()
 	{
-		nri::BufferBarrierDesc barriers[kSmokeCoreStorageBufferCount] = {};
+		nri::BufferBarrierDesc barriers[kSmokeBarrierBufferCount] = {};
 		nri::Buffer* buffers[] = { mParticles.buffer, mControl.buffer, mFineCells.buffer, mReferenceNext.buffer,
 			mFroxelMedium.buffer, mFroxelIntegrated.buffer, mWideCells.buffer, mGlobalDepthCells.buffer, mFroxelPhase.buffer,
 			mFroxelSource.buffer, mOccupiedFroxelIndices.buffer, mIndirectHistory.buffer, mIndirectScratch.buffer,
-			mParticleDirectionalVisibility.buffer, mEmissiveCurrent.buffer, mEmissiveTemporal.buffer, mEmissiveHistory.buffer };
-		for (uint32_t i = 0; i < kSmokeCoreStorageBufferCount; ++i) { barriers[i].buffer = buffers[i]; barriers[i].before = StorageAccess(); barriers[i].after = StorageAccess(); }
-		nri::BarrierDesc barrier = {}; barrier.buffers = barriers; barrier.bufferNum = kSmokeCoreStorageBufferCount;
+			mParticleDirectionalVisibility.buffer, mEmissiveCurrent.buffer, mEmissiveTemporal.buffer, mEmissiveHistory.buffer,
+			mDirectCurrent.buffer, mDirectHistory.buffer };
+		for (uint32_t i = 0; i < kSmokeBarrierBufferCount; ++i) { barriers[i].buffer = buffers[i]; barriers[i].before = StorageAccess(); barriers[i].after = StorageAccess(); }
+		nri::BarrierDesc barrier = {}; barrier.buffers = barriers; barrier.bufferNum = kSmokeBarrierBufferCount;
 		renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, barrier);
 	};
 	renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
@@ -1021,6 +1109,31 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	storageBarrier();
 	dispatch(NRISmokePass::LightDirectional, Groups(froxelCount), 1, 1);
 	storageBarrier();
+	if (renderGrid)
+	{
+		if (effectiveDirectReuseMode >= 1u)
+		{
+			dispatch(NRISmokePass::LightDirectTemporal, Groups(froxelCount), 1, 1);
+			storageBarrier();
+		}
+		dispatch(NRISmokePass::LightDirectSpatial, Groups(froxelCount), 1, 1);
+		storageBarrier();
+		mDirectHistoryValid = true;
+		mLastDirectFrame = renderer.mFrameIndex;
+		mLastDirectReuseMode = effectiveDirectReuseMode;
+		mLastDirectReferenceMode = mSettings.directReferenceMode;
+		mLastDirectQuality = std::min(mSettings.quality, 2u);
+		mLastDirectLightMode = constants.lightMode;
+		mLastDirectLightSamples = constants.lightSamples;
+		mLastDirectSimulationEpoch = mStatus.simulationEpoch;
+		mLastDirectVisibilityBackend = directVisibilityBackend;
+		mLastDirectDirectionalHash = directDirectionalHash;
+	}
+	else
+	{
+		mDirectHistoryValid = false;
+		mLastDirectFrame = UINT32_MAX;
+	}
 	dispatch(NRISmokePass::LightEmissiveInitial, Groups(froxelCount), 1, 1);
 	storageBarrier();
 	dispatch(NRISmokePass::LightEmissiveTemporal, Groups(froxelCount), 1, 1);
@@ -1131,6 +1244,8 @@ bool NRISmokeSystem::DispatchRoute(NRIRenderer& renderer, const NRISmokeRouteDes
 		mVolumeHistoryValid = false;
 		mIndirectHistoryValid = false;
 		mEmissiveHistoryValid = false;
+		mDirectHistoryValid = false;
+		mLastDirectFrame = UINT32_MAX;
 		renderer.CopyTexture(renderer.GetFrameTexture(route.inputSlot), renderer.GetFrameTexture(route.outputSlot));
 		return true;
 	}
@@ -1225,6 +1340,18 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.indirectCacheMaximumAge = 0;
 	mStatus.indirectCacheClamps = 0;
 	mStatus.indirectCacheResolved = 0;
+	mStatus.directReceiverSamples = 0;
+	mStatus.directFractionalVisibility = 0;
+	mStatus.directVisibilityZero = 0;
+	mStatus.directVisibilityOne = 0;
+	mStatus.directTemporalAccepted = 0;
+	mStatus.directTemporalRejected = 0;
+	mStatus.directSpatialAccepted = 0;
+	mStatus.directSpatialRejected = 0;
+	mStatus.directHistoryMaximumAge = 0;
+	mStatus.directHistoryResolved = 0;
+	mStatus.directHistoryClamps = 0;
+	mStatus.directNanRejects = 0;
 	mStatus.lightCandidatesTested = 0;
 	mStatus.lightDistanceRejected = 0;
 	mStatus.lightShadowRays = 0;
@@ -1255,6 +1382,10 @@ void NRISmokeSystem::Reset(const char* reason)
 	mIndirectHistoryValid = false;
 	mEmissiveHistoryValid = false;
 	mLastEmissiveFrame = UINT32_MAX;
+	mDirectHistoryValid = false;
+	mLastDirectFrame = UINT32_MAX;
+	mStatus.directHistoryValid = false;
+	mStatus.directHistoryResetReason = mStatus.resetReason;
 	mVolumeHistoryValid = false;
 	mLastVolumeFrame = UINT32_MAX;
 	mStatus.volumeHistoryValid = false;
@@ -1273,11 +1404,16 @@ void NRISmokeSystem::DestroyViewResources(NRIRenderer& renderer)
 	destroy(mFroxelPhase); destroy(mFroxelSource); destroy(mOccupiedFroxelIndices);
 	destroy(mIndirectHistory); destroy(mIndirectScratch);
 	destroy(mEmissiveCurrent); destroy(mEmissiveTemporal); destroy(mEmissiveHistory);
+	destroy(mDirectCurrent); destroy(mDirectHistory);
 	mViewResourcesInitialized = false;
 	mIndirectHistoryValid = false;
 	mEmissiveHistoryValid = false;
+	mDirectHistoryValid = false;
+	mLastDirectFrame = UINT32_MAX;
 	mStatus.indirectCacheBytes = 0;
 	mStatus.emissiveReservoirBytes = 0;
+	mStatus.directHistoryBytes = 0;
+	mStatus.directHistoryValid = false;
 	mVolumeHistoryValid = false;
 	mLastVolumeFrame = UINT32_MAX;
 	mStatus.volumeHistoryValid = false;
@@ -1349,6 +1485,15 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mSettings.emissiveLights ? "yes" : "no", renderer.mBoundEmissivePrimitiveCount, mStatus.emissiveFroxelsProcessed, mStatus.emissiveSamples,
 		mStatus.emissiveCandidateMisses, mStatus.emissiveDistanceRejected, mStatus.emissiveFacingRejected, mStatus.emissiveShadowRays,
 		mStatus.emissiveShadowVisible, mStatus.emissiveShadowOccluded, mStatus.emissiveContributed, mStatus.emissiveRadianceClamps);
+	Printf("NRI PT smoke direct reconstruction: grid_only=yes reuse_requested=%u reuse_effective=%u reference=%u history=%s reset=%s cache_mib=%.2f receiver_samples=%u visibility_fractional=%u visibility_zero=%u visibility_one=%u temporal=%u/%u spatial=%u/%u maximum_age=%u resolved=%u clamps=%u nan=%u field_readback=0\n",
+		mStatus.directReuseModeRequested, mStatus.directReuseModeEffective, mStatus.directReferenceMode,
+		mStatus.directHistoryValid ? "valid" : "invalid", mStatus.directHistoryResetReason,
+		(double)mStatus.directHistoryBytes / (1024.0 * 1024.0), mStatus.directReceiverSamples,
+		mStatus.directFractionalVisibility, mStatus.directVisibilityZero, mStatus.directVisibilityOne,
+		mStatus.directTemporalAccepted, mStatus.directTemporalRejected,
+		mStatus.directSpatialAccepted, mStatus.directSpatialRejected,
+		mStatus.directHistoryMaximumAge, mStatus.directHistoryResolved,
+		mStatus.directHistoryClamps, mStatus.directNanRejects);
 	Printf("NRI PT smoke emissive reservoir: reuse_requested=%u reuse_effective=%u reference=%s history=%s reservoir_mib=%.2f initialized=%u invalid=%u temporal=%u/%u spatial=%u/%u final=%u source_clamps=%u maximum_age=%u identity_rejects=%u reference_samples=%u reference_rays=%u field_readback=0\n",
 		mStatus.emissiveReuseModeRequested, mStatus.emissiveReuseModeEffective, mStatus.emissiveReference ? "yes" : "no",
 		mStatus.emissiveHistoryValid ? "valid" : "invalid", (double)mStatus.emissiveReservoirBytes / (1024.0 * 1024.0),

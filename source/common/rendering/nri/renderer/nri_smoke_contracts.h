@@ -14,6 +14,8 @@ enum class NRISmokePass : uint32_t
 	EvaluateGrid,
 	LightPoint,
 	LightDirectional,
+	LightDirectTemporal,
+	LightDirectSpatial,
 	LightEmissiveInitial,
 	LightEmissiveTemporal,
 	LightEmissiveSpatial,
@@ -184,9 +186,29 @@ struct NRISmokeControlGpu
 	uint32_t indirectCacheMaximumAge = 0;
 	uint32_t indirectCacheClamps = 0;
 	uint32_t indirectCacheResolved = 0;
+	uint32_t directReceiverSamples = 0;
+	uint32_t directFractionalVisibility = 0;
+	uint32_t directVisibilityZero = 0;
+	uint32_t directVisibilityOne = 0;
+	uint32_t directTemporalAccepted = 0;
+	uint32_t directTemporalRejected = 0;
+	uint32_t directSpatialAccepted = 0;
+	uint32_t directSpatialRejected = 0;
+	uint32_t directHistoryMaximumAge = 0;
+	uint32_t directHistoryResolved = 0;
+	uint32_t directHistoryClamps = 0;
+	uint32_t directNanRejects = 0;
 };
 
 struct NRISmokeIndirectCacheGpu
+{
+	float radiance[3] = {};
+	float sigmaT = 0.0f;
+	float worldPosition[3] = {};
+	uint32_t metadata = 0;
+};
+
+struct NRISmokeDirectCacheGpu
 {
 	float radiance[3] = {};
 	float sigmaT = 0.0f;
@@ -211,8 +233,9 @@ struct NRISmokeEmissiveReservoirGpu
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
 static_assert(sizeof(NRISmokeStyleGpu) == 80);
 static_assert(sizeof(NRISmokeInjectionCommandGpu) == 64);
-static_assert(sizeof(NRISmokeControlGpu) == 428);
+static_assert(sizeof(NRISmokeControlGpu) == 476);
 static_assert(sizeof(NRISmokeIndirectCacheGpu) == 32);
+static_assert(sizeof(NRISmokeDirectCacheGpu) == 32);
 static_assert(sizeof(NRISmokeEmissiveReservoirGpu) == 48);
 
 struct NRISmokeConstants

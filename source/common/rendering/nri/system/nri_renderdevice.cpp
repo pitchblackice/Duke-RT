@@ -9053,7 +9053,7 @@ bool NRIRenderDevice::CreateRenderResources()
 	poolDesc.textureMaxNum = 16384;
 	poolDesc.storageTextureMaxNum = 128;
 	poolDesc.structuredBufferMaxNum = 512;
-	poolDesc.storageStructuredBufferMaxNum = 128;
+	poolDesc.storageStructuredBufferMaxNum = 256;
 	poolDesc.accelerationStructureMaxNum = 16;
 
 	if (mCore.CreateDescriptorPool(*mDevice, poolDesc, mDescriptorPool) != nri::Result::SUCCESS)
