@@ -32,58 +32,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float3 viewRay = normalize(ray);
 	uint scratchCount, scratchStride;
 	gSmokeIndirectScratch.GetDimensions(scratchCount, scratchStride);
-	const float3 geometricPosition = SmokeFroxelCenter(froxelCoordinates, ray);
-	const float3 representativePosition = froxelIndex < scratchCount
-		? gSmokeIndirectScratch[froxelIndex].WorldPosition
-		: geometricPosition;
-	const float3 froxelPosition = all(isfinite(representativePosition))
-		? representativePosition
-		: geometricPosition;
+	if (froxelIndex >= scratchCount)
+		return;
+	const float3 visibleDirectionalScattering = max(gSmokeIndirectScratch[froxelIndex].Radiance, 0.0);
 	const float3 centerDirection = SmokeDirectionalDirection();
 	const float anisotropy = gSmokeFroxelPhase[froxelIndex].x;
 	const bool castsShadow = (gSmokeConstants.LightSourceFlags & NRI_SMOKE_LIGHT_SOURCE_DIRECTIONAL_SHADOW) != 0u;
 	if (gSmokeConstants.LightMode >= 2u && castsShadow && !SmokeShadowTracingReady())
 		return;
-	const uint sampleCount = gSmokeConstants.LightMode >= 3u ? clamp(gSmokeConstants.LightSamples, 1u, 4u) : 1u;
-	float3 contribution = 0.0;
-	[loop]
-	for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
-	{
-		uint randomState = SmokeDirectionalWorldRandomSeed(
-			froxelPosition,
-			sampleIndex,
-			gSmokeConstants.DirectionalColorPacked ^
-			asuint(gSmokeConstants.DirectionalAngularSize) ^
-			SmokeHash(asuint(gSmokeConstants.DirectionalDirectionX)) ^
-			SmokeHash(asuint(gSmokeConstants.DirectionalDirectionY)) ^
-			SmokeHash(asuint(gSmokeConstants.DirectionalDirectionZ)));
-		const float3 lightDirection = gSmokeConstants.LightMode >= 3u
-			? SmokeSampleDirectionalCone(centerDirection, gSmokeConstants.DirectionalAngularSize, randomState)
-			: centerDirection;
-		float visibility = 1.0;
-		if (gSmokeConstants.LightMode >= 2u && castsShadow)
-		{
-			if (diagnostics)
-				InterlockedAdd(gSmokeControl[0].DirectionalShadowRays, 1u);
-			visibility = (SmokeFilteredVisibilityEffective()
-				? SmokePointLightVisibleFiltered(froxelPosition, lightDirection, 100000.0, diagnostics)
-				: SmokePointLightVisible(froxelPosition, lightDirection, 100000.0, diagnostics)) ? 1.0 : 0.0;
-			if (diagnostics)
-			{
-				if (visibility > 0.0)
-					InterlockedAdd(gSmokeControl[0].DirectionalShadowVisible, 1u);
-				else
-					InterlockedAdd(gSmokeControl[0].DirectionalShadowOccluded, 1u);
-			}
-		}
-		if (diagnostics)
-			InterlockedAdd(gSmokeControl[0].DirectionalSamples, 1u);
-		contribution += SmokeDirectionalColor() * (SmokeHenyeyGreenstein(dot(lightDirection, viewRay), anisotropy) * visibility);
-	}
-
-	const float3 unclamped = contribution / (float)sampleCount;
+	const float3 unclamped = visibleDirectionalScattering * SmokeDirectionalColor() *
+		SmokeHenyeyGreenstein(dot(centerDirection, viewRay), anisotropy);
 	if (diagnostics && any(unclamped > 32.0))
 		InterlockedAdd(gSmokeControl[0].DirectionalRadianceClamps, 1u);
-	const float3 source = gSmokeFroxelSource[froxelIndex].rgb + medium.rgb * min(unclamped, 32.0) * gSmokeConstants.RadianceScale;
+	const float3 source = gSmokeFroxelSource[froxelIndex].rgb + min(unclamped, 32.0) * gSmokeConstants.RadianceScale;
 	gSmokeFroxelSource[froxelIndex] = float4(source, 0.0);
 }

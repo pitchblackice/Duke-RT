@@ -446,14 +446,12 @@ uint SmokeLightingRandomSeed(uint3 froxel, uint sampleIndex, uint familySalt)
 	return SmokeHash(seed ^ SmokeHash(sampleIndex + 1u));
 }
 
-uint SmokeDirectionalWorldRandomSeed(float3 worldPosition, uint sampleIndex, uint familySalt)
+uint SmokeDirectionalCarrierRandomSeed(uint carrierSerial, uint sampleIndex, uint familySalt)
 {
-	// Directional visibility has no temporal filter. Anchor its cone rotation to
-	// coarse world cells so camera motion and frame progression cannot reseed it.
-	const int3 worldCell = (int3)floor(worldPosition * 0.25);
-	uint seed = SmokeHash(asuint(worldCell.x) ^ SmokeHash(asuint(worldCell.y) + 0x9e3779b9u));
-	seed ^= SmokeHash(asuint(worldCell.z) + 0x85ebca6bu);
-	seed ^= SmokeHash(familySalt);
+	// Directional visibility has no temporal filter. Keep each carrier's cone
+	// sequence stable while it moves; camera, frame, and world-cell boundaries
+	// must not reseed it.
+	uint seed = SmokeHash(carrierSerial + 0x9e3779b9u) ^ SmokeHash(familySalt);
 	return SmokeHash(seed ^ SmokeHash(sampleIndex + 1u));
 }
 

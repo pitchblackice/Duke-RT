@@ -176,7 +176,7 @@ private:
 	NRISmokeSettings mSettings = {};
 	NRISmokeStatusSnapshot mStatus = {};
 	nri::PipelineLayout* mPipelineLayout = nullptr;
-	std::array<nri::Pipeline*, 13> mPipelines = {};
+	std::array<nri::Pipeline*, 14> mPipelines = {};
 	std::vector<CommandSlot> mCommandSlots;
 	NRIBufferResource mStyleBuffer;
 	NRIBufferResource mParticles;
@@ -185,6 +185,7 @@ private:
 	NRIBufferResource mWideCells;
 	NRIBufferResource mGlobalDepthCells;
 	NRIBufferResource mReferenceNext;
+	NRIBufferResource mParticleDirectionalVisibility;
 	NRIBufferResource mFroxelMedium;
 	NRIBufferResource mFroxelIntegrated;
 	NRIBufferResource mFroxelPhase;

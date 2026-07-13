@@ -195,6 +195,7 @@ RWStructuredBuffer<float4> gSmokeFroxelSource : register(u9, space1);
 RWStructuredBuffer<uint> gSmokeOccupiedFroxelIndices : register(u10, space1);
 RWStructuredBuffer<SmokeIndirectCacheRecord> gSmokeIndirectHistory : register(u11, space1);
 RWStructuredBuffer<SmokeIndirectCacheRecord> gSmokeIndirectScratch : register(u12, space1);
+RWStructuredBuffer<float> gSmokeParticleDirectionalVisibility : register(u13, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);

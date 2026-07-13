@@ -9,6 +9,7 @@ enum class NRISmokePass : uint32_t
 	Simulate,
 	Spawn,
 	Bin,
+	LightDirectionalCarriers,
 	EvaluateMedium,
 	LightPoint,
 	LightDirectional,
