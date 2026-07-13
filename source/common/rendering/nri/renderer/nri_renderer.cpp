@@ -1983,6 +1983,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 
 	mMapWorld = {};
 	mObservedMapWorldBuildSerial = 0;
+	mMapMoverShadow.Reset();
 
 	DestroyCachedTextures();
 	ResetPersistentDynamicEmissiveCache();
@@ -2126,6 +2127,7 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 
 	mMapWorld = {};
 	mObservedMapWorldBuildSerial = 0;
+	mMapMoverShadow.Reset();
 	mAllowStartupMapWorldCorrection = false;
 	mAllowStartupMutationRebaseline = false;
 	mPendingStartupMutationRebaseline = false;
@@ -3375,6 +3377,7 @@ void NRIRenderer::RefreshMapWorld()
 		}
 		mMapWorld.Reset();
 		mMapWorld.level = currentLevel;
+		mMapMoverShadow.Reset();
 		mObservedMapWorldBuildSerial = pendingBuildSerial;
 		mPendingStartupVisibleChunkValidation.clear();
 		mRuntimeMutation.ResetForMapWorldBuildFailure();

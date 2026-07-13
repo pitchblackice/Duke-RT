@@ -30,6 +30,7 @@ namespace
 	{
 		MapMoverSurfaceProvenance provenance;
 		uint64_t materialSlotKey = 0;
+		uint64_t materialStateKey = 0;
 		std::vector<NormalizedVertex> vertices;
 		std::vector<NormalizedTriangle> triangles;
 	};
@@ -242,6 +243,7 @@ namespace
 			NormalizedSurface normalized = {};
 			normalized.provenance = source.provenance;
 			normalized.materialSlotKey = source.materialSlotKey;
+			normalized.materialStateKey = source.materialStateKey;
 			normalized.vertices.reserve(source.vertices.size());
 			for (uint32_t vertexIndex = 0; vertexIndex < source.vertices.size(); ++vertexIndex)
 			{
@@ -431,6 +433,18 @@ namespace
 		return hash;
 	}
 
+	uint64_t BuildMaterialStateKey(const CanonicalLocalMapMoverGeometry& geometry)
+	{
+		uint64_t hash = HashOffset;
+		for (const CanonicalLocalMapMoverSurface& surface : geometry.surfaces)
+		{
+			hash = HashProvenance(hash, surface.provenance);
+			hash = HashValue(hash, surface.materialSlotKey);
+			hash = HashValue(hash, surface.materialStateKey);
+		}
+		return hash;
+	}
+
 	bool BasisIsIdentity(const MapMoverLocalToWorldTransform& transform, double tolerance)
 	{
 		for (int row = 0; row < 3; ++row)
@@ -538,6 +552,7 @@ bool BuildCanonicalLocalMapMoverGeometry(
 		CanonicalLocalMapMoverSurface destination = {};
 		destination.provenance = source.provenance;
 		destination.materialSlotKey = source.materialSlotKey;
+		destination.materialStateKey = source.materialStateKey;
 		destination.vertices.reserve(source.vertices.size());
 		for (const NormalizedVertex& sourceVertex : source.vertices)
 		{
@@ -573,6 +588,7 @@ bool BuildCanonicalLocalMapMoverGeometry(
 	outGeometry.sourceOrderSignature = normalized.sourceOrderSignature;
 	outGeometry.topologyKey = BuildTopologyKey(outGeometry);
 	outGeometry.materialLayoutKey = BuildMaterialLayoutKey(outGeometry);
+	outGeometry.materialStateKey = BuildMaterialStateKey(outGeometry);
 	outGeometry.resourceKey = BuildResourceKey(outGeometry);
 	outGeometry.valid = true;
 	outValidation.valid = true;
@@ -640,6 +656,10 @@ MapMoverGeometryComparison ClassifyMapMoverGeometryChange(
 		if (canonicalSurface.materialSlotKey != currentSurface.materialSlotKey)
 		{
 			result.materialSlotChanged = true;
+		}
+		if (canonicalSurface.materialStateKey != currentSurface.materialStateKey)
+		{
+			result.materialStateChanged = true;
 		}
 		bool surfaceTopologyMatches = canonicalSurface.vertices.size() == currentSurface.vertices.size() &&
 			canonicalSurface.triangles.size() == currentSurface.triangles.size();
@@ -713,27 +733,32 @@ MapMoverGeometryComparison ClassifyMapMoverGeometryChange(
 		!result.topologyChanged &&
 		(!result.rigidFitWithinTolerance || result.vertexAttributeChanged);
 
+	const bool materialChanged = result.materialSlotChanged || result.materialStateChanged;
 	if (result.membershipChanged)
 	{
-		result.classification = (result.topologyChanged || result.materialSlotChanged) ?
+		result.classification = (result.topologyChanged || materialChanged) ?
 			MapMoverGeometryClassification::Mixed :
 			MapMoverGeometryClassification::MembershipChange;
 	}
 	else if (result.topologyChanged)
 	{
-		result.classification = result.materialSlotChanged ?
+		result.classification = materialChanged ?
 			MapMoverGeometryClassification::Mixed :
 			MapMoverGeometryClassification::TopologyChange;
 	}
 	else if (deformed)
 	{
-		result.classification = result.materialSlotChanged ?
+		result.classification = materialChanged ?
 			MapMoverGeometryClassification::Mixed :
 			MapMoverGeometryClassification::StableLayoutDeformer;
 	}
 	else if (result.materialSlotChanged)
 	{
 		result.classification = MapMoverGeometryClassification::MaterialSlotChange;
+	}
+	else if (result.materialStateChanged)
+	{
+		result.classification = MapMoverGeometryClassification::MaterialStateChange;
 	}
 	else
 	{
@@ -760,6 +785,7 @@ const char* GetMapMoverGeometryClassificationName(MapMoverGeometryClassification
 	case MapMoverGeometryClassification::TopologyChange: return "topology-change";
 	case MapMoverGeometryClassification::MembershipChange: return "membership-change";
 	case MapMoverGeometryClassification::MaterialSlotChange: return "material-slot-change";
+	case MapMoverGeometryClassification::MaterialStateChange: return "material-state-change";
 	case MapMoverGeometryClassification::Mixed: return "mixed";
 	default: return "unknown";
 	}

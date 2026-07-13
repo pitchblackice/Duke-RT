@@ -942,6 +942,8 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_map_chunk_diagnostics.cpp
 	common/rendering/nri/renderer/nri_map_chunk_status.cpp
 	common/rendering/nri/renderer/nri_map_movers.cpp
+	common/rendering/nri/renderer/nri_map_mover_shadow.cpp
+	common/rendering/nri/renderer/nri_map_mover_shadow_state.cpp
 	common/rendering/nri/renderer/nri_material_policy.cpp
 	common/rendering/nri/renderer/nri_material_warmup.cpp
 	common/rendering/nri/renderer/nri_nrd.cpp
@@ -1002,6 +1004,8 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_voxel_compute_meshing.cpp
 	common/rendering/nri/scene/nri_map_world.cpp
 	common/rendering/nri/scene/nri_map_builder.cpp
+	common/rendering/nri/scene/nri_map_mover_adapter.cpp
+	common/rendering/nri/scene/nri_map_mover_authored_topology.cpp
 	common/rendering/nri/scene/nri_map_mover_geometry.cpp
 	common/rendering/nri/scene/nri_scene_stats.cpp
 	common/rendering/nri/scene/nri_scene_texture_utils.cpp

@@ -226,6 +226,11 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.updateStateMs);
 	Clocker clock(NriPTUpdateState);
 	mMapMovers.CaptureFrame(gi, di.Viewpoint.TicFrac, mMapWorld.buildSerial);
+	mMapMoverShadow.CaptureChangedGroups(
+		mMapMovers,
+		mMapWorld,
+		mFrameIndex,
+		(int)nri_ptmapmovershadow);
 	if ((int)nri_ptmapmovertrace > 0)
 	{
 		MapMoverPrintfSink sink;

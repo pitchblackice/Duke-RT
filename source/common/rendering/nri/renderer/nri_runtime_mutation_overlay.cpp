@@ -1991,6 +1991,17 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				return false;
 			}
+			if (liveWorld.chunks.size() != 1 ||
+				liveWorld.chunks[0].chunkIndex != mapChunk.chunkIndex ||
+				liveWorld.chunks[0].sectorIndex != mapChunk.sectorIndex)
+			{
+				return false;
+			}
+			mMapMoverShadow.ObserveLiveChunk(
+				mMapMovers,
+				liveWorld,
+				mFrameIndex,
+				(int)nri_ptmapmovershadow);
 
 			nri_scene::BuildMapChunkSceneView(liveWorld, liveWorld.chunks[0], liveChunkView);
 			const bool exclusiveMaterialOnlyReplacement =
@@ -3719,5 +3730,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			return false;
 		}
 	}
+	mMapMoverShadow.EndFrame(
+		mMapMovers,
+		mMapWorld,
+		mFrameIndex,
+		(int)nri_ptmapmovershadow);
 	return !outGeometry.primitives.empty() || !outMaterials.materials.empty();
 }

@@ -16,6 +16,7 @@ enum class MapMoverGeometryClassification : uint8_t
 	TopologyChange,
 	MembershipChange,
 	MaterialSlotChange,
+	MaterialStateChange,
 	Mixed,
 };
 
@@ -86,7 +87,10 @@ struct WorldMapMoverTriangle
 struct WorldMapMoverSurface
 {
 	MapMoverSurfaceProvenance provenance;
+	// Identifies the logical material slot attached to this authored surface.
+	// Live texture/palette/shade state must not participate in this key.
 	uint64_t materialSlotKey = 0;
+	uint64_t materialStateKey = 0;
 	std::vector<WorldMapMoverVertex> vertices;
 	std::vector<WorldMapMoverTriangle> triangles;
 };
@@ -113,6 +117,7 @@ struct CanonicalLocalMapMoverSurface
 {
 	MapMoverSurfaceProvenance provenance;
 	uint64_t materialSlotKey = 0;
+	uint64_t materialStateKey = 0;
 	std::vector<CanonicalLocalMapMoverVertex> vertices;
 	std::vector<CanonicalLocalMapMoverTriangle> triangles;
 };
@@ -122,6 +127,7 @@ struct CanonicalLocalMapMoverGeometry
 	bool valid = false;
 	uint64_t topologyKey = 0;
 	uint64_t materialLayoutKey = 0;
+	uint64_t materialStateKey = 0;
 	uint64_t resourceKey = 0;
 	uint64_t sourceOrderSignature = 0;
 	std::vector<CanonicalLocalMapMoverSurface> surfaces;
@@ -153,6 +159,7 @@ struct MapMoverGeometryComparison
 	bool membershipChanged = false;
 	bool topologyChanged = false;
 	bool materialSlotChanged = false;
+	bool materialStateChanged = false;
 	bool vertexAttributeChanged = false;
 	bool rigidFitWithinTolerance = false;
 	uint32_t rigidFitVertexCount = 0;
