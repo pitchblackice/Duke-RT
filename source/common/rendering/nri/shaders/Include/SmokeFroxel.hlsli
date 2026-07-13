@@ -180,4 +180,36 @@ float SmokeSphereSegmentKernelAverage(float3 sphereCenter, float radius, float3 
 	return segmentWorldLength > 0.0 ? max(kernelIntegral * 1.5 / segmentWorldLength, 0.0) : 0.0;
 }
 
+float3 SmokeSphereSegmentKernelCentroid(float3 sphereCenter, float radius, float3 ray, float sliceNearDepth, float sliceFarDepth)
+{
+	const float safeRadius = max(radius, 0.001);
+	const float radiusSquared = safeRadius * safeRadius;
+	const float rayLengthSquared = max(dot(ray, ray), 0.000001);
+	const float rayLength = sqrt(rayLengthSquared);
+	const float3 toCenter = sphereCenter - gSmokeConstants.CameraPosition;
+	const float closestViewDepth = dot(toCenter, ray) / rayLengthSquared;
+	const float3 closestOffset = gSmokeConstants.CameraPosition + ray * closestViewDepth - sphereCenter;
+	const float perpendicularDistanceSquared = dot(closestOffset, closestOffset);
+	if (perpendicularDistanceSquared >= radiusSquared)
+		return gSmokeConstants.CameraPosition + ray * clamp(closestViewDepth, sliceNearDepth, sliceFarDepth);
+
+	const float halfChordWorld = sqrt(max(radiusSquared - perpendicularDistanceSquared, 0.0));
+	const float halfChordViewDepth = halfChordWorld / rayLength;
+	const float overlapNearDepth = max(sliceNearDepth, closestViewDepth - halfChordViewDepth);
+	const float overlapFarDepth = min(sliceFarDepth, closestViewDepth + halfChordViewDepth);
+	if (overlapFarDepth <= overlapNearDepth)
+		return gSmokeConstants.CameraPosition + ray * clamp(closestViewDepth, sliceNearDepth, sliceFarDepth);
+
+	const float q0 = (overlapNearDepth - closestViewDepth) * rayLength;
+	const float q1 = (overlapFarDepth - closestViewDepth) * rayLength;
+	const float radialBase = 1.0 - perpendicularDistanceSquared / radiusSquared;
+	const float kernelIntegral = radialBase * (q1 - q0) - (q1 * q1 * q1 - q0 * q0 * q0) / (3.0 * radiusSquared);
+	if (kernelIntegral <= 1e-8)
+		return gSmokeConstants.CameraPosition + ray * ((overlapNearDepth + overlapFarDepth) * 0.5);
+	const float kernelFirstMoment = radialBase * (q1 * q1 - q0 * q0) * 0.5 -
+		(q1 * q1 * q1 * q1 - q0 * q0 * q0 * q0) / (4.0 * radiusSquared);
+	const float centroidViewDepth = closestViewDepth + (kernelFirstMoment / kernelIntegral) / rayLength;
+	return gSmokeConstants.CameraPosition + ray * centroidViewDepth;
+}
+
 #endif

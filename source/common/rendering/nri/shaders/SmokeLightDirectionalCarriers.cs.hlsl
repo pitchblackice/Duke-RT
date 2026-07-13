@@ -8,11 +8,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	uint particleCount, visibilityCount, ignoredStride;
 	gSmokeParticles.GetDimensions(particleCount, ignoredStride);
 	gSmokeParticleDirectionalVisibility.GetDimensions(visibilityCount, ignoredStride);
-	const uint particleIndex = dispatchThreadId.x;
-	if (particleIndex >= min(gSmokeConstants.ParticleCapacity, min(particleCount, visibilityCount)))
+	const uint visibilityIndex = dispatchThreadId.x;
+	const uint particleIndex = visibilityIndex / NRI_SMOKE_DIRECTIONAL_PROBES_PER_PARTICLE;
+	const uint probeIndex = visibilityIndex - particleIndex * NRI_SMOKE_DIRECTIONAL_PROBES_PER_PARTICLE;
+	if (particleIndex >= min(gSmokeConstants.ParticleCapacity, particleCount) || visibilityIndex >= visibilityCount)
 		return;
 
-	gSmokeParticleDirectionalVisibility[particleIndex] = 0.0;
+	gSmokeParticleDirectionalVisibility[visibilityIndex] = 0.0;
 	const SmokeParticle particle = gSmokeParticles[particleIndex];
 	if (particle.Active == 0u || particle.Epoch != gSmokeConstants.SimulationEpoch ||
 		gSmokeConstants.LightMode == 0u ||
@@ -22,7 +24,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const bool castsShadow = (gSmokeConstants.LightSourceFlags & NRI_SMOKE_LIGHT_SOURCE_DIRECTIONAL_SHADOW) != 0u;
 	if (gSmokeConstants.LightMode < 2u || !castsShadow)
 	{
-		gSmokeParticleDirectionalVisibility[particleIndex] = 1.0;
+		gSmokeParticleDirectionalVisibility[visibilityIndex] = 1.0;
 		return;
 	}
 	if (!SmokeShadowTracingReady())
@@ -30,13 +32,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;
 	const float3 centerDirection = SmokeDirectionalDirection();
+	const uint probeX = probeIndex % NRI_SMOKE_DIRECTIONAL_PROBE_AXIS;
+	const uint probeY = (probeIndex / NRI_SMOKE_DIRECTIONAL_PROBE_AXIS) % NRI_SMOKE_DIRECTIONAL_PROBE_AXIS;
+	const uint probeZ = probeIndex / (NRI_SMOKE_DIRECTIONAL_PROBE_AXIS * NRI_SMOKE_DIRECTIONAL_PROBE_AXIS);
+	const int3 carrierCell = (int3)floor(particle.Position / NRI_SMOKE_DIRECTIONAL_PROBE_CELL_SIZE + 0.5);
+	const int3 probeOffset = int3(probeX, probeY, probeZ) - NRI_SMOKE_DIRECTIONAL_PROBE_RADIUS;
+	const float3 probePosition = (float3)(carrierCell + probeOffset) * NRI_SMOKE_DIRECTIONAL_PROBE_CELL_SIZE;
 	const uint sampleCount = gSmokeConstants.LightMode >= 3u ? clamp(gSmokeConstants.LightSamples, 1u, 4u) : 1u;
 	float visibleSamples = 0.0;
 	[loop]
 	for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
 	{
-		uint randomState = SmokeDirectionalCarrierRandomSeed(
-			particle.Serial,
+		uint randomState = SmokeDirectionalStableRandomSeed(
 			sampleIndex,
 			gSmokeConstants.DirectionalColorPacked ^
 			asuint(gSmokeConstants.DirectionalAngularSize) ^
@@ -52,8 +59,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			InterlockedAdd(gSmokeControl[0].DirectionalShadowRays, 1u);
 		}
 		const bool visible = SmokeFilteredVisibilityEffective()
-			? SmokePointLightVisibleFiltered(particle.Position, lightDirection, 100000.0, diagnostics)
-			: SmokePointLightVisible(particle.Position, lightDirection, 100000.0, diagnostics);
+			? SmokePointLightVisibleFiltered(probePosition, lightDirection, 100000.0, diagnostics)
+			: SmokePointLightVisible(probePosition, lightDirection, 100000.0, diagnostics);
 		if (visible)
 		{
 			visibleSamples += 1.0;
@@ -64,5 +71,5 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			InterlockedAdd(gSmokeControl[0].DirectionalShadowOccluded, 1u);
 		}
 	}
-	gSmokeParticleDirectionalVisibility[particleIndex] = visibleSamples / (float)sampleCount;
+	gSmokeParticleDirectionalVisibility[visibilityIndex] = visibleSamples / (float)sampleCount;
 }

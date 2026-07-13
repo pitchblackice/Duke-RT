@@ -1,6 +1,48 @@
 #include "Include/SmokeResources.hlsli"
 #include "Include/SmokeFroxel.hlsli"
 
+uint SmokeDirectionalProbeIndex(uint particleIndex, uint3 probe)
+{
+	return particleIndex * NRI_SMOKE_DIRECTIONAL_PROBES_PER_PARTICLE +
+		(probe.z * NRI_SMOKE_DIRECTIONAL_PROBE_AXIS + probe.y) * NRI_SMOKE_DIRECTIONAL_PROBE_AXIS + probe.x;
+}
+
+float SmokeSampleCarrierDirectionalVisibilityAtWorldPosition(
+	uint particleIndex,
+	uint directionalVisibilityCount,
+	SmokeParticle particle,
+	float3 samplePosition)
+{
+	const uint lastProbe = SmokeDirectionalProbeIndex(particleIndex,
+		uint3(NRI_SMOKE_DIRECTIONAL_PROBE_AXIS - 1u, NRI_SMOKE_DIRECTIONAL_PROBE_AXIS - 1u, NRI_SMOKE_DIRECTIONAL_PROBE_AXIS - 1u));
+	if (lastProbe >= directionalVisibilityCount)
+		return 0.0;
+
+	const int3 carrierCell = (int3)floor(particle.Position / NRI_SMOKE_DIRECTIONAL_PROBE_CELL_SIZE + 0.5);
+	const float3 worldGridPosition = samplePosition / NRI_SMOKE_DIRECTIONAL_PROBE_CELL_SIZE;
+	const int3 worldLowerCell = (int3)floor(worldGridPosition);
+	const int3 localLowerCell = worldLowerCell - carrierCell + NRI_SMOKE_DIRECTIONAL_PROBE_RADIUS;
+	const uint3 p0 = (uint3)clamp(localLowerCell, int3(0, 0, 0),
+		int3(NRI_SMOKE_DIRECTIONAL_PROBE_AXIS - 2u, NRI_SMOKE_DIRECTIONAL_PROBE_AXIS - 2u, NRI_SMOKE_DIRECTIONAL_PROBE_AXIS - 2u));
+	const uint3 p1 = p0 + 1u;
+	const int3 p0WorldCell = carrierCell + (int3)p0 - NRI_SMOKE_DIRECTIONAL_PROBE_RADIUS;
+	const float3 blend = saturate(worldGridPosition - (float3)p0WorldCell);
+
+	const float v000 = saturate(gSmokeParticleDirectionalVisibility[SmokeDirectionalProbeIndex(particleIndex, uint3(p0.x, p0.y, p0.z))]);
+	const float v100 = saturate(gSmokeParticleDirectionalVisibility[SmokeDirectionalProbeIndex(particleIndex, uint3(p1.x, p0.y, p0.z))]);
+	const float v010 = saturate(gSmokeParticleDirectionalVisibility[SmokeDirectionalProbeIndex(particleIndex, uint3(p0.x, p1.y, p0.z))]);
+	const float v110 = saturate(gSmokeParticleDirectionalVisibility[SmokeDirectionalProbeIndex(particleIndex, uint3(p1.x, p1.y, p0.z))]);
+	const float v001 = saturate(gSmokeParticleDirectionalVisibility[SmokeDirectionalProbeIndex(particleIndex, uint3(p0.x, p0.y, p1.z))]);
+	const float v101 = saturate(gSmokeParticleDirectionalVisibility[SmokeDirectionalProbeIndex(particleIndex, uint3(p1.x, p0.y, p1.z))]);
+	const float v011 = saturate(gSmokeParticleDirectionalVisibility[SmokeDirectionalProbeIndex(particleIndex, uint3(p0.x, p1.y, p1.z))]);
+	const float v111 = saturate(gSmokeParticleDirectionalVisibility[SmokeDirectionalProbeIndex(particleIndex, uint3(p1.x, p1.y, p1.z))]);
+	const float v00 = lerp(v000, v100, blend.x);
+	const float v10 = lerp(v010, v110, blend.x);
+	const float v01 = lerp(v001, v101, blend.x);
+	const float v11 = lerp(v011, v111, blend.x);
+	return lerp(lerp(v00, v10, blend.y), lerp(v01, v11, blend.y), blend.z);
+}
+
 void SmokeAccumulateCandidate(
 	uint particleIndex,
 	uint particleCount,
@@ -32,9 +74,10 @@ void SmokeAccumulateCandidate(
 	const float localScatteringWeight = dot(localScattering, float3(0.2126, 0.7152, 0.0722));
 	weightedAnisotropy += clamp(style.Anisotropy, -0.95, 0.95) * localScatteringWeight;
 	anisotropyWeight += localScatteringWeight;
-	const float directionalVisibility = particleIndex < directionalVisibilityCount
-		? saturate(gSmokeParticleDirectionalVisibility[particleIndex])
-		: 0.0;
+	const float3 directionalSamplePosition = SmokeSphereSegmentKernelCentroid(
+		particle.Position, particle.Radius, ray, sliceNearDepth, sliceFarDepth);
+	const float directionalVisibility = SmokeSampleCarrierDirectionalVisibilityAtWorldPosition(
+		particleIndex, directionalVisibilityCount, particle, directionalSamplePosition);
 	visibleDirectionalScattering += localScattering * directionalVisibility;
 	contributingCandidates++;
 }

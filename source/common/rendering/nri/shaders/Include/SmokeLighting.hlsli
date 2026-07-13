@@ -446,13 +446,11 @@ uint SmokeLightingRandomSeed(uint3 froxel, uint sampleIndex, uint familySalt)
 	return SmokeHash(seed ^ SmokeHash(sampleIndex + 1u));
 }
 
-uint SmokeDirectionalCarrierRandomSeed(uint carrierSerial, uint sampleIndex, uint familySalt)
+uint SmokeDirectionalStableRandomSeed(uint sampleIndex, uint familySalt)
 {
-	// Directional visibility has no temporal filter. Keep each carrier's cone
-	// sequence stable while it moves; camera, frame, and world-cell boundaries
-	// must not reseed it.
-	uint seed = SmokeHash(carrierSerial + 0x9e3779b9u) ^ SmokeHash(familySalt);
-	return SmokeHash(seed ^ SmokeHash(sampleIndex + 1u));
+	// Every duplicate node in the overlapping carrier windows represents the
+	// same world visibility field, so it must use the same stable cone sequence.
+	return SmokeHash(SmokeHash(familySalt) ^ SmokeHash(sampleIndex + 1u));
 }
 
 float3 SmokeSampleDirectionalCone(float3 centerDirection, float angularRadius, inout uint randomState)
