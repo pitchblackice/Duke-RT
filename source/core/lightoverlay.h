@@ -299,6 +299,9 @@ struct ParsedLightOverlaySmokeStyle
 	float drag = 0.0f;
 	float turbulence = 0.0f;
 	float turbulenceScale = 0.0f;
+	float temperature = 1.0f;
+	float momentumScale = 1.0f;
+	float coolingHalfLife = 2.0f;
 };
 
 struct ParsedLightOverlaySmokeActorRule

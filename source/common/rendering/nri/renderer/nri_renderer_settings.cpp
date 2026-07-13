@@ -237,5 +237,17 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.densityScale = std::clamp((float)nri_ptsmokedensityscale, 0.0f, 16.0f);
 	settings.radianceScale = std::clamp((float)nri_ptsmokeradiancescale, 0.0f, 16.0f);
 	settings.indirectScale = std::clamp((float)nri_ptsmokeindirectscale, 0.0f, 16.0f);
+	settings.representation = (uint32_t)std::clamp((int)nri_ptsmokerepresentation, 0, 2);
+	settings.gridBrickCapacity = (uint32_t)std::clamp((int)nri_ptsmokegridbricks, 64, 4096);
+	settings.gridCellSize = std::clamp((float)nri_ptsmokegridcellsize, 1.0f, 64.0f);
+	settings.gridBuoyancy = std::clamp((float)nri_ptsmokegridbuoyancy, 0.0f, 64.0f);
+	settings.gridVelocityDamping = std::clamp((float)nri_ptsmokegridvelocitydamping, 0.0f, 16.0f);
+	settings.gridWindCoupling = std::clamp((float)nri_ptsmokegridwindcoupling, 0.0f, 16.0f);
+	settings.gridDensityHalfLifeScale = std::clamp((float)nri_ptsmokegriddensityhalflifescale, 0.05f, 20.0f);
+	settings.gridCoolingScale = std::clamp((float)nri_ptsmokegridcoolingscale, 0.05f, 20.0f);
+	settings.gridMaxVelocity = std::clamp((float)nri_ptsmokegridmaxvelocity, 1.0f, 1024.0f);
+	settings.gridMaxBacktrace = std::clamp((float)nri_ptsmokegridmaxbacktrace, 1.0f, 256.0f);
+	settings.gridActiveThreshold = std::clamp((float)nri_ptsmokegridactivethreshold, 0.000001f, 0.1f);
+	settings.gridReclaimGrace = (uint32_t)std::clamp((int)nri_ptsmokegridreclaimgrace, 1, 3600);
 	return settings;
 }

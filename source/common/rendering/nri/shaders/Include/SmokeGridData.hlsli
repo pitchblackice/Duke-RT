@@ -1,0 +1,152 @@
+#ifndef NRI_SMOKE_GRID_DATA_HLSLI
+#define NRI_SMOKE_GRID_DATA_HLSLI
+
+#define NRI_SMOKE_GRID_BRICK_AXIS 8
+#define NRI_SMOKE_GRID_CELLS_PER_BRICK 512u
+#define NRI_SMOKE_GRID_HASH_PROBES 24u
+#define NRI_SMOKE_GRID_EMPTY 0u
+#define NRI_SMOKE_GRID_CLAIMED 1u
+#define NRI_SMOKE_GRID_RESIDENT 2u
+#define NRI_SMOKE_GRID_NEW 3u
+#define NRI_SMOKE_GRID_TOMBSTONE 4u
+#define NRI_SMOKE_GRID_BRICK_CONTENT 1u
+#define NRI_SMOKE_GRID_BRICK_HALO 2u
+
+struct SmokeGridHashEntry
+{
+	int3 Coordinate;
+	uint BrickIndex;
+	uint Generation;
+	uint State;
+	uint2 Padding;
+};
+
+struct SmokeGridBrick
+{
+	int3 Coordinate;
+	uint HashSlot;
+	uint Generation;
+	uint State;
+	uint IdleFrames;
+	uint Flags;
+};
+
+struct SmokeGridControl
+{
+	uint ActiveCountA;
+	uint ActiveCountB;
+	uint ResidentCount;
+	uint FreeCount;
+	uint Allocated;
+	uint Reclaimed;
+	uint AllocationFailures;
+	uint ProbeFailures;
+	uint MaximumProbe;
+	uint CommandsProcessed;
+	uint RequestedMassQ;
+	uint DepositedMassQ;
+	uint RejectedMassQ;
+	uint SaturatedDeposits;
+	uint HaloAllocations;
+	uint OccupiedBricks;
+	uint EmptyBricks;
+	uint CflClamps;
+	uint BacktraceClamps;
+	uint NanRejects;
+	uint FieldHashLo;
+	uint FieldHashHi;
+	uint DepositionCells;
+	uint DepositionRejected;
+	uint Generation;
+	uint FrameStamp;
+	uint BrickCapacity;
+	uint HashCapacity;
+	uint CellCapacity;
+	uint ActivePing;
+	uint FieldPing;
+	uint CellSizeBits;
+};
+
+struct SmokeGridConstants
+{
+	uint Pass;
+	uint FrameIndex;
+	uint SimulationEpoch;
+	uint CommandCount;
+
+	uint StyleCount;
+	uint BrickCapacity;
+	uint HashCapacity;
+	uint CellCapacity;
+
+	uint ActivePing;
+	uint FieldPing;
+	uint Flags;
+	uint Representation;
+
+	float CellSize;
+	float DeltaTime;
+	float TimeScale;
+	float MaxBacktrace;
+
+	float3 Wind;
+	float Buoyancy;
+
+	float VelocityDamping;
+	float WindCoupling;
+	float DensityHalfLifeScale;
+	float CoolingScale;
+
+	float MaxVelocity;
+	float ActiveThreshold;
+	uint ReclaimGrace;
+	float MassQuantization;
+
+	float MomentumQuantization;
+	float3 Padding;
+};
+
+int SmokeGridFloorDiv8(int value)
+{
+	const int quotient = value / NRI_SMOKE_GRID_BRICK_AXIS;
+	const int remainder = value - quotient * NRI_SMOKE_GRID_BRICK_AXIS;
+	return quotient - (remainder < 0 ? 1 : 0);
+}
+
+int3 SmokeGridBrickCoordinate(int3 cell)
+{
+	return int3(SmokeGridFloorDiv8(cell.x), SmokeGridFloorDiv8(cell.y), SmokeGridFloorDiv8(cell.z));
+}
+
+uint3 SmokeGridLocalCoordinate(int3 cell, int3 brick)
+{
+	return (uint3)(cell - brick * NRI_SMOKE_GRID_BRICK_AXIS);
+}
+
+uint SmokeGridLocalIndex(uint3 local)
+{
+	return local.x + local.y * NRI_SMOKE_GRID_BRICK_AXIS + local.z * NRI_SMOKE_GRID_BRICK_AXIS * NRI_SMOKE_GRID_BRICK_AXIS;
+}
+
+int3 SmokeGridCellCoordinate(int3 brick, uint3 local)
+{
+	return brick * NRI_SMOKE_GRID_BRICK_AXIS + (int3)local;
+}
+
+float3 SmokeGridCellCenter(int3 brick, uint3 local, float cellSize)
+{
+	return ((float3)SmokeGridCellCoordinate(brick, local) + 0.5) * cellSize;
+}
+
+uint SmokeGridHashCoordinate(int3 coordinate)
+{
+	uint value = asuint(coordinate.x) * 0x8da6b343u;
+	value ^= asuint(coordinate.y) * 0xd8163841u;
+	value ^= asuint(coordinate.z) * 0xcb1ab31fu;
+	value ^= value >> 16u;
+	value *= 0x7feb352du;
+	value ^= value >> 15u;
+	return value;
+}
+
+#endif

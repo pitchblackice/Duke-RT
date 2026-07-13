@@ -117,6 +117,18 @@ struct NRISmokeSettings
 	float densityScale = 1.0f;
 	float radianceScale = 1.0f;
 	float indirectScale = 1.0f;
+	uint32_t representation = 0;
+	uint32_t gridBrickCapacity = 512;
+	float gridCellSize = 8.0f;
+	float gridBuoyancy = 1.0f;
+	float gridVelocityDamping = 0.15f;
+	float gridWindCoupling = 0.5f;
+	float gridDensityHalfLifeScale = 1.0f;
+	float gridCoolingScale = 1.0f;
+	float gridMaxVelocity = 128.0f;
+	float gridMaxBacktrace = 32.0f;
+	float gridActiveThreshold = 0.0001f;
+	uint32_t gridReclaimGrace = 120;
 };
 
 NRITraceSettings BuildNRITraceSettingsFromCVars();

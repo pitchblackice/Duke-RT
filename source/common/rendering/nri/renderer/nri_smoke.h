@@ -4,6 +4,7 @@
 #include "nri_resources.h"
 #include "nri_smoke_contracts.h"
 #include "nri_smoke_emitters.h"
+#include "nri_smoke_grid.h"
 #include "v_video.h"
 
 #include <array>
@@ -38,6 +39,10 @@ struct NRISmokeStatusSnapshot
 	uint32_t styleCount = 0;
 	uint32_t commandsDropped = 0;
 	uint32_t simulationSubsteps = 0;
+	uint32_t representationRequested = 0;
+	uint32_t representationEffective = 0;
+	bool gridReady = false;
+	const char* representationFallback = "none";
 	uint32_t requestedLightMode = 0;
 	uint32_t effectiveLightMode = 0;
 	bool filteredVisibilityRequested = false;
@@ -199,11 +204,14 @@ private:
 	void DestroyViewResources(NRIRenderer& renderer);
 	void DestroyResources(NRIRenderer& renderer);
 	void AppendSyntheticCommand(NRIRenderer& renderer);
+	NRISmokeGridServices BuildGridServices(NRIRenderer& renderer) const;
+	static bool LoadGridShaderBlob(void* user, const char* fileName, std::vector<uint8_t>& outBlob);
+	static void WaitForGridCommands(void* user, const char* reason);
 
 	NRISmokeSettings mSettings = {};
 	NRISmokeStatusSnapshot mStatus = {};
 	nri::PipelineLayout* mPipelineLayout = nullptr;
-	std::array<nri::Pipeline*, 18> mPipelines = {};
+	std::array<nri::Pipeline*, 19> mPipelines = {};
 	std::vector<CommandSlot> mCommandSlots;
 	NRIBufferResource mStyleBuffer;
 	NRIBufferResource mParticles;
@@ -224,6 +232,7 @@ private:
 	NRIBufferResource mEmissiveTemporal;
 	NRIBufferResource mEmissiveHistory;
 	NRISmokeEmitterSystem mEmitters;
+	NRISmokeGrid mGrid;
 	std::vector<NRISmokeStyleGpu> mStyles;
 	std::vector<NRISmokeInjectionCommandGpu> mPendingCommands;
 	uint32_t mResourceParticleCapacity = 0;
@@ -236,6 +245,9 @@ private:
 	uint32_t mNextCommandSerial = 1;
 	float mAccumulator = 0.0f;
 	double mLastGameplaySeconds = -1.0;
+	double mParticleSimulationSeconds = 0.0;
+	double mLatestParticleDeathSeconds = 0.0;
+	bool mMayHaveParticleSmoke = false;
 	bool mSyntheticRequested = false;
 	bool mNeedsClear = true;
 	bool mControlCopyPending = false;

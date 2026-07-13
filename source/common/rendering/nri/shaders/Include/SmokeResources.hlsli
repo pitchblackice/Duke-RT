@@ -3,6 +3,8 @@
 
 #include "NRI.hlsl"
 #include "SmokeConstants.hlsli"
+#include "SmokeData.hlsli"
+#include "SmokeGridData.hlsli"
 
 #define NRI_SMOKE_SET_INPUTS 0
 #define NRI_SMOKE_SET_BUFFERS 1
@@ -23,6 +25,7 @@
 #define NRI_SMOKE_DIRECTIONAL_PROBE_HALF_AXIS 10
 #define NRI_SMOKE_DIRECTIONAL_PROBES_PER_PARTICLE 8000u
 #define NRI_SMOKE_DIRECTIONAL_PROBE_CELL_SIZE 2.0
+#define NRI_SMOKE_FLAG_COMPARE_REPRESENTATION 0x10000u
 
 int3 SmokeDirectionalProbeWindowMinCell(float3 particlePosition)
 {
@@ -44,41 +47,6 @@ struct SmokeParticle
 	float InitialRadius;
 	uint Serial;
 	uint Active;
-};
-
-struct SmokeStyle
-{
-	float3 Albedo;
-	float Extinction;
-	float Anisotropy;
-	float Radius;
-	float ExpansionVelocity;
-	float Lifetime;
-	float Density;
-	float DensityHalfLife;
-	float RiseVelocity;
-	float VelocityRandom;
-	float VelocityInherit;
-	float Buoyancy;
-	float Drag;
-	float Turbulence;
-	float TurbulenceScale;
-	float3 Padding;
-};
-
-struct SmokeInjectionCommand
-{
-	float3 Position;
-	float SpawnRadius;
-	float3 Velocity;
-	uint StyleIndex;
-	uint Count;
-	uint Serial;
-	float DensityScale;
-	float RadiusScale;
-	float VelocityCone;
-	uint Epoch;
-	uint2 Padding;
 };
 
 struct SmokeCellHeader
@@ -236,6 +204,17 @@ RWStructuredBuffer<float> gSmokeParticleDirectionalVisibility : register(u13, sp
 RWStructuredBuffer<SmokeEmissiveReservoirRecord> gSmokeEmissiveCurrent : register(u14, space1);
 RWStructuredBuffer<SmokeEmissiveReservoirRecord> gSmokeEmissiveTemporal : register(u15, space1);
 RWStructuredBuffer<SmokeEmissiveReservoirRecord> gSmokeEmissiveHistory : register(u16, space1);
+RWStructuredBuffer<SmokeGridControl> gSmokeRenderGridControl : register(u17, space1);
+RWStructuredBuffer<SmokeGridHashEntry> gSmokeRenderGridHash : register(u18, space1);
+RWStructuredBuffer<SmokeGridBrick> gSmokeRenderGridBricks : register(u19, space1);
+RWStructuredBuffer<float4> gSmokeRenderGridScalarA : register(u20, space1);
+RWStructuredBuffer<float4> gSmokeRenderGridScalarB : register(u21, space1);
+RWStructuredBuffer<float4> gSmokeRenderGridVelocityA : register(u22, space1);
+RWStructuredBuffer<float4> gSmokeRenderGridVelocityB : register(u23, space1);
+RWStructuredBuffer<float4> gSmokeRenderGridOpticalA : register(u24, space1);
+RWStructuredBuffer<float4> gSmokeRenderGridOpticalB : register(u25, space1);
+RWStructuredBuffer<float4> gSmokeRenderGridDynamicsA : register(u26, space1);
+RWStructuredBuffer<float4> gSmokeRenderGridDynamicsB : register(u27, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);

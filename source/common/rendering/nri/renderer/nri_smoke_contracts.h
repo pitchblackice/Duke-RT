@@ -11,6 +11,7 @@ enum class NRISmokePass : uint32_t
 	Bin,
 	LightDirectionalCarriers,
 	EvaluateMedium,
+	EvaluateGrid,
 	LightPoint,
 	LightDirectional,
 	LightEmissiveInitial,
@@ -58,7 +59,9 @@ struct NRISmokeStyleGpu
 	float drag = 0.5f;
 	float turbulence = 1.0f;
 	float turbulenceScale = 32.0f;
-	float padding[3] = {};
+	float temperature = 1.0f;
+	float momentumScale = 1.0f;
+	float coolingHalfLife = 2.0f;
 };
 
 struct NRISmokeInjectionCommandGpu

@@ -68,6 +68,9 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, const TArray<PathTracingWeapo
 		target.drag = source.drag;
 		target.turbulence = source.turbulence;
 		target.turbulenceScale = source.turbulenceScale;
+		target.temperature = source.temperature;
+		target.momentumScale = source.momentumScale;
+		target.coolingHalfLife = source.coolingHalfLife;
 	}
 
 	std::unordered_set<Identity, IdentityHash> observed;

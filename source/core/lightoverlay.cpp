@@ -833,6 +833,9 @@ namespace
 				else if (sc.Compare("drag")) value = &rule.drag;
 				else if (sc.Compare("turbulence")) value = &rule.turbulence;
 				else if (sc.Compare("turbulencescale")) value = &rule.turbulenceScale;
+				else if (sc.Compare("temperature")) value = &rule.temperature;
+				else if (sc.Compare("momentumscale")) value = &rule.momentumScale;
+				else if (sc.Compare("coolinghalflife")) { value = &rule.coolingHalfLife; minimum = 0.001f; }
 				else
 				{
 					SkipUnknownField("smokestyle", sc.String);
@@ -1749,6 +1752,9 @@ namespace
 		AppendLine(text, 2, FStringf("drag %s", FormatLightOverlayFloat(rule.drag).GetChars()));
 		AppendLine(text, 2, FStringf("turbulence %s", FormatLightOverlayFloat(rule.turbulence).GetChars()));
 		AppendLine(text, 2, FStringf("turbulencescale %s", FormatLightOverlayFloat(rule.turbulenceScale).GetChars()));
+		AppendLine(text, 2, FStringf("temperature %s", FormatLightOverlayFloat(rule.temperature).GetChars()));
+		AppendLine(text, 2, FStringf("momentumscale %s", FormatLightOverlayFloat(rule.momentumScale).GetChars()));
+		AppendLine(text, 2, FStringf("coolinghalflife %s", FormatLightOverlayFloat(rule.coolingHalfLife).GetChars()));
 		AppendLine(text, 1, "}");
 	}
 

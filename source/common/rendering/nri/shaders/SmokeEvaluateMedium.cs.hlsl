@@ -154,6 +154,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 	if (dispatchThreadId.x >= gSmokeConstants.FroxelWidth || dispatchThreadId.y >= gSmokeConstants.FroxelHeight || dispatchThreadId.z >= gSmokeConstants.FroxelDepth)
 		return;
+	// Comparison mode gives particles the left half and the sparse grid the
+	// right half.  The two representations never contribute to one froxel.
+	if ((gSmokeConstants.Flags & NRI_SMOKE_FLAG_COMPARE_REPRESENTATION) != 0u &&
+		dispatchThreadId.x >= gSmokeConstants.FroxelWidth / 2u)
+		return;
 
 	uint fineCellCount, wideCellCount, globalDepthCount;
 	uint particleCount, styleCount, mediumCount, phaseCount, sourceCount, occupiedCapacity, controlCount, scratchCount;
