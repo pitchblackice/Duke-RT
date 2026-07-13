@@ -97,7 +97,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gSmokeControl[0].FilterSkipLimitExits = 0u;
 			gSmokeControl[0].FilterContinuationLimitExits = 0u;
 			gSmokeControl[0].FilterResourceDowngrades = 0u;
-			if ((gSmokeConstants.FilteredVisibilityEnabled & 1u) != 0u && (gSmokeConstants.FilteredVisibilityEnabled & 2u) == 0u && gSmokeConstants.LightMode > 0u)
+			if ((gSmokeConstants.FilteredVisibilityEnabled & NRI_SMOKE_VISIBILITY_FILTERED_REQUESTED) != 0u &&
+				(gSmokeConstants.FilteredVisibilityEnabled & NRI_SMOKE_VISIBILITY_FILTERED_EFFECTIVE) == 0u && gSmokeConstants.LightMode >= 2u)
 				gSmokeControl[0].FilterResourceDowngrades = 1u;
 		}
 	}

@@ -33,6 +33,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;
 	if (gSmokeConstants.LightMode == 0u || (gSmokeConstants.LightSourceFlags & NRI_SMOKE_LIGHT_SOURCE_EMISSIVE) == 0u)
 		return;
+	if (gSmokeConstants.LightMode >= 2u && !SmokeShadowTracingReady())
+		return;
 	if (diagnostics)
 		InterlockedAdd(gSmokeControl[0].EmissiveFroxelsProcessed, 1u);
 
@@ -101,7 +103,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			if (diagnostics)
 				InterlockedAdd(gSmokeControl[0].EmissiveShadowRays, 1u);
-			visibility = ((gSmokeConstants.FilteredVisibilityEnabled & 1u) != 0u
+			visibility = (SmokeFilteredVisibilityEffective()
 				? SmokePointLightVisibleFiltered(froxelPosition, lightDirection, distanceToLight, diagnostics)
 				: SmokePointLightVisible(froxelPosition, lightDirection, distanceToLight, diagnostics)) ? 1.0 : 0.0;
 			if (diagnostics)

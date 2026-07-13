@@ -38,6 +38,12 @@ struct NRISmokeStatusSnapshot
 	uint32_t styleCount = 0;
 	uint32_t commandsDropped = 0;
 	uint32_t simulationSubsteps = 0;
+	uint32_t requestedLightMode = 0;
+	uint32_t effectiveLightMode = 0;
+	bool filteredVisibilityRequested = false;
+	bool filteredVisibilityEffective = false;
+	bool forceOpaqueVisibility = false;
+	bool shadowTlasReady = false;
 	uint64_t residentBytes = 0;
 	uint64_t controlReadbackBytes = 0;
 	bool gpuStatsValid = false;

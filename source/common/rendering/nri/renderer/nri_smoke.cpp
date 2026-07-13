@@ -667,10 +667,6 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	const bool directionalLightReady = mSettings.directionalLight && renderer.mDirectionalLightState.enabled;
 	const bool emissiveLightsReady = mSettings.emissiveLights && emissiveResourcesReady;
 	constants.lightMode = (pointLightsReady || directionalLightReady || emissiveLightsReady) ? mSettings.lightMode : 0u;
-	if (constants.lightMode >= 2u && !shadowReady)
-		constants.lightMode = 1u;
-	if (constants.lightMode >= 2u && mSettings.filteredVisibility && !filteredResourcesReady)
-		constants.lightMode = 1u;
 	constants.lightSamples = mSettings.lightSamples;
 	constants.maxLightCandidates = mSettings.maxLightCandidates;
 	constants.runtimeLightCount = pointLightsReady ? renderer.mBoundRuntimeLightCount : 0u;
@@ -681,10 +677,19 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		(directionalLightReady ? 0x2u : 0u) |
 		(directionalLightReady && renderer.mDirectionalLightState.shadow ? 0x4u : 0u) |
 		(emissiveLightsReady ? 0x8u : 0u);
+	const bool filteredVisibilityEffective = constants.lightMode >= 2u && mSettings.filteredVisibility && filteredResourcesReady && shadowReady;
 	constants.filteredVisibilityEnabled =
-		(mSettings.filteredVisibility ? 1u : 0u) |
+		(filteredVisibilityEffective ? 1u : 0u) |
 		(filteredResourcesReady ? 2u : 0u) |
+		(shadowReady ? 4u : 0u) |
+		(mSettings.filteredVisibility ? 8u : 0u) |
 		(std::min(BuildNRITraceSettingsFromCVars().portalDepth, 8u) << 8u);
+	mStatus.requestedLightMode = mSettings.lightMode;
+	mStatus.effectiveLightMode = constants.lightMode;
+	mStatus.filteredVisibilityRequested = mSettings.filteredVisibility;
+	mStatus.filteredVisibilityEffective = filteredVisibilityEffective;
+	mStatus.forceOpaqueVisibility = constants.lightMode >= 2u && shadowReady && !filteredVisibilityEffective;
+	mStatus.shadowTlasReady = shadowReady;
 	constants.flags = (mSettings.readback || mSettings.traceMode > 0u) ? 2u : 0u;
 	auto dispatch = [&](NRISmokePass pass, uint32_t x, uint32_t y, uint32_t z)
 	{
@@ -896,11 +901,13 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 	const char* placement = mStatus.routePlacement == (uint32_t)NRISmokeRoutePlacement::DlrrPostUpscale ? "dlrr_post_upscale" : "standard_pre_upscale";
 	const char* inputName = mStatus.inputSlot < (uint32_t)NRIRenderer::FrameTextureSlot::Count ? renderer.GetFrameTextureSlotName((NRIRenderer::FrameTextureSlot)mStatus.inputSlot) : "none";
 	const char* outputName = mStatus.outputSlot < (uint32_t)NRIRenderer::FrameTextureSlot::Count ? renderer.GetFrameTextureSlotName((NRIRenderer::FrameTextureSlot)mStatus.outputSlot) : "none";
-	Printf("NRI PT smoke status: enabled=%s epoch=%u main_view=%s route_supported=%s placement=%s input=%s output=%s extent=%ux%u froxels=%ux%ux%u particles=%u styles=%u commands=%u commands_total=%llu dropped=%u substeps=%u light_mode=%u light_samples=%u light_candidates_max=%u point_lights=%s filtered_visibility=%s runtime_lights=%u gpu_stats=%s active=%u spawned=%u expired=%u evictions=%u column_overflow=%u reference_mode=complete reference_stride=512 invalid_links=%u traversal_limit=%u wide_projected=%u wide_global_drops=%u fine_refs=%u wide_refs=%u global_refs=%u tier_particles=%u/%u/%u occupied_cells=%u/%u/%u max_cell_refs=%u/%u/%u depth_span_max=%u carrier_candidates_max=%u medium_occupied=%u occupied_overflow=%u medium_candidate_tests=%u point_froxels=%u light_candidates=%u light_distance_rejected=%u light_shadow_rays=%u light_visible=%u light_occluded=%u light_soft_samples=%u light_clamps=%u filter_hits=%u filter_alpha=%u filter_no_shadow=%u filter_one_way=%u filter_reflection=%u filter_portals=%u filter_blockers=%u filter_misses=%u filter_skip_limit=%u filter_continuation_limit=%u filter_downgrades=%u resident_mib=%.2f particle_readback=0 control_readback=%llu reset=%s\n",
+	Printf("NRI PT smoke status: enabled=%s epoch=%u main_view=%s route_supported=%s placement=%s input=%s output=%s extent=%ux%u froxels=%ux%ux%u particles=%u styles=%u commands=%u commands_total=%llu dropped=%u substeps=%u light_mode_requested=%u light_mode_effective=%u light_samples=%u light_candidates_max=%u point_lights=%s filtered_visibility_requested=%s filtered_visibility_effective=%s visibility_fallback=%s shadow_tlas=%s runtime_lights=%u gpu_stats=%s active=%u spawned=%u expired=%u evictions=%u column_overflow=%u reference_mode=complete reference_stride=512 invalid_links=%u traversal_limit=%u wide_projected=%u wide_global_drops=%u fine_refs=%u wide_refs=%u global_refs=%u tier_particles=%u/%u/%u occupied_cells=%u/%u/%u max_cell_refs=%u/%u/%u depth_span_max=%u carrier_candidates_max=%u medium_occupied=%u occupied_overflow=%u medium_candidate_tests=%u point_froxels=%u light_candidates=%u light_distance_rejected=%u light_shadow_rays=%u light_visible=%u light_occluded=%u light_soft_samples=%u light_clamps=%u filter_hits=%u filter_alpha=%u filter_no_shadow=%u filter_one_way=%u filter_reflection=%u filter_portals=%u filter_blockers=%u filter_misses=%u filter_skip_limit=%u filter_continuation_limit=%u filter_downgrades=%u resident_mib=%.2f particle_readback=0 control_readback=%llu reset=%s\n",
 		mStatus.enabled ? "yes" : "no", mStatus.simulationEpoch, mStatus.mainViewEligible ? "yes" : "no", mStatus.routeSupported ? "yes" : "no", placement,
 		inputName, outputName, mStatus.routeWidth, mStatus.routeHeight, mStatus.froxelWidth, mStatus.froxelHeight, mStatus.froxelDepth,
 		mStatus.particleCapacity, mStatus.styleCount, mStatus.commandsUploaded, (unsigned long long)mStatus.commandsUploadedTotal, mStatus.commandsDropped, mStatus.simulationSubsteps,
-		mSettings.lightMode, mSettings.lightSamples, mSettings.maxLightCandidates, mSettings.pointLights ? "yes" : "no", mSettings.filteredVisibility ? "yes" : "no", renderer.mBoundRuntimeLightCount,
+		mStatus.requestedLightMode, mStatus.effectiveLightMode, mSettings.lightSamples, mSettings.maxLightCandidates, mSettings.pointLights ? "yes" : "no",
+		mStatus.filteredVisibilityRequested ? "yes" : "no", mStatus.filteredVisibilityEffective ? "yes" : "no",
+		mStatus.forceOpaqueVisibility ? "force_opaque" : "none", mStatus.shadowTlasReady ? "ready" : "missing", renderer.mBoundRuntimeLightCount,
 		mStatus.gpuStatsValid ? "valid" : "disabled", mStatus.activeParticles, mStatus.spawnedParticles, mStatus.expiredParticles, mStatus.liveEvictions, mStatus.columnOverflow,
 		mStatus.referenceInvalidLinks, mStatus.referenceTraversalLimitExits,
 		mStatus.wideParticlesProjected, mStatus.wideGlobalDrops, mStatus.fineColumnReferences, mStatus.wideCellReferences, mStatus.globalDepthReferences,

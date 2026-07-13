@@ -128,9 +128,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const bool castsShadow = (light.flags & NRI_SMOKE_RUNTIME_LIGHT_FLAG_CASTS_SHADOW) != 0u;
 				if (gSmokeConstants.LightMode >= 2u && castsShadow)
 				{
+					if (!SmokeShadowTracingReady())
+						continue;
 					if (lightingDiagnostics)
 						InterlockedAdd(gSmokeControl[0].LightShadowRays, 1u);
-					visibility = ((gSmokeConstants.FilteredVisibilityEnabled & 1u) != 0u
+					visibility = (SmokeFilteredVisibilityEffective()
 						? SmokePointLightVisibleFiltered(froxelPosition, lightDirection, sampledDistance, lightingDiagnostics)
 						: SmokePointLightVisible(froxelPosition, lightDirection, sampledDistance, lightingDiagnostics)) ? 1.0 : 0.0;
 					if (lightingDiagnostics)
@@ -151,5 +153,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			scattering += medium.rgb * (sampledContribution / (float)sampleCount);
 		}
 	}
-	gSmokeFroxelSource[froxelIndex] = float4(scattering * gSmokeConstants.RadianceScale, 0.0);
+	const float3 source = gSmokeFroxelSource[froxelIndex].rgb + scattering * gSmokeConstants.RadianceScale;
+	gSmokeFroxelSource[froxelIndex] = float4(source, 0.0);
 }

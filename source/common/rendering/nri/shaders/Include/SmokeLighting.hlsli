@@ -20,6 +20,15 @@
 #define NRI_SMOKE_LIGHT_SOURCE_DIRECTIONAL 0x2u
 #define NRI_SMOKE_LIGHT_SOURCE_DIRECTIONAL_SHADOW 0x4u
 #define NRI_SMOKE_LIGHT_SOURCE_EMISSIVE 0x8u
+bool SmokeShadowTracingReady()
+{
+	return (gSmokeConstants.FilteredVisibilityEnabled & NRI_SMOKE_VISIBILITY_TLAS_READY) != 0u;
+}
+
+bool SmokeFilteredVisibilityEffective()
+{
+	return (gSmokeConstants.FilteredVisibilityEnabled & NRI_SMOKE_VISIBILITY_FILTERED_EFFECTIVE) != 0u;
+}
 
 StructuredBuffer<RuntimePointLightData> gSmokeRuntimePointLights : register(t0, space4);
 StructuredBuffer<RuntimeLightTileHeaderData> gSmokeRuntimeLightTileHeaders : register(t1, space4);

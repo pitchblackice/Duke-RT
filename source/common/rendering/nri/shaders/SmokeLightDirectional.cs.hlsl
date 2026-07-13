@@ -34,6 +34,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float3 centerDirection = SmokeDirectionalDirection();
 	const float anisotropy = gSmokeFroxelPhase[froxelIndex].x;
 	const bool castsShadow = (gSmokeConstants.LightSourceFlags & NRI_SMOKE_LIGHT_SOURCE_DIRECTIONAL_SHADOW) != 0u;
+	if (gSmokeConstants.LightMode >= 2u && castsShadow && !SmokeShadowTracingReady())
+		return;
 	const uint sampleCount = gSmokeConstants.LightMode >= 3u ? clamp(gSmokeConstants.LightSamples, 1u, 4u) : 1u;
 	float3 contribution = 0.0;
 	[loop]
@@ -55,7 +57,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			if (diagnostics)
 				InterlockedAdd(gSmokeControl[0].DirectionalShadowRays, 1u);
-			visibility = ((gSmokeConstants.FilteredVisibilityEnabled & 1u) != 0u
+			visibility = (SmokeFilteredVisibilityEffective()
 				? SmokePointLightVisibleFiltered(froxelPosition, lightDirection, 100000.0, diagnostics)
 				: SmokePointLightVisible(froxelPosition, lightDirection, 100000.0, diagnostics)) ? 1.0 : 0.0;
 			if (diagnostics)

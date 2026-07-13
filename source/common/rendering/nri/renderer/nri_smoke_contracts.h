@@ -206,7 +206,8 @@ struct NRISmokeConstants
 	// bit 0: point, bit 1: directional, bit 2: directional shadow,
 	// bit 3: emissive.
 	uint32_t lightSourceFlags = 1;
-	// bit 0: filtered visibility requested, bit 1: resources ready,
+	// bit 0: filtered visibility effective, bit 1: filtered resources ready,
+	// bit 2: TLAS ready, bit 3: filtered visibility requested,
 	// bits 8..15: portal traversal depth.
 	uint32_t filteredVisibilityEnabled = 0;
 
