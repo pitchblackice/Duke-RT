@@ -94,6 +94,10 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 			updated.Flags = NRI_SMOKE_GRID_BRICK_HALO;
 			InterlockedAdd(gSmokeGridControl[0].EmptyBricks, 1u);
 			const bool graceExpired = updated.IdleFrames >= gSmokeGridConstants.ReclaimGrace;
+			// Empty topology is a cache, not source data. Under pressure, release it
+			// immediately so the next frame's injection commands retain priority.
+			const bool capacityPressure = gSmokeGridControl[0].FreeCount < SmokeGridEmissionReserve();
+			const bool reclaimable = graceExpired || capacityPressure;
 			bool mappingValid = false;
 			if (updated.HashSlot < gSmokeGridConstants.HashCapacity)
 			{
@@ -101,7 +105,7 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 				mappingValid = entry.State == NRI_SMOKE_GRID_RESIDENT && entry.BrickIndex == brickIndex &&
 					entry.Generation == updated.Generation && all(entry.Coordinate == updated.Coordinate);
 			}
-			if (graceExpired && mappingValid)
+			if (reclaimable && mappingValid)
 			{
 				gSmokeGridBricks[brickIndex] = updated;
 				gSmokeGridReclaimDecision = 1u;
@@ -109,7 +113,7 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 			else
 			{
 				gSmokeGridBricks[brickIndex] = updated;
-				if (graceExpired)
+				if (reclaimable)
 					InterlockedAdd(gSmokeGridControl[0].ProbeFailures, 1u);
 				if (!SmokeGridAppendNextActive(brickIndex))
 					InterlockedAdd(gSmokeGridControl[0].AllocationFailures, 1u);

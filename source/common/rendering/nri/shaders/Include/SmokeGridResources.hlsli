@@ -47,6 +47,14 @@ uint SmokeGridActiveCountForPing(uint ping)
 	return ping == 0u ? gSmokeGridControl[0].ActiveCountA : gSmokeGridControl[0].ActiveCountB;
 }
 
+// Halos improve advection at brick boundaries, but they must never consume the
+// entire sparse pool ahead of future source commands. Keep a bounded reserve
+// for content allocation; missing halo samples safely resolve to empty space.
+uint SmokeGridEmissionReserve()
+{
+	return min(gSmokeGridConstants.BrickCapacity, max(8u, gSmokeGridConstants.BrickCapacity / 4u));
+}
+
 bool SmokeGridTryAppendActive(uint ping, uint brickIndex)
 {
 	uint destination = 0u;

@@ -18,15 +18,28 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const SmokeGridBrick source = gSmokeGridBricks[sourceIndex];
 		if (source.State != NRI_SMOKE_GRID_RESIDENT || (source.Flags & NRI_SMOKE_GRID_BRICK_CONTENT) == 0u)
 			continue;
+		// Face neighbors matter most for trilinear sampling and transport. Add
+		// them before edges and corners so a pressured pool degrades evenly.
+		[loop] for (int shell = 1; shell <= 3; ++shell)
 		[loop] for (int z = -1; z <= 1; ++z)
 		[loop] for (int y = -1; y <= 1; ++y)
 		[loop] for (int x = -1; x <= 1; ++x)
 		{
-			if (x == 0 && y == 0 && z == 0)
+			if (abs(x) + abs(y) + abs(z) != shell)
 				continue;
+			const int3 neighborCoordinate = source.Coordinate + int3(x, y, z);
+			uint existingIndex;
+			if (SmokeGridLookupBrick(neighborCoordinate, existingIndex))
+			{
+				gSmokeGridBricks[existingIndex].Flags |= NRI_SMOKE_GRID_BRICK_HALO;
+				gSmokeGridBricks[existingIndex].IdleFrames = 0u;
+				continue;
+			}
+			if (gSmokeGridControl[0].FreeCount <= SmokeGridEmissionReserve())
+				return;
 			uint neighborIndex;
 			bool newlyAllocated;
-			if (SmokeGridFindOrAllocateBrickSerial(source.Coordinate + int3(x, y, z),
+			if (SmokeGridFindOrAllocateBrickSerial(neighborCoordinate,
 				NRI_SMOKE_GRID_BRICK_HALO, neighborIndex, newlyAllocated) && newlyAllocated)
 			{
 				gSmokeGridControl[0].HaloAllocations++;
