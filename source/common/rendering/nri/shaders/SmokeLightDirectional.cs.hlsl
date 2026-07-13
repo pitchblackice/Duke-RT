@@ -30,7 +30,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint3 froxelCoordinates = SmokeFroxelCoordinates(froxelIndex);
 	const float3 ray = SmokeFroxelRay(froxelCoordinates.xy);
 	const float3 viewRay = normalize(ray);
-	const float3 froxelPosition = SmokeFroxelCenter(froxelCoordinates, ray);
+	uint scratchCount, scratchStride;
+	gSmokeIndirectScratch.GetDimensions(scratchCount, scratchStride);
+	const float3 geometricPosition = SmokeFroxelCenter(froxelCoordinates, ray);
+	const float3 representativePosition = froxelIndex < scratchCount
+		? gSmokeIndirectScratch[froxelIndex].WorldPosition
+		: geometricPosition;
+	const float3 froxelPosition = all(isfinite(representativePosition))
+		? representativePosition
+		: geometricPosition;
 	const float3 centerDirection = SmokeDirectionalDirection();
 	const float anisotropy = gSmokeFroxelPhase[froxelIndex].x;
 	const bool castsShadow = (gSmokeConstants.LightSourceFlags & NRI_SMOKE_LIGHT_SOURCE_DIRECTIONAL_SHADOW) != 0u;
@@ -41,8 +49,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	[loop]
 	for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
 	{
-		uint randomState = SmokeLightingRandomSeed(
-			froxelCoordinates,
+		uint randomState = SmokeDirectionalWorldRandomSeed(
+			froxelPosition,
 			sampleIndex,
 			gSmokeConstants.DirectionalColorPacked ^
 			asuint(gSmokeConstants.DirectionalAngularSize) ^

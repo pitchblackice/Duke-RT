@@ -446,6 +446,17 @@ uint SmokeLightingRandomSeed(uint3 froxel, uint sampleIndex, uint familySalt)
 	return SmokeHash(seed ^ SmokeHash(sampleIndex + 1u));
 }
 
+uint SmokeDirectionalWorldRandomSeed(float3 worldPosition, uint sampleIndex, uint familySalt)
+{
+	// Directional visibility has no temporal filter. Anchor its cone rotation to
+	// coarse world cells so camera motion and frame progression cannot reseed it.
+	const int3 worldCell = (int3)floor(worldPosition * 0.25);
+	uint seed = SmokeHash(asuint(worldCell.x) ^ SmokeHash(asuint(worldCell.y) + 0x9e3779b9u));
+	seed ^= SmokeHash(asuint(worldCell.z) + 0x85ebca6bu);
+	seed ^= SmokeHash(familySalt);
+	return SmokeHash(seed ^ SmokeHash(sampleIndex + 1u));
+}
+
 float3 SmokeSampleDirectionalCone(float3 centerDirection, float angularRadius, inout uint randomState)
 {
 	return SampleUniformDirectionalCone(centerDirection, angularRadius, float2(SmokeRandom01(randomState), SmokeRandom01(randomState)));

@@ -12,6 +12,7 @@ void SmokeAccumulateCandidate(
 	inout float3 scatteringCoefficient,
 	inout float weightedAnisotropy,
 	inout float anisotropyWeight,
+	inout float3 weightedPosition,
 	inout uint contributingCandidates)
 {
 	if (particleIndex >= min(gSmokeConstants.ParticleCapacity, particleCount))
@@ -30,6 +31,7 @@ void SmokeAccumulateCandidate(
 	const float localScatteringWeight = dot(localScattering, float3(0.2126, 0.7152, 0.0722));
 	weightedAnisotropy += clamp(style.Anisotropy, -0.95, 0.95) * localScatteringWeight;
 	anisotropyWeight += localScatteringWeight;
+	weightedPosition += particle.Position * localScatteringWeight;
 	contributingCandidates++;
 }
 
@@ -48,6 +50,7 @@ void SmokeAccumulateReferenceList(
 	inout float3 scatteringCoefficient,
 	inout float weightedAnisotropy,
 	inout float anisotropyWeight,
+	inout float3 weightedPosition,
 	inout uint contributingCandidates)
 {
 	if (cell.Head == NRI_SMOKE_REFERENCE_END || cell.Count == 0u || remainingTraversal == 0u)
@@ -74,7 +77,7 @@ void SmokeAccumulateReferenceList(
 		}
 		const uint particleIndex = nodeIndex / NRI_SMOKE_MAX_TIER_REFERENCES;
 		SmokeAccumulateCandidate(particleIndex, particleCount, styleCount, ray, sliceNearDepth, sliceFarDepth,
-			extinction, scatteringCoefficient, weightedAnisotropy, anisotropyWeight, contributingCandidates);
+			extinction, scatteringCoefficient, weightedAnisotropy, anisotropyWeight, weightedPosition, contributingCandidates);
 		nodeIndex = gSmokeReferenceNext[nodeIndex];
 		traversed++;
 		testedReferences++;
@@ -105,7 +108,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 
 	uint fineCellCount, wideCellCount, globalDepthCount;
-	uint particleCount, styleCount, mediumCount, phaseCount, sourceCount, occupiedCapacity, controlCount, ignoredStride;
+	uint particleCount, styleCount, mediumCount, phaseCount, sourceCount, occupiedCapacity, controlCount, scratchCount, ignoredStride;
 	gSmokeFineCells.GetDimensions(fineCellCount, ignoredStride);
 	gSmokeWideCells.GetDimensions(wideCellCount, ignoredStride);
 	gSmokeGlobalDepthCells.GetDimensions(globalDepthCount, ignoredStride);
@@ -116,6 +119,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	gSmokeFroxelSource.GetDimensions(sourceCount, ignoredStride);
 	gSmokeOccupiedFroxelIndices.GetDimensions(occupiedCapacity, ignoredStride);
 	gSmokeControl.GetDimensions(controlCount, ignoredStride);
+	gSmokeIndirectScratch.GetDimensions(scratchCount, ignoredStride);
 
 	const uint froxelIndex = SmokeFroxelIndex(dispatchThreadId.x, dispatchThreadId.y, dispatchThreadId.z);
 	if (froxelIndex >= fineCellCount || froxelIndex >= mediumCount || froxelIndex >= phaseCount || froxelIndex >= sourceCount)
@@ -129,6 +133,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float3 scatteringCoefficient = 0.0;
 	float weightedAnisotropy = 0.0;
 	float anisotropyWeight = 0.0;
+	float3 weightedPosition = 0.0;
 	uint contributingCandidates = 0u;
 	uint testedReferences = 0u;
 	uint remainingTraversal = min(gSmokeConstants.ParticleCapacity, particleCount);
@@ -137,7 +142,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	SmokeAccumulateReferenceList(gSmokeFineCells[froxelIndex], particleCount, styleCount, ray, sliceNearDepth, sliceFarDepth,
 		remainingTraversal, testedReferences, invalidLink, traversalLimitExit, extinction, scatteringCoefficient,
-		weightedAnisotropy, anisotropyWeight, contributingCandidates);
+		weightedAnisotropy, anisotropyWeight, weightedPosition, contributingCandidates);
 
 	const uint2 wideCellPosition = min(uint2(
 		dispatchThreadId.x * NRI_SMOKE_WIDE_GRID_X / gSmokeConstants.FroxelWidth,
@@ -148,14 +153,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	{
 		SmokeAccumulateReferenceList(gSmokeWideCells[wideCellIndex], particleCount, styleCount, ray, sliceNearDepth, sliceFarDepth,
 			remainingTraversal, testedReferences, invalidLink, traversalLimitExit, extinction, scatteringCoefficient,
-			weightedAnisotropy, anisotropyWeight, contributingCandidates);
+			weightedAnisotropy, anisotropyWeight, weightedPosition, contributingCandidates);
 	}
 
 	if (dispatchThreadId.z < globalDepthCount)
 	{
 		SmokeAccumulateReferenceList(gSmokeGlobalDepthCells[dispatchThreadId.z], particleCount, styleCount, ray, sliceNearDepth, sliceFarDepth,
 			remainingTraversal, testedReferences, invalidLink, traversalLimitExit, extinction, scatteringCoefficient,
-			weightedAnisotropy, anisotropyWeight, contributingCandidates);
+			weightedAnisotropy, anisotropyWeight, weightedPosition, contributingCandidates);
 	}
 
 	if (diagnostics)
@@ -172,6 +177,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	gSmokeFroxelMedium[froxelIndex] = float4(scatteringCoefficient, extinction);
 	gSmokeFroxelPhase[froxelIndex] = float4(anisotropy, anisotropyWeight, (float)contributingCandidates, occupied ? 1.0 : 0.0);
 	gSmokeFroxelSource[froxelIndex] = 0.0;
+	if (froxelIndex < scratchCount)
+	{
+		SmokeIndirectCacheRecord currentRecord = (SmokeIndirectCacheRecord)0;
+		currentRecord.WorldPosition = anisotropyWeight > 1e-6
+			? weightedPosition / anisotropyWeight
+			: SmokeFroxelCenter(dispatchThreadId, ray);
+		gSmokeIndirectScratch[froxelIndex] = currentRecord;
+	}
 
 	if (occupied && controlCount > 0u)
 	{
