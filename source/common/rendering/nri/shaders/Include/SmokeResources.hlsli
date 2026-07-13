@@ -95,6 +95,20 @@ struct SmokeIndirectCacheRecord
 	uint Metadata;
 };
 
+struct SmokeEmissiveReservoirRecord
+{
+	uint CandidateIndex;
+	uint SampleSeed;
+	uint StableKeyLo;
+	uint StableKeyHi;
+	float Target;
+	float WeightSum;
+	uint Metadata;
+	uint Generation;
+	float3 ReceiverPosition;
+	float SigmaT;
+};
+
 struct SmokeControl
 {
 	uint WriteCursor;
@@ -166,6 +180,19 @@ struct SmokeControl
 	uint EmissiveShadowOccluded;
 	uint EmissiveContributed;
 	uint EmissiveRadianceClamps;
+	uint EmissiveReservoirInitial;
+	uint EmissiveReservoirInvalid;
+	uint EmissiveTemporalAccepted;
+	uint EmissiveTemporalRejected;
+	uint EmissiveSpatialAccepted;
+	uint EmissiveSpatialRejected;
+	uint EmissiveFinalEvaluations;
+	uint EmissiveSourceClamps;
+	uint EmissiveRemovedEnergy;
+	uint EmissiveMaximumAge;
+	uint EmissiveReferenceSamples;
+	uint EmissiveReferenceRays;
+	uint EmissiveIdentityRejects;
 	uint IndirectFroxelsProcessed;
 	uint IndirectLocalityRays;
 	uint IndirectLocalityAgreement;
@@ -206,10 +233,23 @@ RWStructuredBuffer<uint> gSmokeOccupiedFroxelIndices : register(u10, space1);
 RWStructuredBuffer<SmokeIndirectCacheRecord> gSmokeIndirectHistory : register(u11, space1);
 RWStructuredBuffer<SmokeIndirectCacheRecord> gSmokeIndirectScratch : register(u12, space1);
 RWStructuredBuffer<float> gSmokeParticleDirectionalVisibility : register(u13, space1);
+RWStructuredBuffer<SmokeEmissiveReservoirRecord> gSmokeEmissiveCurrent : register(u14, space1);
+RWStructuredBuffer<SmokeEmissiveReservoirRecord> gSmokeEmissiveTemporal : register(u15, space1);
+RWStructuredBuffer<SmokeEmissiveReservoirRecord> gSmokeEmissiveHistory : register(u16, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);
+Texture2D<float4> gSmokeVolumeHistoryInput : register(t2, space2);
+Texture2D<float4> gSmokeVolumeMetaInput : register(t3, space2);
+Texture2D<float4> gSmokeVolumeResolvedInput : register(t4, space2);
+Texture2D<float4> gSmokeVolumeResolvedMetaInput : register(t5, space2);
+Texture2D<float4> gSmokeVolumeCurrentInput : register(t6, space2);
+Texture2D<float4> gSmokeVolumeCurrentMetaInput : register(t7, space2);
 RWTexture2D<float4> gSmokeOutput : register(u0, space3);
+RWTexture2D<float4> gSmokeVolumeCurrentOutput : register(u1, space3);
+RWTexture2D<float4> gSmokeVolumeCurrentMetaOutput : register(u2, space3);
+RWTexture2D<float4> gSmokeVolumeHistoryOutput : register(u3, space3);
+RWTexture2D<float4> gSmokeVolumeMetaOutput : register(u4, space3);
 
 NRI_ROOT_CONSTANTS(SmokeConstants, gSmokeConstants, 0, NRI_SMOKE_SET_ROOT);
 

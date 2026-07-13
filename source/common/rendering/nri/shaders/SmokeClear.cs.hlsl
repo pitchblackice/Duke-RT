@@ -15,7 +15,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint expectedWideCellCount = NRI_SMOKE_WIDE_CELL_COUNT * gSmokeConstants.FroxelDepth;
 	uint controlCount, particleCount, fineCellCount, wideCellCount;
 	uint globalDepthCount, mediumFroxelCount, integratedFroxelCount, phaseFroxelCount, sourceFroxelCount;
-	uint indirectHistoryCount, indirectScratchCount, ignoredStride;
+	uint indirectHistoryCount, indirectScratchCount, emissiveCurrentCount, emissiveTemporalCount, emissiveHistoryCount, ignoredStride;
 	gSmokeControl.GetDimensions(controlCount, ignoredStride);
 	gSmokeParticles.GetDimensions(particleCount, ignoredStride);
 	gSmokeFineCells.GetDimensions(fineCellCount, ignoredStride);
@@ -27,9 +27,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	gSmokeFroxelSource.GetDimensions(sourceFroxelCount, ignoredStride);
 	gSmokeIndirectHistory.GetDimensions(indirectHistoryCount, ignoredStride);
 	gSmokeIndirectScratch.GetDimensions(indirectScratchCount, ignoredStride);
+	gSmokeEmissiveCurrent.GetDimensions(emissiveCurrentCount, ignoredStride);
+	gSmokeEmissiveTemporal.GetDimensions(emissiveTemporalCount, ignoredStride);
+	gSmokeEmissiveHistory.GetDimensions(emissiveHistoryCount, ignoredStride);
 
 	const bool clearWorld = (gSmokeConstants.Flags & 1u) != 0u;
 	const bool clearIndirectCache = clearWorld || (gSmokeConstants.Flags & 0x80u) != 0u;
+	const bool clearEmissiveHistory = clearWorld || (gSmokeConstants.Flags & 0x100u) == 0u;
 	if (index == 0u && controlCount != 0u)
 	{
 		if (clearWorld)
@@ -83,6 +87,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gSmokeControl[0].EmissiveShadowOccluded = 0u;
 			gSmokeControl[0].EmissiveContributed = 0u;
 			gSmokeControl[0].EmissiveRadianceClamps = 0u;
+			gSmokeControl[0].EmissiveReservoirInitial = 0u;
+			gSmokeControl[0].EmissiveReservoirInvalid = 0u;
+			gSmokeControl[0].EmissiveTemporalAccepted = 0u;
+			gSmokeControl[0].EmissiveTemporalRejected = 0u;
+			gSmokeControl[0].EmissiveSpatialAccepted = 0u;
+			gSmokeControl[0].EmissiveSpatialRejected = 0u;
+			gSmokeControl[0].EmissiveFinalEvaluations = 0u;
+			gSmokeControl[0].EmissiveSourceClamps = 0u;
+			gSmokeControl[0].EmissiveRemovedEnergy = 0u;
+			gSmokeControl[0].EmissiveMaximumAge = 0u;
+			gSmokeControl[0].EmissiveReferenceSamples = 0u;
+			gSmokeControl[0].EmissiveReferenceRays = 0u;
+			gSmokeControl[0].EmissiveIdentityRejects = 0u;
 			gSmokeControl[0].IndirectFroxelsProcessed = 0u;
 			gSmokeControl[0].IndirectLocalityRays = 0u;
 			gSmokeControl[0].IndirectLocalityAgreement = 0u;
@@ -151,5 +168,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		SmokeIndirectCacheRecord emptyRecord = (SmokeIndirectCacheRecord)0;
 		gSmokeIndirectHistory[index] = emptyRecord;
 		gSmokeIndirectScratch[index] = emptyRecord;
+	}
+	if (index < min(froxelCount, min(emissiveCurrentCount, emissiveTemporalCount)))
+	{
+		SmokeEmissiveReservoirRecord emptyReservoir = (SmokeEmissiveReservoirRecord)0;
+		emptyReservoir.CandidateIndex = 0xffffffffu;
+		gSmokeEmissiveCurrent[index] = emptyReservoir;
+		gSmokeEmissiveTemporal[index] = emptyReservoir;
+	}
+	if (clearEmissiveHistory && index < min(froxelCount, emissiveHistoryCount))
+	{
+		SmokeEmissiveReservoirRecord emptyReservoir = (SmokeEmissiveReservoirRecord)0;
+		emptyReservoir.CandidateIndex = 0xffffffffu;
+		gSmokeEmissiveHistory[index] = emptyReservoir;
 	}
 }

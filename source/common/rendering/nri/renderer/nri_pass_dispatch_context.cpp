@@ -172,9 +172,9 @@ void NRIPassDispatchContext::UpscalerService::TraceTemporalState(const char* sta
 	traceTemporalState(user, stage, resolvedMainUpscaler, resolvedPostSharpen, runAppTaa, primarySlot, secondarySlot);
 }
 
-bool NRIPassDispatchContext::UpscalerService::EnsureMainUpscaler(NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t outputWidth, uint32_t outputHeight, bool exposure) const
+bool NRIPassDispatchContext::UpscalerService::EnsureMainUpscaler(NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t outputWidth, uint32_t outputHeight, bool exposure, bool reactive) const
 {
-	return ensureMainUpscaler(user, kind, mode, outputWidth, outputHeight, exposure);
+	return ensureMainUpscaler(user, kind, mode, outputWidth, outputHeight, exposure, reactive);
 }
 
 bool NRIPassDispatchContext::UpscalerService::DispatchMainUpscaler(NRIMainUpscalerKind kind, const NRIUpscalerDispatchDesc& desc) const
@@ -211,6 +211,11 @@ bool NRIPassDispatchContext::SmokeService::PrepareFrame(bool mainViewEligible) c
 bool NRIPassDispatchContext::SmokeService::DispatchRoute(const NRISmokeRouteDesc& route) const
 {
 	return dispatchRoute == nullptr || dispatchRoute(user, route);
+}
+
+NRIPassDispatchContext::FrameTextureSlot NRIPassDispatchContext::SmokeService::GetVolumeSlot(bool metadata) const
+{
+	return getVolumeSlot != nullptr ? (FrameTextureSlot)getVolumeSlot(user, metadata) : FrameTextureSlot::Count;
 }
 
 NRIPassDispatchContext::NRIPassDispatchContext(const Init& init)

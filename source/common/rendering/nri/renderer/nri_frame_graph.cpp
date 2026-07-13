@@ -414,11 +414,27 @@ bool ExecuteNRIFrameGraph(
 			{
 				return false;
 			}
+			if (nri_ptsmoke && (int)nri_ptsmokedlrrmode == 1)
+			{
+				NRISmokeRouteDesc smokeRoute = {};
+				smokeRoute.inputSlot = FrameTextureSlot::RrInput;
+				smokeRoute.outputSlot = FrameTextureSlot::RrVolumeInput;
+				smokeRoute.depthSlot = FrameTextureSlot::ViewZ;
+				smokeRoute.exposureDomain = NRIRenderer::ExposureDomain::SceneHDR;
+				smokeRoute.placement = NRISmokeRoutePlacement::DlrrPreUpscaleMainInput;
+				smokeRoute.width = context.mFrame.renderWidth;
+				smokeRoute.height = context.mFrame.renderHeight;
+				smokeRoute.supported = true;
+				if (!context.mSmokeService.DispatchRoute(smokeRoute))
+					return false;
+			}
 		}
 
 		if (!needStandardComposition)
 		{
-			if (!context.mExposureService.DispatchAutoExposure(FrameTextureSlot::RrInput))
+			const FrameTextureSlot rrExposureInput = nri_ptsmoke && (int)nri_ptsmokedlrrmode == 1 ?
+				FrameTextureSlot::RrVolumeInput : FrameTextureSlot::RrInput;
+			if (!context.mExposureService.DispatchAutoExposure(rrExposureInput))
 			{
 				return false;
 			}
@@ -497,7 +513,7 @@ bool ExecuteNRIFrameGraph(
 
 		const FrameTextureSlot resolvedPresentSlot = context.mUseUpscaledInFinal ? context.mUpscaledInputSlot : context.mHistoryOutputSlot;
 		FrameTextureSlot finalPresentSlot = resolvedPresentSlot;
-		if (context.mUpscalerService.ResolveMainUpscalerKind(false) == NRIMainUpscalerKind::DLRR)
+		if (context.mUpscalerService.ResolveMainUpscalerKind(false) == NRIMainUpscalerKind::DLRR && (int)nri_ptsmokedlrrmode == 2)
 		{
 			NRISmokeRouteDesc smokeRoute = {};
 			smokeRoute.inputSlot = resolvedPresentSlot;

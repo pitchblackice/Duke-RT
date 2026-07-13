@@ -98,6 +98,11 @@ struct NRISmokeSettings
 	bool pointLights = true;
 	bool directionalLight = true;
 	bool emissiveLights = true;
+	uint32_t emissiveReuseMode = 2;
+	bool emissiveReference = false;
+	float emissiveSourceClamp = 32.0f;
+	bool volumeHistory = true;
+	uint32_t dlrrMode = 1;
 	bool indirect = true;
 	uint32_t indirectCacheMode = 3;
 	uint32_t lightMode = 1;

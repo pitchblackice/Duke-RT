@@ -5331,6 +5331,13 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 	for (const auto& distributionEntry : distributionEntries)
 	{
 		BuiltCandidate candidate = candidates[distributionEntry.inputIndex];
+		// The distribution resolves duplicate authored keys into unique,
+		// deterministically ordered identities. Publish that resolved key to
+		// GPU consumers so temporal reservoirs cannot confuse two candidates
+		// that shared the pre-distribution key.
+		candidate.gpu.stableKeyLo = (uint32_t)(distributionEntry.stableKey & 0xffffffffu);
+		candidate.gpu.stableKeyHi = (uint32_t)(distributionEntry.stableKey >> 32u);
+		candidate.debug.stableKey = distributionEntry.stableKey;
 		candidate.gpu.selectionWeight = distributionEntry.proposalWeight;
 		candidate.gpu.selectionPdf = distributionEntry.selectionPdf;
 		candidate.debug.selectionWeight = distributionEntry.proposalWeight;

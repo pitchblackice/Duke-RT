@@ -216,6 +216,11 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.pointLights = (bool)nri_ptsmokepointlights;
 	settings.directionalLight = (bool)nri_ptsmokedirectionallight;
 	settings.emissiveLights = (bool)nri_ptsmokeemissivelights;
+	settings.emissiveReuseMode = (uint32_t)std::clamp((int)nri_ptsmokeemissivereuse, 0, 2);
+	settings.emissiveReference = (bool)nri_ptsmokeemissivereference;
+	settings.emissiveSourceClamp = std::clamp((float)nri_ptsmokeemissiveclamp, 1.0f, 256.0f);
+	settings.volumeHistory = (bool)nri_ptsmokevolumehistory;
+	settings.dlrrMode = (uint32_t)std::clamp((int)nri_ptsmokedlrrmode, 0, 2);
 	settings.indirect = (bool)nri_ptsmokeindirect;
 	settings.indirectCacheMode = (uint32_t)std::clamp((int)nri_ptsmokeindirectcache, 0, 3);
 	settings.lightMode = (uint32_t)std::clamp((int)nri_ptsmokelightmode, 0, 3);

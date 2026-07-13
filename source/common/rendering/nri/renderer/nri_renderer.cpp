@@ -2814,6 +2814,7 @@ NRIRenderer::ExposureDomain NRIRenderer::ResolveFrameTextureExposureDomain(Frame
 	case FrameTextureSlot::PostVolumeOutput:
 	case FrameTextureSlot::SrInput:
 	case FrameTextureSlot::RrInput:
+	case FrameTextureSlot::RrVolumeInput:
 		return ExposureDomain::SceneHDR;
 	case FrameTextureSlot::TaaHistoryPing:
 	case FrameTextureSlot::TaaHistoryPong:

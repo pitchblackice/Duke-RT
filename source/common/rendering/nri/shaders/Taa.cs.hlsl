@@ -5,6 +5,7 @@
 #define NRI_FLAG_RESET_HISTORY 0x1u
 #define NRI_TEMPORAL_FLAG_AUTO_EXPOSURE 0x1000u
 #define NRI_TEMPORAL_FLAG_EXPOSURE_TEXTURE_VALID 0x2000u
+#define NRI_TEMPORAL_FLAG_VOLUME_REACTIVE 0x4000u
 #define TAA_HISTORY_FRAME_CAP 12.0
 #define TAA_BASE_BLEND (1.0 / TAA_HISTORY_FRAME_CAP)
 #define TAA_SIGMA_SCALE 2.0
@@ -20,6 +21,7 @@ Texture2D<float4> gHistoryInput : register(t0, space0);
 Texture2D<float4> gMotionInput : register(t1, space0);
 Texture2D<float4> gComposedInput : register(t2, space0);
 Texture2D<float4> gExposureStateInput : register(t3, space0);
+Texture2D<float4> gVolumeMetaInput : register(t4, space0);
 
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gHistoryOutput, u, 0, 1);
 
@@ -106,6 +108,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const bool resetHistory = (gTemporalConstants.Flags & NRI_FLAG_RESET_HISTORY) != 0u;
 	const TemporalExposureState exposureState = LoadTemporalExposureState();
 	const float3 currentColor = LoadCurrentColor(int2(pixelPos), size, exposureState.currentExposure);
+	const float volumeReactive = (gTemporalConstants.Flags & NRI_TEMPORAL_FLAG_VOLUME_REACTIVE) != 0u ?
+		saturate(gVolumeMetaInput.Load(int3(pixelPos, 0)).x) : 0.0;
 
 	const float4 centerMotion = gMotionInput[pixelPos];
 	// TAA consumes the shared PT motion contract from Shared.hlsli:
@@ -169,11 +173,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	float currentWeight = max(1.0 / (effectiveHistoryFrames + 1.0), TAA_BASE_BLEND);
 	currentWeight = max(currentWeight, rejection);
+	currentWeight = max(currentWeight, volumeReactive);
 	if (motionPixels > 0.0)
 	{
 		currentWeight = max(currentWeight, TAA_MOTION_MIN_WEIGHT);
 	}
-	if (rejectHistory)
+	if (rejectHistory || volumeReactive >= 0.95)
 	{
 		currentWeight = 1.0;
 		effectiveHistoryFrames = 1.0;

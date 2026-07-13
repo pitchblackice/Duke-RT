@@ -16,6 +16,8 @@ struct SmokeReprojectionData
 	float4 previousViewToClipMatrix[4];
 	float4 currentWorldToViewMatrix[4];
 	float4 previousWorldToViewMatrix[4];
+	float2 currentJitter;
+	float2 previousJitter;
 };
 
 StructuredBuffer<SmokeReprojectionData> gSmokeReprojectionData : register(t17, space6);
@@ -109,6 +111,28 @@ bool SmokePreviousFroxel(float3 worldPosition, out uint previousIndex)
 		uint2(gSmokeConstants.FroxelWidth - 1u, gSmokeConstants.FroxelHeight - 1u));
 	previousIndex = SmokeFroxelIndex(xy.x, xy.y, SmokeDepthSlice(previousDepth));
 	return true;
+}
+
+bool SmokePreviousUv(float3 worldPosition, out float2 previousStableUv, out float2 previousStorageUv)
+{
+	previousStableUv = 0.0;
+	previousStorageUv = 0.0;
+	uint reprojectionCount, ignoredStride;
+	gSmokeReprojectionData.GetDimensions(reprojectionCount, ignoredStride);
+	if (reprojectionCount == 0u)
+		return false;
+	const SmokeReprojectionData reprojection = gSmokeReprojectionData[0];
+	const float4 previousView = SmokeMultiplyMatrixPoint(float4(worldPosition, 1.0), reprojection.previousWorldToViewMatrix);
+	if (!all(isfinite(previousView)) || -previousView.z <= 0.001)
+		return false;
+	const float4 previousClip = SmokeMultiplyMatrixPoint(previousView, reprojection.previousViewToClipMatrix);
+	if (!all(isfinite(previousClip)) || previousClip.w <= 1e-5)
+		return false;
+	const float2 ndc = previousClip.xy / previousClip.w;
+	previousStableUv = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+	previousStorageUv = previousStableUv - reprojection.previousJitter /
+		float2(max(gSmokeConstants.RenderWidth, 1u), max(gSmokeConstants.RenderHeight, 1u));
+	return all(previousStorageUv >= 0.0) && all(previousStorageUv < 1.0);
 }
 
 #endif

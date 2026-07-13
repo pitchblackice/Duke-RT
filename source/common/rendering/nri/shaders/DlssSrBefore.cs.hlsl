@@ -10,6 +10,8 @@ struct ReprojectionData
 	float4 previousViewToClipMatrix[4];
 	float4 currentWorldToViewMatrix[4];
 	float4 previousWorldToViewMatrix[4];
+	float2 currentJitter;
+	float2 previousJitter;
 };
 
 StructuredBuffer<ReprojectionData> gReprojectionDataBuffer : register(t18, space2);

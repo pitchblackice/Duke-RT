@@ -16,6 +16,7 @@ namespace nri_scene
 enum class NRISmokeRoutePlacement : uint32_t
 {
 	StandardPreUpscale = 0,
+	DlrrPreUpscaleMainInput,
 	DlrrPostUpscale,
 };
 
@@ -167,7 +168,7 @@ public:
 		using GetSelectedUpscalerModeFn = nri::UpscalerMode (*)(void* user);
 		using ShouldRunAppTaaForFrameGraphFn = bool (*)(void* user, NRIMainUpscalerKind kind);
 		using TraceTemporalStateFn = void (*)(void* user, const char* stage, NRIMainUpscalerKind resolvedMainUpscaler, NRIPostSharpenKind resolvedPostSharpen, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot);
-		using EnsureMainUpscalerFn = bool (*)(void* user, NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t outputWidth, uint32_t outputHeight, bool exposure);
+		using EnsureMainUpscalerFn = bool (*)(void* user, NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t outputWidth, uint32_t outputHeight, bool exposure, bool reactive);
 		using DispatchMainUpscalerFn = bool (*)(void* user, NRIMainUpscalerKind kind, const NRIUpscalerDispatchDesc& desc);
 		using EnsurePostSharpenFn = bool (*)(void* user, NRIPostSharpenKind kind, uint32_t outputWidth, uint32_t outputHeight);
 		using DispatchPostSharpenFn = bool (*)(void* user, NRIPostSharpenKind kind, const NRIUpscalerDispatchDesc& desc);
@@ -188,7 +189,7 @@ public:
 		nri::UpscalerMode GetSelectedUpscalerMode() const;
 		bool ShouldRunAppTaaForFrameGraph(NRIMainUpscalerKind kind) const;
 		void TraceTemporalState(const char* stage, NRIMainUpscalerKind resolvedMainUpscaler, NRIPostSharpenKind resolvedPostSharpen, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const;
-		bool EnsureMainUpscaler(NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t outputWidth, uint32_t outputHeight, bool exposure) const;
+		bool EnsureMainUpscaler(NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t outputWidth, uint32_t outputHeight, bool exposure, bool reactive) const;
 		bool DispatchMainUpscaler(NRIMainUpscalerKind kind, const NRIUpscalerDispatchDesc& desc) const;
 		bool EnsurePostSharpen(NRIPostSharpenKind kind, uint32_t outputWidth, uint32_t outputHeight) const;
 		bool DispatchPostSharpen(NRIPostSharpenKind kind, const NRIUpscalerDispatchDesc& desc) const;
@@ -211,14 +212,17 @@ public:
 	{
 		using PrepareFrameFn = bool (*)(void* user, bool mainViewEligible, const TArray<PathTracingWeaponLightEvent>& weaponEvents);
 		using DispatchRouteFn = bool (*)(void* user, const NRISmokeRouteDesc& route);
+		using GetVolumeSlotFn = uint32_t (*)(void* user, bool metadata);
 
 		void* user = nullptr;
 		const TArray<PathTracingWeaponLightEvent>* weaponEvents = nullptr;
 		PrepareFrameFn prepareFrame = nullptr;
 		DispatchRouteFn dispatchRoute = nullptr;
+		GetVolumeSlotFn getVolumeSlot = nullptr;
 
 		bool PrepareFrame(bool mainViewEligible) const;
 		bool DispatchRoute(const NRISmokeRouteDesc& route) const;
+		FrameTextureSlot GetVolumeSlot(bool metadata) const;
 	};
 
 	struct FrameSnapshot

@@ -173,10 +173,10 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext(bool mainViewEligib
 		{
 			static_cast<NRIRenderer*>(user)->TraceTemporalState(stage, resolvedMainUpscaler, resolvedPostSharpen, runAppTaa, primarySlot, secondarySlot);
 		};
-		service.ensureMainUpscaler = [](void* user, NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t outputWidth, uint32_t outputHeight, bool exposure) -> bool
+		service.ensureMainUpscaler = [](void* user, NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t outputWidth, uint32_t outputHeight, bool exposure, bool reactive) -> bool
 		{
 			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
-			return renderer->mUpscaler.EnsureMainUpscaler(*renderer->mFrameBuffer, kind, mode, outputWidth, outputHeight, exposure);
+			return renderer->mUpscaler.EnsureMainUpscaler(*renderer->mFrameBuffer, kind, mode, outputWidth, outputHeight, exposure, reactive);
 		};
 		service.dispatchMainUpscaler = [](void* user, NRIMainUpscalerKind kind, const NRIUpscalerDispatchDesc& desc) -> bool
 		{
@@ -225,6 +225,16 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext(bool mainViewEligib
 		{
 			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
 			return renderer->mSmoke == nullptr || renderer->mSmoke->DispatchRoute(*renderer, route);
+		};
+		service.getVolumeSlot = [](void* user, bool metadata) -> uint32_t
+		{
+			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			if (renderer->mSmoke == nullptr)
+				return (uint32_t)NRIRenderer::FrameTextureSlot::Count;
+			const NRISmokeStatusSnapshot& status = renderer->mSmoke->GetStatusSnapshot();
+			if (!status.enabled || !status.mainViewEligible || !status.routeSupported || status.dispatchedFrame != renderer->mFrameIndex)
+				return (uint32_t)NRIRenderer::FrameTextureSlot::Count;
+			return metadata ? status.volumeMetaSlot : status.volumeResolvedSlot;
 		};
 		return service;
 	};

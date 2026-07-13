@@ -115,7 +115,9 @@ bool NRIFrameResources::EnsureFrameResources(NRIRenderer& renderer, uint32_t out
 		renderer.mSceneLeft == sceneLeft &&
 		renderer.mSceneTop == sceneTop &&
 		renderer.mFinalSceneFormat == finalFormat &&
-		(!nri_ptsmoke || renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::PostVolumeOutput).texture != nullptr) &&
+		(!nri_ptsmoke || (renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::PostVolumeOutput).texture != nullptr &&
+			renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::SmokeVolumeHistoryPing).texture != nullptr &&
+			renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrVolumeInput).texture != nullptr)) &&
 		renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Final).texture != nullptr;
 
 	if (upToDate)
@@ -172,7 +174,14 @@ bool NRIFrameResources::EnsureFrameResources(NRIRenderer& renderer, uint32_t out
 	const nri::Format rrGuideSpecHitDistanceFormat = nri::Format::R16_SFLOAT;
 	const nri::Format rrGuideNormalRoughnessFormat = nri::Format::RGBA16_SFLOAT;
 	const bool smokeOutputReady = !nri_ptsmoke ||
-		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::PostVolumeOutput, outputWidth, outputHeight, colorFormat);
+		(CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::PostVolumeOutput, outputWidth, outputHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::SmokeVolumeCurrent, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::SmokeVolumeCurrentMeta, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::SmokeVolumeHistoryPing, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::SmokeVolumeHistoryPong, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::SmokeVolumeMetaPing, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::SmokeVolumeMetaPong, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::RrVolumeInput, renderWidth, renderHeight, colorFormat));
 
 	return
 		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::ViewZ, renderWidth, renderHeight, colorFormat) &&

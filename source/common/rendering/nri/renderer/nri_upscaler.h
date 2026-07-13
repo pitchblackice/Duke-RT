@@ -46,6 +46,7 @@ struct NRIUpscalerDispatchDesc
 	NRITextureResource* diffuseAlbedo = nullptr;
 	NRITextureResource* specularAlbedo = nullptr;
 	NRITextureResource* specularHitDistance = nullptr;
+	NRITextureResource* reactive = nullptr;
 	uint32_t currentWidth = 0;
 	uint32_t currentHeight = 0;
 	float cameraJitter[2] = {};
@@ -58,7 +59,7 @@ struct NRIUpscalerDispatchDesc
 class NRIUpscalerContext
 {
 public:
-	bool EnsureMainUpscaler(NRIRenderDevice& frameBuffer, NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t upscaleWidth, uint32_t upscaleHeight, bool useExposure);
+	bool EnsureMainUpscaler(NRIRenderDevice& frameBuffer, NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t upscaleWidth, uint32_t upscaleHeight, bool useExposure, bool useReactive);
 	bool DispatchMainUpscaler(NRIRenderDevice& frameBuffer, NRIMainUpscalerKind kind, const NRIUpscalerDispatchDesc& desc);
 	bool EnsurePostSharpen(NRIRenderDevice& frameBuffer, NRIPostSharpenKind kind, uint32_t upscaleWidth, uint32_t upscaleHeight);
 	bool DispatchPostSharpen(NRIRenderDevice& frameBuffer, NRIPostSharpenKind kind, const NRIUpscalerDispatchDesc& desc);

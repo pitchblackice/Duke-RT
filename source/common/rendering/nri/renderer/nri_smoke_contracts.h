@@ -13,11 +13,15 @@ enum class NRISmokePass : uint32_t
 	EvaluateMedium,
 	LightPoint,
 	LightDirectional,
-	LightEmissive,
+	LightEmissiveInitial,
+	LightEmissiveTemporal,
+	LightEmissiveSpatial,
 	LightIndirectReference,
 	LightIndirectTemporal,
 	LightIndirectSpatial,
 	Integrate,
+	ResolveVolume,
+	TemporalVolume,
 	Composite,
 };
 
@@ -143,6 +147,19 @@ struct NRISmokeControlGpu
 	uint32_t emissiveShadowOccluded = 0;
 	uint32_t emissiveContributed = 0;
 	uint32_t emissiveRadianceClamps = 0;
+	uint32_t emissiveReservoirInitial = 0;
+	uint32_t emissiveReservoirInvalid = 0;
+	uint32_t emissiveTemporalAccepted = 0;
+	uint32_t emissiveTemporalRejected = 0;
+	uint32_t emissiveSpatialAccepted = 0;
+	uint32_t emissiveSpatialRejected = 0;
+	uint32_t emissiveFinalEvaluations = 0;
+	uint32_t emissiveSourceClamps = 0;
+	uint32_t emissiveRemovedEnergy = 0;
+	uint32_t emissiveMaximumAge = 0;
+	uint32_t emissiveReferenceSamples = 0;
+	uint32_t emissiveReferenceRays = 0;
+	uint32_t emissiveIdentityRejects = 0;
 	uint32_t indirectFroxelsProcessed = 0;
 	uint32_t indirectLocalityRays = 0;
 	uint32_t indirectLocalityAgreement = 0;
@@ -174,11 +191,26 @@ struct NRISmokeIndirectCacheGpu
 	uint32_t metadata = 0;
 };
 
+struct NRISmokeEmissiveReservoirGpu
+{
+	uint32_t candidateIndex = UINT32_MAX;
+	uint32_t sampleSeed = 0;
+	uint32_t stableKeyLo = 0;
+	uint32_t stableKeyHi = 0;
+	float target = 0.0f;
+	float weightSum = 0.0f;
+	uint32_t metadata = 0;
+	uint32_t generation = 0;
+	float receiverPosition[3] = {};
+	float sigmaT = 0.0f;
+};
+
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
 static_assert(sizeof(NRISmokeStyleGpu) == 80);
 static_assert(sizeof(NRISmokeInjectionCommandGpu) == 64);
-static_assert(sizeof(NRISmokeControlGpu) == 376);
+static_assert(sizeof(NRISmokeControlGpu) == 428);
 static_assert(sizeof(NRISmokeIndirectCacheGpu) == 32);
+static_assert(sizeof(NRISmokeEmissiveReservoirGpu) == 48);
 
 struct NRISmokeConstants
 {

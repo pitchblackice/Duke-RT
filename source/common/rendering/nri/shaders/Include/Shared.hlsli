@@ -51,6 +51,8 @@ struct ReprojectionData
 	float4 previousViewToClipMatrix[4];
 	float4 currentWorldToViewMatrix[4];
 	float4 previousWorldToViewMatrix[4];
+	float2 currentJitter;
+	float2 previousJitter;
 };
 
 NRI_ROOT_CONSTANTS(NRITraceSceneConstants, gTraceConstants, 0, SET_ROOT);

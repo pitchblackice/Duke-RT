@@ -296,7 +296,7 @@ bool NRIUpscalerContext::EnsureUpscaler(
 	return true;
 }
 
-bool NRIUpscalerContext::EnsureMainUpscaler(NRIRenderDevice& frameBuffer, NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t upscaleWidth, uint32_t upscaleHeight, bool useExposure)
+bool NRIUpscalerContext::EnsureMainUpscaler(NRIRenderDevice& frameBuffer, NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t upscaleWidth, uint32_t upscaleHeight, bool useExposure, bool useReactive)
 {
 	if (kind == NRIMainUpscalerKind::Off)
 	{
@@ -317,6 +317,8 @@ bool NRIUpscalerContext::EnsureMainUpscaler(NRIRenderDevice& frameBuffer, NRIMai
 	{
 		flags = (nri::UpscalerBits)((uint32_t)flags | (uint32_t)nri::UpscalerBits::USE_EXPOSURE);
 	}
+	if (useReactive)
+		flags = (nri::UpscalerBits)((uint32_t)flags | (uint32_t)nri::UpscalerBits::USE_REACTIVE);
 	return EnsureUpscaler(frameBuffer, slot, type, mode, upscaleWidth, upscaleHeight, flags);
 }
 
@@ -368,6 +370,8 @@ bool NRIUpscalerContext::DispatchMainUpscaler(NRIRenderDevice& frameBuffer, NRIM
 		{
 			dispatchDesc.guides.upscaler.exposure = { desc.exposure->texture, desc.exposure->shaderView };
 		}
+		if (desc.reactive != nullptr)
+			dispatchDesc.guides.upscaler.reactive = { desc.reactive->texture, desc.reactive->shaderView };
 	}
 	else if (kind == NRIMainUpscalerKind::DLRR)
 	{
@@ -387,6 +391,8 @@ bool NRIUpscalerContext::DispatchMainUpscaler(NRIRenderDevice& frameBuffer, NRIM
 		{
 			dispatchDesc.guides.denoiser.exposure = { desc.exposure->texture, desc.exposure->shaderView };
 		}
+		if (desc.reactive != nullptr)
+			dispatchDesc.guides.denoiser.reactive = { desc.reactive->texture, desc.reactive->shaderView };
 		std::memcpy(dispatchDesc.settings.dlrr.viewToClipMatrix, desc.viewToClipMatrix, sizeof(dispatchDesc.settings.dlrr.viewToClipMatrix));
 		std::memcpy(dispatchDesc.settings.dlrr.worldToViewMatrix, desc.worldToViewMatrix, sizeof(dispatchDesc.settings.dlrr.worldToViewMatrix));
 	}
@@ -553,6 +559,13 @@ const char* NRIRenderer::GetFrameTextureSlotName(FrameTextureSlot slot) const
 	case FrameTextureSlot::RrGuideSpecularAlbedo: return "RrGuideSpecularAlbedo";
 	case FrameTextureSlot::RrGuideSpecularHitDistance: return "RrGuideSpecularHitDistance";
 	case FrameTextureSlot::RrGuideNormalRoughness: return "RrGuideNormalRoughness";
+	case FrameTextureSlot::SmokeVolumeCurrent: return "SmokeVolumeCurrent";
+	case FrameTextureSlot::SmokeVolumeCurrentMeta: return "SmokeVolumeCurrentMeta";
+	case FrameTextureSlot::SmokeVolumeHistoryPing: return "SmokeVolumeHistoryPing";
+	case FrameTextureSlot::SmokeVolumeHistoryPong: return "SmokeVolumeHistoryPong";
+	case FrameTextureSlot::SmokeVolumeMetaPing: return "SmokeVolumeMetaPing";
+	case FrameTextureSlot::SmokeVolumeMetaPong: return "SmokeVolumeMetaPong";
+	case FrameTextureSlot::RrVolumeInput: return "RrVolumeInput";
 	case FrameTextureSlot::VendorOutput: return "VendorOutput";
 	case FrameTextureSlot::PostSharpenOutput: return "PostSharpenOutput";
 	case FrameTextureSlot::PostVolumeOutput: return "PostVolumeOutput";

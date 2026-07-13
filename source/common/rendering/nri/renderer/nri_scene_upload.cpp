@@ -129,7 +129,10 @@ namespace
 		float previousViewToClip[16] = {};
 		float currentWorldToView[16] = {};
 		float previousWorldToView[16] = {};
+		float currentJitter[2] = {};
+		float previousJitter[2] = {};
 	};
+	static_assert(sizeof(NRIReprojectionData) == 272);
 
 	static bool ShouldTraceSceneBufferDirtyRanges()
 	{
@@ -753,6 +756,8 @@ bool NRISceneUploadManager::UpdateReprojectionBuffer(NRIRenderer& renderer, bool
 	std::memcpy(data.previousViewToClip, renderer.mPreviousViewToClip, sizeof(data.previousViewToClip));
 	std::memcpy(data.currentWorldToView, renderer.mCurrentWorldToView, sizeof(data.currentWorldToView));
 	std::memcpy(data.previousWorldToView, renderer.mPreviousWorldToView, sizeof(data.previousWorldToView));
+	std::memcpy(data.currentJitter, renderer.mCurrentJitter, sizeof(data.currentJitter));
+	std::memcpy(data.previousJitter, renderer.mPreviousJitter, sizeof(data.previousJitter));
 
 	NRISceneDataFrameSlot* sceneDataSlot =
 		allowSceneDataRing && renderer.ShouldUseSceneDataFrameRing() ? &renderer.GetCurrentSceneDataFrameSlot() : nullptr;
