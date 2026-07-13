@@ -33,6 +33,7 @@ Prepared for public release: 03/21/2003 - Charlie Wiederhold, 3D Realms
 #include "dukeactor.h"
 #include "savegamehelp.h"
 #include "gamevar.h"
+#include "runtime_map_movers.h"
 
 //==========================================================================
 //
@@ -459,6 +460,7 @@ void GameInterface::SerializeGameState(FSerializer& arc)
 
 		if (arc.isReading())
 		{
+			ResetRuntimeMapMoverAuthority();
 			screenpeek = myconnectindex;
 			ud.recstat = 0;
 

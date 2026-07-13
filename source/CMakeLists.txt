@@ -746,6 +746,7 @@ set( NOT_COMPILED_SOURCE_FILES
 	games/duke/src/premap_d.cpp
 	games/duke/src/premap_r.cpp
 	games/duke/src/render.cpp
+	games/duke/src/runtime_map_movers.cpp
 	games/duke/src/savegame.cpp
 	games/duke/src/sbar.cpp
 	games/duke/src/sectors.cpp
@@ -1000,6 +1001,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_voxel_compute_meshing.cpp
 	common/rendering/nri/scene/nri_map_world.cpp
 	common/rendering/nri/scene/nri_map_builder.cpp
+	common/rendering/nri/scene/nri_map_mover_geometry.cpp
 	common/rendering/nri/scene/nri_scene_stats.cpp
 	common/rendering/nri/scene/nri_scene_texture_utils.cpp
 	common/rendering/nri/scene/nri_texture_signature.cpp

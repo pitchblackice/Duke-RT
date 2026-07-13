@@ -16,6 +16,7 @@
 #include "src/premap.cpp"
 #include "src/prediction.cpp"
 #include "src/render.cpp"
+#include "src/runtime_map_movers.cpp" // authoritative map-mover snapshots
 #include "src/savegame.cpp"
 #include "src/sbar.cpp"
 #include "src/sectors.cpp"
