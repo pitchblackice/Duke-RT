@@ -30,9 +30,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (lightingDiagnostics)
 		InterlockedAdd(gSmokeControl[0].PointFroxelsProcessed, 1u);
 
-	// Preserve the original ambient fallback even when the point-light family is
-	// disabled or unavailable. Later light families add to this source field.
-	float3 scattering = medium.rgb * 0.18;
+	// Start with extinction only. A fixed neutral ambient source makes sufficiently
+	// dark surfaces appear uniformly brighter anywhere smoke overlaps them.
+	// Explicit point, directional, and emissive families add real in-scattering.
+	float3 scattering = 0.0;
 	if (medium.a > 0.0 && any(medium.rgb > 0.0) &&
 		gSmokeConstants.LightMode > 0u && (gSmokeConstants.LightSourceFlags & NRI_SMOKE_LIGHT_SOURCE_POINT) != 0u)
 	{
