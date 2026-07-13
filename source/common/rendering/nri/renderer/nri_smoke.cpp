@@ -17,9 +17,10 @@ namespace
 	constexpr uint32_t kMaxCommands = 256;
 	constexpr uint32_t kWideCellCount = 16u * 9u;
 	constexpr uint32_t kMaximumReferencesPerParticle = 512u;
-	constexpr uint32_t kSmokeStorageBufferCount = 11u;
+	constexpr uint32_t kSmokeStorageBufferCount = 13u;
 	constexpr uint32_t kSmokeFilteredSceneBufferCount = 8u;
 	constexpr uint32_t kSmokeEmissiveSceneBufferCount = 7u;
+	constexpr uint32_t kSmokeExtendedSceneBufferCount = 10u;
 
 	uint32_t PackDirectionalLightColor24(const float color[3])
 	{
@@ -128,19 +129,19 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 	lights.descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
 	lights.shaderStages = nri::StageBits::COMPUTE_SHADER;
 	lights.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-	nri::DescriptorRangeDesc filteredSceneRanges[7] = {};
+	nri::DescriptorRangeDesc filteredSceneRanges[5] = {};
 	filteredSceneRanges[0].baseRegisterIndex = 0;
 	filteredSceneRanges[0].descriptorNum = kSmokeFilteredSceneBufferCount;
 	filteredSceneRanges[0].descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
 	filteredSceneRanges[0].shaderStages = nri::StageBits::COMPUTE_SHADER;
 	filteredSceneRanges[0].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
 	filteredSceneRanges[1].baseRegisterIndex = 8;
-	filteredSceneRanges[1].descriptorNum = kSmokeEmissiveSceneBufferCount;
+	filteredSceneRanges[1].descriptorNum = kSmokeExtendedSceneBufferCount;
 	filteredSceneRanges[1].descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
 	filteredSceneRanges[1].shaderStages = nri::StageBits::COMPUTE_SHADER;
 	filteredSceneRanges[1].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-	filteredSceneRanges[2].baseRegisterIndex = 15;
-	filteredSceneRanges[2].descriptorNum = 513;
+	filteredSceneRanges[2].baseRegisterIndex = 18;
+	filteredSceneRanges[2].descriptorNum = 514;
 	filteredSceneRanges[2].descriptorType = nri::DescriptorType::TEXTURE;
 	filteredSceneRanges[2].shaderStages = nri::StageBits::COMPUTE_SHADER;
 	filteredSceneRanges[2].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
@@ -149,21 +150,11 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 	filteredSceneRanges[3].descriptorType = nri::DescriptorType::SAMPLER;
 	filteredSceneRanges[3].shaderStages = nri::StageBits::COMPUTE_SHADER;
 	filteredSceneRanges[3].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-	filteredSceneRanges[4].baseRegisterIndex = 528;
+	filteredSceneRanges[4].baseRegisterIndex = 532;
 	filteredSceneRanges[4].descriptorNum = 1;
 	filteredSceneRanges[4].descriptorType = nri::DescriptorType::ACCELERATION_STRUCTURE;
 	filteredSceneRanges[4].shaderStages = nri::StageBits::COMPUTE_SHADER;
 	filteredSceneRanges[4].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-	filteredSceneRanges[5].baseRegisterIndex = 529;
-	filteredSceneRanges[5].descriptorNum = 2;
-	filteredSceneRanges[5].descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
-	filteredSceneRanges[5].shaderStages = nri::StageBits::COMPUTE_SHADER;
-	filteredSceneRanges[5].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-	filteredSceneRanges[6].baseRegisterIndex = 531;
-	filteredSceneRanges[6].descriptorNum = 1;
-	filteredSceneRanges[6].descriptorType = nri::DescriptorType::TEXTURE;
-	filteredSceneRanges[6].shaderStages = nri::StageBits::COMPUTE_SHADER;
-	filteredSceneRanges[6].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
 	nri::DescriptorSetDesc sets[6] = {};
 	nri::DescriptorRangeDesc* ranges[] = { &input, &buffers, &textures, &output, &lights };
 	for (uint32_t i = 0; i < 5; ++i)
@@ -175,7 +166,7 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 	}
 	sets[5].registerSpace = 6;
 	sets[5].ranges = filteredSceneRanges;
-	sets[5].rangeNum = 7;
+	sets[5].rangeNum = 5;
 	sets[5].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
 	nri::RootConstantDesc root = {};
 	root.registerIndex = 0;
@@ -192,7 +183,7 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 		return false;
 
 	const bool d3d12 = renderer.mFrameBuffer->GetSelectedAPI() == nri::GraphicsAPI::D3D12;
-	const char* names[] = { "SmokeClear", "SmokeSimulate", "SmokeSpawn", "SmokeBin", "SmokeEvaluateMedium", "SmokeLightPoint", "SmokeLightDirectional", "SmokeLightEmissive", "SmokeLightIndirectReference", "SmokeIntegrate", "SmokeComposite" };
+	const char* names[] = { "SmokeClear", "SmokeSimulate", "SmokeSpawn", "SmokeBin", "SmokeEvaluateMedium", "SmokeLightPoint", "SmokeLightDirectional", "SmokeLightEmissive", "SmokeLightIndirectReference", "SmokeLightIndirectTemporal", "SmokeLightIndirectSpatial", "SmokeIntegrate", "SmokeComposite" };
 	for (uint32_t i = 0; i < (uint32_t)mPipelines.size(); ++i)
 	{
 		std::vector<uint8_t> blob;
@@ -282,7 +273,9 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 		!CreateBuffer(renderer, mFroxelIntegrated, froxels * 16, 16, storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mFroxelPhase, froxels * 16, 16, storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mFroxelSource, froxels * 16, 16, storage, nri::MemoryLocation::DEVICE, false, true) ||
-		!CreateBuffer(renderer, mOccupiedFroxelIndices, froxels * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true))
+		!CreateBuffer(renderer, mOccupiedFroxelIndices, froxels * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
+		!CreateBuffer(renderer, mIndirectHistory, froxels * sizeof(NRISmokeIndirectCacheGpu), sizeof(NRISmokeIndirectCacheGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
+		!CreateBuffer(renderer, mIndirectScratch, froxels * sizeof(NRISmokeIndirectCacheGpu), sizeof(NRISmokeIndirectCacheGpu), storage, nri::MemoryLocation::DEVICE, false, true))
 	{
 		DestroyViewResources(renderer);
 		return false;
@@ -291,6 +284,7 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 	mResourceFroxelHeight = fh;
 	mResourceFroxelDepth = mSettings.froxelDepth;
 	mViewResourcesInitialized = false;
+	mIndirectHistoryValid = false;
 	mStatus.froxelWidth = fw;
 	mStatus.froxelHeight = fh;
 	mStatus.froxelDepth = mSettings.froxelDepth;
@@ -298,7 +292,8 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 	mStatus.residentBytes = mParticles.memorySize + mControl.memorySize + mReferenceNext.memorySize + mFineCells.memorySize +
 		mWideCells.memorySize + mGlobalDepthCells.memorySize +
 		mFroxelMedium.memorySize + mFroxelIntegrated.memorySize + mFroxelPhase.memorySize + mFroxelSource.memorySize +
-		mOccupiedFroxelIndices.memorySize + mStyleBuffer.memorySize;
+		mOccupiedFroxelIndices.memorySize + mIndirectHistory.memorySize + mIndirectScratch.memorySize + mStyleBuffer.memorySize;
+	mStatus.indirectCacheBytes = mIndirectHistory.memorySize + mIndirectScratch.memorySize;
 	for (const CommandSlot& slot : mCommandSlots)
 		mStatus.residentBytes += slot.upload.memorySize + slot.device.memorySize + slot.styleUpload.memorySize + slot.controlReadback.memorySize;
 	return true;
@@ -400,6 +395,13 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 				mStatus.indirectEmissionContributions = control.indirectEmissionContributions;
 				mStatus.indirectRadianceClamps = control.indirectRadianceClamps;
 				mStatus.indirectNanRejects = control.indirectNanRejects;
+				mStatus.indirectTemporalAccepted = control.indirectTemporalAccepted;
+				mStatus.indirectTemporalRejected = control.indirectTemporalRejected;
+				mStatus.indirectSpatialAccepted = control.indirectSpatialAccepted;
+				mStatus.indirectSpatialRejected = control.indirectSpatialRejected;
+				mStatus.indirectCacheMaximumAge = control.indirectCacheMaximumAge;
+				mStatus.indirectCacheClamps = control.indirectCacheClamps;
+				mStatus.indirectCacheResolved = control.indirectCacheResolved;
 				mStatus.lightCandidatesTested = control.lightCandidatesTested;
 				mStatus.lightDistanceRejected = control.lightDistanceRejected;
 				mStatus.lightShadowRays = control.lightShadowRays;
@@ -479,7 +481,8 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	nri::BufferBarrierDesc compute[2 + kSmokeStorageBufferCount] = {};
 	nri::Buffer* computeBuffers[] = { mStyleBuffer.buffer, slot.device.buffer, mParticles.buffer, mControl.buffer,
 		mFineCells.buffer, mReferenceNext.buffer, mFroxelMedium.buffer, mFroxelIntegrated.buffer,
-		mWideCells.buffer, mGlobalDepthCells.buffer, mFroxelPhase.buffer, mFroxelSource.buffer, mOccupiedFroxelIndices.buffer };
+		mWideCells.buffer, mGlobalDepthCells.buffer, mFroxelPhase.buffer, mFroxelSource.buffer, mOccupiedFroxelIndices.buffer,
+		mIndirectHistory.buffer, mIndirectScratch.buffer };
 	for (uint32_t i = 0; i < 2 + kSmokeStorageBufferCount; ++i)
 	{
 		compute[i].buffer = computeBuffers[i];
@@ -505,7 +508,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	const nri::Descriptor* inputs[] = { mStyleBuffer.shaderView, slot.device.shaderView };
 	const nri::Descriptor* outputs[] = { mParticles.storageView, mControl.storageView, mFineCells.storageView, mReferenceNext.storageView,
 		mFroxelMedium.storageView, mFroxelIntegrated.storageView, mWideCells.storageView, mGlobalDepthCells.storageView, mFroxelPhase.storageView,
-		mFroxelSource.storageView, mOccupiedFroxelIndices.storageView };
+		mFroxelSource.storageView, mOccupiedFroxelIndices.storageView, mIndirectHistory.storageView, mIndirectScratch.storageView };
 	nri::UpdateDescriptorRangeDesc updates[2] = {};
 	updates[0].descriptorSet = slot.inputSet; updates[0].rangeIndex = 0; updates[0].descriptors = inputs; updates[0].descriptorNum = 2;
 	updates[1].descriptorSet = slot.bufferSet; updates[1].rangeIndex = 0; updates[1].descriptors = outputs; updates[1].descriptorNum = kSmokeStorageBufferCount;
@@ -618,28 +621,37 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	};
 	const bool emissiveBuffersReady = std::all_of(std::begin(emissiveSceneBuffers), std::end(emissiveSceneBuffers), [](const nri::Descriptor* descriptor) { return descriptor != nullptr; });
 	const bool filteredTexturesReady = renderer.mCurrentSceneTextureDescriptors.size() >= 514u && renderer.mCurrentSceneTextureDescriptors[0] != nullptr;
-	const bool filteredResourcesReady = filteredBuffersReady && filteredTexturesReady;
-	const bool emissiveResourcesReady = filteredResourcesReady && emissiveBuffersReady && renderer.mBoundEmissivePrimitiveCount > 0u;
 	const bool shadowReady = renderer.mTopLevelAS.descriptor != nullptr;
-	const nri::Descriptor* sectorLightBuffers[] = { renderer.mSceneDataDescriptors[16], renderer.mSceneDataDescriptors[17] };
-	const bool sectorLightResourcesReady = sectorLightBuffers[0] != nullptr && sectorLightBuffers[1] != nullptr && renderer.mBoundSectorLightSectorCount > 0u;
+	const nri::Descriptor* indirectSceneBuffers[] = {
+		renderer.mSceneDataDescriptors[16], renderer.mSceneDataDescriptors[17], renderer.mSceneDataDescriptors[18]
+	};
+	const bool sectorLightResourcesReady = indirectSceneBuffers[0] != nullptr && indirectSceneBuffers[1] != nullptr && renderer.mBoundSectorLightSectorCount > 0u;
+	const bool reprojectionResourcesReady = indirectSceneBuffers[2] != nullptr;
 	const nri::Descriptor* smokeSky[] = {
 		renderer.mCurrentSceneTextureDescriptors.size() > 1u ? renderer.mCurrentSceneTextureDescriptors[1] : nullptr
 	};
 	const bool skyResourceReady = smokeSky[0] != nullptr;
+	std::array<const nri::Descriptor*, kSmokeExtendedSceneBufferCount> extendedSceneBuffers = {};
+	std::copy(std::begin(emissiveSceneBuffers), std::end(emissiveSceneBuffers), extendedSceneBuffers.begin());
+	for (uint32_t i = 0; i < 3u; ++i)
+		extendedSceneBuffers[kSmokeEmissiveSceneBufferCount + i] = indirectSceneBuffers[i] != nullptr ? indirectSceneBuffers[i] : emissiveSceneBuffers[0];
+	const bool extendedSceneBuffersReady = emissiveBuffersReady;
+	const bool filteredResourcesReady = filteredBuffersReady && filteredTexturesReady && skyResourceReady && extendedSceneBuffersReady;
+	const bool emissiveResourcesReady = filteredResourcesReady && emissiveBuffersReady && renderer.mBoundEmissivePrimitiveCount > 0u;
 	const bool indirectResourcesReady = filteredResourcesReady && shadowReady && sectorLightResourcesReady && skyResourceReady;
-	std::array<const nri::Descriptor*, 513> smokeSceneTextures = {};
-	if (filteredTexturesReady)
+	std::array<const nri::Descriptor*, 514> smokeSceneTextures = {};
+	if (filteredTexturesReady && skyResourceReady)
 	{
 		smokeSceneTextures[0] = renderer.mCurrentSceneTextureDescriptors[0];
-		std::copy(renderer.mCurrentSceneTextureDescriptors.begin() + 2, renderer.mCurrentSceneTextureDescriptors.begin() + 514, smokeSceneTextures.begin() + 1);
+		smokeSceneTextures[1] = smokeSky[0];
+		std::copy(renderer.mCurrentSceneTextureDescriptors.begin() + 2, renderer.mCurrentSceneTextureDescriptors.begin() + 514, smokeSceneTextures.begin() + 2);
 	}
 	const nri::Descriptor* filteredSamplers[] = {
 		renderer.mFrameBuffer->mSamplers[(size_t)NRISamplerMode::WrapPoint],
 		renderer.mFrameBuffer->mSamplers[(size_t)NRISamplerMode::WrapLinear],
 		renderer.mFrameBuffer->mSamplers[(size_t)NRISamplerMode::ClampPoint],
 	};
-	nri::UpdateDescriptorRangeDesc updates[10] = {};
+	nri::UpdateDescriptorRangeDesc updates[11] = {};
 	updates[0].descriptorSet = slot.textureSet; updates[0].rangeIndex = 0; updates[0].descriptors = textures; updates[0].descriptorNum = 2;
 	updates[1].descriptorSet = slot.outputSet; updates[1].rangeIndex = 0; updates[1].descriptors = outputTexture; updates[1].descriptorNum = 1;
 	uint32_t updateCount = 2;
@@ -651,9 +663,9 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	if (filteredResourcesReady)
 	{
 		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 0; updates[updateCount].descriptors = filteredSceneBuffers; updates[updateCount].descriptorNum = kSmokeFilteredSceneBufferCount; updateCount++;
-		if (emissiveBuffersReady)
+		if (extendedSceneBuffersReady)
 		{
-			updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 1; updates[updateCount].descriptors = emissiveSceneBuffers; updates[updateCount].descriptorNum = kSmokeEmissiveSceneBufferCount; updateCount++;
+			updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 1; updates[updateCount].descriptors = extendedSceneBuffers.data(); updates[updateCount].descriptorNum = kSmokeExtendedSceneBufferCount; updateCount++;
 		}
 		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 2; updates[updateCount].descriptors = smokeSceneTextures.data(); updates[updateCount].descriptorNum = (uint32_t)smokeSceneTextures.size(); updateCount++;
 		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 3; updates[updateCount].descriptors = filteredSamplers; updates[updateCount].descriptorNum = 3; updateCount++;
@@ -662,14 +674,6 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	if (shadowReady)
 	{
 		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 4; updates[updateCount].descriptors = worldTlas; updates[updateCount].descriptorNum = 1; updateCount++;
-	}
-	if (sectorLightResourcesReady)
-	{
-		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 5; updates[updateCount].descriptors = sectorLightBuffers; updates[updateCount].descriptorNum = 2; updateCount++;
-	}
-	if (skyResourceReady)
-	{
-		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 6; updates[updateCount].descriptors = smokeSky; updates[updateCount].descriptorNum = 1; updateCount++;
 	}
 	renderer.mFrameBuffer->mCore.UpdateDescriptorRanges(updates, updateCount);
 
@@ -732,7 +736,25 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	mStatus.filteredVisibilityEffective = filteredVisibilityEffective;
 	mStatus.forceOpaqueVisibility = constants.lightMode >= 2u && shadowReady && !filteredVisibilityEffective;
 	mStatus.shadowTlasReady = shadowReady;
+	uint32_t effectiveIndirectCacheMode = mSettings.indirectCacheMode;
+	if (effectiveIndirectCacheMode >= 2u && !reprojectionResourcesReady)
+		effectiveIndirectCacheMode = 1u;
+	mStatus.indirectCacheModeRequested = mSettings.indirectCacheMode;
+	mStatus.indirectCacheModeEffective = effectiveIndirectCacheMode;
+	const uint64_t indirectSectorHash = renderer.mSectorLightingPayloadHash;
+	const uint64_t indirectSkyKey = renderer.mSkyEnvironment.ActiveKey();
+	const uint64_t indirectEmissiveHash = renderer.mEmissiveSamplingPayloadHash;
+	const bool indirectHistoryCompatible = mIndirectHistoryValid && !renderer.mResetHistory &&
+		mLastIndirectCacheMode == effectiveIndirectCacheMode &&
+		mLastIndirectSectorHash == indirectSectorHash && mLastIndirectSkyKey == indirectSkyKey &&
+		mLastIndirectEmissiveHash == indirectEmissiveHash;
 	constants.flags = (mSettings.readback || mSettings.traceMode > 0u) ? 2u : 0u;
+	constants.flags |= (effectiveIndirectCacheMode & 3u) << 2u;
+	constants.flags |= (std::min(mSettings.quality, 2u) & 3u) << 5u;
+	if (indirectHistoryCompatible)
+		constants.flags |= 0x10u;
+	else if (effectiveIndirectCacheMode > 0u)
+		constants.flags |= 0x80u;
 	auto dispatch = [&](NRISmokePass pass, uint32_t x, uint32_t y, uint32_t z)
 	{
 		constants.pass = (uint32_t)pass;
@@ -745,7 +767,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		nri::BufferBarrierDesc barriers[kSmokeStorageBufferCount] = {};
 		nri::Buffer* buffers[] = { mParticles.buffer, mControl.buffer, mFineCells.buffer, mReferenceNext.buffer,
 			mFroxelMedium.buffer, mFroxelIntegrated.buffer, mWideCells.buffer, mGlobalDepthCells.buffer, mFroxelPhase.buffer,
-			mFroxelSource.buffer, mOccupiedFroxelIndices.buffer };
+			mFroxelSource.buffer, mOccupiedFroxelIndices.buffer, mIndirectHistory.buffer, mIndirectScratch.buffer };
 		for (uint32_t i = 0; i < kSmokeStorageBufferCount; ++i) { barriers[i].buffer = buffers[i]; barriers[i].before = StorageAccess(); barriers[i].after = StorageAccess(); }
 		nri::BarrierDesc barrier = {}; barrier.buffers = barriers; barrier.bufferNum = kSmokeStorageBufferCount;
 		renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, barrier);
@@ -757,7 +779,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 3, slot.outputSet, nri::BindPoint::COMPUTE });
 	if (lightBuffersReady)
 		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 4, slot.lightSet, nri::BindPoint::COMPUTE });
-	if (filteredResourcesReady || shadowReady || sectorLightResourcesReady || skyResourceReady)
+	if (filteredResourcesReady || shadowReady || sectorLightResourcesReady || skyResourceReady || reprojectionResourcesReady)
 		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 5, slot.filteredSceneSet, nri::BindPoint::COMPUTE });
 	const uint64_t froxelCount = (uint64_t)mResourceFroxelWidth * mResourceFroxelHeight * mResourceFroxelDepth;
 	const uint64_t wideCellCount = (uint64_t)kWideCellCount * mResourceFroxelDepth;
@@ -777,6 +799,26 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	{
 		dispatch(NRISmokePass::LightIndirectReference, Groups(froxelCount), 1, 1);
 		storageBarrier();
+		if (effectiveIndirectCacheMode > 0u)
+		{
+			dispatch(NRISmokePass::LightIndirectTemporal, Groups(froxelCount), 1, 1);
+			storageBarrier();
+			dispatch(NRISmokePass::LightIndirectSpatial, Groups(froxelCount), 1, 1);
+			storageBarrier();
+			mIndirectHistoryValid = true;
+			mLastIndirectCacheMode = effectiveIndirectCacheMode;
+			mLastIndirectSectorHash = indirectSectorHash;
+			mLastIndirectSkyKey = indirectSkyKey;
+			mLastIndirectEmissiveHash = indirectEmissiveHash;
+		}
+		else
+		{
+			mIndirectHistoryValid = false;
+		}
+	}
+	else
+	{
+		mIndirectHistoryValid = false;
 	}
 	dispatch(NRISmokePass::Integrate, (mResourceFroxelWidth + 7) / 8, (mResourceFroxelHeight + 7) / 8, 1);
 	storageBarrier();
@@ -891,6 +933,13 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.indirectEmissionContributions = 0;
 	mStatus.indirectRadianceClamps = 0;
 	mStatus.indirectNanRejects = 0;
+	mStatus.indirectTemporalAccepted = 0;
+	mStatus.indirectTemporalRejected = 0;
+	mStatus.indirectSpatialAccepted = 0;
+	mStatus.indirectSpatialRejected = 0;
+	mStatus.indirectCacheMaximumAge = 0;
+	mStatus.indirectCacheClamps = 0;
+	mStatus.indirectCacheResolved = 0;
 	mStatus.lightCandidatesTested = 0;
 	mStatus.lightDistanceRejected = 0;
 	mStatus.lightShadowRays = 0;
@@ -915,6 +964,7 @@ void NRISmokeSystem::Reset(const char* reason)
 	mLastPreparedFrame = UINT32_MAX;
 	mLastSimulatedFrame = UINT32_MAX;
 	mNeedsClear = true;
+	mIndirectHistoryValid = false;
 	mEmitters.Reset();
 }
 
@@ -923,7 +973,10 @@ void NRISmokeSystem::DestroyViewResources(NRIRenderer& renderer)
 	auto destroy = [&](NRIBufferResource& resource) { renderer.DestroyBufferResource(resource); };
 	destroy(mFineCells); destroy(mWideCells); destroy(mGlobalDepthCells); destroy(mFroxelMedium); destroy(mFroxelIntegrated);
 	destroy(mFroxelPhase); destroy(mFroxelSource); destroy(mOccupiedFroxelIndices);
+	destroy(mIndirectHistory); destroy(mIndirectScratch);
 	mViewResourcesInitialized = false;
+	mIndirectHistoryValid = false;
+	mStatus.indirectCacheBytes = 0;
 	mResourceFroxelWidth = mResourceFroxelHeight = mResourceFroxelDepth = 0;
 }
 
@@ -985,11 +1038,14 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mSettings.emissiveLights ? "yes" : "no", renderer.mBoundEmissivePrimitiveCount, mStatus.emissiveFroxelsProcessed, mStatus.emissiveSamples,
 		mStatus.emissiveCandidateMisses, mStatus.emissiveDistanceRejected, mStatus.emissiveFacingRejected, mStatus.emissiveShadowRays,
 		mStatus.emissiveShadowVisible, mStatus.emissiveShadowOccluded, mStatus.emissiveContributed, mStatus.emissiveRadianceClamps);
-	Printf("NRI PT smoke indirect status: enabled=%s scale=%.3f froxels=%u locality_rays=%u agreement=%u one_sided=%u mismatch=%u invalid=%u reference_rays=%u hits=%u misses=%u sector=%u sky=%u emission=%u clamps=%u nan=%u\n",
-		mSettings.indirect ? "yes" : "no", mSettings.indirectScale, mStatus.indirectFroxelsProcessed,
+	Printf("NRI PT smoke indirect status: enabled=%s scale=%.3f cache_mode_requested=%u cache_mode_effective=%u samples=%u history=%s cache_mib=%.2f froxels=%u locality_rays=%u agreement=%u one_sided=%u mismatch=%u invalid=%u reference_rays=%u hits=%u misses=%u sector=%u sky=%u emission=%u clamps=%u nan=%u temporal=%u/%u spatial=%u/%u cache_age=%u cache_clamps=%u resolved=%u field_readback=0\n",
+		mSettings.indirect ? "yes" : "no", mSettings.indirectScale, mStatus.indirectCacheModeRequested, mStatus.indirectCacheModeEffective, 1u << std::min(mSettings.quality, 2u),
+		mIndirectHistoryValid ? "valid" : "invalid", (double)mStatus.indirectCacheBytes / (1024.0 * 1024.0), mStatus.indirectFroxelsProcessed,
 		mStatus.indirectLocalityRays, mStatus.indirectLocalityAgreement, mStatus.indirectLocalityOneSided,
 		mStatus.indirectLocalityMismatch, mStatus.indirectLocalityInvalid, mStatus.indirectReferenceRays,
 		mStatus.indirectReferenceHits, mStatus.indirectReferenceMisses, mStatus.indirectSectorContributions,
 		mStatus.indirectSkyContributions, mStatus.indirectEmissionContributions, mStatus.indirectRadianceClamps,
-		mStatus.indirectNanRejects);
+		mStatus.indirectNanRejects, mStatus.indirectTemporalAccepted, mStatus.indirectTemporalRejected,
+		mStatus.indirectSpatialAccepted, mStatus.indirectSpatialRejected, mStatus.indirectCacheMaximumAge,
+		mStatus.indirectCacheClamps, mStatus.indirectCacheResolved);
 }

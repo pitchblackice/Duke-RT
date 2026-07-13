@@ -21,7 +21,6 @@
 #define NRI_SMOKE_LIGHT_SOURCE_DIRECTIONAL_SHADOW 0x4u
 #define NRI_SMOKE_LIGHT_SOURCE_EMISSIVE 0x8u
 #define NRI_SMOKE_LIGHT_SOURCE_INDIRECT 0x10u
-#define NRI_SMOKE_INDIRECT_SAMPLE_COUNT 4u
 
 struct SmokeSectorLightHeaderData
 {
@@ -73,15 +72,15 @@ StructuredBuffer<EmissivePrimitiveHeaderData> gSmokeEmissivePrimitiveHeaders : r
 StructuredBuffer<EmissivePrimitiveData> gSmokeEmissivePrimitives : register(t12, space6);
 StructuredBuffer<float> gSmokeEmissivePrimitiveCdf : register(t13, space6);
 StructuredBuffer<EmissiveMaterialResponseData> gSmokeEmissiveMaterialResponses : register(t14, space6);
-Texture2D<float4> gSmokePaletteLookup : register(t15, space6);
-Texture2D<float4> gSmokeSceneTextures[NRI_SMOKE_SCENE_TEXTURE_COUNT] : register(t16, space6);
+StructuredBuffer<SmokeSectorLightHeaderData> gSmokeSectorLightHeaders : register(t15, space6);
+StructuredBuffer<SmokeSectorLightData> gSmokeSectorLights : register(t16, space6);
+Texture2D<float4> gSmokePaletteLookup : register(t18, space6);
+TextureCube<float4> gSmokeSkyTexture : register(t19, space6);
+Texture2D<float4> gSmokeSceneTextures[NRI_SMOKE_SCENE_TEXTURE_COUNT] : register(t20, space6);
 SamplerState gSmokePointWrap : register(s0, space6);
 SamplerState gSmokeLinearWrap : register(s1, space6);
 SamplerState gSmokePointClamp : register(s2, space6);
-RaytracingAccelerationStructure gSmokeWorldTlas : register(t528, space6);
-StructuredBuffer<SmokeSectorLightHeaderData> gSmokeSectorLightHeaders : register(t529, space6);
-StructuredBuffer<SmokeSectorLightData> gSmokeSectorLights : register(t530, space6);
-TextureCube<float4> gSmokeSkyTexture : register(t531, space6);
+RaytracingAccelerationStructure gSmokeWorldTlas : register(t532, space6);
 
 struct SmokeIndirectHit
 {
@@ -166,9 +165,9 @@ float3 SmokeSectorAmbientIncidentRadiance(uint sectorIndex)
 	return max(light.ambientColor, 0.0) * max(light.ambientIntensity, 0.0);
 }
 
-float3 SmokeIndirectReferenceDirection(uint sampleIndex, uint3 froxel)
+float3 SmokeIndirectReferenceDirection(uint sampleIndex, uint sampleCount, uint3 froxel)
 {
-	const float z = 1.0 - 2.0 * ((float)sampleIndex + 0.5) / (float)NRI_SMOKE_INDIRECT_SAMPLE_COUNT;
+	const float z = 1.0 - 2.0 * ((float)sampleIndex + 0.5) / max((float)sampleCount, 1.0);
 	const float radius = sqrt(max(1.0 - z * z, 0.0));
 	const float rotation = (float)(SmokeHash(froxel.x ^ SmokeHash(froxel.y ^ SmokeHash(froxel.z))) & 0xffffu) * (6.28318530718 / 65536.0);
 	const float phi = rotation + (float)sampleIndex * 2.39996322973;

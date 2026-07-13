@@ -99,6 +99,7 @@ struct NRISmokeSettings
 	bool directionalLight = true;
 	bool emissiveLights = true;
 	bool indirect = true;
+	uint32_t indirectCacheMode = 3;
 	uint32_t lightMode = 1;
 	uint32_t lightSamples = 1;
 	uint32_t maxLightCandidates = 8;

@@ -77,6 +77,14 @@ struct SmokeCellHeader
 	uint Count;
 };
 
+struct SmokeIndirectCacheRecord
+{
+	float3 Radiance;
+	float SigmaT;
+	float3 WorldPosition;
+	uint Metadata;
+};
+
 struct SmokeControl
 {
 	uint WriteCursor;
@@ -162,7 +170,13 @@ struct SmokeControl
 	uint IndirectEmissionContributions;
 	uint IndirectRadianceClamps;
 	uint IndirectNanRejects;
-	uint Padding;
+	uint IndirectTemporalAccepted;
+	uint IndirectTemporalRejected;
+	uint IndirectSpatialAccepted;
+	uint IndirectSpatialRejected;
+	uint IndirectCacheMaximumAge;
+	uint IndirectCacheClamps;
+	uint IndirectCacheResolved;
 };
 
 StructuredBuffer<SmokeStyle> gSmokeStyles : register(t0, space0);
@@ -179,6 +193,8 @@ RWStructuredBuffer<SmokeCellHeader> gSmokeGlobalDepthCells : register(u7, space1
 RWStructuredBuffer<float4> gSmokeFroxelPhase : register(u8, space1);
 RWStructuredBuffer<float4> gSmokeFroxelSource : register(u9, space1);
 RWStructuredBuffer<uint> gSmokeOccupiedFroxelIndices : register(u10, space1);
+RWStructuredBuffer<SmokeIndirectCacheRecord> gSmokeIndirectHistory : register(u11, space1);
+RWStructuredBuffer<SmokeIndirectCacheRecord> gSmokeIndirectScratch : register(u12, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);

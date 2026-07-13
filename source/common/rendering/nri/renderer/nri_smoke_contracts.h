@@ -14,6 +14,8 @@ enum class NRISmokePass : uint32_t
 	LightDirectional,
 	LightEmissive,
 	LightIndirectReference,
+	LightIndirectTemporal,
+	LightIndirectSpatial,
 	Integrate,
 	Composite,
 };
@@ -154,13 +156,28 @@ struct NRISmokeControlGpu
 	uint32_t indirectEmissionContributions = 0;
 	uint32_t indirectRadianceClamps = 0;
 	uint32_t indirectNanRejects = 0;
-	uint32_t padding = 0;
+	uint32_t indirectTemporalAccepted = 0;
+	uint32_t indirectTemporalRejected = 0;
+	uint32_t indirectSpatialAccepted = 0;
+	uint32_t indirectSpatialRejected = 0;
+	uint32_t indirectCacheMaximumAge = 0;
+	uint32_t indirectCacheClamps = 0;
+	uint32_t indirectCacheResolved = 0;
+};
+
+struct NRISmokeIndirectCacheGpu
+{
+	float radiance[3] = {};
+	float sigmaT = 0.0f;
+	float worldPosition[3] = {};
+	uint32_t metadata = 0;
 };
 
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
 static_assert(sizeof(NRISmokeStyleGpu) == 80);
 static_assert(sizeof(NRISmokeInjectionCommandGpu) == 64);
-static_assert(sizeof(NRISmokeControlGpu) == 352);
+static_assert(sizeof(NRISmokeControlGpu) == 376);
+static_assert(sizeof(NRISmokeIndirectCacheGpu) == 32);
 
 struct NRISmokeConstants
 {

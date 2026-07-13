@@ -45,6 +45,9 @@ struct NRISmokeStatusSnapshot
 	bool forceOpaqueVisibility = false;
 	bool shadowTlasReady = false;
 	uint64_t residentBytes = 0;
+	uint64_t indirectCacheBytes = 0;
+	uint32_t indirectCacheModeRequested = 0;
+	uint32_t indirectCacheModeEffective = 0;
 	uint64_t controlReadbackBytes = 0;
 	bool gpuStatsValid = false;
 	uint32_t activeParticles = 0;
@@ -104,6 +107,13 @@ struct NRISmokeStatusSnapshot
 	uint32_t indirectEmissionContributions = 0;
 	uint32_t indirectRadianceClamps = 0;
 	uint32_t indirectNanRejects = 0;
+	uint32_t indirectTemporalAccepted = 0;
+	uint32_t indirectTemporalRejected = 0;
+	uint32_t indirectSpatialAccepted = 0;
+	uint32_t indirectSpatialRejected = 0;
+	uint32_t indirectCacheMaximumAge = 0;
+	uint32_t indirectCacheClamps = 0;
+	uint32_t indirectCacheResolved = 0;
 	uint32_t lightCandidatesTested = 0;
 	uint32_t lightDistanceRejected = 0;
 	uint32_t lightShadowRays = 0;
@@ -166,7 +176,7 @@ private:
 	NRISmokeSettings mSettings = {};
 	NRISmokeStatusSnapshot mStatus = {};
 	nri::PipelineLayout* mPipelineLayout = nullptr;
-	std::array<nri::Pipeline*, 11> mPipelines = {};
+	std::array<nri::Pipeline*, 13> mPipelines = {};
 	std::vector<CommandSlot> mCommandSlots;
 	NRIBufferResource mStyleBuffer;
 	NRIBufferResource mParticles;
@@ -180,6 +190,8 @@ private:
 	NRIBufferResource mFroxelPhase;
 	NRIBufferResource mFroxelSource;
 	NRIBufferResource mOccupiedFroxelIndices;
+	NRIBufferResource mIndirectHistory;
+	NRIBufferResource mIndirectScratch;
 	NRISmokeEmitterSystem mEmitters;
 	std::vector<NRISmokeStyleGpu> mStyles;
 	std::vector<NRISmokeInjectionCommandGpu> mPendingCommands;
@@ -198,4 +210,9 @@ private:
 	bool mControlCopyPending = false;
 	bool mResourcesInitialized = false;
 	bool mViewResourcesInitialized = false;
+	bool mIndirectHistoryValid = false;
+	uint32_t mLastIndirectCacheMode = 0;
+	uint64_t mLastIndirectSectorHash = 0;
+	uint64_t mLastIndirectSkyKey = 0;
+	uint64_t mLastIndirectEmissiveHash = 0;
 };
