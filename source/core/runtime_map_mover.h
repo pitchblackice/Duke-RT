@@ -24,6 +24,10 @@ enum RuntimeMapMoverMemberFlags : uint32_t
 	RuntimeMapMoverMember_OwnsCeiling = 1u << 2,
 	RuntimeMapMoverMember_SharedVertexPropagation = 1u << 3,
 	RuntimeMapMoverMember_ControlOnly = 1u << 4,
+	// Direct sector membership does not yet enumerate dragpoint() propagation
+	// and adjacent two-sided wall-band plane dependencies. Optimized routing is
+	// quarantined until a shadow owner proves and clears this boundary.
+	RuntimeMapMoverMember_AdjacencyUnproven = 1u << 5,
 };
 
 struct RuntimeMapMoverPose
@@ -67,4 +71,14 @@ struct RuntimeMapMoverSnapshot
 	RuntimeMapMoverPose presentationPreviousPose = {};
 	RuntimeMapMoverPose presentationCurrentPose = {};
 	TArray<RuntimeMapMoverMember> members;
+};
+
+// Cheap authority stamp queried every render frame. The full snapshot array is
+// copied only when revision changes at the game tick boundary. mapEpoch remains
+// valid even for maps with no movers, so an empty array is unambiguous.
+struct RuntimeMapMoverAuthorityState
+{
+	bool available = false;
+	uint64_t mapEpoch = 0;
+	uint64_t revision = 0;
 };

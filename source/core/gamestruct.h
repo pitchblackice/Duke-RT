@@ -151,7 +151,8 @@ struct GameInterface
 	virtual bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) { return false; }
 	virtual bool GetNightVisionState(RuntimeNightVisionState* state) { return false; }
 	virtual bool GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo* info) { return false; }
-	virtual void CaptureRuntimeMapMovers(TArray<RuntimeMapMoverSnapshot>& out, double presentationFraction) { out.Clear(); }
+	virtual RuntimeMapMoverAuthorityState GetRuntimeMapMoverAuthorityState() const { return {}; }
+	virtual void CaptureRuntimeMapMovers(TArray<RuntimeMapMoverSnapshot>& out) const { out.Clear(); }
 	virtual int Voxelize(int sprnum) { return -1; }
 	virtual void AddExcludedEpisode(const FString& episode) {}
 	virtual int GetCurrentSkill() { return -1; }

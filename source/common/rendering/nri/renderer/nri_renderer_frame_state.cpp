@@ -4,6 +4,7 @@
 #include "../system/nri_renderdevice.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
+#include "gamestruct.h"
 #include "printf.h"
 
 #include <algorithm>
@@ -47,6 +48,15 @@ namespace
 	private:
 		double* mTarget = nullptr;
 		std::chrono::steady_clock::time_point mStart = {};
+	};
+
+	class MapMoverPrintfSink final : public NRIMapMoverPerfSink
+	{
+	public:
+		void EmitLine(const char* line) override
+		{
+			Printf("%s", line);
+		}
 	};
 
 	static void MarkChunkVisible(std::vector<uint32_t>& visibleChunkWords, uint32_t chunkIndex)
@@ -215,6 +225,12 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 {
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.updateStateMs);
 	Clocker clock(NriPTUpdateState);
+	mMapMovers.CaptureFrame(gi, di.Viewpoint.TicFrac, mMapWorld.buildSerial);
+	if ((int)nri_ptmapmovertrace > 0)
+	{
+		MapMoverPrintfSink sink;
+		mMapMovers.EmitPerfTrace(mFrameIndex, sink, (int)nri_ptmapmovertrace >= 2);
+	}
 
 	if (mHasPreviousCameraState)
 	{

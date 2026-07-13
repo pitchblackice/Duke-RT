@@ -12,6 +12,7 @@
 #include "nri_pipeline_state.h"
 #include "nri_renderer_context.h"
 #include "nri_resources.h"
+#include "nri_map_movers.h"
 #include "nri_runtime_mutation.h"
 #include "nri_runtime_space_link_state.h"
 #include "nri_scene_data_frame_ring.h"
@@ -2589,6 +2590,7 @@ private:
 	StaticMapSceneCache mStaticMapScene;
 	StaticMapChunkAtlas mStaticMapChunkAtlas = {};
 	NRIStaticSceneResidency mStaticSceneResidency;
+	NRIMapMoverSystem mMapMovers;
 	NRIRuntimeMutationSystem mRuntimeMutation;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	NRIPersistentVoxelResidency mPersistentVoxels;

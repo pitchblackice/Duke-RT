@@ -6,6 +6,6 @@ BEGIN_DUKE_NS
 
 void ResetRuntimeMapMoverAuthority();
 void UpdateRuntimeMapMoverAuthority();
-void CaptureRuntimeMapMoverAuthority(TArray<RuntimeMapMoverSnapshot>& out, double presentationFraction);
+void CaptureRuntimeMapMoverAuthority(TArray<RuntimeMapMoverSnapshot>& out);
 
 END_DUKE_NS

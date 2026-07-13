@@ -27,6 +27,7 @@ namespace
 
 	TArray<RuntimeMapMoverSnapshot> MoverSnapshots;
 	uint64_t MoverMapEpoch = 1;
+	uint64_t MoverRevision = 1;
 
 	void HashBytes(uint64_t& hash, const void* data, size_t size)
 	{
@@ -61,6 +62,14 @@ namespace
 		default:
 			return false;
 		}
+	}
+
+	bool HasCanonicalWallSpan(int offset, int count)
+	{
+		if (offset < 0 || count < 0) return false;
+		const unsigned first = (unsigned)offset;
+		const unsigned span = (unsigned)count;
+		return first <= mspos.Size() && span <= mspos.Size() - first;
 	}
 
 	RuntimeMapMoverCapability ClassifyMover(const DDukeActor* actor)
@@ -114,12 +123,12 @@ namespace
 		const auto authority = pivotGroup ? actor->GetOwner() : actor;
 		uint64_t hash = HashOffset;
 		const uint32_t kind = pivotGroup ? 0x44554b30u : 0x44554b4du;
-		const int sectorIndex = authority->sectno();
+		// DCoreActor::time is the serialized game-issued spawn identity (GetIndex),
+		// not a renderer/container index. It remains stable when a moving effector
+		// changes sector or repurposes tags as live state, and across save restore.
+		const int spawnIdentity = authority->GetIndex();
 		HashValue(hash, kind);
-		HashValue(hash, sectorIndex);
-		HashValue(hash, actor->spr.lotag);
-		HashValue(hash, actor->spr.hitag);
-		if (!pivotGroup) HashValue(hash, actor->temp_data[1]);
+		HashValue(hash, spawnIdentity);
 		return hash;
 	}
 
@@ -150,15 +159,6 @@ namespace
 	bool SamePose(const RuntimeMapMoverPose& a, const RuntimeMapMoverPose& b)
 	{
 		return a.translation == b.translation && a.rotation == b.rotation;
-	}
-
-	RuntimeMapMoverPose InterpolatePose(const RuntimeMapMoverPose& previous, const RuntimeMapMoverPose& current, double fraction)
-	{
-		RuntimeMapMoverPose result = {};
-		fraction = std::clamp(fraction, 0.0, 1.0);
-		result.translation = previous.translation + (current.translation - previous.translation) * fraction;
-		result.rotation = previous.rotation + deltaangle(previous.rotation, current.rotation) * fraction;
-		return result;
 	}
 
 	MoverCandidate* FindCandidate(TArray<MoverCandidate>& candidates, uint64_t id)
@@ -195,6 +195,10 @@ namespace
 		while (auto actor = it.Next())
 		{
 			if (!actor->exists() || actor->sector() == nullptr || actor->spr.lotag == SE_1_PIVOT) continue;
+			// Analytic point/spot lights have their own actor-light owner and may cross
+			// sectors while attached to moving geometry. They are not map-geometry
+			// mutation authorities and must not manufacture topology work here.
+			if (actor->spr.lotag == SE_49_POINT_LIGHT || actor->spr.lotag == SE_50_SPOT_LIGHT) continue;
 
 			const auto id = StableGroupId(actor);
 			auto candidate = FindCandidate(candidates, id);
@@ -227,7 +231,8 @@ namespace
 				flags = RuntimeMapMoverMember_OwnsFloor;
 			else
 				flags = RuntimeMapMoverMember_OwnsWalls | RuntimeMapMoverMember_OwnsFloor |
-					RuntimeMapMoverMember_OwnsCeiling | RuntimeMapMoverMember_SharedVertexPropagation;
+					RuntimeMapMoverMember_OwnsCeiling | RuntimeMapMoverMember_SharedVertexPropagation |
+					RuntimeMapMoverMember_AdjacencyUnproven;
 			AppendMember(candidate->snapshot, sectorIndex, wallOffset, wallCount, flags);
 			candidate->sources.Push({ actor, sectorIndex, wallOffset });
 
@@ -248,17 +253,19 @@ namespace
 		HashValue(topology, source.sectorIndex);
 		HashValue(topology, source.canonicalWallOffset);
 		HashValue(topology, actor->spr.lotag);
-		HashValue(topology, actor->spr.hitag);
 		HashValue(topology, wallCount);
 
 		const bool canonicalRigid =
 			(capability == RuntimeMapMoverCapability::RigidTranslation || capability == RuntimeMapMoverCapability::RigidTransform) &&
-			source.canonicalWallOffset >= 0 &&
-			(unsigned)(source.canonicalWallOffset + wallCount) <= mspos.Size();
-		HashValue(geometry, sec->floorz);
-		HashValue(geometry, sec->ceilingz);
-		HashValue(geometry, sec->floorheinum);
-		HashValue(geometry, sec->ceilingheinum);
+			HasCanonicalWallSpan(source.canonicalWallOffset, wallCount);
+		const bool ownsGeometry = capability != RuntimeMapMoverCapability::MaterialOrLightOnly;
+		if (ownsGeometry)
+		{
+			HashValue(geometry, sec->floorz);
+			HashValue(geometry, sec->ceilingz);
+			HashValue(geometry, sec->floorheinum);
+			HashValue(geometry, sec->ceilingheinum);
+		}
 
 		const int floorTexture = sec->floortexture.GetIndex();
 		const int ceilingTexture = sec->ceilingtexture.GetIndex();
@@ -295,7 +302,7 @@ namespace
 				HashValue(geometry, local.X);
 				HashValue(geometry, local.Y);
 			}
-			else
+			else if (ownsGeometry)
 			{
 				HashValue(geometry, wal.pos.X);
 				HashValue(geometry, wal.pos.Y);
@@ -344,9 +351,24 @@ namespace
 		{
 			if (!SamePose(pose, CapturePose(source.actor))) candidate.snapshot.capability = RuntimeMapMoverCapability::Unknown;
 		}
+		if (candidate.snapshot.capability == RuntimeMapMoverCapability::RigidTranslation ||
+			candidate.snapshot.capability == RuntimeMapMoverCapability::RigidTransform)
+		{
+			for (const auto& source : candidate.sources)
+			{
+				const int wallCount = (int)source.actor->sector()->walls.Size();
+				if (!HasCanonicalWallSpan(source.canonicalWallOffset, wallCount))
+				{
+					candidate.snapshot.capability = RuntimeMapMoverCapability::Unknown;
+					break;
+				}
+			}
+		}
 
 		uint64_t topology = HashOffset, geometry = HashOffset, material = HashOffset;
 		uint64_t visibility = HashOffset, light = HashOffset;
+		const uint8_t capability = (uint8_t)candidate.snapshot.capability;
+		HashValue(topology, capability);
 		for (const auto& member : candidate.snapshot.members)
 		{
 			HashValue(topology, member.sectorIndex);
@@ -385,12 +407,59 @@ namespace
 		snapshot.presentationPreviousPose = snapshot.simulationPreviousPose;
 		snapshot.presentationCurrentPose = snapshot.simulationCurrentPose;
 	}
+
+	bool SameAuthorityState(const TArray<RuntimeMapMoverSnapshot>& a, const TArray<RuntimeMapMoverSnapshot>& b)
+	{
+		if (a.Size() != b.Size()) return false;
+		for (unsigned index = 0; index < a.Size(); ++index)
+		{
+			const auto& left = a[index];
+			const auto& right = b[index];
+			if (left.stableGroupId != right.stableGroupId || left.mapEpoch != right.mapEpoch ||
+				left.capability != right.capability ||
+				left.ownerActorIndex != right.ownerActorIndex ||
+				left.ownerSectorIndex != right.ownerSectorIndex ||
+				left.effectorLotag != right.effectorLotag ||
+				left.effectorHitag != right.effectorHitag ||
+				left.topologyGeneration != right.topologyGeneration ||
+				left.geometryGeneration != right.geometryGeneration ||
+				left.materialGeneration != right.materialGeneration ||
+				left.transformGeneration != right.transformGeneration ||
+				left.visibilityGeneration != right.visibilityGeneration ||
+				left.lightGeneration != right.lightGeneration ||
+				left.topologySignature != right.topologySignature ||
+				left.geometrySignature != right.geometrySignature ||
+				left.materialSignature != right.materialSignature ||
+				left.visibilitySignature != right.visibilitySignature ||
+				left.lightSignature != right.lightSignature ||
+				!SamePose(left.simulationPreviousPose, right.simulationPreviousPose) ||
+				!SamePose(left.simulationCurrentPose, right.simulationCurrentPose))
+			{
+				return false;
+			}
+			if (left.members.Size() != right.members.Size()) return false;
+			for (unsigned memberIndex = 0; memberIndex < left.members.Size(); ++memberIndex)
+			{
+				const auto& leftMember = left.members[memberIndex];
+				const auto& rightMember = right.members[memberIndex];
+				if (leftMember.sectorIndex != rightMember.sectorIndex ||
+					leftMember.canonicalWallOffset != rightMember.canonicalWallOffset ||
+					leftMember.wallCount != rightMember.wallCount ||
+					leftMember.flags != rightMember.flags)
+				{
+					return false;
+				}
+			}
+		}
+		return true;
+	}
 }
 
 void ResetRuntimeMapMoverAuthority()
 {
 	MoverSnapshots.Clear();
 	if (++MoverMapEpoch == 0) MoverMapEpoch = 1;
+	if (++MoverRevision == 0) MoverRevision = 1;
 }
 
 void UpdateRuntimeMapMoverAuthority()
@@ -407,24 +476,26 @@ void UpdateRuntimeMapMoverAuthority()
 			});
 	}
 
-	MoverSnapshots.Clear();
-	for (auto& candidate : candidates) MoverSnapshots.Push(std::move(candidate.snapshot));
+	TArray<RuntimeMapMoverSnapshot> nextSnapshots;
+	for (auto& candidate : candidates) nextSnapshots.Push(std::move(candidate.snapshot));
+	const bool authorityChanged = !SameAuthorityState(MoverSnapshots, nextSnapshots);
+	MoverSnapshots = std::move(nextSnapshots);
+	if (authorityChanged && ++MoverRevision == 0) MoverRevision = 1;
 }
 
-void CaptureRuntimeMapMoverAuthority(TArray<RuntimeMapMoverSnapshot>& out, double presentationFraction)
+void CaptureRuntimeMapMoverAuthority(TArray<RuntimeMapMoverSnapshot>& out)
 {
 	out = MoverSnapshots;
-	for (auto& snapshot : out)
-	{
-		snapshot.presentationPreviousPose = snapshot.simulationPreviousPose;
-		snapshot.presentationCurrentPose = InterpolatePose(snapshot.simulationPreviousPose,
-			snapshot.simulationCurrentPose, presentationFraction);
-	}
 }
 
-void GameInterface::CaptureRuntimeMapMovers(TArray<RuntimeMapMoverSnapshot>& out, double presentationFraction)
+RuntimeMapMoverAuthorityState GameInterface::GetRuntimeMapMoverAuthorityState() const
 {
-	CaptureRuntimeMapMoverAuthority(out, presentationFraction);
+	return { true, MoverMapEpoch, MoverRevision };
+}
+
+void GameInterface::CaptureRuntimeMapMovers(TArray<RuntimeMapMoverSnapshot>& out) const
+{
+	CaptureRuntimeMapMoverAuthority(out);
 }
 
 END_DUKE_NS
