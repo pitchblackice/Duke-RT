@@ -18,14 +18,14 @@ float SmokeSampleCarrierDirectionalVisibilityAtWorldPosition(
 	if (lastProbe >= directionalVisibilityCount)
 		return 0.0;
 
-	const int3 carrierCell = (int3)floor(particle.Position / NRI_SMOKE_DIRECTIONAL_PROBE_CELL_SIZE + 0.5);
+	const int3 windowMinCell = SmokeDirectionalProbeWindowMinCell(particle.Position);
 	const float3 worldGridPosition = samplePosition / NRI_SMOKE_DIRECTIONAL_PROBE_CELL_SIZE;
 	const int3 worldLowerCell = (int3)floor(worldGridPosition);
-	const int3 localLowerCell = worldLowerCell - carrierCell + NRI_SMOKE_DIRECTIONAL_PROBE_RADIUS;
+	const int3 localLowerCell = worldLowerCell - windowMinCell;
 	const uint3 p0 = (uint3)clamp(localLowerCell, int3(0, 0, 0),
 		int3(NRI_SMOKE_DIRECTIONAL_PROBE_AXIS - 2u, NRI_SMOKE_DIRECTIONAL_PROBE_AXIS - 2u, NRI_SMOKE_DIRECTIONAL_PROBE_AXIS - 2u));
 	const uint3 p1 = p0 + 1u;
-	const int3 p0WorldCell = carrierCell + (int3)p0 - NRI_SMOKE_DIRECTIONAL_PROBE_RADIUS;
+	const int3 p0WorldCell = windowMinCell + (int3)p0;
 	const float3 blend = saturate(worldGridPosition - (float3)p0WorldCell);
 
 	const float v000 = saturate(gSmokeParticleDirectionalVisibility[SmokeDirectionalProbeIndex(particleIndex, uint3(p0.x, p0.y, p0.z))]);

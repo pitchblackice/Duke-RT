@@ -2,16 +2,19 @@
 #include "Include/SmokeFroxel.hlsli"
 #include "Include/SmokeLighting.hlsli"
 
-[numthreads(64, 1, 1)]
+[numthreads(64, 2, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
 	uint particleCount, visibilityCount, ignoredStride;
 	gSmokeParticles.GetDimensions(particleCount, ignoredStride);
 	gSmokeParticleDirectionalVisibility.GetDimensions(visibilityCount, ignoredStride);
-	const uint visibilityIndex = dispatchThreadId.x;
-	const uint particleIndex = visibilityIndex / NRI_SMOKE_DIRECTIONAL_PROBES_PER_PARTICLE;
-	const uint probeIndex = visibilityIndex - particleIndex * NRI_SMOKE_DIRECTIONAL_PROBES_PER_PARTICLE;
-	if (particleIndex >= min(gSmokeConstants.ParticleCapacity, particleCount) || visibilityIndex >= visibilityCount)
+	const uint probeIndex = dispatchThreadId.x;
+	const uint particleIndex = dispatchThreadId.y;
+	if (probeIndex >= NRI_SMOKE_DIRECTIONAL_PROBES_PER_PARTICLE ||
+		particleIndex >= min(gSmokeConstants.ParticleCapacity, particleCount))
+		return;
+	const uint visibilityIndex = particleIndex * NRI_SMOKE_DIRECTIONAL_PROBES_PER_PARTICLE + probeIndex;
+	if (visibilityIndex >= visibilityCount)
 		return;
 
 	gSmokeParticleDirectionalVisibility[visibilityIndex] = 0.0;
@@ -35,9 +38,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint probeX = probeIndex % NRI_SMOKE_DIRECTIONAL_PROBE_AXIS;
 	const uint probeY = (probeIndex / NRI_SMOKE_DIRECTIONAL_PROBE_AXIS) % NRI_SMOKE_DIRECTIONAL_PROBE_AXIS;
 	const uint probeZ = probeIndex / (NRI_SMOKE_DIRECTIONAL_PROBE_AXIS * NRI_SMOKE_DIRECTIONAL_PROBE_AXIS);
-	const int3 carrierCell = (int3)floor(particle.Position / NRI_SMOKE_DIRECTIONAL_PROBE_CELL_SIZE + 0.5);
-	const int3 probeOffset = int3(probeX, probeY, probeZ) - NRI_SMOKE_DIRECTIONAL_PROBE_RADIUS;
-	const float3 probePosition = (float3)(carrierCell + probeOffset) * NRI_SMOKE_DIRECTIONAL_PROBE_CELL_SIZE;
+	const int3 windowMinCell = SmokeDirectionalProbeWindowMinCell(particle.Position);
+	const float3 probePosition = (float3)(windowMinCell + int3(probeX, probeY, probeZ)) * NRI_SMOKE_DIRECTIONAL_PROBE_CELL_SIZE;
 	const uint sampleCount = gSmokeConstants.LightMode >= 3u ? clamp(gSmokeConstants.LightSamples, 1u, 4u) : 1u;
 	float visibleSamples = 0.0;
 	[loop]

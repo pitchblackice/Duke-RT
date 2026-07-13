@@ -17,7 +17,9 @@ namespace
 	constexpr uint32_t kMaxCommands = 256;
 	constexpr uint32_t kWideCellCount = 16u * 9u;
 	constexpr uint32_t kMaximumReferencesPerParticle = 512u;
-	constexpr uint32_t kDirectionalProbesPerParticle = 125u;
+	constexpr uint32_t kDirectionalProbesPerParticle = 8000u;
+	constexpr uint32_t kDirectionalProbeThreadGroupWidth = 64u;
+	constexpr uint32_t kDirectionalParticleThreadGroupHeight = 2u;
 	constexpr uint32_t kSmokeStorageBufferCount = 14u;
 	constexpr uint32_t kSmokeFilteredSceneBufferCount = 8u;
 	constexpr uint32_t kSmokeEmissiveSceneBufferCount = 7u;
@@ -791,7 +793,9 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	storageBarrier();
 	dispatch(NRISmokePass::Bin, Groups(mSettings.particleCapacity), 1, 1);
 	storageBarrier();
-	dispatch(NRISmokePass::LightDirectionalCarriers, Groups((uint64_t)mSettings.particleCapacity * kDirectionalProbesPerParticle), 1, 1);
+	dispatch(NRISmokePass::LightDirectionalCarriers,
+		(kDirectionalProbesPerParticle + kDirectionalProbeThreadGroupWidth - 1u) / kDirectionalProbeThreadGroupWidth,
+		(mSettings.particleCapacity + kDirectionalParticleThreadGroupHeight - 1u) / kDirectionalParticleThreadGroupHeight, 1);
 	storageBarrier();
 	dispatch(NRISmokePass::EvaluateMedium, (mResourceFroxelWidth + 3) / 4, (mResourceFroxelHeight + 3) / 4, (mResourceFroxelDepth + 3) / 4);
 	storageBarrier();
@@ -1038,7 +1042,7 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.filterCandidateHits, mStatus.filterAlphaRejects, mStatus.filterNoShadowRejects, mStatus.filterOneWayRejects, mStatus.filterReflectionRejects,
 		mStatus.filterPortalContinuations, mStatus.filterAcceptedBlockers, mStatus.filterMisses, mStatus.filterSkipLimitExits, mStatus.filterContinuationLimitExits, mStatus.filterResourceDowngrades,
 		(double)mStatus.residentBytes / (1024.0 * 1024.0), (unsigned long long)mStatus.controlReadbackBytes, mStatus.resetReason);
-	Printf("NRI PT smoke lighting status: directional=%s resolved=%s shadow=%s directional_probe_grid=5x5x5 directional_probe_cell=8.0 directional_probe_mib=%.2f directional_froxels=%u directional_samples=%u directional_shadow_rays=%u directional_visible=%u directional_occluded=%u directional_clamps=%u emissive=%s emissive_primitives=%u emissive_froxels=%u emissive_samples=%u emissive_no_candidate=%u emissive_distance_rejected=%u emissive_facing_rejected=%u emissive_shadow_rays=%u emissive_visible=%u emissive_occluded=%u emissive_contributed=%u emissive_clamps=%u\n",
+	Printf("NRI PT smoke lighting status: directional=%s resolved=%s shadow=%s directional_probe_grid=20x20x20 directional_probe_cell=2.0 directional_probe_mib=%.2f directional_froxels=%u directional_samples=%u directional_shadow_rays=%u directional_visible=%u directional_occluded=%u directional_clamps=%u emissive=%s emissive_primitives=%u emissive_froxels=%u emissive_samples=%u emissive_no_candidate=%u emissive_distance_rejected=%u emissive_facing_rejected=%u emissive_shadow_rays=%u emissive_visible=%u emissive_occluded=%u emissive_contributed=%u emissive_clamps=%u\n",
 		mSettings.directionalLight ? "yes" : "no", renderer.mDirectionalLightState.enabled ? "yes" : "no", renderer.mDirectionalLightState.shadow ? "yes" : "no",
 		(double)mParticleDirectionalVisibility.memorySize / (1024.0 * 1024.0),
 		mStatus.directionalFroxelsProcessed, mStatus.directionalSamples, mStatus.directionalShadowRays, mStatus.directionalShadowVisible, mStatus.directionalShadowOccluded, mStatus.directionalRadianceClamps,
