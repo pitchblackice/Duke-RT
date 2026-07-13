@@ -1,6 +1,9 @@
 #include "Include/SmokeResources.hlsli"
 #include "Include/SmokeFroxel.hlsli"
 
+#define NRI_SMOKE_GRID_MAX_FOOTPRINT_SAMPLES 2u
+#define NRI_SMOKE_GRID_MAX_DEPTH_SAMPLES 8u
+
 bool SmokeRenderGridLookup(int3 coordinate, out uint brickIndex)
 {
 	brickIndex = 0xffffffffu;
@@ -72,6 +75,53 @@ void SmokeRenderGridSample(float3 worldPosition, float cellSize, out float4 scal
 	optical = lerp(lerp(o00, o10, blend.y), lerp(o01, o11, blend.y), blend.z);
 }
 
+void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 scalar, out float4 optical)
+{
+	const float sliceNearDepth = SmokeSliceNearDepth(froxel.z);
+	const float sliceFarDepth = SmokeSliceFarDepth(froxel.z);
+	const float sliceCenterDepth = (sliceNearDepth + sliceFarDepth) * 0.5;
+	const float footprintWidth = 2.0 * sliceCenterDepth * gSmokeConstants.TanHalfFovX /
+		max((float)gSmokeConstants.FroxelWidth, 1.0);
+	const float footprintHeight = 2.0 * sliceCenterDepth * gSmokeConstants.TanHalfFovY /
+		max((float)gSmokeConstants.FroxelHeight, 1.0);
+	const uint2 footprintSampleCount = uint2(
+		footprintWidth > cellSize ? NRI_SMOKE_GRID_MAX_FOOTPRINT_SAMPLES : 1u,
+		footprintHeight > cellSize ? NRI_SMOKE_GRID_MAX_FOOTPRINT_SAMPLES : 1u);
+	const float3 centerRay = SmokeFroxelRay(froxel.xy);
+	const float segmentWorldLength = SmokeWorldSegmentLength(centerRay, sliceNearDepth, sliceFarDepth);
+	const uint depthSampleCount = clamp((uint)ceil(segmentWorldLength / cellSize),
+		1u, NRI_SMOKE_GRID_MAX_DEPTH_SAMPLES);
+	float4 integratedScalar = 0.0;
+	float4 integratedOptical = 0.0;
+	[loop]
+	for (uint footprintY = 0u; footprintY < footprintSampleCount.y; ++footprintY)
+	{
+		[loop]
+		for (uint footprintX = 0u; footprintX < footprintSampleCount.x; ++footprintX)
+		{
+			const float2 footprintUnit = (float2(footprintX, footprintY) + 0.5) /
+				(float2)footprintSampleCount;
+			const float2 sampleUv = (float2(froxel.xy) + footprintUnit) /
+				float2(max(gSmokeConstants.FroxelWidth, 1u), max(gSmokeConstants.FroxelHeight, 1u));
+			[loop]
+			for (uint depthSample = 0u; depthSample < depthSampleCount; ++depthSample)
+			{
+				const float sampleDepthUnit = ((float)depthSample + 0.5) / (float)depthSampleCount;
+				const float sampleViewDepth = lerp(sliceNearDepth, sliceFarDepth, sampleDepthUnit);
+				const float3 samplePosition = SmokeWorldPosition(sampleUv, sampleViewDepth);
+				float4 sampleScalar;
+				float4 sampleOptical;
+				SmokeRenderGridSample(samplePosition, cellSize, sampleScalar, sampleOptical);
+				integratedScalar += sampleScalar;
+				integratedOptical += sampleOptical;
+			}
+		}
+	}
+	const float sampleWeight = rcp((float)(footprintSampleCount.x * footprintSampleCount.y * depthSampleCount));
+	scalar = integratedScalar * sampleWeight;
+	optical = integratedOptical * sampleWeight;
+}
+
 [numthreads(4, 4, 4)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -90,11 +140,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (!isfinite(cellSize) || cellSize <= 0.0)
 		return;
 	const uint froxelIndex = SmokeFroxelIndex(dispatchThreadId.x, dispatchThreadId.y, dispatchThreadId.z);
-	const float3 ray = SmokeFroxelRay(dispatchThreadId.xy);
-	const float3 worldPosition = SmokeFroxelCenter(dispatchThreadId, ray);
 	float4 scalar;
 	float4 optical;
-	SmokeRenderGridSample(worldPosition, cellSize, scalar, optical);
+	SmokeRenderGridIntegrateFroxel(dispatchThreadId, cellSize, scalar, optical);
 	// Deposition stores density-weighted sigma_t and sigma_s coefficients in
 	// inverse world units. Cell size controls sampling support only; dividing the
 	// coefficients by it again made the canonical eight-unit grid 8x too faint.
