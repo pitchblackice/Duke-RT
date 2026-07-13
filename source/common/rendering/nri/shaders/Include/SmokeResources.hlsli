@@ -148,7 +148,21 @@ struct SmokeControl
 	uint EmissiveShadowOccluded;
 	uint EmissiveContributed;
 	uint EmissiveRadianceClamps;
-	uint3 Padding;
+	uint IndirectFroxelsProcessed;
+	uint IndirectLocalityRays;
+	uint IndirectLocalityAgreement;
+	uint IndirectLocalityOneSided;
+	uint IndirectLocalityMismatch;
+	uint IndirectLocalityInvalid;
+	uint IndirectReferenceRays;
+	uint IndirectReferenceHits;
+	uint IndirectReferenceMisses;
+	uint IndirectSectorContributions;
+	uint IndirectSkyContributions;
+	uint IndirectEmissionContributions;
+	uint IndirectRadianceClamps;
+	uint IndirectNanRejects;
+	uint Padding;
 };
 
 StructuredBuffer<SmokeStyle> gSmokeStyles : register(t0, space0);

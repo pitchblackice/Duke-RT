@@ -13,6 +13,7 @@ enum class NRISmokePass : uint32_t
 	LightPoint,
 	LightDirectional,
 	LightEmissive,
+	LightIndirectReference,
 	Integrate,
 	Composite,
 };
@@ -139,13 +140,27 @@ struct NRISmokeControlGpu
 	uint32_t emissiveShadowOccluded = 0;
 	uint32_t emissiveContributed = 0;
 	uint32_t emissiveRadianceClamps = 0;
-	uint32_t padding[3] = {};
+	uint32_t indirectFroxelsProcessed = 0;
+	uint32_t indirectLocalityRays = 0;
+	uint32_t indirectLocalityAgreement = 0;
+	uint32_t indirectLocalityOneSided = 0;
+	uint32_t indirectLocalityMismatch = 0;
+	uint32_t indirectLocalityInvalid = 0;
+	uint32_t indirectReferenceRays = 0;
+	uint32_t indirectReferenceHits = 0;
+	uint32_t indirectReferenceMisses = 0;
+	uint32_t indirectSectorContributions = 0;
+	uint32_t indirectSkyContributions = 0;
+	uint32_t indirectEmissionContributions = 0;
+	uint32_t indirectRadianceClamps = 0;
+	uint32_t indirectNanRejects = 0;
+	uint32_t padding = 0;
 };
 
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
 static_assert(sizeof(NRISmokeStyleGpu) == 80);
 static_assert(sizeof(NRISmokeInjectionCommandGpu) == 64);
-static_assert(sizeof(NRISmokeControlGpu) == 304);
+static_assert(sizeof(NRISmokeControlGpu) == 352);
 
 struct NRISmokeConstants
 {
@@ -172,7 +187,9 @@ struct NRISmokeConstants
 	uint32_t flags = 0;
 
 	float deltaTime = 0.0f;
-	float simulationTime = 0.0f;
+	// Dedicated volume-indirect scale. This preserves the validated 216-byte
+	// root layout by assigning a previously unused scalar to its first owner.
+	float indirectScale = 0.0f;
 	float froxelMaxDistance = 0.0f;
 	float depthExponent = 1.0f;
 

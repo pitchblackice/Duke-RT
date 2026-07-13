@@ -20,6 +20,30 @@
 #define NRI_SMOKE_LIGHT_SOURCE_DIRECTIONAL 0x2u
 #define NRI_SMOKE_LIGHT_SOURCE_DIRECTIONAL_SHADOW 0x4u
 #define NRI_SMOKE_LIGHT_SOURCE_EMISSIVE 0x8u
+#define NRI_SMOKE_LIGHT_SOURCE_INDIRECT 0x10u
+#define NRI_SMOKE_INDIRECT_SAMPLE_COUNT 4u
+
+struct SmokeSectorLightHeaderData
+{
+	uint sectorCount;
+	uint activeCount;
+	uint pulsingCount;
+	uint flags;
+};
+
+struct SmokeSectorLightData
+{
+	float3 ambientColor;
+	float ambientIntensity;
+	float3 hemisphereColor;
+	float hemisphereAmount;
+	float fogAmount;
+	float pulseScale;
+	uint sourceFlags;
+	int paletteIndex;
+	int lotag;
+	int hitag;
+};
 bool SmokeShadowTracingReady()
 {
 	return (gSmokeConstants.FilteredVisibilityEnabled & NRI_SMOKE_VISIBILITY_TLAS_READY) != 0u;
@@ -55,6 +79,101 @@ SamplerState gSmokePointWrap : register(s0, space6);
 SamplerState gSmokeLinearWrap : register(s1, space6);
 SamplerState gSmokePointClamp : register(s2, space6);
 RaytracingAccelerationStructure gSmokeWorldTlas : register(t528, space6);
+StructuredBuffer<SmokeSectorLightHeaderData> gSmokeSectorLightHeaders : register(t529, space6);
+StructuredBuffer<SmokeSectorLightData> gSmokeSectorLights : register(t530, space6);
+TextureCube<float4> gSmokeSkyTexture : register(t531, space6);
+
+struct SmokeIndirectHit
+{
+	uint hit;
+	uint instanceValid;
+	uint dataSource;
+	uint primitiveIndex;
+	uint sectorIndex;
+	uint materialFlags;
+	uint instanceSectorIndex;
+	uint materialIndex;
+	float2 uv;
+	float2 padding2;
+};
+
+PrimitiveData SmokeGetPrimitive(uint dataSource, uint primitiveIndex);
+MaterialData SmokeGetMaterial(uint dataSource, uint materialIndex);
+uint SmokeResolveMaterialIndex(SceneInstanceData instanceData, PrimitiveData primitive);
+
+SmokeIndirectHit SmokeTraceIndirectClosest(float3 origin, float3 direction, float maximumDistance)
+{
+	SmokeIndirectHit result = (SmokeIndirectHit)0;
+	result.sectorIndex = 0xffffffffu;
+	result.instanceSectorIndex = 0xffffffffu;
+	RayDesc ray = { origin + direction * 0.05, 0.001, direction, max(maximumDistance - 0.051, 0.001) };
+	RayQuery<RAY_FLAG_FORCE_OPAQUE> query;
+	query.TraceRayInline(gSmokeWorldTlas, RAY_FLAG_FORCE_OPAQUE, NRI_TLAS_MASK_ALL_WORKLOADS, ray);
+	while (query.Proceed()) {}
+	if (query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+		return result;
+
+	result.hit = 1u;
+	uint instanceCount, ignoredStride;
+	gSmokeSceneInstances.GetDimensions(instanceCount, ignoredStride);
+	const uint instanceIndex = query.CommittedInstanceID();
+	if (instanceIndex >= instanceCount)
+		return result;
+	const SceneInstanceData instanceData = gSmokeSceneInstances[instanceIndex];
+	const uint primitiveIndex = instanceData.primitiveBase + query.CommittedPrimitiveIndex();
+	const PrimitiveData primitive = SmokeGetPrimitive(instanceData.dataSource, primitiveIndex);
+	const uint materialIndex = SmokeResolveMaterialIndex(instanceData, primitive);
+	const MaterialData material = SmokeGetMaterial(instanceData.dataSource, materialIndex);
+	const float2 bary = query.CommittedTriangleBarycentrics();
+	const float3 weights = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
+	result.instanceValid = 1u;
+	result.dataSource = instanceData.dataSource;
+	result.primitiveIndex = primitiveIndex;
+	result.sectorIndex = material.sectorIndex;
+	result.materialFlags = material.flags;
+	result.instanceSectorIndex = instanceData.metadata1;
+	result.materialIndex = materialIndex;
+	result.uv = primitive.uv0 * weights.x + primitive.uv1 * weights.y + primitive.uv2 * weights.z;
+	return result;
+}
+
+bool SmokeResolveStaticFlatSector(SmokeIndirectHit hit, out uint sectorIndex)
+{
+	sectorIndex = 0xffffffffu;
+	if (hit.hit == 0u || hit.instanceValid == 0u || hit.dataSource != NRI_SMOKE_SCENE_DATA_SOURCE_STATIC ||
+		(hit.materialFlags & MATERIAL_FLAG_FLAT) == 0u || hit.sectorIndex == 0xffffffffu ||
+		hit.instanceSectorIndex != hit.sectorIndex)
+		return false;
+	uint headerCount, headerStride, sectorCount, sectorStride;
+	gSmokeSectorLightHeaders.GetDimensions(headerCount, headerStride);
+	gSmokeSectorLights.GetDimensions(sectorCount, sectorStride);
+	if (headerCount == 0u || (gSmokeSectorLightHeaders[0].flags & 1u) == 0u ||
+		hit.sectorIndex >= min(gSmokeSectorLightHeaders[0].sectorCount, sectorCount))
+		return false;
+	sectorIndex = hit.sectorIndex;
+	return true;
+}
+
+float3 SmokeSectorAmbientIncidentRadiance(uint sectorIndex)
+{
+	uint sectorCount, ignoredStride;
+	gSmokeSectorLights.GetDimensions(sectorCount, ignoredStride);
+	if (sectorIndex >= sectorCount)
+		return 0.0;
+	const SmokeSectorLightData light = gSmokeSectorLights[sectorIndex];
+	// Only the normal-free ambient field has validated incident-radiance semantics.
+	// Hemisphere and fog terms remain surface policy and are intentionally excluded.
+	return max(light.ambientColor, 0.0) * max(light.ambientIntensity, 0.0);
+}
+
+float3 SmokeIndirectReferenceDirection(uint sampleIndex, uint3 froxel)
+{
+	const float z = 1.0 - 2.0 * ((float)sampleIndex + 0.5) / (float)NRI_SMOKE_INDIRECT_SAMPLE_COUNT;
+	const float radius = sqrt(max(1.0 - z * z, 0.0));
+	const float rotation = (float)(SmokeHash(froxel.x ^ SmokeHash(froxel.y ^ SmokeHash(froxel.z))) & 0xffffu) * (6.28318530718 / 65536.0);
+	const float phi = rotation + (float)sampleIndex * 2.39996322973;
+	return float3(radius * cos(phi), z, radius * sin(phi));
+}
 
 struct SmokeFilterStats
 {

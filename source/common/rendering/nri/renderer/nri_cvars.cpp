@@ -798,6 +798,7 @@ CVAR(Float, nri_ptsmokeradiancescale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptsmokepointlights, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptsmokedirectionallight, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptsmokeemissivelights, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptsmokeindirect, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsmokelightmode, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsmokelightsamples, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsmokemaxlightcandidates, 8, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -805,6 +806,7 @@ CVAR(Bool, nri_ptsmokefilteredvisibility, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG
 CVAR(Int, nri_ptsmokedebug, 0, 0)
 CVAR(Int, nri_ptsmoketrace, 0, 0)
 CVAR(Bool, nri_ptsmokereadback, false, 0)
+CVAR(Float, nri_ptsmokeindirectscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CUSTOM_CVAR(Float, nri_ptemissivelighteditnotifyrange, 2048.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {

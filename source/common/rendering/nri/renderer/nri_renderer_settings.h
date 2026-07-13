@@ -98,6 +98,7 @@ struct NRISmokeSettings
 	bool pointLights = true;
 	bool directionalLight = true;
 	bool emissiveLights = true;
+	bool indirect = true;
 	uint32_t lightMode = 1;
 	uint32_t lightSamples = 1;
 	uint32_t maxLightCandidates = 8;
@@ -109,6 +110,7 @@ struct NRISmokeSettings
 	float wind[3] = {};
 	float densityScale = 1.0f;
 	float radianceScale = 1.0f;
+	float indirectScale = 1.0f;
 };
 
 NRITraceSettings BuildNRITraceSettingsFromCVars();

@@ -29,7 +29,7 @@ struct SmokeConstants
     uint Flags;
 
     float DeltaTime;
-    float SimulationTime;
+    float IndirectScale;
     float FroxelMaxDistance;
     float DepthExponent;
 

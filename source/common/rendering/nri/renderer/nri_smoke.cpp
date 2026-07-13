@@ -128,7 +128,7 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 	lights.descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
 	lights.shaderStages = nri::StageBits::COMPUTE_SHADER;
 	lights.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-	nri::DescriptorRangeDesc filteredSceneRanges[5] = {};
+	nri::DescriptorRangeDesc filteredSceneRanges[7] = {};
 	filteredSceneRanges[0].baseRegisterIndex = 0;
 	filteredSceneRanges[0].descriptorNum = kSmokeFilteredSceneBufferCount;
 	filteredSceneRanges[0].descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
@@ -154,6 +154,16 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 	filteredSceneRanges[4].descriptorType = nri::DescriptorType::ACCELERATION_STRUCTURE;
 	filteredSceneRanges[4].shaderStages = nri::StageBits::COMPUTE_SHADER;
 	filteredSceneRanges[4].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+	filteredSceneRanges[5].baseRegisterIndex = 529;
+	filteredSceneRanges[5].descriptorNum = 2;
+	filteredSceneRanges[5].descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
+	filteredSceneRanges[5].shaderStages = nri::StageBits::COMPUTE_SHADER;
+	filteredSceneRanges[5].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+	filteredSceneRanges[6].baseRegisterIndex = 531;
+	filteredSceneRanges[6].descriptorNum = 1;
+	filteredSceneRanges[6].descriptorType = nri::DescriptorType::TEXTURE;
+	filteredSceneRanges[6].shaderStages = nri::StageBits::COMPUTE_SHADER;
+	filteredSceneRanges[6].flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
 	nri::DescriptorSetDesc sets[6] = {};
 	nri::DescriptorRangeDesc* ranges[] = { &input, &buffers, &textures, &output, &lights };
 	for (uint32_t i = 0; i < 5; ++i)
@@ -165,7 +175,7 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 	}
 	sets[5].registerSpace = 6;
 	sets[5].ranges = filteredSceneRanges;
-	sets[5].rangeNum = 5;
+	sets[5].rangeNum = 7;
 	sets[5].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
 	nri::RootConstantDesc root = {};
 	root.registerIndex = 0;
@@ -182,7 +192,7 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 		return false;
 
 	const bool d3d12 = renderer.mFrameBuffer->GetSelectedAPI() == nri::GraphicsAPI::D3D12;
-	const char* names[] = { "SmokeClear", "SmokeSimulate", "SmokeSpawn", "SmokeBin", "SmokeEvaluateMedium", "SmokeLightPoint", "SmokeLightDirectional", "SmokeLightEmissive", "SmokeIntegrate", "SmokeComposite" };
+	const char* names[] = { "SmokeClear", "SmokeSimulate", "SmokeSpawn", "SmokeBin", "SmokeEvaluateMedium", "SmokeLightPoint", "SmokeLightDirectional", "SmokeLightEmissive", "SmokeLightIndirectReference", "SmokeIntegrate", "SmokeComposite" };
 	for (uint32_t i = 0; i < (uint32_t)mPipelines.size(); ++i)
 	{
 		std::vector<uint8_t> blob;
@@ -376,6 +386,20 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 				mStatus.emissiveShadowOccluded = control.emissiveShadowOccluded;
 				mStatus.emissiveContributed = control.emissiveContributed;
 				mStatus.emissiveRadianceClamps = control.emissiveRadianceClamps;
+				mStatus.indirectFroxelsProcessed = control.indirectFroxelsProcessed;
+				mStatus.indirectLocalityRays = control.indirectLocalityRays;
+				mStatus.indirectLocalityAgreement = control.indirectLocalityAgreement;
+				mStatus.indirectLocalityOneSided = control.indirectLocalityOneSided;
+				mStatus.indirectLocalityMismatch = control.indirectLocalityMismatch;
+				mStatus.indirectLocalityInvalid = control.indirectLocalityInvalid;
+				mStatus.indirectReferenceRays = control.indirectReferenceRays;
+				mStatus.indirectReferenceHits = control.indirectReferenceHits;
+				mStatus.indirectReferenceMisses = control.indirectReferenceMisses;
+				mStatus.indirectSectorContributions = control.indirectSectorContributions;
+				mStatus.indirectSkyContributions = control.indirectSkyContributions;
+				mStatus.indirectEmissionContributions = control.indirectEmissionContributions;
+				mStatus.indirectRadianceClamps = control.indirectRadianceClamps;
+				mStatus.indirectNanRejects = control.indirectNanRejects;
 				mStatus.lightCandidatesTested = control.lightCandidatesTested;
 				mStatus.lightDistanceRejected = control.lightDistanceRejected;
 				mStatus.lightShadowRays = control.lightShadowRays;
@@ -597,6 +621,13 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	const bool filteredResourcesReady = filteredBuffersReady && filteredTexturesReady;
 	const bool emissiveResourcesReady = filteredResourcesReady && emissiveBuffersReady && renderer.mBoundEmissivePrimitiveCount > 0u;
 	const bool shadowReady = renderer.mTopLevelAS.descriptor != nullptr;
+	const nri::Descriptor* sectorLightBuffers[] = { renderer.mSceneDataDescriptors[16], renderer.mSceneDataDescriptors[17] };
+	const bool sectorLightResourcesReady = sectorLightBuffers[0] != nullptr && sectorLightBuffers[1] != nullptr && renderer.mBoundSectorLightSectorCount > 0u;
+	const nri::Descriptor* smokeSky[] = {
+		renderer.mCurrentSceneTextureDescriptors.size() > 1u ? renderer.mCurrentSceneTextureDescriptors[1] : nullptr
+	};
+	const bool skyResourceReady = smokeSky[0] != nullptr;
+	const bool indirectResourcesReady = filteredResourcesReady && shadowReady && sectorLightResourcesReady && skyResourceReady;
 	std::array<const nri::Descriptor*, 513> smokeSceneTextures = {};
 	if (filteredTexturesReady)
 	{
@@ -608,7 +639,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		renderer.mFrameBuffer->mSamplers[(size_t)NRISamplerMode::WrapLinear],
 		renderer.mFrameBuffer->mSamplers[(size_t)NRISamplerMode::ClampPoint],
 	};
-	nri::UpdateDescriptorRangeDesc updates[8] = {};
+	nri::UpdateDescriptorRangeDesc updates[10] = {};
 	updates[0].descriptorSet = slot.textureSet; updates[0].rangeIndex = 0; updates[0].descriptors = textures; updates[0].descriptorNum = 2;
 	updates[1].descriptorSet = slot.outputSet; updates[1].rangeIndex = 0; updates[1].descriptors = outputTexture; updates[1].descriptorNum = 1;
 	uint32_t updateCount = 2;
@@ -632,6 +663,14 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	{
 		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 4; updates[updateCount].descriptors = worldTlas; updates[updateCount].descriptorNum = 1; updateCount++;
 	}
+	if (sectorLightResourcesReady)
+	{
+		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 5; updates[updateCount].descriptors = sectorLightBuffers; updates[updateCount].descriptorNum = 2; updateCount++;
+	}
+	if (skyResourceReady)
+	{
+		updates[updateCount].descriptorSet = slot.filteredSceneSet; updates[updateCount].rangeIndex = 6; updates[updateCount].descriptors = smokeSky; updates[updateCount].descriptorNum = 1; updateCount++;
+	}
 	renderer.mFrameBuffer->mCore.UpdateDescriptorRanges(updates, updateCount);
 
 	NRISmokeConstants constants = {};
@@ -651,6 +690,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	constants.depthExponent = 2.0f;
 	constants.densityScale = mSettings.densityScale;
 	constants.radianceScale = mSettings.radianceScale;
+	constants.indirectScale = mSettings.indirectScale;
 	constants.tanHalfFovX = renderer.mCurrentTanHalfFovX;
 	constants.tanHalfFovY = renderer.mCurrentTanHalfFovY;
 	std::copy(renderer.mCurrentCameraPos, renderer.mCurrentCameraPos + 3, constants.cameraPosition);
@@ -677,6 +717,8 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		(directionalLightReady ? 0x2u : 0u) |
 		(directionalLightReady && renderer.mDirectionalLightState.shadow ? 0x4u : 0u) |
 		(emissiveLightsReady ? 0x8u : 0u);
+	if (mSettings.indirect && indirectResourcesReady)
+		constants.lightSourceFlags |= 0x10u;
 	const bool filteredVisibilityEffective = constants.lightMode >= 2u && mSettings.filteredVisibility && filteredResourcesReady && shadowReady;
 	constants.filteredVisibilityEnabled =
 		(filteredVisibilityEffective ? 1u : 0u) |
@@ -715,7 +757,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 3, slot.outputSet, nri::BindPoint::COMPUTE });
 	if (lightBuffersReady)
 		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 4, slot.lightSet, nri::BindPoint::COMPUTE });
-	if (filteredResourcesReady || shadowReady)
+	if (filteredResourcesReady || shadowReady || sectorLightResourcesReady || skyResourceReady)
 		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 5, slot.filteredSceneSet, nri::BindPoint::COMPUTE });
 	const uint64_t froxelCount = (uint64_t)mResourceFroxelWidth * mResourceFroxelHeight * mResourceFroxelDepth;
 	const uint64_t wideCellCount = (uint64_t)kWideCellCount * mResourceFroxelDepth;
@@ -731,6 +773,11 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	storageBarrier();
 	dispatch(NRISmokePass::LightEmissive, Groups(froxelCount), 1, 1);
 	storageBarrier();
+	if (mSettings.indirect && indirectResourcesReady && mSettings.indirectScale > 0.0f)
+	{
+		dispatch(NRISmokePass::LightIndirectReference, Groups(froxelCount), 1, 1);
+		storageBarrier();
+	}
 	dispatch(NRISmokePass::Integrate, (mResourceFroxelWidth + 7) / 8, (mResourceFroxelHeight + 7) / 8, 1);
 	storageBarrier();
 	dispatch(NRISmokePass::Composite, (route.width + 7) / 8, (route.height + 7) / 8, 1);
@@ -830,6 +877,20 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.emissiveShadowOccluded = 0;
 	mStatus.emissiveContributed = 0;
 	mStatus.emissiveRadianceClamps = 0;
+	mStatus.indirectFroxelsProcessed = 0;
+	mStatus.indirectLocalityRays = 0;
+	mStatus.indirectLocalityAgreement = 0;
+	mStatus.indirectLocalityOneSided = 0;
+	mStatus.indirectLocalityMismatch = 0;
+	mStatus.indirectLocalityInvalid = 0;
+	mStatus.indirectReferenceRays = 0;
+	mStatus.indirectReferenceHits = 0;
+	mStatus.indirectReferenceMisses = 0;
+	mStatus.indirectSectorContributions = 0;
+	mStatus.indirectSkyContributions = 0;
+	mStatus.indirectEmissionContributions = 0;
+	mStatus.indirectRadianceClamps = 0;
+	mStatus.indirectNanRejects = 0;
 	mStatus.lightCandidatesTested = 0;
 	mStatus.lightDistanceRejected = 0;
 	mStatus.lightShadowRays = 0;
@@ -924,4 +985,11 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mSettings.emissiveLights ? "yes" : "no", renderer.mBoundEmissivePrimitiveCount, mStatus.emissiveFroxelsProcessed, mStatus.emissiveSamples,
 		mStatus.emissiveCandidateMisses, mStatus.emissiveDistanceRejected, mStatus.emissiveFacingRejected, mStatus.emissiveShadowRays,
 		mStatus.emissiveShadowVisible, mStatus.emissiveShadowOccluded, mStatus.emissiveContributed, mStatus.emissiveRadianceClamps);
+	Printf("NRI PT smoke indirect status: enabled=%s scale=%.3f froxels=%u locality_rays=%u agreement=%u one_sided=%u mismatch=%u invalid=%u reference_rays=%u hits=%u misses=%u sector=%u sky=%u emission=%u clamps=%u nan=%u\n",
+		mSettings.indirect ? "yes" : "no", mSettings.indirectScale, mStatus.indirectFroxelsProcessed,
+		mStatus.indirectLocalityRays, mStatus.indirectLocalityAgreement, mStatus.indirectLocalityOneSided,
+		mStatus.indirectLocalityMismatch, mStatus.indirectLocalityInvalid, mStatus.indirectReferenceRays,
+		mStatus.indirectReferenceHits, mStatus.indirectReferenceMisses, mStatus.indirectSectorContributions,
+		mStatus.indirectSkyContributions, mStatus.indirectEmissionContributions, mStatus.indirectRadianceClamps,
+		mStatus.indirectNanRejects);
 }

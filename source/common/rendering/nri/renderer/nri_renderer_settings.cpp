@@ -216,6 +216,7 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.pointLights = (bool)nri_ptsmokepointlights;
 	settings.directionalLight = (bool)nri_ptsmokedirectionallight;
 	settings.emissiveLights = (bool)nri_ptsmokeemissivelights;
+	settings.indirect = (bool)nri_ptsmokeindirect;
 	settings.lightMode = (uint32_t)std::clamp((int)nri_ptsmokelightmode, 0, 3);
 	settings.lightSamples = (uint32_t)std::clamp((int)nri_ptsmokelightsamples, 1, 4);
 	settings.maxLightCandidates = (uint32_t)std::clamp((int)nri_ptsmokemaxlightcandidates, 1, 32);
@@ -229,5 +230,6 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.wind[2] = std::clamp((float)nri_ptsmokewindz, -256.0f, 256.0f);
 	settings.densityScale = std::clamp((float)nri_ptsmokedensityscale, 0.0f, 16.0f);
 	settings.radianceScale = std::clamp((float)nri_ptsmokeradiancescale, 0.0f, 16.0f);
+	settings.indirectScale = std::clamp((float)nri_ptsmokeindirectscale, 0.0f, 16.0f);
 	return settings;
 }
