@@ -52,8 +52,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float historyWeight = 0.0;
 	if (accepted)
 	{
-		float minimumTau = current.a;
-		float maximumTau = current.a;
 		float3 minimumNormalized = SmokeNormalizedVolumeRadiance(current);
 		float3 maximumNormalized = minimumNormalized;
 		[unroll]
@@ -66,19 +64,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const float4 neighbor = gSmokeVolumeCurrentInput.Load(int3(neighborPixel, 0));
 				if (neighbor.a <= 1e-6 || !all(isfinite(neighbor)))
 					continue;
-				minimumTau = min(minimumTau, neighbor.a);
-				maximumTau = max(maximumTau, neighbor.a);
 				const float3 normalized = SmokeNormalizedVolumeRadiance(neighbor);
 				minimumNormalized = min(minimumNormalized, normalized);
 				maximumNormalized = max(maximumNormalized, normalized);
 			}
 		}
-		const float clampedTau = clamp(history.a, minimumTau, maximumTau);
 		const float3 clampedNormalized = clamp(SmokeNormalizedVolumeRadiance(history), minimumNormalized, maximumNormalized);
-		history = float4(clampedNormalized * (1.0 - exp(-clampedTau)), clampedTau);
+		// Current optical depth owns the smoke footprint. History reconstructs
+		// incident radiance only and cannot make a fringe denser than this frame.
+		history = float4(clampedNormalized * (1.0 - exp(-current.a)), current.a);
 		historyWeight = min(max(historyMeta.w, 0.125), 0.75);
 	}
-	const float4 resolved = lerp(current, history, historyWeight);
+	float4 resolved = lerp(current, history, historyWeight);
+	resolved.a = current.a;
 	const float age = accepted ? min(historyMeta.w + 0.125, 1.0) : 0.125;
 	gSmokeVolumeHistoryOutput[pixel] = resolved;
 	gSmokeVolumeMetaOutput[pixel] = float4(currentMeta.xyz, age);

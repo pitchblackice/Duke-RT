@@ -170,6 +170,21 @@ void SmokeReservoirMerge(
 	reservoir.Metadata = SmokePackEmissiveMetadata(SmokeEmissiveRecordM(reservoir) + representedSamples, mediumHash, age);
 }
 
+float SmokeRetargetedEmissiveWeight(
+	SmokeEmissiveReservoirRecord record,
+	float currentTarget,
+	uint retainedSamples)
+{
+	const uint sourceSamples = SmokeEmissiveRecordM(record);
+	if (sourceSamples == 0u || retainedSamples == 0u || !isfinite(currentTarget) || currentTarget <= 1e-8)
+		return 0.0;
+	// Reuse deliberately bounds represented samples. Preserve average sample
+	// mass when truncating M; importing the full WeightSum with a smaller M
+	// makes energy multiply across temporal and spatial passes.
+	const float retainedFraction = (float)retainedSamples / (float)sourceSamples;
+	return record.WeightSum * currentTarget / max(record.Target, 1e-8) * retainedFraction;
+}
+
 bool SmokeEmissiveReservoirCompatible(
 	SmokeEmissiveReservoirRecord record,
 	float4 medium,

@@ -105,8 +105,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				continue;
 			const uint neighborIndex = SmokeFroxelIndex((uint)neighbor.x, (uint)neighbor.y, (uint)neighbor.z);
 			const SmokeEmissiveReservoirRecord candidate = gSmokeEmissiveTemporal[neighborIndex];
-			if (!SmokeEmissiveRecordValid(candidate) || !SmokeEmissiveIdentityValid(candidate) ||
-				SmokeEmissiveRecordMedium(candidate) != SmokeEmissiveMediumHash(medium, anisotropy))
+			if (!SmokeEmissiveReservoirCompatible(candidate, medium, anisotropy, gSmokeConstants.FrameIndex,
+				receiverPosition, SmokeIndirectWorldTolerance(froxel) * 2.0))
 			{
 				if (diagnostics)
 					InterlockedAdd(gSmokeControl[0].EmissiveSpatialRejected, 1u);
@@ -118,9 +118,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				integrand, lightDirection, distanceToLight))
 				continue;
 			const float target = SmokeEmissiveLuminance(integrand);
-			const float adjustedWeight = candidate.WeightSum * target / max(candidate.Target, 1e-8);
+			const uint retainedSamples = min(SmokeEmissiveRecordM(candidate), 16u);
+			const float adjustedWeight = SmokeRetargetedEmissiveWeight(candidate, target, retainedSamples);
 			SmokeReservoirMerge(reservoir, candidate, target, adjustedWeight,
-				min(SmokeEmissiveRecordM(candidate), 16u), SmokeEmissiveMediumHash(medium, anisotropy),
+				retainedSamples, SmokeEmissiveMediumHash(medium, anisotropy),
 				max(SmokeEmissiveRecordAge(reservoir), SmokeEmissiveRecordAge(candidate)), randomState);
 			if (diagnostics)
 				InterlockedAdd(gSmokeControl[0].EmissiveSpatialAccepted, 1u);
@@ -158,11 +159,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	const float normalization = reservoir.WeightSum /
 		max((float)SmokeEmissiveRecordM(reservoir) * reservoir.Target, 1e-8);
-	float3 sourceContribution = medium.rgb * integrand * (normalization * visibility * gSmokeConstants.RadianceScale);
-	const float unclampedLuminance = SmokeEmissiveLuminance(sourceContribution);
+	float3 incidentContribution = integrand * (normalization * visibility * gSmokeConstants.RadianceScale);
+	const float unclampedLuminance = SmokeEmissiveLuminance(incidentContribution);
 	if (unclampedLuminance > gSmokeConstants.DeltaTime)
 	{
-		sourceContribution *= gSmokeConstants.DeltaTime / unclampedLuminance;
+		incidentContribution *= gSmokeConstants.DeltaTime / unclampedLuminance;
 		if (diagnostics)
 		{
 			InterlockedAdd(gSmokeControl[0].EmissiveSourceClamps, 1u);
@@ -170,6 +171,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				(uint)min((unclampedLuminance - gSmokeConstants.DeltaTime) * 1024.0, 4294967295.0));
 		}
 	}
+	const float3 sourceContribution = medium.rgb * incidentContribution;
 	gSmokeFroxelSource[froxelIndex] = float4(gSmokeFroxelSource[froxelIndex].rgb + sourceContribution, 0.0);
 	reservoir.Metadata = SmokePackEmissiveMetadata(SmokeEmissiveRecordM(reservoir),
 		SmokeEmissiveMediumHash(medium, anisotropy), SmokeEmissiveRecordAge(reservoir));

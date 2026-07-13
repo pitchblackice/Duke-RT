@@ -42,11 +42,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					integrand, lightDirection, distanceToLight))
 				{
 					const float target = SmokeEmissiveLuminance(integrand);
-					const float adjustedWeight = history.WeightSum * target / max(history.Target, 1e-8);
+					const uint retainedSamples = min(SmokeEmissiveRecordM(history), 32u);
+					const float adjustedWeight = SmokeRetargetedEmissiveWeight(history, target, retainedSamples);
 					uint selectionState = SmokeLightingRandomSeed(froxel, 0u, 0x7d449b1fu);
 					const uint age = min(SmokeEmissiveRecordAge(history) + 1u, 15u);
 					SmokeReservoirMerge(reservoir, history, target, adjustedWeight,
-						min(SmokeEmissiveRecordM(history), 32u), SmokeEmissiveMediumHash(medium, anisotropy), age, selectionState);
+						retainedSamples, SmokeEmissiveMediumHash(medium, anisotropy), age, selectionState);
 					accepted = true;
 					if (diagnostics)
 						InterlockedMax(gSmokeControl[0].EmissiveMaximumAge, age);

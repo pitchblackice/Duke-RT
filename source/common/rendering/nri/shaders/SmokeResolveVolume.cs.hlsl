@@ -26,14 +26,14 @@ SmokeBilinearFootprint SmokeMakeBilinearFootprint(float2 stableUv)
 	return footprint;
 }
 
-float4 SmokeBilinearIntegrated(SmokeBilinearFootprint footprint, uint z)
+float SmokeBilinearIntegratedTau(SmokeBilinearFootprint footprint, uint z)
 {
-	const float4 row0 = lerp(
-		gSmokeFroxelIntegrated[SmokeFroxelIndex(footprint.p00.x, footprint.p00.y, z)],
-		gSmokeFroxelIntegrated[SmokeFroxelIndex(footprint.p10.x, footprint.p10.y, z)], footprint.blend.x);
-	const float4 row1 = lerp(
-		gSmokeFroxelIntegrated[SmokeFroxelIndex(footprint.p01.x, footprint.p01.y, z)],
-		gSmokeFroxelIntegrated[SmokeFroxelIndex(footprint.p11.x, footprint.p11.y, z)], footprint.blend.x);
+	const float tau00 = min(-log(max(gSmokeFroxelIntegrated[SmokeFroxelIndex(footprint.p00.x, footprint.p00.y, z)].a, 1e-7)), 16.0);
+	const float tau10 = min(-log(max(gSmokeFroxelIntegrated[SmokeFroxelIndex(footprint.p10.x, footprint.p10.y, z)].a, 1e-7)), 16.0);
+	const float tau01 = min(-log(max(gSmokeFroxelIntegrated[SmokeFroxelIndex(footprint.p01.x, footprint.p01.y, z)].a, 1e-7)), 16.0);
+	const float tau11 = min(-log(max(gSmokeFroxelIntegrated[SmokeFroxelIndex(footprint.p11.x, footprint.p11.y, z)].a, 1e-7)), 16.0);
+	const float row0 = lerp(tau00, tau10, footprint.blend.x);
+	const float row1 = lerp(tau01, tau11, footprint.blend.x);
 	return lerp(row0, row1, footprint.blend.y);
 }
 
@@ -67,7 +67,7 @@ float SmokeRepresentativeDepth(SmokeBilinearFootprint footprint, uint terminalSl
 	for (uint step = 0u; step < 7u && low < high; ++step)
 	{
 		const uint mid = (low + high) >> 1u;
-		const float tau = min(-log(max(SmokeBilinearIntegrated(footprint, mid).a, 1e-7)), 16.0);
+		const float tau = SmokeBilinearIntegratedTau(footprint, mid);
 		if (tau < targetTau)
 			low = mid + 1u;
 		else
