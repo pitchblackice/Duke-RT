@@ -113,11 +113,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const float attenuation = EvaluateAnalyticPointLightAttenuation(centerDistance, light.radius, light.intensity);
 			if (attenuation <= 0.0)
 				continue;
+			const float3 centerDirection = toLightCenter / centerDistance;
 			const uint sampleCount = gridDirect ? SmokeDirectReceiverSampleCount() :
 				(gSmokeConstants.LightMode >= 3u ? clamp(gSmokeConstants.LightSamples, 1u, 4u) : 1u);
 			if (gridDirect)
 				receiverSamples += sampleCount;
-			float3 sampledContribution = 0.0;
+			float visibleSamples = 0.0;
+			float3 particleContribution = 0.0;
 			[loop]
 			for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
 			{
@@ -165,24 +167,33 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 							InterlockedAdd(gSmokeControl[0].LightShadowOccluded, 1u);
 					}
 				}
-				const float receiverAttenuation = EvaluateAnalyticPointLightAttenuation(
-					receiverCenterDistance, light.radius, light.intensity);
-				const float3 receiverViewRay = gridDirect ? normalize(receiverPosition - gSmokeConstants.CameraPosition) : viewRay;
-				const float phase = SmokeHenyeyGreenstein(dot(lightDirection, receiverViewRay), anisotropy);
-				const float3 unclampedLightRadiance = max(light.color, 0.0) * receiverAttenuation;
-				if (lightingDiagnostics && any(unclampedLightRadiance > 32.0))
-					InterlockedAdd(gSmokeControl[0].LightRadianceClamps, 1u);
-				const float3 lightRadiance = min(unclampedLightRadiance, 32.0);
-				const float3 unshadowedContribution = lightRadiance * phase;
-				sampledContribution += unshadowedContribution * visibility;
 				if (gridDirect)
+					visibleSamples += visibility;
+				else
 				{
-					const float sampleWeight = dot(max(unshadowedContribution, 0.0), float3(0.2126, 0.7152, 0.0722));
-					unshadowedWeight += sampleWeight;
-					visibleWeight += sampleWeight * visibility;
+					const float phase = SmokeHenyeyGreenstein(dot(lightDirection, viewRay), anisotropy);
+					const float3 unclampedLightRadiance = max(light.color, 0.0) * attenuation;
+					if (lightingDiagnostics && any(unclampedLightRadiance > 32.0))
+						InterlockedAdd(gSmokeControl[0].LightRadianceClamps, 1u);
+					particleContribution += min(unclampedLightRadiance, 32.0) * (phase * visibility);
 				}
 			}
-			scattering += medium.rgb * (sampledContribution / (float)sampleCount);
+			if (!gridDirect)
+			{
+				scattering += medium.rgb * (particleContribution / (float)sampleCount);
+				continue;
+			}
+			const float fractionalVisibility = visibleSamples / (float)sampleCount;
+			const float phase = SmokeHenyeyGreenstein(dot(centerDirection, viewRay), anisotropy);
+			const float3 unclampedLightRadiance = max(light.color, 0.0) * attenuation;
+			if (lightingDiagnostics && any(unclampedLightRadiance > 32.0))
+				InterlockedAdd(gSmokeControl[0].LightRadianceClamps, 1u);
+			const float3 unshadowedContribution = min(unclampedLightRadiance, 32.0) * phase;
+			const float3 unshadowedScattering = medium.rgb * unshadowedContribution;
+			scattering += unshadowedScattering;
+			const float sampleWeight = dot(max(unshadowedScattering, 0.0), float3(0.2126, 0.7152, 0.0722));
+			unshadowedWeight += sampleWeight;
+			visibleWeight += sampleWeight * fractionalVisibility;
 		}
 	}
 	if (gridDirect)

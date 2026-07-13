@@ -30,9 +30,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;
 	const int3 coordinates = (int3)SmokeFroxelCoordinates(froxelIndex);
 	const float centerVisibility = SmokeDirectRecordVisibility(center);
-	float3 resolved = max(center.Radiance, 0.0);
-	float3 neighborhoodMinimum = resolved;
-	float3 neighborhoodMaximum = resolved;
+	float resolvedVisibility = centerVisibility;
+	float neighborhoodMinimum = centerVisibility;
+	float neighborhoodMaximum = centerVisibility;
 	float weight = 1.0;
 
 	if (SmokeDirectReuseMode() >= 2u)
@@ -56,38 +56,38 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				continue;
 			}
 			const SmokeDirectCacheRecord candidateRecord = gSmokeDirectCurrent[candidateIndex];
-			const float visibilityDifference = abs(SmokeDirectRecordVisibility(candidateRecord) - centerVisibility);
+			const float candidateVisibility = SmokeDirectRecordVisibility(candidateRecord);
+			const float visibilityDifference = abs(candidateVisibility - centerVisibility);
 			if (!SmokeDirectRecordsCompatible(center, candidateRecord, (uint3)coordinates) || visibilityDifference > 0.35)
 			{
 				if (diagnostics) InterlockedAdd(gSmokeControl[0].DirectSpatialRejected, 1u);
 				continue;
 			}
 			const float candidateWeight = 0.125 * saturate(1.0 - visibilityDifference / 0.35);
-			const float3 candidateRadiance = max(candidateRecord.Radiance, 0.0);
-			resolved += candidateRadiance * candidateWeight;
+			resolvedVisibility += candidateVisibility * candidateWeight;
 			weight += candidateWeight;
-			neighborhoodMinimum = min(neighborhoodMinimum, candidateRadiance);
-			neighborhoodMaximum = max(neighborhoodMaximum, candidateRadiance);
+			neighborhoodMinimum = min(neighborhoodMinimum, candidateVisibility);
+			neighborhoodMaximum = max(neighborhoodMaximum, candidateVisibility);
 			if (diagnostics) InterlockedAdd(gSmokeControl[0].DirectSpatialAccepted, 1u);
 		}
 	}
 
-	resolved /= max(weight, 1e-6);
-	const float3 unclamped = resolved;
-	resolved = clamp(resolved, neighborhoodMinimum, neighborhoodMaximum);
-	if (!all(isfinite(resolved)))
+	resolvedVisibility /= max(weight, 1e-6);
+	const float unclamped = resolvedVisibility;
+	resolvedVisibility = clamp(resolvedVisibility, neighborhoodMinimum, neighborhoodMaximum);
+	if (!isfinite(resolvedVisibility) || !all(isfinite(center.Radiance)))
 	{
 		if (diagnostics) InterlockedAdd(gSmokeControl[0].DirectNanRejects, 1u);
 		return;
 	}
-	if (diagnostics && any(abs(unclamped - resolved) > 1e-6))
+	if (diagnostics && abs(unclamped - resolvedVisibility) > 1e-6)
 		InterlockedAdd(gSmokeControl[0].DirectHistoryClamps, 1u);
 	SmokeDirectCacheRecord outputRecord = center;
-	outputRecord.Radiance = resolved;
 	outputRecord.Metadata = SmokeDirectPackMetadata(max(SmokeDirectRecordAge(center), 1u),
-		gSmokeConstants.FrameIndex, centerVisibility);
+		gSmokeConstants.FrameIndex, resolvedVisibility);
 	gSmokeDirectHistory[froxelIndex] = outputRecord;
-	gSmokeFroxelSource[froxelIndex].rgb += resolved * gSmokeConstants.RadianceScale;
+	gSmokeFroxelSource[froxelIndex].rgb += max(center.Radiance, 0.0) *
+		(resolvedVisibility * gSmokeConstants.RadianceScale);
 	if (diagnostics)
 	{
 		InterlockedAdd(gSmokeControl[0].DirectHistoryResolved, 1u);

@@ -59,14 +59,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const uint age = min(SmokeDirectRecordAge(history) + 1u, 255u);
 	const float historyWeight = min((float)(age - 1u) / (float)age, 0.875);
-	const float3 resolved = lerp(max(current.Radiance, 0.0), max(history.Radiance, 0.0), historyWeight);
 	const float visibility = lerp(currentVisibility, historyVisibility, historyWeight);
-	if (!all(isfinite(resolved)) || !isfinite(visibility))
+	if (!all(isfinite(current.Radiance)) || !isfinite(visibility))
 	{
 		if (diagnostics) InterlockedAdd(gSmokeControl[0].DirectNanRejects, 1u);
 		return;
 	}
-	current.Radiance = resolved;
+	// Radiance contains current-view attenuation and HG phase. Reuse only the
+	// view-independent fractional visibility; blending prior-camera radiance
+	// makes a stationary plume contract or expand during camera rotation.
 	current.Metadata = SmokeDirectPackMetadata(age, gSmokeConstants.FrameIndex, visibility);
 	gSmokeDirectCurrent[froxelIndex] = current;
 	if (diagnostics)

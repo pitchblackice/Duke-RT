@@ -44,7 +44,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			return;
 		const uint sampleCount = SmokeDirectReceiverSampleCount();
 		const uint directionalKey = SmokeDirectDirectionalKey();
-		float3 directionalSource = 0.0;
 		float visibleSamples = 0.0;
 		[loop]
 		for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
@@ -77,11 +76,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				}
 			}
 			visibleSamples += visibility;
-			const float3 receiverViewRay = normalize(receiverPosition - gSmokeConstants.CameraPosition);
-			directionalSource += medium.rgb * SmokeDirectionalColor() *
-				(SmokeHenyeyGreenstein(dot(lightDirection, receiverViewRay), phaseRecord.x) * visibility);
 		}
-		directionalSource /= (float)sampleCount;
+		const float directionalVisibility = visibleSamples / (float)sampleCount;
+		// Receiver/emitter samples reconstruct visibility only. Radiometry and
+		// phase stay on the current occupied froxel so camera rotation cannot
+		// resize the apparent carrier envelope or import an old view direction.
+		float3 directionalSource = medium.rgb * SmokeDirectionalColor() *
+			SmokeHenyeyGreenstein(dot(centerDirection, viewRay), phaseRecord.x);
 		if (diagnostics && any(directionalSource > 32.0))
 			InterlockedAdd(gSmokeControl[0].DirectionalRadianceClamps, 1u);
 		directionalSource = min(max(directionalSource, 0.0), 32.0);
@@ -94,7 +95,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		const float oldLuminance = dot(max(record.Radiance, 0.0), float3(0.2126, 0.7152, 0.0722));
 		const float newLuminance = dot(directionalSource, float3(0.2126, 0.7152, 0.0722));
-		const float directionalVisibility = visibleSamples / (float)sampleCount;
 		const float combinedVisibility = oldLuminance + newLuminance > 1e-6
 			? (SmokeDirectRecordVisibility(record) * oldLuminance + directionalVisibility * newLuminance) /
 				(oldLuminance + newLuminance)
