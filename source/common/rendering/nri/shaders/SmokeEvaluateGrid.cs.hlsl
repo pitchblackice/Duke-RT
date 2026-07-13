@@ -137,9 +137,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float4 scalar;
 	float4 optical;
 	SmokeRenderGridSample(worldPosition, cellSize, scalar, optical);
-	const float inverseCellSize = rcp(cellSize);
-	const float extinction = max(scalar.z * inverseCellSize * gSmokeConstants.DensityScale, 0.0);
-	const float3 scattering = max(optical.rgb * inverseCellSize * gSmokeConstants.DensityScale, 0.0);
+	// Deposition stores density-weighted sigma_t and sigma_s coefficients in
+	// inverse world units. Cell size controls sampling support only; dividing the
+	// coefficients by it again made the canonical eight-unit grid 8x too faint.
+	const float extinction = max(scalar.z * gSmokeConstants.DensityScale, 0.0);
+	const float3 scattering = max(optical.rgb * gSmokeConstants.DensityScale, 0.0);
 	if (extinction <= 1e-6 || !any(scattering > 0.0))
 		return;
 	const float anisotropy = optical.w > 1e-6 ? clamp(scalar.w / optical.w, -0.95, 0.95) : 0.0;
