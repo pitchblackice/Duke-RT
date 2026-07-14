@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../scene/nri_map_material_layout.h"
+
 #include "nri_frame_resources.h"
 #include "nri_resources.h"
 #include "nri_runtime_mutation.h"
@@ -161,6 +163,7 @@ struct StaticMapSceneCache
 		uint64_t fixedLayoutPrimitiveBytes = 0;
 		bool hasAnimatedTextureCandidates = false;
 		bool animatedRefreshSuppressed = false;
+		nri_scene::CanonicalPTMapMaterialLayout canonicalMaterialLayout;
 		nri_scene::MaterialBridgeData materialBridge;
 		std::vector<ResidentMaterialSliceCacheEntry> residentMaterialSliceCache;
 		NRIAccelerationStructureResource accelerationStructure;

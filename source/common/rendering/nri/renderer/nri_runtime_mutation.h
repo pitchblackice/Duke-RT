@@ -99,6 +99,8 @@ struct RuntimeMapMutationCache
 			uint64_t animatedGeometrySignature = 0;
 			uint64_t animatedMaterialSignature = 0;
 			uint32_t surfaceCount = 0;
+			uint64_t canonicalMaterialStateKey = 0;
+			std::vector<uint64_t> canonicalMaterialStateKeys;
 			nri_scene::MaterialBridgeData materialBridge;
 		};
 
@@ -136,6 +138,28 @@ struct RuntimeMapMutationCache
 		uint64_t fixedLayoutDeformerKey = 0;
 		std::vector<RuntimeMutationResidentElementSpan> fixedLayoutVertexSpans;
 		std::vector<RuntimeMutationResidentElementSpan> fixedLayoutPrimitiveSpans;
+		// Proof produced by the canonical material-state route. This is the only
+		// way an otherwise-exclusive wall-material replacement may reuse resident
+		// geometry. Resident apply revalidates every captured atlas fact before
+		// consulting this bit.
+		bool certifiedResidentMaterialOnly = false;
+		uint64_t certifiedMaterialBuildSerial = 0;
+		uint64_t certifiedMaterialMapEpoch = 0;
+		uint64_t certifiedMaterialOwnerStableId = UINT64_MAX;
+		uint64_t certifiedMaterialLayoutKey = 0;
+		uint64_t certifiedMaterialStateKey = 0;
+		uint64_t certifiedExactGeometrySignature = 0;
+		uint64_t certifiedGeometryTopologySignature = 0;
+		uint64_t certifiedPrimitiveLayoutSignature = 0;
+		uint32_t certifiedChunkListIndex = UINT32_MAX;
+		uint32_t certifiedVertexOffset = 0;
+		uint32_t certifiedVertexCount = 0;
+		uint32_t certifiedIndexOffset = 0;
+		uint32_t certifiedIndexCount = 0;
+		uint32_t certifiedPrimitiveOffset = 0;
+		uint32_t certifiedPrimitiveCount = 0;
+		uint32_t certifiedMaterialOffset = 0;
+		uint32_t certifiedMaterialCount = 0;
 		uint32_t surfaceCount = 0;
 		uint32_t triangleCount = 0;
 		SceneLightSystem::SurfaceIdentityOverrides lightIdentityOverrides;
@@ -153,6 +177,7 @@ struct RuntimeMutationResidentApplyMode
 	bool materialOnlyReplacement = false;
 	bool exclusiveMaterialOnlyReplacement = false;
 	bool fastResidentMaterialOnlyUpdate = false;
+	bool certifiedResidentMaterialOnlyUpdate = false;
 };
 
 struct RuntimeMutationResidentApplyModeStats
@@ -161,6 +186,7 @@ struct RuntimeMutationResidentApplyModeStats
 	uint32_t fastMaterialOnlyCount = 0;
 	uint32_t slowMaterialOnlyCount = 0;
 	uint32_t materialOnlyExclusiveCount = 0;
+	uint32_t certifiedMaterialOnlyCount = 0;
 	uint32_t materialOnlyNoResidentChunkCount = 0;
 	uint32_t materialOnlyInvalidReplacementCount = 0;
 	uint32_t materialOnlyMaterialCountMismatchCount = 0;

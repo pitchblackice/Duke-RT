@@ -238,6 +238,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyStructuralCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyFastMaterialOnlyCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyCertifiedMaterialOnlyCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplySlowMaterialOnlyCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyExclusiveCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyNoResidentChunkCount = 0;
@@ -862,6 +863,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		mFrameIndex,
 		mMapWorld.buildSerial,
 		mMapMovers.GetMapEpoch());
+	mMapMaterialOnlyRoute.BeginFrame(mFrameIndex);
 	static constexpr uint8_t kVisibleResidentValidationWindow = 8;
 	static constexpr uint8_t kVisibleResidentUnresolvedTextureValidationWindow = 64;
 	static constexpr uint8_t kStartupVisibleResidentValidationWindow = 64;
@@ -2245,6 +2247,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			[&replacement](uint64_t animatedGeometrySignature,
 				uint64_t animatedMaterialSignature,
 				uint32_t surfaceCount,
+				const nri_scene::CanonicalPTMapMaterialLayout* canonicalLayout,
 				nri_scene::MaterialBridgeData& outMaterials) -> bool
 		{
 			auto& cache = replacement.materialStateCache;
@@ -2253,7 +2256,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				const auto& entry = cache[index];
 				if (entry.animatedGeometrySignature != animatedGeometrySignature ||
 					entry.animatedMaterialSignature != animatedMaterialSignature ||
-					entry.surfaceCount != surfaceCount)
+					entry.surfaceCount != surfaceCount ||
+					(canonicalLayout != nullptr &&
+					 (entry.canonicalMaterialStateKey != canonicalLayout->stateKey ||
+					  entry.canonicalMaterialStateKeys != canonicalLayout->canonicalMaterialStateKeys)))
 				{
 					continue;
 				}
@@ -2274,6 +2280,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			[&replacement](uint64_t animatedGeometrySignature,
 				uint64_t animatedMaterialSignature,
 				uint32_t surfaceCount,
+				const nri_scene::CanonicalPTMapMaterialLayout* canonicalLayout,
 				const nri_scene::MaterialBridgeData& materials)
 		{
 			if (materials.materials.empty())
@@ -2287,7 +2294,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				auto& entry = cache[index];
 				if (entry.animatedGeometrySignature != animatedGeometrySignature ||
 					entry.animatedMaterialSignature != animatedMaterialSignature ||
-					entry.surfaceCount != surfaceCount)
+					entry.surfaceCount != surfaceCount ||
+					(canonicalLayout != nullptr &&
+					 (entry.canonicalMaterialStateKey != canonicalLayout->stateKey ||
+					  entry.canonicalMaterialStateKeys != canonicalLayout->canonicalMaterialStateKeys)))
 				{
 					continue;
 				}
@@ -2306,12 +2316,174 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			entry.animatedGeometrySignature = animatedGeometrySignature;
 			entry.animatedMaterialSignature = animatedMaterialSignature;
 			entry.surfaceCount = surfaceCount;
+			if (canonicalLayout != nullptr)
+			{
+				entry.canonicalMaterialStateKey = canonicalLayout->stateKey;
+				entry.canonicalMaterialStateKeys = canonicalLayout->canonicalMaterialStateKeys;
+			}
 			entry.materialBridge = materials;
 			cache.insert(cache.begin(), std::move(entry));
 			if (cache.size() > kRuntimeMutationMaterialStateCacheCapacity)
 			{
 				cache.pop_back();
 			}
+		};
+		const auto tryBuildCertifiedMaterialOnlyReplacement =
+			[&](bool countAsStructuralRebuild, bool allowAnimatedMaterialState) -> bool
+		{
+			if (!materialOnlyReplacement && !allowAnimatedMaterialState)
+			{
+				return false;
+			}
+			if (!havePreparedLiveChunkView || liveWorld.chunks.size() != 1)
+			{
+				mMapMaterialOnlyRoute.NotePreflightReject(
+					NRIMapMaterialOnlyRoutePreflightReject::LiveChunkNotPrepared);
+				return false;
+			}
+
+			uint32_t residentChunkListIndex = UINT32_MAX;
+			const StaticMapSceneCache::ChunkCache* residentChunkCache = nullptr;
+			const nri_scene::SceneView* residentChunkView = nullptr;
+			if (!tryResolveResidentChunkState(residentChunkListIndex, residentChunkCache, residentChunkView) ||
+				residentChunkCache == nullptr || residentChunkView == nullptr ||
+				residentChunkListIndex >= mStaticMapChunkAtlas.chunks.size())
+			{
+				mMapMaterialOnlyRoute.NotePreflightReject(
+					NRIMapMaterialOnlyRoutePreflightReject::ResidentStateUnavailable);
+				return false;
+			}
+			const auto& atlasChunk = mStaticMapChunkAtlas.chunks[residentChunkListIndex];
+			if (!atlasChunk.valid || atlasChunk.materialCount == 0 ||
+				residentChunkCache->materialCount != atlasChunk.materialCount ||
+				residentChunkCache->accelerationStructure.accelerationStructure == nullptr)
+			{
+				mMapMaterialOnlyRoute.NotePreflightReject(
+					NRIMapMaterialOnlyRoutePreflightReject::AtlasStateUnavailable);
+				return false;
+			}
+
+			NRIMapMaterialOnlyRouteInput routeInput;
+			routeInput.movers = &mMapMovers;
+			routeInput.retainedWorld = &mMapWorld;
+			routeInput.retainedChunk = &mapChunk;
+			routeInput.retainedSceneView = residentChunkView;
+			routeInput.retainedLayout = &residentChunkCache->canonicalMaterialLayout;
+			routeInput.currentWorld = &liveWorld;
+			routeInput.currentChunk = &liveWorld.chunks[0];
+			routeInput.currentSceneView = &liveChunkView;
+			routeInput.buildSerial = mMapWorld.buildSerial;
+			routeInput.mapEpoch = mMapMovers.GetMapEpoch();
+			routeInput.frameIndex = mFrameIndex;
+			// The refresh caller supplies the engine-activity authority: no authored
+			// replacement delta and no visible mutable canvas, but the resolved material
+			// signature advanced. The retained static hint is intentionally not used as
+			// authority because it misses runtime-resolved Build tile animations.
+			routeInput.allowAnimatedMaterialState = allowAnimatedMaterialState;
+			NRIMapMaterialOnlyRouteResult routeResult = mMapMaterialOnlyRoute.TryPrepare(routeInput);
+			if (!routeResult.admitted)
+			{
+				return false;
+			}
+
+			auto& mutableResidentChunk = mStaticMapScene.chunks[residentChunkListIndex];
+			if (!mutableResidentChunk.canonicalMaterialLayout.valid)
+			{
+				mutableResidentChunk.canonicalMaterialLayout = routeResult.retainedLayout;
+			}
+			const uint64_t canonicalGeometrySignature =
+				ComputeAnimatedGeometrySignature(routeResult.residentOrderSceneView);
+			const uint64_t canonicalMaterialSignature =
+				ComputeAnimatedMaterialSignature(routeResult.residentOrderSceneView);
+			const uint32_t surfaceCount = CountSceneViewSurfaces(routeResult.residentOrderSceneView);
+			nri_scene::MaterialBridgeData residentOrderMaterials;
+			if (tryGetCachedRuntimeMutationMaterials(
+				canonicalGeometrySignature,
+				canonicalMaterialSignature,
+				surfaceCount,
+				&routeResult.currentLayout,
+				residentOrderMaterials))
+			{
+				mLastPerfShellTraceStats.runtimeMutationMaterialCacheHitCount++;
+			}
+			else
+			{
+				mLastPerfShellTraceStats.runtimeMutationMaterialCacheMissCount++;
+				{
+					Clocker clock(NriPTMaterialBuild);
+					BuildMaterialsWithActorOverrides(
+						routeResult.residentOrderSceneView,
+						residentOrderMaterials,
+						"runtime_mutation_chunk");
+				}
+				storeCachedRuntimeMutationMaterials(
+					canonicalGeometrySignature,
+					canonicalMaterialSignature,
+					surfaceCount,
+					&routeResult.currentLayout,
+					residentOrderMaterials);
+				mLastPerfShellTraceStats.runtimeMutationMaterialCacheStoreCount++;
+			}
+			if (residentOrderMaterials.materials.size() != atlasChunk.materialCount ||
+				residentOrderMaterials.lightMetadata.size() != atlasChunk.materialCount)
+			{
+				return false;
+			}
+
+			nri_scene::PTMapChunkMutationBaseline liveBaseline;
+			if (!nri_scene::CaptureMapChunkMutationBaseline(mapChunk, liveBaseline))
+			{
+				return false;
+			}
+			mRuntimeMutation.BuildLightIdentityOverrides(
+				mMapWorld,
+				mapChunk,
+				liveWorld,
+				liveWorld.chunks[0],
+				replacement.lightIdentityOverrides);
+
+			replacement.sceneView = std::move(routeResult.residentOrderSceneView);
+			replacement.geometry = {};
+			replacement.materialBridge = std::move(residentOrderMaterials);
+			replacement.replacementBaseline = std::move(liveBaseline);
+			replacement.exactGeometrySignature = residentChunkCache->exactGeometrySignature;
+			replacement.surfaceCount = surfaceCount;
+			replacement.triangleCount = atlasChunk.primitiveCount;
+			replacement.animatedMaterialSignature = canonicalMaterialSignature;
+			replacement.valid = true;
+			replacement.active = true;
+			if (!IsRuntimeMutationMaterialOnlyReasonMask(replacement.reasonMask))
+			{
+				// Resolved tile animation can advance without mutating authored map
+				// fields. Give resident apply an explicit material-only operation kind.
+				replacement.reasonMask = nri_scene::PTMapChunkMutationReason_WallMaterial;
+			}
+			replacement.excludeStaticChunk = false;
+			replacement.staticAnimatedReplacement = useStaticAnimatedReplacement;
+			replacement.certifiedResidentMaterialOnly = true;
+			replacement.certifiedMaterialBuildSerial = mMapWorld.buildSerial;
+			replacement.certifiedMaterialMapEpoch = mMapMovers.GetMapEpoch();
+			replacement.certifiedMaterialOwnerStableId = routeResult.ownerStableId;
+			replacement.certifiedMaterialLayoutKey = routeResult.layoutKey;
+			replacement.certifiedMaterialStateKey = routeResult.stateKey;
+			replacement.certifiedExactGeometrySignature = residentChunkCache->exactGeometrySignature;
+			replacement.certifiedGeometryTopologySignature = residentChunkCache->geometryTopologySignature;
+			replacement.certifiedPrimitiveLayoutSignature = residentChunkCache->primitiveLayoutSignature;
+			replacement.certifiedChunkListIndex = residentChunkListIndex;
+			replacement.certifiedVertexOffset = atlasChunk.vertexOffset;
+			replacement.certifiedVertexCount = atlasChunk.vertexCount;
+			replacement.certifiedIndexOffset = atlasChunk.indexOffset;
+			replacement.certifiedIndexCount = atlasChunk.indexCount;
+			replacement.certifiedPrimitiveOffset = atlasChunk.primitiveOffset;
+			replacement.certifiedPrimitiveCount = atlasChunk.primitiveCount;
+			replacement.certifiedMaterialOffset = atlasChunk.materialOffset;
+			replacement.certifiedMaterialCount = atlasChunk.materialCount;
+			if (countAsStructuralRebuild)
+			{
+				mRuntimeMutation.NoteRebuiltChunk();
+				mLastPerfShellTraceStats.runtimeMutationRebuiltChunks++;
+			}
+			return true;
 		};
 		const auto captureSectorDirtyTruth = [&]()
 		{
@@ -2397,6 +2569,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		};
 		const auto rebuildReplacementFromPreparedLiveChunk = [&](bool countAsStructuralRebuild) -> bool
 		{
+			if (tryBuildCertifiedMaterialOnlyReplacement(countAsStructuralRebuild, false))
+			{
+				return true;
+			}
 			const bool exclusiveMaterialOnlyReplacement =
 				materialOnlyReplacement &&
 				RequiresExclusiveRuntimeMutationMaterialOnlyReasonMask(normalizedReasonMask);
@@ -2432,6 +2608,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				liveAnimatedGeometrySignature,
 				liveAnimatedMaterialSignature,
 				liveSurfaceCount,
+				nullptr,
 				liveMaterials))
 			{
 				mLastPerfShellTraceStats.runtimeMutationMaterialCacheHitCount++;
@@ -2447,6 +2624,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					liveAnimatedGeometrySignature,
 					liveAnimatedMaterialSignature,
 					liveSurfaceCount,
+					nullptr,
 					liveMaterials);
 				mLastPerfShellTraceStats.runtimeMutationMaterialCacheStoreCount++;
 			}
@@ -2515,8 +2693,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			}
 			return true;
 		};
-		const auto refreshReplacementMaterialsFromPreparedLiveChunk = [&]() -> bool
+		const auto refreshReplacementMaterialsFromPreparedLiveChunk =
+			[&](bool allowAnimatedMaterialState) -> bool
 		{
+			if (tryBuildCertifiedMaterialOnlyReplacement(false, allowAnimatedMaterialState))
+			{
+				return true;
+			}
 			const bool exclusiveMaterialOnlyReplacement =
 				materialOnlyReplacement &&
 				RequiresExclusiveRuntimeMutationMaterialOnlyReasonMask(normalizedReasonMask);
@@ -2547,6 +2730,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				liveAnimatedGeometrySignature,
 				liveAnimatedMaterialSignature,
 				liveSurfaceCount,
+				nullptr,
 				liveMaterials))
 			{
 				mLastPerfShellTraceStats.runtimeMutationMaterialCacheHitCount++;
@@ -2562,6 +2746,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					liveAnimatedGeometrySignature,
 					liveAnimatedMaterialSignature,
 					liveSurfaceCount,
+					nullptr,
 					liveMaterials);
 				mLastPerfShellTraceStats.runtimeMutationMaterialCacheStoreCount++;
 			}
@@ -3140,7 +3325,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 								mLastPerfShellTraceStats.runtimeMutationMaterialRefreshFarMs :
 								mLastPerfShellTraceStats.runtimeMutationMaterialRefreshUnknownDistanceMs));
 				ScopedPtPerfTimer materialRefreshDistanceTierPerfTimer(materialRefreshDistanceTierMs);
-				if (!refreshReplacementMaterialsFromPreparedLiveChunk())
+				if (!refreshReplacementMaterialsFromPreparedLiveChunk(
+					!forceReplacementMaterialRefresh && !forceHardwareCanvasRefresh))
 				{
 					return false;
 				}

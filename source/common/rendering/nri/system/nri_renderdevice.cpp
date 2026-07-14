@@ -5475,7 +5475,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationValidStructuralCount,
 			shell.runtimeMutationValidMaterialCount);
 		Printf(
-			"PERF pt resident apply detail NRI: frame=%llu total_ms=%.3f live_build_ms=%.3f geometry_ms=%.3f material_ms=%.3f baseline_ms=%.3f atlas_ms=%.3f atlas_bookkeeping_ms=%.3f vertex_index_copy_ms=%.3f vertex_cpu_ms=%.3f index_cpu_ms=%.3f vertex_stage_ms=%.3f index_stage_ms=%.3f primitive_rewrite_ms=%.3f primitive_cpu_ms=%.3f primitive_stage_ms=%.3f geometry_order_hash_ms=%.3f downstream_blas_ms=%.3f downstream_blas_setup_ms=%.3f downstream_blas_filter_ms=%.3f downstream_blas_create_ms=%.3f downstream_blas_scratch_ms=%.3f downstream_blas_barrier_ms=%.3f downstream_blas_build_ms=%.3f calls=%u material_only=%u structural=%u fast_material_only=%u slow_material_only=%u material_only_exclusive=%u block_no_resident=%u block_replacement_invalid=%u block_material_count=%u material_hash_checks=%u material_hash_skips=%u material_hash_misses=%u material_hash_rejects=%u geometry_hash_checks=%u geometry_hash_skips=%u geometry_hash_misses=%u geometry_hash_rejects=%u geometry_hash_blas_skips=%u geometry_order_checks=%u geometry_order_equiv=%u geometry_order_misses=%u geometry_order_rejects=%u stage_vertex_ranges=%u stage_index_ranges=%u stage_primitive_ranges=%u stage_vertex_bytes=%llu stage_index_bytes=%llu stage_primitive_bytes=%llu stage_coalesced_ranges=%u stage_coalesced_bytes=%llu stage_coalesced_gap_bytes=%llu stage_coalesce_rejects=%u stage_map_ms=%.3f stage_memcpy_ms=%.3f stage_command_ms=%.3f stage_batches=%u stage_batch_ranges=%u stage_copy_cmds=%u stage_barrier_cmds=%u stage_scratch_grows=%u stage_scratch_grow_bytes=%llu preserve_geo=%u preserve_index=%u preserve_primitive=%u blas_reuse=%u blas_update=%u blas_refit_only=%u blas_recreate=%u blas_scratch_queries=%u blas_scratch_cache_hits=%u blas_scratch_cache_misses=%u blas_scratch_grows=%u blas_build_cmds=%u blas_scratch_barriers=%u keep_geo_slice=%u keep_mat_slice=%u empty_remove=%u recover_attempts=%u recover_success=%u atlas_grows=%u\n",
+			"PERF pt resident apply detail NRI: frame=%llu total_ms=%.3f live_build_ms=%.3f geometry_ms=%.3f material_ms=%.3f baseline_ms=%.3f atlas_ms=%.3f atlas_bookkeeping_ms=%.3f vertex_index_copy_ms=%.3f vertex_cpu_ms=%.3f index_cpu_ms=%.3f vertex_stage_ms=%.3f index_stage_ms=%.3f primitive_rewrite_ms=%.3f primitive_cpu_ms=%.3f primitive_stage_ms=%.3f geometry_order_hash_ms=%.3f downstream_blas_ms=%.3f downstream_blas_setup_ms=%.3f downstream_blas_filter_ms=%.3f downstream_blas_create_ms=%.3f downstream_blas_scratch_ms=%.3f downstream_blas_barrier_ms=%.3f downstream_blas_build_ms=%.3f calls=%u material_only=%u structural=%u fast_material_only=%u certified_material_only=%u slow_material_only=%u material_only_exclusive=%u block_no_resident=%u block_replacement_invalid=%u block_material_count=%u material_hash_checks=%u material_hash_skips=%u material_hash_misses=%u material_hash_rejects=%u geometry_hash_checks=%u geometry_hash_skips=%u geometry_hash_misses=%u geometry_hash_rejects=%u geometry_hash_blas_skips=%u geometry_order_checks=%u geometry_order_equiv=%u geometry_order_misses=%u geometry_order_rejects=%u stage_vertex_ranges=%u stage_index_ranges=%u stage_primitive_ranges=%u stage_vertex_bytes=%llu stage_index_bytes=%llu stage_primitive_bytes=%llu stage_coalesced_ranges=%u stage_coalesced_bytes=%llu stage_coalesced_gap_bytes=%llu stage_coalesce_rejects=%u stage_map_ms=%.3f stage_memcpy_ms=%.3f stage_command_ms=%.3f stage_batches=%u stage_batch_ranges=%u stage_copy_cmds=%u stage_barrier_cmds=%u stage_scratch_grows=%u stage_scratch_grow_bytes=%llu preserve_geo=%u preserve_index=%u preserve_primitive=%u blas_reuse=%u blas_update=%u blas_refit_only=%u blas_recreate=%u blas_scratch_queries=%u blas_scratch_cache_hits=%u blas_scratch_cache_misses=%u blas_scratch_grows=%u blas_build_cmds=%u blas_scratch_barriers=%u keep_geo_slice=%u keep_mat_slice=%u empty_remove=%u recover_attempts=%u recover_success=%u atlas_grows=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.runtimeMutationResidentApplyMs,
 			shell.runtimeMutationResidentApplyLiveBuildMs,
@@ -5504,6 +5504,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationResidentApplyMaterialOnlyCount,
 			shell.runtimeMutationResidentApplyStructuralCount,
 			shell.runtimeMutationResidentApplyFastMaterialOnlyCount,
+			shell.runtimeMutationResidentApplyCertifiedMaterialOnlyCount,
 			shell.runtimeMutationResidentApplySlowMaterialOnlyCount,
 			shell.runtimeMutationResidentApplyMaterialOnlyExclusiveCount,
 			shell.runtimeMutationResidentApplyMaterialOnlyNoResidentChunkCount,
@@ -5609,6 +5610,36 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			se29Deformer.applyFailures,
 			se29Deformer.blasUpdated,
 			se29Deformer.blasRecreated);
+		const NRIMapMaterialOnlyRouteFrameStats materialRoute =
+			mRenderer->GetMapMaterialOnlyRouteFrameStats();
+		const nri_scene::PTMapMaterialStateVariantStats materialVariants =
+			mRenderer->GetMapMaterialVariantStats();
+		Printf(
+			"PERF pt map material route NRI: frame=%llu candidates=%u admitted=%u terminal=%u animated=%u variant_hits=%u variant_inserts=%u variant_evictions=%u record_evictions=%u reject_mask=0x%llx preflight_reject_mask=0x%llx validation_failure_mask=0x%llx requests=%llu eligible=%llu layout_rejects=%llu total_hits=%llu total_inserts=%llu total_variant_evictions=%llu total_record_evictions=%llu fallbacks=%llu epoch_resets=%llu resident_records=%u resident_variants=%u variant_high_water=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			materialRoute.candidates,
+			materialRoute.admitted,
+			materialRoute.terminalAdmissions,
+			materialRoute.animatedAdmissions,
+			materialRoute.variantHits,
+			materialRoute.variantInserts,
+			materialRoute.variantEvictions,
+			materialRoute.recordEvictions,
+			(unsigned long long)materialRoute.rejectMask,
+			(unsigned long long)materialRoute.preflightRejectMask,
+			(unsigned long long)materialRoute.validationFailureMask,
+			(unsigned long long)materialVariants.requests,
+			(unsigned long long)materialVariants.eligible,
+			(unsigned long long)materialVariants.layoutRejects,
+			(unsigned long long)materialVariants.hits,
+			(unsigned long long)materialVariants.inserts,
+			(unsigned long long)materialVariants.variantEvictions,
+			(unsigned long long)materialVariants.recordEvictions,
+			(unsigned long long)materialVariants.fallbacks,
+			(unsigned long long)materialVariants.epochBuildResets,
+			materialVariants.residentRecords,
+			materialVariants.residentVariants,
+			materialVariants.residentVariantHighWater);
 		for (size_t index = 0; index < NRIRenderer::RuntimeResidentBlasRecreateTraceCount; ++index)
 		{
 			const auto& entry = shell.runtimeResidentBlasRecreateEntries[index];

@@ -13,6 +13,7 @@
 #include "nri_renderer_context.h"
 #include "nri_resources.h"
 #include "nri_map_movers.h"
+#include "nri_map_material_only_route.h"
 #include "nri_map_mover_rigid_route.h"
 #include "nri_map_mover_shadow.h"
 #include "nri_se29_floor_deformer_route.h"
@@ -1037,6 +1038,7 @@ public:
 		uint32_t runtimeMutationResidentApplyMaterialOnlyCount = 0;
 		uint32_t runtimeMutationResidentApplyStructuralCount = 0;
 		uint32_t runtimeMutationResidentApplyFastMaterialOnlyCount = 0;
+		uint32_t runtimeMutationResidentApplyCertifiedMaterialOnlyCount = 0;
 		uint32_t runtimeMutationResidentApplySlowMaterialOnlyCount = 0;
 		uint32_t runtimeMutationResidentApplyMaterialOnlyExclusiveCount = 0;
 		uint32_t runtimeMutationResidentApplyMaterialOnlyNoResidentChunkCount = 0;
@@ -1911,6 +1913,8 @@ public:
 	const PerfResourceTraceStats& GetLastPerfResourceTraceStats() const { return mLastPerfResourceTraceStats; }
 	const PerfTraceShaderStats& GetLastPerfTraceShaderStats() const { return mLastPerfTraceShaderStats; }
 	NRISE29FloorDeformerRouteFrameStats GetSE29FloorDeformerRouteFrameStats() const;
+	NRIMapMaterialOnlyRouteFrameStats GetMapMaterialOnlyRouteFrameStats() const;
+	nri_scene::PTMapMaterialStateVariantStats GetMapMaterialVariantStats() const;
 	MemoryTelemetry GetMemoryTelemetry() const;
 	static const char* GetMaterialBuildTraceSlotName(MaterialBuildTraceSlot slot);
 	enum class FrameTextureSlot : uint32_t
@@ -2628,6 +2632,7 @@ private:
 	NRIMapMoverShadow mMapMoverShadow;
 	NRIMapMoverRigidRoute mMapMoverRigidRoute;
 	NRISE29FloorDeformerRoute mSE29FloorDeformerRoute;
+	NRIMapMaterialOnlyRoute mMapMaterialOnlyRoute;
 	NRIRuntimeMutationSystem mRuntimeMutation;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	NRIPersistentVoxelResidency mPersistentVoxels;

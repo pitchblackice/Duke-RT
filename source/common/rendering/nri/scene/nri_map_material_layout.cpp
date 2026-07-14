@@ -87,8 +87,7 @@ namespace
 			return false;
 		}
 		if ((uint32_t)provenance.mapChunkIndex != view.chunkIndex ||
-			provenance.actorIndex >= 0 || provenance.drawListType != UINT32_MAX ||
-			provenance.materialFlags != view.surface->material.flags)
+			provenance.actorIndex >= 0 || provenance.drawListType != UINT32_MAX)
 		{
 			outFailure = PTMapMaterialLayoutFailure::InvalidSemanticSlot;
 			return false;
