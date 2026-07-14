@@ -35,6 +35,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	gSmokeDirectHistory.GetDimensions(directHistoryCount, ignoredStride);
 
 	const bool clearWorld = (gSmokeConstants.Flags & 1u) != 0u;
+	const bool particleResourcesAvailable =
+		(gSmokeConstants.Flags & NRI_SMOKE_FLAG_GRID_REPRESENTATION) == 0u ||
+		(gSmokeConstants.Flags & NRI_SMOKE_FLAG_COMPARE_REPRESENTATION) != 0u;
 	const bool clearIndirectCache = clearWorld || (gSmokeConstants.Flags & 0x80u) != 0u;
 	const bool clearEmissiveHistory = clearWorld || (gSmokeConstants.Flags & 0x100u) == 0u;
 	const bool clearDirectHistory = clearWorld || (gSmokeConstants.Flags & NRI_SMOKE_DIRECT_HISTORY_VALID) == 0u;
@@ -160,17 +163,17 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gSmokeControl[0].FilterResourceDowngrades = 1u;
 		}
 	}
-	if (clearWorld && index < min(gSmokeConstants.ParticleCapacity, particleCount))
+	if (particleResourcesAvailable && clearWorld && index < min(gSmokeConstants.ParticleCapacity, particleCount))
 	{
 		SmokeParticle particle = (SmokeParticle)0;
 		particle.Epoch = gSmokeConstants.SimulationEpoch;
 		gSmokeParticles[index] = particle;
 	}
-	if (index < min(froxelCount, fineCellCount))
+	if (particleResourcesAvailable && index < min(froxelCount, fineCellCount))
 		gSmokeFineCells[index] = SmokeEmptyCell();
-	if (index < min(expectedWideCellCount, wideCellCount))
+	if (particleResourcesAvailable && index < min(expectedWideCellCount, wideCellCount))
 		gSmokeWideCells[index] = SmokeEmptyCell();
-	if (index < min(gSmokeConstants.FroxelDepth, globalDepthCount))
+	if (particleResourcesAvailable && index < min(gSmokeConstants.FroxelDepth, globalDepthCount))
 		gSmokeGlobalDepthCells[index] = SmokeEmptyCell();
 	if (index < min(froxelCount, min(mediumFroxelCount, min(integratedFroxelCount, min(phaseFroxelCount, sourceFroxelCount)))))
 	{

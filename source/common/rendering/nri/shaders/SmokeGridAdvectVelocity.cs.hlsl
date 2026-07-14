@@ -41,7 +41,7 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 	advectedVelocity *= exp(-damping * deltaTime);
 	const float windBlend = 1.0 - exp(-max(gSmokeGridConstants.WindCoupling, 0.0) * deltaTime);
 	advectedVelocity = lerp(advectedVelocity, gSmokeGridConstants.Wind, saturate(windBlend));
-	advectedVelocity += float3(0.0, 0.0, 1.0) *
+	advectedVelocity += float3(0.0, -1.0, 0.0) *
 		(max(gSmokeGridConstants.Buoyancy, 0.0) * styleBuoyancy * temperature * deltaTime);
 
 	const float speed = length(advectedVelocity);

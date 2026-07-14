@@ -615,15 +615,19 @@ bool NRISmokeGrid::RecordFrame(const NRISmokeGridServices& services, const NRISm
 		Dispatch(services, constants, NRISmokeGridPass::BuildDispatch, 1u);
 		StorageBarrier(services);
 	}
-	if (!RecordControlReadback(services, settings))
+	const bool controlReadbackReady = RecordControlReadback(services, settings);
+	if (!controlReadbackReady)
 	{
-		SetFailure("control-readback");
-		return false;
+		// Readback is diagnostic-only and occurs after the authoritative field
+		// has already been updated. Never misreport a completed deposition as a
+		// simulation failure or replay its one-shot commands.
+		mStatus.gpuStatsValid = false;
+		mStatus.failureReason = "control-readback-unavailable";
 	}
 	mStatus.activePing = mActivePing;
 	mStatus.fieldPing = mFieldPing;
 	mStatus.resourcesReady = true;
-	mStatus.failureReason = "none";
+	mStatus.failureReason = controlReadbackReady ? "none" : "control-readback-unavailable";
 	return true;
 }
 
@@ -699,7 +703,7 @@ void NRISmokeGrid::PrintStatus() const
 {
 	Printf("NRI PT smoke grid status: requested=%s representation=%u initialized=%s resources=%s "
 		"bricks=%u hash=%u cells=%u active_ping=%u field_ping=%u gpu_stats=%s "
-		"resident=%u active=%u/%u free=%u allocated=%u reclaimed=%u allocation_failures=%u "
+		"resident=%u resident_bytes=%llu active=%u/%u free=%u allocated=%u reclaimed=%u allocation_failures=%u "
 		"probe_failures=%u max_probe=%u commands=%u requested_mass_q=%u deposited_mass_q=%u "
 		"rejected_mass_q=%u saturated=%u halo=%u occupied=%u empty=%u cfl_clamps=%u "
 		"backtrace_clamps=%u nan=%u field_hash=%08x%08x resident_mib=%.2f "
@@ -708,7 +712,8 @@ void NRISmokeGrid::PrintStatus() const
 		mStatus.initialized ? "yes" : "no", mStatus.resourcesReady ? "ready" : "unavailable",
 		mStatus.brickCapacity, mStatus.hashCapacity, mStatus.cellCapacity,
 		mStatus.activePing, mStatus.fieldPing, mStatus.gpuStatsValid ? "valid" : "disabled",
-		mStatus.gpu.residentCount, mStatus.gpu.activeCountA, mStatus.gpu.activeCountB,
+		mStatus.gpu.residentCount, (unsigned long long)mStatus.residentBytes,
+		mStatus.gpu.activeCountA, mStatus.gpu.activeCountB,
 		mStatus.gpu.freeCount, mStatus.gpu.allocated, mStatus.gpu.reclaimed,
 		mStatus.gpu.allocationFailures, mStatus.gpu.probeFailures, mStatus.gpu.maximumProbe,
 		mStatus.gpu.commandsProcessed, mStatus.gpu.requestedMassQ, mStatus.gpu.depositedMassQ,

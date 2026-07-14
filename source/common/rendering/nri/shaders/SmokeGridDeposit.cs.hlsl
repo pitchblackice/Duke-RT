@@ -58,7 +58,7 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 		const float densityRate = 0.69314718056 / max(style.DensityHalfLife, 0.001);
 		const float coolingRate = 0.69314718056 / max(style.CoolingHalfLife, 0.001);
 		const float3 injectionVelocity = command.Velocity * (style.VelocityInherit * style.MomentumScale) +
-			float3(0.0, 0.0, style.RiseVelocity);
+			float3(0.0, -style.RiseVelocity, 0.0);
 		const float3 momentum = injectionVelocity * mass;
 		int original;
 		InterlockedAdd(gSmokeGridDeposit0[cellIndex].x, SmokeGridQuantize(mass, gSmokeGridConstants.MassQuantization), original);

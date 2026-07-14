@@ -1998,6 +1998,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 {
 	WaitForCommandsTracked("level-unload");
 	RequestHistoryReset("level-unload", true, true);
+	ResetSmoke("level-unload");
 
 	if (info.oldLevel != info.newLevel)
 	{

@@ -2,6 +2,7 @@
 
 #include "nri_renderer_settings.h"
 #include "nri_resources.h"
+#include "nri_smoke_authority.h"
 #include "nri_smoke_contracts.h"
 #include "nri_smoke_emitters.h"
 #include "nri_smoke_grid.h"
@@ -44,6 +45,20 @@ struct NRISmokeStatusSnapshot
 	uint32_t representationEffective = 0;
 	bool gridReady = false;
 	const char* representationFallback = "none";
+	const char* authority = "disabled";
+	const char* authorityReason = "initial";
+	const char* authorityPreparation = "none";
+	bool authorityOperational = false;
+	uint32_t authorityTransitionSerial = 0;
+	uint32_t authorityTransitionFrame = UINT32_MAX;
+	uint64_t particlePayloadBytes = 0;
+	uint64_t descriptorSentinelBytes = 0;
+	uint32_t particleSimulationDispatches = 0;
+	uint32_t gridSimulationDispatches = 0;
+	uint32_t particleOpticalDispatches = 0;
+	uint32_t gridOpticalDispatches = 0;
+	uint32_t particleCommandsRouted = 0;
+	uint32_t gridCommandsRouted = 0;
 	uint32_t requestedLightMode = 0;
 	uint32_t effectiveLightMode = 0;
 	bool filteredVisibilityRequested = false;
@@ -217,8 +232,17 @@ private:
 		bool readbackInitialized = false;
 	};
 
-	bool EnsureResources(NRIRenderer& renderer);
+	bool EnsureResources(NRIRenderer& renderer, uint32_t representation);
+	bool RebuildAuthorityResourcesTransactional(NRIRenderer& renderer, uint32_t representation);
+	void UpdateResourceStatus();
+	void PublishAuthorityStatus(const char* preparation = "none", const char* fallbackOverride = nullptr);
 	bool CreateBuffer(NRIRenderer& renderer, NRIBufferResource& out, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::MemoryLocation location, bool srv, bool uav);
+	bool CreateCompatibilityDescriptors(NRIRenderer& renderer);
+	bool CreateCompatibilityDescriptors(NRIRenderer& renderer, NRIBufferResource& storage,
+		nri::Descriptor*& particleView, nri::Descriptor*& cellView);
+	void DestroyCompatibilityDescriptors(NRIRenderer& renderer);
+	void DestroyCompatibilityDescriptors(NRIRenderer& renderer, NRIBufferResource& storage,
+		nri::Descriptor*& particleView, nri::Descriptor*& cellView);
 	bool UploadBytes(NRIRenderer& renderer, NRIBufferResource& upload, const void* data, uint64_t size);
 	bool RecordSimulation(NRIRenderer& renderer);
 	bool RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc& route);
@@ -235,6 +259,9 @@ private:
 	std::array<nri::Pipeline*, 21> mPipelines = {};
 	std::vector<CommandSlot> mCommandSlots;
 	NRIBufferResource mStyleBuffer;
+	NRIBufferResource mCompatibilityStorage;
+	nri::Descriptor* mCompatibilityParticleView = nullptr;
+	nri::Descriptor* mCompatibilityCellView = nullptr;
 	NRIBufferResource mParticles;
 	NRIBufferResource mControl;
 	NRIBufferResource mFineCells;
@@ -255,6 +282,7 @@ private:
 	NRIBufferResource mDirectCurrent;
 	NRIBufferResource mDirectHistory;
 	NRISmokeEmitterSystem mEmitters;
+	NRISmokeAuthority mAuthority;
 	NRISmokeGrid mGrid;
 	NRISmokeGridLighting mGridLighting;
 	std::vector<NRISmokeStyleGpu> mStyles;
@@ -266,6 +294,9 @@ private:
 	uint32_t mResourceStyleCapacity = 0;
 	uint32_t mLastPreparedFrame = UINT32_MAX;
 	uint32_t mLastSimulatedFrame = UINT32_MAX;
+	uint32_t mLastGridBrickCapacity = 0;
+	float mLastGridCellSize = 0.0f;
+	bool mGridLayoutTracked = false;
 	uint32_t mNextCommandSerial = 1;
 	float mAccumulator = 0.0f;
 	double mLastGameplaySeconds = -1.0;
@@ -276,8 +307,10 @@ private:
 	bool mNeedsClear = true;
 	bool mControlCopyPending = false;
 	bool mResourcesInitialized = false;
+	bool mParticleResourcesInitialized = false;
 	bool mViewResourcesInitialized = false;
 	bool mResourceLegacyEmissiveFull = true;
+	bool mResourceParticlePayload = false;
 	bool mIndirectHistoryValid = false;
 	bool mEmissiveHistoryValid = false;
 	uint32_t mLastEmissiveReuseMode = 0;

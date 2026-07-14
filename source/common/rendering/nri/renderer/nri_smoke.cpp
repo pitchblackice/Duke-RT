@@ -23,7 +23,6 @@ namespace
 	constexpr uint32_t kSmokeCoreStorageBufferCount = 17u;
 	constexpr uint32_t kSmokeDirectStorageBufferCount = 2u;
 	constexpr uint32_t kSmokeGridLightingStorageBufferCount = NRISmokeGridLighting::StorageDescriptorCount;
-	constexpr uint32_t kSmokeBarrierBufferCount = kSmokeCoreStorageBufferCount + kSmokeDirectStorageBufferCount;
 	constexpr uint32_t kSmokeStorageDescriptorCount = kSmokeCoreStorageBufferCount + NRISmokeGrid::EvaluationDescriptorCount +
 		kSmokeDirectStorageBufferCount + kSmokeGridLightingStorageBufferCount;
 	constexpr uint32_t kSmokeFilteredSceneBufferCount = 8u;
@@ -141,6 +140,61 @@ bool NRISmokeSystem::CreateBuffer(NRIRenderer& renderer, NRIBufferResource& out,
 		}
 		return true;
 	}
+
+bool NRISmokeSystem::CreateCompatibilityDescriptors(NRIRenderer& renderer)
+{
+	return CreateCompatibilityDescriptors(renderer, mCompatibilityStorage,
+		mCompatibilityParticleView, mCompatibilityCellView);
+}
+
+bool NRISmokeSystem::CreateCompatibilityDescriptors(NRIRenderer& renderer, NRIBufferResource& storage,
+	nri::Descriptor*& particleView, nri::Descriptor*& cellView)
+{
+	if (storage.buffer != nullptr && storage.storageView != nullptr && particleView != nullptr && cellView != nullptr)
+		return true;
+	DestroyCompatibilityDescriptors(renderer, storage, particleView, cellView);
+	const nri::BufferUsageBits storageUsage = NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE_STORAGE,
+		nri::BufferUsageBits::SHADER_RESOURCE);
+	if (!CreateBuffer(renderer, storage, sizeof(NRISmokeParticleGpu), sizeof(uint32_t),
+		storageUsage, nri::MemoryLocation::DEVICE, false, true))
+		return false;
+
+	auto createView = [&](uint32_t stride, nri::Descriptor*& descriptor)
+	{
+		nri::BufferViewDesc view = {};
+		view.buffer = storage.buffer;
+		view.type = nri::BufferView::STORAGE_STRUCTURED_BUFFER;
+		view.offset = 0;
+		view.size = nri::WHOLE_SIZE;
+		view.structureStride = stride;
+		return renderer.mFrameBuffer->mCore.CreateBufferView(view, descriptor) == nri::Result::SUCCESS;
+	};
+	if (!createView(sizeof(NRISmokeParticleGpu), particleView) ||
+		!createView(sizeof(uint32_t) * 2u, cellView))
+	{
+		DestroyCompatibilityDescriptors(renderer, storage, particleView, cellView);
+		return false;
+	}
+	return true;
+}
+
+void NRISmokeSystem::DestroyCompatibilityDescriptors(NRIRenderer& renderer)
+{
+	DestroyCompatibilityDescriptors(renderer, mCompatibilityStorage,
+		mCompatibilityParticleView, mCompatibilityCellView);
+}
+
+void NRISmokeSystem::DestroyCompatibilityDescriptors(NRIRenderer& renderer, NRIBufferResource& storage,
+	nri::Descriptor*& particleView, nri::Descriptor*& cellView)
+{
+	if (particleView != nullptr)
+		renderer.mFrameBuffer->mCore.DestroyDescriptor(particleView);
+	if (cellView != nullptr)
+		renderer.mFrameBuffer->mCore.DestroyDescriptor(cellView);
+	particleView = nullptr;
+	cellView = nullptr;
+	renderer.DestroyBufferResource(storage);
+}
 
 bool NRISmokeSystem::UploadBytes(NRIRenderer& renderer, NRIBufferResource& upload, const void* data, uint64_t size)
 	{
@@ -287,23 +341,41 @@ bool NRISmokeSystem::Initialize(NRIRenderer& renderer)
 	return true;
 }
 
-bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
+bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer, uint32_t representation)
 {
 	if (mStyles.empty())
 		mStyles.emplace_back();
 	const uint32_t fw = (renderer.mRenderWidth + mSettings.froxelPixelSize - 1) / mSettings.froxelPixelSize;
 	const uint32_t fh = (renderer.mRenderHeight + mSettings.froxelPixelSize - 1) / mSettings.froxelPixelSize;
-	const bool pureGridWorld = mStatus.representationEffective == 1u && mGridLighting.IsWorldReady() &&
+	const bool particlePayload = representation != 1u;
+	const bool pureGridWorld = representation == 1u && mGridLighting.IsWorldReady() &&
 		mSettings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy &&
 		mSettings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Compare;
 	const bool legacyEmissiveFull = !pureGridWorld;
-	const bool persistentReady = mParticles.buffer != nullptr && mReferenceNext.buffer != nullptr && mParticleDirectionalVisibility.buffer != nullptr && mResourceParticleCapacity == mSettings.particleCapacity &&
-		mResourceStyleCapacity == (uint32_t)mStyles.size();
-	const bool viewReady = mFineCells.buffer != nullptr && mDirectCurrent.buffer != nullptr && mDirectHistory.buffer != nullptr && mResourceFroxelWidth == fw &&
+	const bool commandSlotsReady = std::all_of(mCommandSlots.begin(), mCommandSlots.end(), [](const CommandSlot& slot)
+	{
+		return slot.upload.buffer != nullptr && slot.device.buffer != nullptr && slot.styleUpload.buffer != nullptr &&
+			slot.controlReadback.buffer != nullptr;
+	});
+	const bool selectedPayloadReady = particlePayload ?
+		(mParticles.buffer != nullptr && mReferenceNext.buffer != nullptr && mParticleDirectionalVisibility.buffer != nullptr &&
+			mResourceParticleCapacity == mSettings.particleCapacity) :
+		(mParticles.buffer == nullptr && mReferenceNext.buffer == nullptr && mParticleDirectionalVisibility.buffer == nullptr &&
+			mCompatibilityStorage.buffer != nullptr && mCompatibilityParticleView != nullptr && mCompatibilityCellView != nullptr &&
+			mResourceParticleCapacity == 0u);
+	const bool persistentReady = mControl.buffer != nullptr && mStyleBuffer.buffer != nullptr && commandSlotsReady &&
+		mResourceParticlePayload == particlePayload && selectedPayloadReady && mResourceStyleCapacity == (uint32_t)mStyles.size();
+	const bool selectedViewReady = particlePayload ?
+		(mFineCells.buffer != nullptr && mWideCells.buffer != nullptr && mGlobalDepthCells.buffer != nullptr) :
+		(mFineCells.buffer == nullptr && mWideCells.buffer == nullptr && mGlobalDepthCells.buffer == nullptr);
+	const bool viewReady = selectedViewReady && mFroxelMedium.buffer != nullptr && mDirectCurrent.buffer != nullptr && mDirectHistory.buffer != nullptr && mResourceFroxelWidth == fw &&
 		mResourceFroxelHeight == fh && mResourceFroxelDepth == mSettings.froxelDepth &&
 		mResourceLegacyEmissiveFull == legacyEmissiveFull;
 	if (persistentReady && viewReady)
+	{
+		UpdateResourceStatus();
 		return true;
+	}
 
 	renderer.WaitForCommandsTracked();
 	if (!persistentReady)
@@ -318,11 +390,13 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 	const uint64_t wideCells = (uint64_t)kWideCellCount * mSettings.froxelDepth;
 	if (!persistentReady)
 	{
-		if (!CreateBuffer(renderer, mParticles, (uint64_t)mSettings.particleCapacity * sizeof(NRISmokeParticleGpu), sizeof(NRISmokeParticleGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
-			!CreateBuffer(renderer, mControl, sizeof(NRISmokeControlGpu), sizeof(NRISmokeControlGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
-			!CreateBuffer(renderer, mReferenceNext, (uint64_t)mSettings.particleCapacity * kMaximumReferencesPerParticle * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
-			!CreateBuffer(renderer, mParticleDirectionalVisibility, (uint64_t)mSettings.particleCapacity * kDirectionalProbesPerParticle * sizeof(float), sizeof(float), storage, nri::MemoryLocation::DEVICE, false, true) ||
-			!CreateBuffer(renderer, mStyleBuffer, std::max<size_t>(1, mStyles.size()) * sizeof(NRISmokeStyleGpu), sizeof(NRISmokeStyleGpu), copyDevice, nri::MemoryLocation::DEVICE, true, false))
+		if (!CreateBuffer(renderer, mControl, sizeof(NRISmokeControlGpu), sizeof(NRISmokeControlGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
+			!CreateBuffer(renderer, mStyleBuffer, std::max<size_t>(1, mStyles.size()) * sizeof(NRISmokeStyleGpu), sizeof(NRISmokeStyleGpu), copyDevice, nri::MemoryLocation::DEVICE, true, false) ||
+			(particlePayload &&
+				(!CreateBuffer(renderer, mParticles, (uint64_t)mSettings.particleCapacity * sizeof(NRISmokeParticleGpu), sizeof(NRISmokeParticleGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
+				 !CreateBuffer(renderer, mReferenceNext, (uint64_t)mSettings.particleCapacity * kMaximumReferencesPerParticle * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
+				 !CreateBuffer(renderer, mParticleDirectionalVisibility, (uint64_t)mSettings.particleCapacity * kDirectionalProbesPerParticle * sizeof(float), sizeof(float), storage, nri::MemoryLocation::DEVICE, false, true))) ||
+			(!particlePayload && !CreateCompatibilityDescriptors(renderer)))
 		{
 			DestroyResources(renderer);
 			return false;
@@ -338,13 +412,15 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 				return false;
 			}
 		}
-		mResourceParticleCapacity = mSettings.particleCapacity;
+		mResourceParticleCapacity = particlePayload ? mSettings.particleCapacity : 0u;
 		mResourceStyleCapacity = (uint32_t)mStyles.size();
+		mResourceParticlePayload = particlePayload;
 		mNeedsClear = true;
 	}
-	if (!CreateBuffer(renderer, mFineCells, froxels * sizeof(uint32_t) * 2u, sizeof(uint32_t) * 2u, storage, nri::MemoryLocation::DEVICE, false, true) ||
-		!CreateBuffer(renderer, mWideCells, wideCells * sizeof(uint32_t) * 2u, sizeof(uint32_t) * 2u, storage, nri::MemoryLocation::DEVICE, false, true) ||
-		!CreateBuffer(renderer, mGlobalDepthCells, (uint64_t)mSettings.froxelDepth * sizeof(uint32_t) * 2u, sizeof(uint32_t) * 2u, storage, nri::MemoryLocation::DEVICE, false, true) ||
+	if ((particlePayload &&
+			(!CreateBuffer(renderer, mFineCells, froxels * sizeof(uint32_t) * 2u, sizeof(uint32_t) * 2u, storage, nri::MemoryLocation::DEVICE, false, true) ||
+			 !CreateBuffer(renderer, mWideCells, wideCells * sizeof(uint32_t) * 2u, sizeof(uint32_t) * 2u, storage, nri::MemoryLocation::DEVICE, false, true) ||
+			 !CreateBuffer(renderer, mGlobalDepthCells, (uint64_t)mSettings.froxelDepth * sizeof(uint32_t) * 2u, sizeof(uint32_t) * 2u, storage, nri::MemoryLocation::DEVICE, false, true))) ||
 		!CreateBuffer(renderer, mFroxelMedium, froxels * 16, 16, storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mFroxelIntegrated, froxels * 16, 16, storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mFroxelPhase, froxels * 16, 16, storage, nri::MemoryLocation::DEVICE, false, true) ||
@@ -378,21 +454,206 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 	mLastDirectFrame = UINT32_MAX;
 	mStatus.directHistoryValid = false;
 	mStatus.directHistoryResetReason = "view-resources";
-	mStatus.froxelWidth = fw;
-	mStatus.froxelHeight = fh;
-	mStatus.froxelDepth = mSettings.froxelDepth;
-	mStatus.particleCapacity = mSettings.particleCapacity;
+	UpdateResourceStatus();
+	return true;
+}
+
+void NRISmokeSystem::UpdateResourceStatus()
+{
+	mStatus.froxelWidth = mResourceFroxelWidth;
+	mStatus.froxelHeight = mResourceFroxelHeight;
+	mStatus.froxelDepth = mResourceFroxelDepth;
+	mStatus.particleCapacity = mResourceParticleCapacity;
+	mStatus.particlePayloadBytes = mParticles.memorySize + mReferenceNext.memorySize + mParticleDirectionalVisibility.memorySize +
+		mFineCells.memorySize + mWideCells.memorySize + mGlobalDepthCells.memorySize;
+	mStatus.descriptorSentinelBytes = mCompatibilityStorage.memorySize;
 	mStatus.residentBytes = mParticles.memorySize + mControl.memorySize + mReferenceNext.memorySize + mParticleDirectionalVisibility.memorySize + mFineCells.memorySize +
-		mWideCells.memorySize + mGlobalDepthCells.memorySize +
-		mFroxelMedium.memorySize + mFroxelIntegrated.memorySize + mFroxelPhase.memorySize + mFroxelSource.memorySize +
-		mOccupiedFroxelIndices.memorySize + mIndirectHistory.memorySize + mIndirectScratch.memorySize +
-		mEmissiveCurrent.memorySize + mEmissiveTemporal.memorySize + mEmissiveHistory.memorySize +
-		mDirectCurrent.memorySize + mDirectHistory.memorySize + mStyleBuffer.memorySize;
+		mWideCells.memorySize + mGlobalDepthCells.memorySize + mFroxelMedium.memorySize + mFroxelIntegrated.memorySize +
+		mFroxelPhase.memorySize + mFroxelSource.memorySize + mOccupiedFroxelIndices.memorySize + mIndirectHistory.memorySize +
+		mIndirectScratch.memorySize + mEmissiveCurrent.memorySize + mEmissiveTemporal.memorySize + mEmissiveHistory.memorySize +
+		mDirectCurrent.memorySize + mDirectHistory.memorySize + mStyleBuffer.memorySize + mCompatibilityStorage.memorySize;
 	mStatus.indirectCacheBytes = mIndirectHistory.memorySize + mIndirectScratch.memorySize;
 	mStatus.emissiveReservoirBytes = mEmissiveCurrent.memorySize + mEmissiveTemporal.memorySize + mEmissiveHistory.memorySize;
 	mStatus.directHistoryBytes = mDirectCurrent.memorySize + mDirectHistory.memorySize;
 	for (const CommandSlot& slot : mCommandSlots)
 		mStatus.residentBytes += slot.upload.memorySize + slot.device.memorySize + slot.styleUpload.memorySize + slot.controlReadback.memorySize;
+}
+
+void NRISmokeSystem::PublishAuthorityStatus(const char* preparation, const char* fallbackOverride)
+{
+	const NRISmokeAuthoritySnapshot& authority = mAuthority.GetSnapshot();
+	mStatus.representationEffective = authority.effectiveRepresentation;
+	mStatus.representationFallback = fallbackOverride != nullptr ? fallbackOverride : authority.fallback;
+	mStatus.authority = NRISmokeAuthority::ModeName(authority.mode);
+	mStatus.authorityReason = authority.reason;
+	mStatus.authorityPreparation = preparation != nullptr ? preparation : "none";
+	mStatus.authorityOperational = authority.operational;
+	mStatus.authorityTransitionSerial = authority.transitionSerial;
+	mStatus.authorityTransitionFrame = authority.transitionFrame;
+	if (!authority.operational)
+	{
+		mStatus.representationEffective = 0u;
+		mStatus.particleSimulationDispatches = 0u;
+		mStatus.gridSimulationDispatches = 0u;
+		mStatus.particleOpticalDispatches = 0u;
+		mStatus.gridOpticalDispatches = 0u;
+		mStatus.particleCommandsRouted = 0u;
+		mStatus.gridCommandsRouted = 0u;
+	}
+}
+
+bool NRISmokeSystem::RebuildAuthorityResourcesTransactional(NRIRenderer& renderer, uint32_t representation)
+{
+	struct Replacement
+	{
+		NRIBufferResource particles;
+		NRIBufferResource referenceNext;
+		NRIBufferResource directionalVisibility;
+		NRIBufferResource compatibility;
+		nri::Descriptor* compatibilityParticleView = nullptr;
+		nri::Descriptor* compatibilityCellView = nullptr;
+		NRIBufferResource fineCells;
+		NRIBufferResource wideCells;
+		NRIBufferResource globalDepthCells;
+		NRIBufferResource froxelMedium;
+		NRIBufferResource froxelIntegrated;
+		NRIBufferResource froxelPhase;
+		NRIBufferResource froxelSource;
+		NRIBufferResource occupiedFroxelIndices;
+		NRIBufferResource indirectHistory;
+		NRIBufferResource indirectScratch;
+		NRIBufferResource emissiveCurrent;
+		NRIBufferResource emissiveTemporal;
+		NRIBufferResource emissiveHistory;
+		NRIBufferResource directCurrent;
+		NRIBufferResource directHistory;
+	};
+
+	Replacement replacement = {};
+	auto destroyReplacement = [&]()
+	{
+		DestroyCompatibilityDescriptors(renderer, replacement.compatibility,
+			replacement.compatibilityParticleView, replacement.compatibilityCellView);
+		NRIBufferResource* resources[] = { &replacement.particles, &replacement.referenceNext,
+			&replacement.directionalVisibility, &replacement.fineCells, &replacement.wideCells,
+			&replacement.globalDepthCells, &replacement.froxelMedium, &replacement.froxelIntegrated,
+			&replacement.froxelPhase, &replacement.froxelSource, &replacement.occupiedFroxelIndices,
+			&replacement.indirectHistory, &replacement.indirectScratch, &replacement.emissiveCurrent,
+			&replacement.emissiveTemporal, &replacement.emissiveHistory, &replacement.directCurrent,
+			&replacement.directHistory };
+		for (NRIBufferResource* resource : resources)
+			renderer.DestroyBufferResource(*resource);
+	};
+	auto take = [](NRIBufferResource& destination, NRIBufferResource& source)
+	{
+		destination = source;
+		source = {};
+	};
+
+	const bool particlePayload = representation != 1u;
+	const uint32_t fw = (renderer.mRenderWidth + mSettings.froxelPixelSize - 1u) / mSettings.froxelPixelSize;
+	const uint32_t fh = (renderer.mRenderHeight + mSettings.froxelPixelSize - 1u) / mSettings.froxelPixelSize;
+	const uint64_t columns = (uint64_t)fw * fh;
+	const uint64_t froxels = columns * mSettings.froxelDepth;
+	const uint64_t wideCells = (uint64_t)kWideCellCount * mSettings.froxelDepth;
+	const bool pureGridWorld = representation == 1u && mGridLighting.IsWorldReady() &&
+		mSettings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy &&
+		mSettings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Compare;
+	const uint64_t legacyEmissiveRecords = pureGridWorld ? 1u : froxels;
+	const nri::BufferUsageBits storage = NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE_STORAGE,
+		nri::BufferUsageBits::SHADER_RESOURCE);
+	bool created = true;
+	if (particlePayload)
+	{
+		created = CreateBuffer(renderer, replacement.particles,
+			(uint64_t)mSettings.particleCapacity * sizeof(NRISmokeParticleGpu), sizeof(NRISmokeParticleGpu),
+			storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.referenceNext,
+				(uint64_t)mSettings.particleCapacity * kMaximumReferencesPerParticle * sizeof(uint32_t), sizeof(uint32_t),
+				storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.directionalVisibility,
+				(uint64_t)mSettings.particleCapacity * kDirectionalProbesPerParticle * sizeof(float), sizeof(float),
+				storage, nri::MemoryLocation::DEVICE, false, true);
+	}
+	else
+	{
+		created = CreateCompatibilityDescriptors(renderer, replacement.compatibility,
+			replacement.compatibilityParticleView, replacement.compatibilityCellView);
+	}
+	if (created && particlePayload)
+	{
+		created = CreateBuffer(renderer, replacement.fineCells, froxels * sizeof(uint32_t) * 2u,
+			sizeof(uint32_t) * 2u, storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.wideCells, wideCells * sizeof(uint32_t) * 2u,
+				sizeof(uint32_t) * 2u, storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.globalDepthCells, (uint64_t)mSettings.froxelDepth * sizeof(uint32_t) * 2u,
+				sizeof(uint32_t) * 2u, storage, nri::MemoryLocation::DEVICE, false, true);
+	}
+	if (created)
+	{
+		created = CreateBuffer(renderer, replacement.froxelMedium, froxels * 16u, 16u, storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.froxelIntegrated, froxels * 16u, 16u, storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.froxelPhase, froxels * 16u, 16u, storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.froxelSource, froxels * 16u, 16u, storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.occupiedFroxelIndices, froxels * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.indirectHistory, froxels * sizeof(NRISmokeIndirectCacheGpu), sizeof(NRISmokeIndirectCacheGpu), storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.indirectScratch, froxels * sizeof(NRISmokeIndirectCacheGpu), sizeof(NRISmokeIndirectCacheGpu), storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.emissiveCurrent, legacyEmissiveRecords * sizeof(NRISmokeEmissiveStorageGpu), sizeof(NRISmokeEmissiveStorageGpu), storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.emissiveTemporal, legacyEmissiveRecords * sizeof(NRISmokeEmissiveStorageGpu), sizeof(NRISmokeEmissiveStorageGpu), storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.emissiveHistory, legacyEmissiveRecords * sizeof(NRISmokeEmissiveStorageGpu), sizeof(NRISmokeEmissiveStorageGpu), storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.directCurrent, froxels * sizeof(NRISmokeDirectCacheGpu), sizeof(NRISmokeDirectCacheGpu), storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.directHistory, froxels * sizeof(NRISmokeDirectCacheGpu), sizeof(NRISmokeDirectCacheGpu), storage, nri::MemoryLocation::DEVICE, false, true);
+	}
+	if (!created)
+	{
+		destroyReplacement();
+		return false;
+	}
+
+	// The replacement is complete before the committed authority is touched.
+	// This is the transactional boundary: allocation failure above leaves the
+	// old backend and its world field entirely intact.
+	renderer.WaitForCommandsTracked();
+	DestroyViewResources(renderer);
+	renderer.DestroyBufferResource(mParticles);
+	renderer.DestroyBufferResource(mReferenceNext);
+	renderer.DestroyBufferResource(mParticleDirectionalVisibility);
+	DestroyCompatibilityDescriptors(renderer);
+	take(mParticles, replacement.particles);
+	take(mReferenceNext, replacement.referenceNext);
+	take(mParticleDirectionalVisibility, replacement.directionalVisibility);
+	take(mCompatibilityStorage, replacement.compatibility);
+	mCompatibilityParticleView = replacement.compatibilityParticleView;
+	mCompatibilityCellView = replacement.compatibilityCellView;
+	replacement.compatibilityParticleView = nullptr;
+	replacement.compatibilityCellView = nullptr;
+	take(mFineCells, replacement.fineCells);
+	take(mWideCells, replacement.wideCells);
+	take(mGlobalDepthCells, replacement.globalDepthCells);
+	take(mFroxelMedium, replacement.froxelMedium);
+	take(mFroxelIntegrated, replacement.froxelIntegrated);
+	take(mFroxelPhase, replacement.froxelPhase);
+	take(mFroxelSource, replacement.froxelSource);
+	take(mOccupiedFroxelIndices, replacement.occupiedFroxelIndices);
+	take(mIndirectHistory, replacement.indirectHistory);
+	take(mIndirectScratch, replacement.indirectScratch);
+	take(mEmissiveCurrent, replacement.emissiveCurrent);
+	take(mEmissiveTemporal, replacement.emissiveTemporal);
+	take(mEmissiveHistory, replacement.emissiveHistory);
+	take(mDirectCurrent, replacement.directCurrent);
+	take(mDirectHistory, replacement.directHistory);
+	destroyReplacement();
+
+	mResourceParticleCapacity = particlePayload ? mSettings.particleCapacity : 0u;
+	mResourceParticlePayload = particlePayload;
+	mResourceFroxelWidth = fw;
+	mResourceFroxelHeight = fh;
+	mResourceFroxelDepth = mSettings.froxelDepth;
+	mResourceLegacyEmissiveFull = !pureGridWorld;
+	mParticleResourcesInitialized = false;
+	mViewResourcesInitialized = false;
+	mNeedsClear = true;
+	UpdateResourceStatus();
 	return true;
 }
 
@@ -428,9 +689,33 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 	mStatus.volumeResolvedSlot = UINT32_MAX;
 	mStatus.volumeMetaSlot = UINT32_MAX;
 	mStatus.dlrrModeEffective = 0u;
-	if (!mSettings.enabled || !mainViewEligible || mLastPreparedFrame == renderer.mFrameIndex)
+	mStatus.representationRequested = mSettings.representation;
+	if (!mSettings.enabled)
+	{
+		mAuthority.Disable(mSettings.representation, renderer.mFrameIndex, "smoke-disabled");
+		mStatus.gridReady = false;
+		PublishAuthorityStatus("retained-disabled", "resources-retained");
+		return true;
+	}
+	if (!mainViewEligible || mLastPreparedFrame == renderer.mFrameIndex)
 		return true;
 	mLastPreparedFrame = renderer.mFrameIndex;
+	bool gridLayoutInvalidated = false;
+	if (mSettings.representation != 0u)
+	{
+		const bool layoutChanged = mGridLayoutTracked &&
+			(mLastGridBrickCapacity != mSettings.gridBrickCapacity || mLastGridCellSize != mSettings.gridCellSize);
+		mLastGridBrickCapacity = mSettings.gridBrickCapacity;
+		mLastGridCellSize = mSettings.gridCellSize;
+		mGridLayoutTracked = true;
+		if (layoutChanged)
+		{
+			gridLayoutInvalidated = true;
+			Reset("grid-layout");
+			mStatus.preparedFrame = renderer.mFrameIndex;
+			mLastPreparedFrame = renderer.mFrameIndex;
+		}
+	}
 	if (!mCommandSlots.empty())
 	{
 		CommandSlot& completedSlot = mCommandSlots[std::min(renderer.mFrameBuffer->mCurrentQueuedFrameIndex, (uint32_t)mCommandSlots.size() - 1)];
@@ -554,36 +839,171 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 			completedSlot.readbackPending = false;
 		}
 	}
+	const bool worldLightingRequired = mSettings.representation != 0u &&
+		(mSettings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy ||
+		 mSettings.multipleScatter || mSettings.selfShadow);
+	bool worldLightingReady = !worldLightingRequired;
+	auto prepareGridOwners = [&]()
+	{
+		const bool gridPrepared = mGrid.PrepareFrame(BuildGridServices(renderer), mSettings,
+			renderer.mFrameIndex, mStatus.simulationEpoch);
+		mStatus.gridReady = mSettings.representation != 0u && gridPrepared && mGrid.GetStatusSnapshot().resourcesReady;
+		worldLightingReady = !worldLightingRequired;
+		if (mStatus.gridReady && worldLightingRequired)
+		{
+			const NRISmokeGridStatusSnapshot& gridStatus = mGrid.GetStatusSnapshot();
+			worldLightingReady = mGridLighting.PrepareFrame(BuildGridServices(renderer), mSettings,
+				gridStatus.cellCapacity, renderer.mFrameIndex, mStatus.simulationEpoch) && mGridLighting.IsWorldReady();
+			if (worldLightingReady)
+			{
+				std::array<const nri::Descriptor*, NRISmokeGrid::EvaluationDescriptorCount> gridLightingSnapshot = {};
+				if (mGrid.GetEvaluationStorageDescriptors(gridLightingSnapshot))
+					mGridLighting.PublishGridSnapshot(gridLightingSnapshot, mGrid.GetFieldPing(), mSettings.gridCellSize);
+			}
+		}
+	};
+	prepareGridOwners();
 	const uint32_t previousGeneration = mEmitters.GetGeneration();
 	mEmitters.Gather(mStatus.simulationEpoch, weaponEvents, mStyles, mPendingCommands, mNextCommandSerial, mSettings.traceMode);
-	if (previousGeneration != 0 && previousGeneration != mEmitters.GetGeneration())
+	const bool styleLayoutInvalidated = previousGeneration != 0 && previousGeneration != mEmitters.GetGeneration();
+	if (styleLayoutInvalidated)
 	{
 		mStatus.simulationEpoch = std::max(1u, mStatus.simulationEpoch + 1u);
 		mNeedsClear = true;
+		mStatus.resetReason = "style-layout";
+		mStatus.gpuStatsValid = false;
 		for (NRISmokeInjectionCommandGpu& command : mPendingCommands) command.epoch = mStatus.simulationEpoch;
+		mGrid.Reset(mStatus.simulationEpoch, mStatus.resetReason);
+		mGridLighting.Reset(mStatus.simulationEpoch, mStatus.resetReason);
+		prepareGridOwners();
 	}
-	mStatus.representationRequested = mSettings.representation;
-	const bool gridReady = mGrid.PrepareFrame(BuildGridServices(renderer), mSettings,
-		renderer.mFrameIndex, mStatus.simulationEpoch);
-	mStatus.gridReady = mSettings.representation != 0u && gridReady && mGrid.GetStatusSnapshot().resourcesReady;
-	mStatus.representationEffective = mStatus.gridReady ? mSettings.representation : 0u;
-	mStatus.representationFallback = mSettings.representation != 0u && !mStatus.gridReady ? "grid-unavailable" : "none";
-	if (mStatus.gridReady &&
-		(mSettings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy || mSettings.multipleScatter || mSettings.selfShadow))
+
+	auto buildAuthorityRequest = [&]()
 	{
-		const NRISmokeGridStatusSnapshot& gridStatus = mGrid.GetStatusSnapshot();
-		if (!mGridLighting.PrepareFrame(BuildGridServices(renderer), mSettings, gridStatus.cellCapacity,
-			renderer.mFrameIndex, mStatus.simulationEpoch))
-			mStatus.representationFallback = "world-lighting-unavailable/legacy-emissive";
-		else
+		NRISmokeAuthorityRequest request = {};
+		request.enabled = true;
+		request.requestedRepresentation = mSettings.representation;
+		request.gridReady = mStatus.gridReady;
+		request.worldLightingRequired = worldLightingRequired;
+		request.worldLightingReady = worldLightingReady;
+		return request;
+	};
+	NRISmokeAuthorityRequest authorityRequest = buildAuthorityRequest();
+	NRISmokeAuthorityDecision authorityDecision = mAuthority.Resolve(authorityRequest);
+	const NRISmokeAuthoritySnapshot previousAuthority = mAuthority.GetSnapshot();
+	bool authorityTransition = !previousAuthority.operational || previousAuthority.mode != authorityDecision.mode;
+	if (authorityTransition && previousAuthority.operational)
+	{
+		// Readiness can change while queued work drains. Resolve once more before
+		// any state mutation so a transient lighting failure cannot clear a valid
+		// committed grid merely by proposing a fallback.
+		renderer.WaitForCommandsTracked();
+		prepareGridOwners();
+		authorityRequest = buildAuthorityRequest();
+		authorityDecision = mAuthority.Resolve(authorityRequest);
+		authorityTransition = previousAuthority.mode != authorityDecision.mode;
+	}
+	bool resourcesReady = true;
+	const bool previousParticles = previousAuthority.mode == NRISmokeAuthorityMode::Particles ||
+		previousAuthority.mode == NRISmokeAuthorityMode::Compare;
+	const bool targetParticles = authorityDecision.mode == NRISmokeAuthorityMode::Particles ||
+		authorityDecision.mode == NRISmokeAuthorityMode::Compare;
+	const bool isolatedTargetAttempt = authorityTransition && previousAuthority.operational && previousParticles != targetParticles;
+	if (previousAuthority.operational && mResourceStyleCapacity != (uint32_t)mStyles.size() &&
+		!EnsureResources(renderer, previousAuthority.effectiveRepresentation))
+	{
+		mAuthority.Disable(mSettings.representation, renderer.mFrameIndex, "style-resource-rebuild-failed");
+		PublishAuthorityStatus("failed", "style-resource-rebuild-failed-disabled");
+		return true;
+	}
+	if (isolatedTargetAttempt)
+		resourcesReady = RebuildAuthorityResourcesTransactional(renderer, authorityDecision.effectiveRepresentation);
+	else
+		resourcesReady = EnsureResources(renderer, authorityDecision.effectiveRepresentation);
+	if (!resourcesReady)
+	{
+		const bool previousGrid = previousAuthority.mode == NRISmokeAuthorityMode::Grid ||
+			previousAuthority.mode == NRISmokeAuthorityMode::Compare;
+		const bool oldAuthorityInvalidated = gridLayoutInvalidated || styleLayoutInvalidated;
+		const bool previousGridLightingReady = !previousAuthority.worldLightingRequired ||
+			mGridLighting.IsWorldReady();
+		const bool oldAuthorityStillSafe = !oldAuthorityInvalidated &&
+			(!previousGrid || (mGrid.GetStatusSnapshot().resourcesReady && previousGridLightingReady));
+		if (previousAuthority.operational && isolatedTargetAttempt && oldAuthorityStillSafe)
 		{
-			std::array<const nri::Descriptor*, NRISmokeGrid::EvaluationDescriptorCount> gridLightingSnapshot = {};
-			if (mGrid.GetEvaluationStorageDescriptors(gridLightingSnapshot))
-				mGridLighting.PublishGridSnapshot(gridLightingSnapshot, mGrid.GetFieldPing(), mSettings.gridCellSize);
+			// The candidate allocation was isolated. Continue with the last safe
+			// authority and its last validated state; target preparation did not
+			// advance the authority-transition epoch. Do
+			// not simulate with target settings or consume this frame's one-shot
+			// commands until the requested backend can be prepared coherently.
+			PublishAuthorityStatus("failed-retained", "target-allocation-failed-retained-current");
+			AppendSyntheticCommand(renderer);
+			mStatus.particleSimulationDispatches = 0u;
+			mStatus.gridSimulationDispatches = 0u;
+			mStatus.particleOpticalDispatches = 0u;
+			mStatus.gridOpticalDispatches = 0u;
+			mStatus.particleCommandsRouted = 0u;
+			mStatus.gridCommandsRouted = 0u;
+			return true;
+		}
+		mAuthority.Disable(mSettings.representation, renderer.mFrameIndex, "authority-resource-allocation-failed");
+		PublishAuthorityStatus("failed", isolatedTargetAttempt ? "resource-allocation-failed" : "resource-rebuild-failed-disabled");
+		return true;
+	}
+	if (authorityTransition)
+	{
+		std::vector<NRISmokeInjectionCommandGpu> transitionCommands = std::move(mPendingCommands);
+		Reset("authority-transition");
+		mPendingCommands = std::move(transitionCommands);
+		mStatus.preparedFrame = renderer.mFrameIndex;
+		mLastPreparedFrame = renderer.mFrameIndex;
+		for (NRISmokeInjectionCommandGpu& command : mPendingCommands)
+			command.epoch = mStatus.simulationEpoch;
+		if (authorityDecision.mode == NRISmokeAuthorityMode::Grid || authorityDecision.mode == NRISmokeAuthorityMode::Compare)
+		{
+			prepareGridOwners();
+			authorityRequest = buildAuthorityRequest();
+			const NRISmokeAuthorityDecision postResetDecision = mAuthority.Resolve(authorityRequest);
+			if (postResetDecision.mode != authorityDecision.mode)
+			{
+				mAuthority.Disable(mSettings.representation, renderer.mFrameIndex, "authority-post-reset-readiness-failed");
+				PublishAuthorityStatus("failed", "post-reset-readiness-failed");
+				return true;
+			}
+			authorityDecision = postResetDecision;
 		}
 	}
-	if (!EnsureResources(renderer))
-		return false;
+	mAuthority.Commit(authorityRequest, authorityDecision, renderer.mFrameIndex);
+	PublishAuthorityStatus(authorityTransition ? "completed" : "none");
+	const NRISmokeAuthoritySnapshot& authority = mAuthority.GetSnapshot();
+	if (authority.mode == NRISmokeAuthorityMode::Grid)
+	{
+		mMayHaveParticleSmoke = false;
+		mLatestParticleDeathSeconds = 0.0;
+		mStatus.activeParticles = 0u;
+		mStatus.spawnedParticles = 0u;
+		mStatus.expiredParticles = 0u;
+		mStatus.liveEvictions = 0u;
+		mStatus.columnOverflow = 0u;
+		mStatus.wideParticlesProjected = 0u;
+		mStatus.wideGlobalDrops = 0u;
+		mStatus.fineColumnReferences = 0u;
+		mStatus.wideCellReferences = 0u;
+		mStatus.globalDepthReferences = 0u;
+		mStatus.referenceInvalidLinks = 0u;
+		mStatus.referenceTraversalLimitExits = 0u;
+		mStatus.fineTierParticles = 0u;
+		mStatus.wideTierParticles = 0u;
+		mStatus.globalTierParticles = 0u;
+		mStatus.fineOccupiedCells = 0u;
+		mStatus.wideOccupiedCells = 0u;
+		mStatus.globalOccupiedSlices = 0u;
+		mStatus.fineMaximumCellReferences = 0u;
+		mStatus.wideMaximumCellReferences = 0u;
+		mStatus.globalMaximumCellReferences = 0u;
+		mStatus.maximumDepthSpan = 0u;
+		mStatus.maximumCandidatesPerFroxel = 0u;
+	}
 	AppendSyntheticCommand(renderer);
 	return RecordSimulation(renderer);
 }
@@ -593,6 +1013,15 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	if (mLastSimulatedFrame == renderer.mFrameIndex)
 		return true;
 	mLastSimulatedFrame = renderer.mFrameIndex;
+	const NRISmokeAuthorityMode authorityMode = mAuthority.GetSnapshot().mode;
+	const bool particleAuthority = authorityMode == NRISmokeAuthorityMode::Particles || authorityMode == NRISmokeAuthorityMode::Compare;
+	const bool gridAuthority = authorityMode == NRISmokeAuthorityMode::Grid || authorityMode == NRISmokeAuthorityMode::Compare;
+	mStatus.particleSimulationDispatches = 0u;
+	mStatus.gridSimulationDispatches = 0u;
+	mStatus.particleOpticalDispatches = 0u;
+	mStatus.gridOpticalDispatches = 0u;
+	mStatus.particleCommandsRouted = 0u;
+	mStatus.gridCommandsRouted = 0u;
 	const double now = PlayClock > 0 ? (double)PlayClock / 120.0 : 0.0;
 	const float elapsed = mLastGameplaySeconds < 0.0 ? 0.0f : (float)std::max(0.0, std::min(0.25, now - mLastGameplaySeconds));
 	mLastGameplaySeconds = now;
@@ -601,7 +1030,8 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	uint32_t substeps = std::min((uint32_t)std::floor(mAccumulator / step), mSettings.maxSubsteps);
 	mAccumulator -= (float)substeps * step;
 	mStatus.simulationSubsteps = substeps;
-	mParticleSimulationSeconds += (double)substeps * (double)step * (double)mSettings.timeScale;
+	if (particleAuthority)
+		mParticleSimulationSeconds += (double)substeps * (double)step * (double)mSettings.timeScale;
 
 	CommandSlot& slot = mCommandSlots[std::min(renderer.mFrameBuffer->mCurrentQueuedFrameIndex, (uint32_t)mCommandSlots.size() - 1)];
 	const uint32_t commandCount = std::min((uint32_t)mPendingCommands.size(), kMaxCommands);
@@ -609,7 +1039,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	mStatus.commandsUploadedTotal += commandCount;
 	mStatus.styleCount = (uint32_t)mStyles.size();
 	mStatus.commandsDropped += (uint32_t)mPendingCommands.size() - commandCount;
-	if (commandCount > 0u)
+	if (commandCount > 0u && particleAuthority)
 	{
 		mMayHaveParticleSmoke = true;
 		for (uint32_t i = 0; i < commandCount; ++i)
@@ -620,17 +1050,24 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 					mParticleSimulationSeconds + (double)std::max(mStyles[styleIndex].lifetime, 0.0f));
 		}
 	}
-	else if (mMayHaveParticleSmoke && mParticleSimulationSeconds >= mLatestParticleDeathSeconds)
+	else if (particleAuthority && mMayHaveParticleSmoke && mParticleSimulationSeconds >= mLatestParticleDeathSeconds)
 	{
 		mMayHaveParticleSmoke = false;
 	}
+	else if (!particleAuthority)
+	{
+		mMayHaveParticleSmoke = false;
+		mLatestParticleDeathSeconds = 0.0;
+	}
+	mStatus.particleCommandsRouted = particleAuthority ? commandCount : 0u;
+	mStatus.gridCommandsRouted = gridAuthority ? commandCount : 0u;
 	if (commandCount > 0 && !UploadBytes(renderer, slot.upload, mPendingCommands.data(), (uint64_t)commandCount * sizeof(NRISmokeInjectionCommandGpu)))
 		return false;
 	if (!UploadBytes(renderer, slot.styleUpload, mStyles.data(), mStyles.size() * sizeof(NRISmokeStyleGpu)))
 		return false;
-	mPendingCommands.clear();
 
 	const bool firstWorldUse = !mResourcesInitialized;
+	const bool firstParticleResourceUse = !mParticleResourcesInitialized;
 	const bool firstSlotUse = !slot.initialized;
 	nri::BufferBarrierDesc uploadBarriers[4] = {};
 	uploadBarriers[0].buffer = slot.styleUpload.buffer; uploadBarriers[0].after = NRIResourceCopySourceAccess();
@@ -643,40 +1080,64 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	if (commandCount > 0)
 		renderer.mFrameBuffer->mCore.CmdCopyBuffer(*renderer.mFrameBuffer->mCommandBuffer, *slot.device.buffer, 0, *slot.upload.buffer, 0, (uint64_t)commandCount * sizeof(NRISmokeInjectionCommandGpu));
 
-	nri::BufferBarrierDesc compute[2 + kSmokeBarrierBufferCount] = {};
-	nri::Buffer* computeBuffers[] = { mStyleBuffer.buffer, slot.device.buffer, mParticles.buffer, mControl.buffer,
-		mFineCells.buffer, mReferenceNext.buffer, mFroxelMedium.buffer, mFroxelIntegrated.buffer,
-		mWideCells.buffer, mGlobalDepthCells.buffer, mFroxelPhase.buffer, mFroxelSource.buffer, mOccupiedFroxelIndices.buffer,
-		mIndirectHistory.buffer, mIndirectScratch.buffer, mParticleDirectionalVisibility.buffer,
-		mEmissiveCurrent.buffer, mEmissiveTemporal.buffer, mEmissiveHistory.buffer,
-		mDirectCurrent.buffer, mDirectHistory.buffer };
-	for (uint32_t i = 0; i < 2 + kSmokeBarrierBufferCount; ++i)
+	std::vector<NRIBufferResource*> persistentStorage = { &mParticles, &mControl, &mReferenceNext,
+		&mParticleDirectionalVisibility, &mCompatibilityStorage };
+	std::vector<NRIBufferResource*> viewStorage = { &mFineCells, &mFroxelMedium, &mFroxelIntegrated,
+		&mWideCells, &mGlobalDepthCells, &mFroxelPhase, &mFroxelSource, &mOccupiedFroxelIndices,
+		&mIndirectHistory, &mIndirectScratch, &mEmissiveCurrent, &mEmissiveTemporal, &mEmissiveHistory,
+		&mDirectCurrent, &mDirectHistory };
+	std::vector<nri::BufferBarrierDesc> compute;
+	compute.reserve(2u + persistentStorage.size() + viewStorage.size());
+	nri::BufferBarrierDesc styleBarrier = {};
+	styleBarrier.buffer = mStyleBuffer.buffer;
+	styleBarrier.before = NRIResourceCopyDestinationAccess();
+	styleBarrier.after = NRIResourceComputeShaderResourceAccess();
+	compute.push_back(styleBarrier);
+	nri::BufferBarrierDesc commandBarrier = {};
+	commandBarrier.buffer = slot.device.buffer;
+	commandBarrier.before = NRIResourceCopyDestinationAccess();
+	commandBarrier.after = NRIResourceComputeShaderResourceAccess();
+	compute.push_back(commandBarrier);
+	auto appendStorageTransition = [&](NRIBufferResource* resource, bool initialized)
 	{
-		compute[i].buffer = computeBuffers[i];
-		compute[i].after = i < 2 ? NRIResourceComputeShaderResourceAccess() : StorageAccess();
-	}
-	compute[0].before = NRIResourceCopyDestinationAccess();
-	compute[1].before = NRIResourceCopyDestinationAccess();
-	if (!firstWorldUse)
-	{
-		compute[2].before = StorageAccess();
-		compute[3].before = StorageAccess();
-		if (mControlCopyPending) compute[3].before = NRIResourceCopySourceAccess();
-	}
-	if (mViewResourcesInitialized)
-		for (uint32_t i = 4; i < 2 + kSmokeBarrierBufferCount; ++i) compute[i].before = StorageAccess();
+		if (resource == nullptr || resource->buffer == nullptr)
+			return;
+		nri::BufferBarrierDesc transition = {};
+		transition.buffer = resource->buffer;
+		transition.before = initialized ? StorageAccess() : nri::AccessStage{};
+		if (resource == &mControl && mControlCopyPending)
+			transition.before = NRIResourceCopySourceAccess();
+		transition.after = StorageAccess();
+		compute.push_back(transition);
+	};
+	appendStorageTransition(&mControl, !firstWorldUse);
+	appendStorageTransition(&mParticles, !firstParticleResourceUse);
+	appendStorageTransition(&mReferenceNext, !firstParticleResourceUse);
+	appendStorageTransition(&mParticleDirectionalVisibility, !firstParticleResourceUse);
+	appendStorageTransition(&mCompatibilityStorage, !firstParticleResourceUse);
+	for (NRIBufferResource* resource : viewStorage) appendStorageTransition(resource, mViewResourcesInitialized);
 	mControlCopyPending = false;
 	slot.initialized = true;
 	mResourcesInitialized = true;
+	mParticleResourcesInitialized = true;
 	mViewResourcesInitialized = true;
-	nri::BarrierDesc computeBarrier = {}; computeBarrier.buffers = compute; computeBarrier.bufferNum = 2 + kSmokeBarrierBufferCount;
+	nri::BarrierDesc computeBarrier = {}; computeBarrier.buffers = compute.data(); computeBarrier.bufferNum = (uint32_t)compute.size();
 	renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, computeBarrier);
 
 	const nri::Descriptor* inputs[] = { mStyleBuffer.shaderView, slot.device.shaderView };
-	std::array<const nri::Descriptor*, kSmokeStorageDescriptorCount> outputs = { mParticles.storageView, mControl.storageView, mFineCells.storageView, mReferenceNext.storageView,
+	const nri::Descriptor* particleView = mParticles.storageView != nullptr ? mParticles.storageView : mCompatibilityParticleView;
+	const nri::Descriptor* cellView = mFineCells.storageView != nullptr ? mFineCells.storageView : mCompatibilityCellView;
+	const nri::Descriptor* wideCellView = mWideCells.storageView != nullptr ? mWideCells.storageView : mCompatibilityCellView;
+	const nri::Descriptor* globalCellView = mGlobalDepthCells.storageView != nullptr ? mGlobalDepthCells.storageView : mCompatibilityCellView;
+	const nri::Descriptor* scalarView = mCompatibilityStorage.storageView;
+	const nri::Descriptor* referenceView = mReferenceNext.storageView != nullptr ? mReferenceNext.storageView : scalarView;
+	const nri::Descriptor* directionalView = mParticleDirectionalVisibility.storageView != nullptr ? mParticleDirectionalVisibility.storageView : scalarView;
+	std::array<const nri::Descriptor*, kSmokeStorageDescriptorCount> outputs = { particleView, mControl.storageView, cellView, referenceView,
 		mFroxelMedium.storageView, mFroxelIntegrated.storageView, mWideCells.storageView, mGlobalDepthCells.storageView, mFroxelPhase.storageView,
 		mFroxelSource.storageView, mOccupiedFroxelIndices.storageView, mIndirectHistory.storageView, mIndirectScratch.storageView,
-		mParticleDirectionalVisibility.storageView, mEmissiveCurrent.storageView, mEmissiveTemporal.storageView, mEmissiveHistory.storageView };
+		directionalView, mEmissiveCurrent.storageView, mEmissiveTemporal.storageView, mEmissiveHistory.storageView };
+	outputs[6] = wideCellView;
+	outputs[7] = globalCellView;
 	std::array<const nri::Descriptor*, NRISmokeGrid::EvaluationDescriptorCount> gridDescriptors = {};
 	if (!mGrid.GetEvaluationStorageDescriptors(gridDescriptors))
 		gridDescriptors.fill(mControl.storageView);
@@ -696,7 +1157,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	NRISmokeConstants constants = {};
 	constants.frameIndex = renderer.mFrameIndex;
 	constants.simulationEpoch = mStatus.simulationEpoch;
-	constants.particleCapacity = mSettings.particleCapacity;
+	constants.particleCapacity = mResourceParticleCapacity;
 	constants.commandCount = commandCount;
 	constants.styleCount = (uint32_t)mStyles.size();
 	constants.froxelWidth = mResourceFroxelWidth;
@@ -718,9 +1179,21 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	};
 	auto storageBarrier = [&]()
 	{
-		nri::BufferBarrierDesc barriers[kSmokeBarrierBufferCount] = {};
-		for (uint32_t i = 0; i < kSmokeBarrierBufferCount; ++i) { barriers[i].buffer = computeBuffers[i + 2]; barriers[i].before = StorageAccess(); barriers[i].after = StorageAccess(); }
-		nri::BarrierDesc barrier = {}; barrier.buffers = barriers; barrier.bufferNum = kSmokeBarrierBufferCount;
+		std::vector<nri::BufferBarrierDesc> barriers;
+		barriers.reserve(persistentStorage.size() + viewStorage.size());
+		auto append = [&](NRIBufferResource* resource)
+		{
+			if (resource == nullptr || resource->buffer == nullptr)
+				return;
+			nri::BufferBarrierDesc item = {};
+			item.buffer = resource->buffer;
+			item.before = StorageAccess();
+			item.after = StorageAccess();
+			barriers.push_back(item);
+		};
+		for (NRIBufferResource* resource : persistentStorage) append(resource);
+		for (NRIBufferResource* resource : viewStorage) append(resource);
+		nri::BarrierDesc barrier = {}; barrier.buffers = barriers.data(); barrier.bufferNum = (uint32_t)barriers.size();
 		renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, barrier);
 	};
 	renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
@@ -728,25 +1201,19 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 1, slot.bufferSet, nri::BindPoint::COMPUTE });
 	if (mNeedsClear)
 	{
-		constants.flags = 1;
+		constants.flags = 1u | (gridAuthority && !particleAuthority ? kSmokeFlagGridRepresentation : 0u);
 		const uint64_t froxelCount = (uint64_t)mResourceFroxelWidth * mResourceFroxelHeight * mResourceFroxelDepth;
-		const uint64_t wideCellCount = (uint64_t)kWideCellCount * mResourceFroxelDepth;
-		dispatch(NRISmokePass::Clear, Groups(std::max({ (uint64_t)mSettings.particleCapacity, froxelCount, wideCellCount, (uint64_t)mResourceFroxelDepth })));
+		const uint64_t particleCount = particleAuthority ? (uint64_t)mResourceParticleCapacity : 0u;
+		const uint64_t wideCellCount = particleAuthority ? (uint64_t)kWideCellCount * mResourceFroxelDepth : 0u;
+		dispatch(NRISmokePass::Clear, Groups(std::max({ particleCount, froxelCount, wideCellCount, (uint64_t)mResourceFroxelDepth })));
 		storageBarrier();
 		mNeedsClear = false;
 	}
 	constants.flags = 0;
-	for (uint32_t i = 0; i < substeps; ++i)
-	{
-		dispatch(NRISmokePass::Simulate, Groups(mSettings.particleCapacity));
-		storageBarrier();
-	}
-	if (commandCount > 0)
-	{
-		dispatch(NRISmokePass::Spawn, Groups(commandCount));
-		storageBarrier();
-	}
-	if (mStatus.representationEffective != 0u)
+	// Compare mode validates the grid prerequisite before mutating particles.
+	// A failed grid record can therefore retain and retry the command batch
+	// without spawning the particle side twice.
+	if (gridAuthority)
 	{
 		NRISmokeGridFrameDesc gridFrame = {};
 		gridFrame.frameIndex = renderer.mFrameIndex;
@@ -760,10 +1227,28 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		if (!mGrid.RecordFrame(BuildGridServices(renderer), mSettings, gridFrame))
 		{
 			mStatus.gridReady = false;
-			mStatus.representationEffective = 0u;
-			mStatus.representationFallback = "grid-record-failed";
+			mStatus.representationFallback = "grid-record-retry";
+			mStatus.authorityReason = "grid-record-retry";
+			mStatus.authorityPreparation = "failed-retained";
+			mStatus.authorityOperational = false;
+			mStatus.gridCommandsRouted = 0u;
+			return true;
 		}
+		mStatus.gridSimulationDispatches++;
 	}
+	for (uint32_t i = 0; particleAuthority && i < substeps; ++i)
+	{
+		dispatch(NRISmokePass::Simulate, Groups(mResourceParticleCapacity));
+		mStatus.particleSimulationDispatches++;
+		storageBarrier();
+	}
+	if (particleAuthority && commandCount > 0)
+	{
+		dispatch(NRISmokePass::Spawn, Groups(commandCount));
+		mStatus.particleSimulationDispatches++;
+		storageBarrier();
+	}
+	mPendingCommands.clear();
 	return true;
 }
 
@@ -900,7 +1385,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	NRISmokeConstants constants = {};
 	constants.frameIndex = renderer.mFrameIndex;
 	constants.simulationEpoch = mStatus.simulationEpoch;
-	constants.particleCapacity = mSettings.particleCapacity;
+	constants.particleCapacity = mResourceParticleCapacity;
 	constants.styleCount = (uint32_t)mStyles.size();
 	constants.froxelWidth = mResourceFroxelWidth;
 	constants.froxelHeight = mResourceFroxelHeight;
@@ -1144,14 +1629,24 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	};
 	auto storageBarrier = [&]()
 	{
-		nri::BufferBarrierDesc barriers[kSmokeBarrierBufferCount] = {};
-		nri::Buffer* buffers[] = { mParticles.buffer, mControl.buffer, mFineCells.buffer, mReferenceNext.buffer,
-			mFroxelMedium.buffer, mFroxelIntegrated.buffer, mWideCells.buffer, mGlobalDepthCells.buffer, mFroxelPhase.buffer,
-			mFroxelSource.buffer, mOccupiedFroxelIndices.buffer, mIndirectHistory.buffer, mIndirectScratch.buffer,
-			mParticleDirectionalVisibility.buffer, mEmissiveCurrent.buffer, mEmissiveTemporal.buffer, mEmissiveHistory.buffer,
-			mDirectCurrent.buffer, mDirectHistory.buffer };
-		for (uint32_t i = 0; i < kSmokeBarrierBufferCount; ++i) { barriers[i].buffer = buffers[i]; barriers[i].before = StorageAccess(); barriers[i].after = StorageAccess(); }
-		nri::BarrierDesc barrier = {}; barrier.buffers = barriers; barrier.bufferNum = kSmokeBarrierBufferCount;
+		NRIBufferResource* resources[] = { &mParticles, &mControl, &mFineCells, &mReferenceNext,
+			&mFroxelMedium, &mFroxelIntegrated, &mWideCells, &mGlobalDepthCells, &mFroxelPhase,
+			&mFroxelSource, &mOccupiedFroxelIndices, &mIndirectHistory, &mIndirectScratch,
+			&mParticleDirectionalVisibility, &mEmissiveCurrent, &mEmissiveTemporal, &mEmissiveHistory,
+			&mDirectCurrent, &mDirectHistory, &mCompatibilityStorage };
+		std::vector<nri::BufferBarrierDesc> barriers;
+		barriers.reserve(std::size(resources));
+		for (NRIBufferResource* resource : resources)
+		{
+			if (resource->buffer == nullptr)
+				continue;
+			nri::BufferBarrierDesc item = {};
+			item.buffer = resource->buffer;
+			item.before = StorageAccess();
+			item.after = StorageAccess();
+			barriers.push_back(item);
+		}
+		nri::BarrierDesc barrier = {}; barrier.buffers = barriers.data(); barrier.bufferNum = (uint32_t)barriers.size();
 		renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, barrier);
 	};
 	renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
@@ -1165,32 +1660,44 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 5, slot.filteredSceneSet, nri::BindPoint::COMPUTE });
 	const bool multipleScatterReady = gridRepresentationActive && mSettings.multipleScatter &&
 		mGridLighting.GetStatusSnapshot().multipleScatterEffective;
-	if (worldEmissiveReady || multipleScatterReady)
-		mGridLighting.Record(BuildGridServices(renderer), mSettings, constants, emissiveResourcesReady);
+	if ((worldEmissiveReady || multipleScatterReady) &&
+		!mGridLighting.Record(BuildGridServices(renderer), mSettings, constants, emissiveResourcesReady))
+	{
+		mStatus.representationFallback = "grid-lighting-record-retry";
+		mStatus.authorityReason = "grid-lighting-record-retry";
+		mStatus.authorityPreparation = "failed-retained";
+		mStatus.authorityOperational = false;
+		return false;
+	}
 	const uint64_t froxelCount = (uint64_t)mResourceFroxelWidth * mResourceFroxelHeight * mResourceFroxelDepth;
-	const uint64_t wideCellCount = (uint64_t)kWideCellCount * mResourceFroxelDepth;
+	const NRISmokeAuthorityMode authorityMode = mAuthority.GetSnapshot().mode;
+	const bool renderParticles = authorityMode == NRISmokeAuthorityMode::Particles || authorityMode == NRISmokeAuthorityMode::Compare;
+	const bool renderGrid = authorityMode == NRISmokeAuthorityMode::Grid || authorityMode == NRISmokeAuthorityMode::Compare;
+	const uint64_t wideCellCount = renderParticles ? (uint64_t)kWideCellCount * mResourceFroxelDepth : 0u;
 	dispatch(NRISmokePass::Clear, Groups(std::max({ froxelCount, wideCellCount, (uint64_t)mResourceFroxelDepth })), 1, 1);
 	storageBarrier();
-	const bool renderParticles = mStatus.representationEffective != 1u;
-	const bool renderGrid = mStatus.representationEffective != 0u;
 	if (renderParticles)
 	{
-		dispatch(NRISmokePass::Bin, Groups(mSettings.particleCapacity), 1, 1);
+		dispatch(NRISmokePass::Bin, Groups(mResourceParticleCapacity), 1, 1);
+		mStatus.particleOpticalDispatches++;
 		storageBarrier();
 		if (directionalLightReady && constants.lightMode > 0u)
 		{
 			dispatch(NRISmokePass::LightDirectionalCarriers,
 				(kDirectionalProbesPerParticle + kDirectionalProbeThreadGroupWidth - 1u) / kDirectionalProbeThreadGroupWidth,
-				(mSettings.particleCapacity + kDirectionalParticleThreadGroupHeight - 1u) / kDirectionalParticleThreadGroupHeight, 1);
+				(mResourceParticleCapacity + kDirectionalParticleThreadGroupHeight - 1u) / kDirectionalParticleThreadGroupHeight, 1);
+			mStatus.particleOpticalDispatches++;
 			storageBarrier();
 		}
 		dispatch(NRISmokePass::EvaluateMedium, (mResourceFroxelWidth + 3) / 4, (mResourceFroxelHeight + 3) / 4, (mResourceFroxelDepth + 3) / 4);
+		mStatus.particleOpticalDispatches++;
 		storageBarrier();
 	}
 	if (renderGrid)
 	{
 		dispatch(NRISmokePass::EvaluateGrid, (mResourceFroxelWidth + 3) / 4,
 			(mResourceFroxelHeight + 3) / 4, (mResourceFroxelDepth + 3) / 4);
+		mStatus.gridOpticalDispatches++;
 		storageBarrier();
 	}
 	dispatch(NRISmokePass::LightPoint, Groups(froxelCount), 1, 1);
@@ -1328,7 +1835,7 @@ bool NRISmokeSystem::DispatchRoute(NRIRenderer& renderer, const NRISmokeRouteDes
 	mStatus.routePlacement = (uint32_t)route.placement;
 	mStatus.dlrrModeEffective = route.placement == NRISmokeRoutePlacement::DlrrPreUpscaleMainInput && route.supported ? 1u : 0u;
 	mStatus.exposureDomain = (uint32_t)route.exposureDomain;
-	if (!mSettings.enabled || !mStatus.mainViewEligible || !route.supported)
+	if (!mSettings.enabled || !mStatus.mainViewEligible || !route.supported || !mStatus.authorityOperational)
 	{
 		mStatus.volumeResolvedSlot = UINT32_MAX;
 		mStatus.volumeMetaSlot = UINT32_MAX;
@@ -1356,7 +1863,13 @@ bool NRISmokeSystem::DispatchRoute(NRIRenderer& renderer, const NRISmokeRouteDes
 		renderer.CopyTexture(renderer.GetFrameTexture(route.inputSlot), renderer.GetFrameTexture(route.outputSlot));
 		return true;
 	}
-	return RecordVolume(renderer, route);
+	if (RecordVolume(renderer, route))
+		return true;
+	mStatus.volumeResolvedSlot = UINT32_MAX;
+	mStatus.volumeMetaSlot = UINT32_MAX;
+	mStatus.volumeHistoryValid = false;
+	renderer.CopyTexture(renderer.GetFrameTexture(route.inputSlot), renderer.GetFrameTexture(route.outputSlot));
+	return true;
 }
 
 void NRISmokeSystem::QueueSyntheticInjection()
@@ -1506,7 +2019,8 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.volumeMetaSlot = UINT32_MAX;
 	mStatus.volumeHistoryAge = 0;
 	mStatus.volumeHistoryResetReason = mStatus.resetReason;
-	mEmitters.Reset();
+	if (std::strcmp(mStatus.resetReason, "authority-transition") != 0)
+		mEmitters.Reset();
 	mGrid.Reset(mStatus.simulationEpoch, mStatus.resetReason);
 	mGridLighting.Reset(mStatus.simulationEpoch, mStatus.resetReason);
 }
@@ -1546,6 +2060,7 @@ void NRISmokeSystem::DestroyResources(NRIRenderer& renderer)
 	auto destroy = [&](NRIBufferResource& resource) { renderer.DestroyBufferResource(resource); };
 	DestroyViewResources(renderer);
 	destroy(mStyleBuffer); destroy(mParticles); destroy(mControl); destroy(mReferenceNext); destroy(mParticleDirectionalVisibility);
+	DestroyCompatibilityDescriptors(renderer);
 	for (CommandSlot& slot : mCommandSlots)
 	{
 		destroy(slot.upload); destroy(slot.device); destroy(slot.styleUpload); destroy(slot.controlReadback);
@@ -1555,7 +2070,11 @@ void NRISmokeSystem::DestroyResources(NRIRenderer& renderer)
 	}
 	mControlCopyPending = false;
 	mResourcesInitialized = false;
+	mParticleResourcesInitialized = false;
 	mResourceParticleCapacity = mResourceStyleCapacity = 0;
+	mResourceParticlePayload = false;
+	mStatus.particlePayloadBytes = 0;
+	mStatus.descriptorSentinelBytes = 0;
 }
 
 void NRISmokeSystem::Shutdown(NRIRenderer& renderer)
@@ -1575,9 +2094,21 @@ void NRISmokeSystem::Shutdown(NRIRenderer& renderer)
 
 void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 {
-	Printf("NRI PT smoke representation: requested=%u effective=%u grid=%s fallback=%s particle_lifetime_active=%s\n",
-		mStatus.representationRequested, mStatus.representationEffective, mStatus.gridReady ? "ready" : "unavailable",
-		mStatus.representationFallback, mMayHaveParticleSmoke ? "yes" : "no");
+	Printf("NRI PT smoke representation: requested=%u effective=%u authority=%s operational=%s reason=%s "
+		"preparation=%s transition=%u@%u grid=%s fallback=%s particle_payload_bytes=%llu descriptor_sentinel_bytes=%llu "
+		"particle_payload_mib=%.3f descriptor_sentinel_mib=%.3f particle_lifetime_active=%s "
+		"particle_sim_dispatches=%u grid_sim_dispatches=%u particle_optical_dispatches=%u grid_optical_dispatches=%u "
+		"particle_commands=%u grid_commands=%u\n",
+		mStatus.representationRequested, mStatus.representationEffective, mStatus.authority,
+		mStatus.authorityOperational ? "yes" : "no", mStatus.authorityReason, mStatus.authorityPreparation,
+		mStatus.authorityTransitionSerial, mStatus.authorityTransitionFrame,
+		mStatus.gridReady ? "ready" : "unavailable", mStatus.representationFallback,
+		(unsigned long long)mStatus.particlePayloadBytes, (unsigned long long)mStatus.descriptorSentinelBytes,
+		(double)mStatus.particlePayloadBytes / (1024.0 * 1024.0),
+		(double)mStatus.descriptorSentinelBytes / (1024.0 * 1024.0),
+		mMayHaveParticleSmoke ? "yes" : "no", mStatus.particleSimulationDispatches,
+		mStatus.gridSimulationDispatches, mStatus.particleOpticalDispatches, mStatus.gridOpticalDispatches,
+		mStatus.particleCommandsRouted, mStatus.gridCommandsRouted);
 	mGrid.PrintStatus();
 	const NRISmokeGridLightingStatusSnapshot& world = mGridLighting.GetStatusSnapshot();
 	Printf("NRI PT smoke grid emissive: requested_backend=%u effective_backend=%u authority=%s ready=%s cells=%u ping=%u field_mib=%.2f work_mib=%.2f links_mib=%.2f proposal_mib=%.3f filter=%s filter_mib=%.2f total_mib=%.2f proposal=%s field_readback=0\n",
