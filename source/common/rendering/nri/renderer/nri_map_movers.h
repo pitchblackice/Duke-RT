@@ -18,6 +18,7 @@ enum NRIMapMoverChangeBits : uint32_t
 	NRIMapMoverChange_Visibility = 1u << 6,
 	NRIMapMoverChange_Light = 1u << 7,
 	NRIMapMoverChange_ValidationMismatch = 1u << 8,
+	NRIMapMoverChange_Lifecycle = 1u << 9,
 };
 
 struct NRIMapMoverDomainCounters
@@ -46,6 +47,7 @@ struct NRIMapMoverFrameStats
 	uint32_t addedGroups = 0;
 	uint32_t updatedGroups = 0;
 	uint32_t removedGroups = 0;
+	uint32_t changedLifecycles = 0;
 	uint32_t queuedGroups = 0;
 	uint32_t coalescedChanges = 0;
 	uint32_t resetCount = 0;

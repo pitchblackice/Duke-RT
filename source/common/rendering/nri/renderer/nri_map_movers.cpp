@@ -97,6 +97,15 @@ namespace
 		}
 	}
 
+	const char* GetLifecycleName(RuntimeMapMoverLifecycle lifecycle)
+	{
+		switch (lifecycle)
+		{
+		case RuntimeMapMoverLifecycle::Terminal: return "terminal";
+		default: return "active";
+		}
+	}
+
 	void ClassifyGeneration(
 		uint64_t previousGeneration,
 		uint64_t currentGeneration,
@@ -135,6 +144,7 @@ namespace
 		RuntimeMapMoverSnapshot& destination,
 		const RuntimeMapMoverSnapshot& source)
 	{
+		destination.lifecycle = source.lifecycle;
 		destination.topologyGeneration = source.topologyGeneration;
 		destination.geometryGeneration = source.geometryGeneration;
 		destination.materialGeneration = source.materialGeneration;
@@ -274,6 +284,11 @@ void NRIMapMoverSystem::IngestFrame(
 		const RuntimeMapMoverDeformerState previousPresentationDeformer = previous.deformer.presentationCurrent;
 		const bool topologyFactsChanged = !SameTopologyFacts(previous, snapshot);
 		uint32_t changeMask = NRIMapMoverChange_None;
+		if (previous.lifecycle != snapshot.lifecycle)
+		{
+			changeMask |= NRIMapMoverChange_Lifecycle;
+			m_frameStats.changedLifecycles++;
+		}
 		ClassifyGeneration(previous.topologyGeneration, snapshot.topologyGeneration,
 			topologyFactsChanged, NRIMapMoverChange_Topology, changeMask,
 			m_frameStats.changed.topology, m_frameStats.missedGenerations.topology,
@@ -442,7 +457,7 @@ void NRIMapMoverSystem::EmitPerfTrace(uint64_t frameIndex, NRIMapMoverPerfSink& 
 {
 	char line[2048];
 	std::snprintf(line, sizeof(line),
-		"PERF pt map mover summary NRI: frame=%llu build_serial=%llu map_epoch=%llu authority_revision=%llu authority_available=%u authority_sampled=%u presentation_fraction=%.6f captured=%u groups=%u members=%u added=%u updated=%u removed=%u queued=%u coalesced=%u resets=%u invalid_group=%u invalid_epoch=%u duplicate_group=%u mixed_epoch=%u changed_topology=%u changed_geometry=%u changed_material=%u changed_transform=%u changed_visibility=%u changed_light=%u missed_topology=%u missed_geometry=%u missed_material=%u missed_transform=%u missed_visibility=%u missed_light=%u redundant_topology=%u redundant_geometry=%u redundant_material=%u redundant_transform=%u redundant_visibility=%u redundant_light=%u regressed_topology=%u regressed_geometry=%u regressed_material=%u regressed_transform=%u regressed_visibility=%u regressed_light=%u\n",
+		"PERF pt map mover summary NRI: frame=%llu build_serial=%llu map_epoch=%llu authority_revision=%llu authority_available=%u authority_sampled=%u presentation_fraction=%.6f captured=%u groups=%u members=%u added=%u updated=%u removed=%u changed_lifecycle=%u queued=%u coalesced=%u resets=%u invalid_group=%u invalid_epoch=%u duplicate_group=%u mixed_epoch=%u changed_topology=%u changed_geometry=%u changed_material=%u changed_transform=%u changed_visibility=%u changed_light=%u missed_topology=%u missed_geometry=%u missed_material=%u missed_transform=%u missed_visibility=%u missed_light=%u redundant_topology=%u redundant_geometry=%u redundant_material=%u redundant_transform=%u redundant_visibility=%u redundant_light=%u regressed_topology=%u regressed_geometry=%u regressed_material=%u regressed_transform=%u regressed_visibility=%u regressed_light=%u\n",
 		(unsigned long long)frameIndex,
 		(unsigned long long)m_frameStats.buildSerial,
 		(unsigned long long)m_frameStats.mapEpoch,
@@ -456,6 +471,7 @@ void NRIMapMoverSystem::EmitPerfTrace(uint64_t frameIndex, NRIMapMoverPerfSink& 
 		m_frameStats.addedGroups,
 		m_frameStats.updatedGroups,
 		m_frameStats.removedGroups,
+		m_frameStats.changedLifecycles,
 		m_frameStats.queuedGroups,
 		m_frameStats.coalescedChanges,
 		m_frameStats.resetCount,
@@ -499,11 +515,12 @@ void NRIMapMoverSystem::EmitPerfTrace(uint64_t frameIndex, NRIMapMoverPerfSink& 
 		for (const auto& member : group.members)
 		{
 			std::snprintf(line, sizeof(line),
-				"PERF pt map mover member NRI: frame=%llu group=0x%016llx map_epoch=%llu capability=%s owner_actor=%d owner_sector=%d lotag=%d hitag=%d sector=%d wall_offset=%d wall_count=%d flags=0x%x topology_generation=%llu geometry_generation=%llu material_generation=%llu transform_generation=%llu visibility_generation=%llu light_generation=%llu\n",
+				"PERF pt map mover member NRI: frame=%llu group=0x%016llx map_epoch=%llu capability=%s lifecycle=%s owner_actor=%d owner_sector=%d lotag=%d hitag=%d sector=%d wall_offset=%d wall_count=%d flags=0x%x topology_generation=%llu geometry_generation=%llu material_generation=%llu transform_generation=%llu visibility_generation=%llu light_generation=%llu\n",
 				(unsigned long long)frameIndex,
 				(unsigned long long)group.stableGroupId,
 				(unsigned long long)group.mapEpoch,
 				GetCapabilityName(group.capability),
+				GetLifecycleName(group.lifecycle),
 				group.ownerActorIndex,
 				group.ownerSectorIndex,
 				group.effectorLotag,

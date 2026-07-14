@@ -16,6 +16,15 @@ enum class RuntimeMapMoverCapability : uint8_t
 	MaterialOrLightOnly,
 };
 
+// Explicit game-owned lifecycle. Terminal authorities outlive the controller
+// actor that issued their final map state and remain authoritative until the
+// game advances the map epoch.
+enum class RuntimeMapMoverLifecycle : uint8_t
+{
+	Active,
+	Terminal,
+};
+
 enum RuntimeMapMoverMemberFlags : uint32_t
 {
 	RuntimeMapMoverMember_None = 0,
@@ -71,6 +80,7 @@ struct RuntimeMapMoverSnapshot
 	uint64_t stableGroupId = 0;
 	uint64_t mapEpoch = 0;
 	RuntimeMapMoverCapability capability = RuntimeMapMoverCapability::Unknown;
+	RuntimeMapMoverLifecycle lifecycle = RuntimeMapMoverLifecycle::Active;
 	int32_t ownerActorIndex = -1; // Diagnostics only, never persistent identity.
 	int32_t ownerSectorIndex = -1;
 	int32_t effectorLotag = 0;

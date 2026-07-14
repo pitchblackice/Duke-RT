@@ -48,6 +48,7 @@ This file is a combination of code from the following sources:
 #include "stats.h"
 #include "constants.h"
 #include "dukeactor.h"
+#include "runtime_map_movers.h"
 #include "v_video.h"
 
 #include <cstring>
@@ -2628,6 +2629,12 @@ void handle_se12(DDukeActor *actor, int planeonly)
 
 		if (actor->temp_data[3] == 1)
 		{
+			if (actor->spr.lotag == SE_12_LIGHT_SWITCH)
+			{
+				// The SE12 controller is one-shot, but the final sector/wall light
+				// state is durable game authority for the rest of this map epoch.
+				RetireRuntimeMapMoverAuthority(actor);
+			}
 			actor->Destroy();
 			return;
 		}

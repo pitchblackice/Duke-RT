@@ -1,9 +1,12 @@
 #include "ns.h"
 
 #include <algorithm>
+#include <limits>
 
 #include "duke3d.h"
+#include "printf.h"
 #include "runtime_map_movers.h"
+#include "serializer.h"
 
 BEGIN_DUKE_NS
 
@@ -14,9 +17,11 @@ namespace
 
 	struct MoverSource
 	{
-		DDukeActor* actor;
-		int sectorIndex;
-		int canonicalWallOffset;
+		DDukeActor* actor = nullptr;
+		int sectorIndex = -1;
+		int canonicalWallOffset = -1;
+		int actorIndex = -1;
+		int effectorLotag = 0;
 	};
 
 	struct MoverCandidate
@@ -26,8 +31,40 @@ namespace
 	};
 
 	TArray<RuntimeMapMoverSnapshot> MoverSnapshots;
+
+	struct TerminalMoverAuthorityRecord
+	{
+		uint64_t stableGroupId = 0;
+		int32_t ownerActorIndex = -1;
+		int32_t ownerSectorIndex = -1;
+		int32_t effectorLotag = 0;
+		int32_t effectorHitag = 0;
+	};
+
+	TArray<TerminalMoverAuthorityRecord> TerminalMoverAuthorities;
 	uint64_t MoverMapEpoch = 1;
 	uint64_t MoverRevision = 1;
+
+	FSerializer& Serialize(FSerializer& arc, const char* key, TerminalMoverAuthorityRecord& value,
+		TerminalMoverAuthorityRecord* def)
+	{
+		static TerminalMoverAuthorityRecord nullRecord;
+		if (def == nullptr)
+		{
+			def = &nullRecord;
+			if (arc.isReading()) value = {};
+		}
+		if (arc.BeginObject(key))
+		{
+			arc("group_id", value.stableGroupId, def->stableGroupId)
+				("actor_index", value.ownerActorIndex, def->ownerActorIndex)
+				("sector_index", value.ownerSectorIndex, def->ownerSectorIndex)
+				("lotag", value.effectorLotag, def->effectorLotag)
+				("hitag", value.effectorHitag, def->effectorHitag)
+				.EndObject();
+		}
+		return arc;
+	}
 
 	void HashBytes(uint64_t& hash, const void* data, size_t size)
 	{
@@ -203,6 +240,25 @@ namespace
 		return nullptr;
 	}
 
+	TerminalMoverAuthorityRecord* FindTerminalAuthorityForSector(
+		TArray<TerminalMoverAuthorityRecord>& authorities,
+		int sectorIndex)
+	{
+		for (auto& authority : authorities)
+			if (authority.ownerSectorIndex == sectorIndex) return &authority;
+		return nullptr;
+	}
+
+	bool SameTerminalOwner(
+		const RuntimeMapMoverSnapshot& live,
+		const TerminalMoverAuthorityRecord& terminal)
+	{
+		return live.ownerActorIndex == terminal.ownerActorIndex &&
+			live.ownerSectorIndex == terminal.ownerSectorIndex &&
+			live.effectorLotag == terminal.effectorLotag &&
+			live.effectorHitag == terminal.effectorHitag;
+	}
+
 	void AppendMember(RuntimeMapMoverSnapshot& snapshot, int sectorIndex, int wallOffset, int wallCount, uint32_t flags)
 	{
 		for (auto& member : snapshot.members)
@@ -262,7 +318,7 @@ namespace
 					RuntimeMapMoverMember_OwnsCeiling | RuntimeMapMoverMember_SharedVertexPropagation |
 					RuntimeMapMoverMember_AdjacencyUnproven;
 			AppendMember(candidate->snapshot, sectorIndex, wallOffset, wallCount, flags);
-			candidate->sources.Push({ actor, sectorIndex, wallOffset });
+			candidate->sources.Push({ actor, sectorIndex, wallOffset, actor->GetIndex(), actor->spr.lotag });
 
 			if (actor->spr.lotag == SE_0_ROTATING_SECTOR && actor->GetOwner() != nullptr && actor->GetOwner()->sector() != actor->sector())
 			{
@@ -270,17 +326,67 @@ namespace
 					(int)actor->GetOwner()->sector()->walls.Size(), RuntimeMapMoverMember_ControlOnly);
 			}
 		}
+
+		TArray<unsigned> prunedTerminalAuthorities;
+		for (unsigned authorityIndex = 0; authorityIndex < TerminalMoverAuthorities.Size(); ++authorityIndex)
+		{
+			const auto& authority = TerminalMoverAuthorities[authorityIndex];
+			if (authority.stableGroupId == 0 || authority.effectorLotag != SE_12_LIGHT_SWITCH ||
+				authority.ownerSectorIndex < 0 || (unsigned)authority.ownerSectorIndex >= sector.Size())
+			{
+				prunedTerminalAuthorities.Push(authorityIndex);
+				continue;
+			}
+			// A live controller with the same game-issued identity wins. This is a
+			// fail-closed guard for malformed or incompatible save data; normal SE12
+			// retirement destroys the actor before the next authority update.
+			if (auto live = FindCandidate(candidates, authority.stableGroupId))
+			{
+				if (!SameTerminalOwner(live->snapshot, authority))
+				{
+					DPrintf(DMSG_WARNING,
+						"Runtime mover terminal collision: group=0x%016llx terminal_actor=%d terminal_sector=%d live_actor=%d live_sector=%d; rejecting stale terminal authority.\n",
+						(unsigned long long)authority.stableGroupId,
+						authority.ownerActorIndex,
+						authority.ownerSectorIndex,
+						live->snapshot.ownerActorIndex,
+						live->snapshot.ownerSectorIndex);
+				}
+				prunedTerminalAuthorities.Push(authorityIndex);
+				continue;
+			}
+
+			const auto index = candidates.Reserve(1);
+			auto& candidate = candidates[index];
+			candidate.snapshot.stableGroupId = authority.stableGroupId;
+			candidate.snapshot.mapEpoch = MoverMapEpoch;
+			candidate.snapshot.capability = RuntimeMapMoverCapability::MaterialOrLightOnly;
+			candidate.snapshot.lifecycle = RuntimeMapMoverLifecycle::Terminal;
+			candidate.snapshot.ownerActorIndex = authority.ownerActorIndex;
+			candidate.snapshot.ownerSectorIndex = authority.ownerSectorIndex;
+			candidate.snapshot.effectorLotag = authority.effectorLotag;
+			candidate.snapshot.effectorHitag = authority.effectorHitag;
+			const int wallCount = (int)sector[authority.ownerSectorIndex].walls.Size();
+			AppendMember(candidate.snapshot, authority.ownerSectorIndex, -1, wallCount,
+				RuntimeMapMoverMember_ControlOnly);
+			candidate.sources.Push({ nullptr, authority.ownerSectorIndex, -1,
+				authority.ownerActorIndex, authority.effectorLotag });
+		}
+		for (unsigned index = prunedTerminalAuthorities.Size(); index > 0; --index)
+		{
+			TerminalMoverAuthorities.Delete(prunedTerminalAuthorities[index - 1]);
+		}
 	}
 
 	void HashSector(const MoverSource& source, RuntimeMapMoverCapability capability,
 		uint64_t& topology, uint64_t& geometry, uint64_t& material, uint64_t& visibility, uint64_t& light)
 	{
 		const auto actor = source.actor;
-		const auto sec = actor->sector();
+		const auto sec = actor != nullptr ? actor->sector() : &sector[source.sectorIndex];
 		const int wallCount = (int)sec->walls.Size();
 		HashValue(topology, source.sectorIndex);
 		HashValue(topology, source.canonicalWallOffset);
-		HashValue(topology, actor->spr.lotag);
+		HashValue(topology, source.effectorLotag);
 		HashValue(topology, wallCount);
 
 		const bool canonicalRigid =
@@ -361,7 +467,7 @@ namespace
 				[](const MoverSource& a, const MoverSource& b)
 				{
 					if (a.sectorIndex != b.sectorIndex) return a.sectorIndex < b.sectorIndex;
-					return a.actor->GetIndex() < b.actor->GetIndex();
+					return a.actorIndex < b.actorIndex;
 				});
 		}
 		if (candidate.snapshot.members.Size() > 1)
@@ -374,16 +480,23 @@ namespace
 				});
 		}
 
-		auto pose = CapturePose(candidate.sources[0].actor);
+		auto pose = candidate.sources[0].actor != nullptr
+			? CapturePose(candidate.sources[0].actor) : RuntimeMapMoverPose{};
 		for (const auto& source : candidate.sources)
 		{
-			if (!SamePose(pose, CapturePose(source.actor))) candidate.snapshot.capability = RuntimeMapMoverCapability::Unknown;
+			if (source.actor != nullptr && !SamePose(pose, CapturePose(source.actor)))
+				candidate.snapshot.capability = RuntimeMapMoverCapability::Unknown;
 		}
 		if (candidate.snapshot.capability == RuntimeMapMoverCapability::RigidTranslation ||
 			candidate.snapshot.capability == RuntimeMapMoverCapability::RigidTransform)
 		{
 			for (const auto& source : candidate.sources)
 			{
+				if (source.actor == nullptr)
+				{
+					candidate.snapshot.capability = RuntimeMapMoverCapability::Unknown;
+					break;
+				}
 				const int wallCount = (int)source.actor->sector()->walls.Size();
 				if (!HasCanonicalWallSpan(source.canonicalWallOffset, wallCount))
 				{
@@ -457,6 +570,7 @@ namespace
 			const auto& right = b[index];
 			if (left.stableGroupId != right.stableGroupId || left.mapEpoch != right.mapEpoch ||
 				left.capability != right.capability ||
+				left.lifecycle != right.lifecycle ||
 				left.ownerActorIndex != right.ownerActorIndex ||
 				left.ownerSectorIndex != right.ownerSectorIndex ||
 				left.effectorLotag != right.effectorLotag ||
@@ -503,8 +617,131 @@ namespace
 void ResetRuntimeMapMoverAuthority()
 {
 	MoverSnapshots.Clear();
+	TerminalMoverAuthorities.Clear();
 	if (++MoverMapEpoch == 0) MoverMapEpoch = 1;
 	if (++MoverRevision == 0) MoverRevision = 1;
+}
+
+void RetireRuntimeMapMoverAuthority(DDukeActor* actor)
+{
+	if (actor == nullptr || !actor->exists() || actor->sector() == nullptr ||
+		actor->spr.lotag != SE_12_LIGHT_SWITCH)
+	{
+		return;
+	}
+
+	TerminalMoverAuthorityRecord record = {};
+	record.stableGroupId = StableGroupId(actor);
+	record.ownerActorIndex = actor->GetIndex();
+	record.ownerSectorIndex = actor->sectno();
+	record.effectorLotag = actor->spr.lotag;
+	record.effectorHitag = actor->spr.hitag;
+	for (const auto& authority : TerminalMoverAuthorities)
+	{
+		if (authority.stableGroupId == record.stableGroupId &&
+			authority.ownerSectorIndex != record.ownerSectorIndex)
+		{
+			DPrintf(DMSG_WARNING,
+				"Runtime mover terminal collision: group=0x%016llx sectors=%d/%d; rejecting new terminal authority.\n",
+				(unsigned long long)record.stableGroupId,
+				authority.ownerSectorIndex,
+				record.ownerSectorIndex);
+			return;
+		}
+	}
+
+	if (auto existing = FindTerminalAuthorityForSector(TerminalMoverAuthorities, record.ownerSectorIndex))
+	{
+		*existing = record;
+	}
+	else if (TerminalMoverAuthorities.Size() >= sector.Size())
+	{
+		DPrintf(DMSG_WARNING,
+			"Runtime mover terminal capacity exhausted: terminals=%u sectors=%u; rejecting sector %d.\n",
+			TerminalMoverAuthorities.Size(), sector.Size(), record.ownerSectorIndex);
+	}
+	else
+	{
+		TerminalMoverAuthorities.Push(record);
+	}
+}
+
+void SerializeRuntimeMapMoverAuthority(FSerializer& arc)
+{
+	arc("runtime_map_mover_terminals", TerminalMoverAuthorities);
+	if (!arc.isReading()) return;
+
+	TArray<TerminalMoverAuthorityRecord> sanitized;
+	unsigned invalidRecords = 0;
+	unsigned collidingRecords = 0;
+	unsigned coalescedRecords = 0;
+	unsigned overflowRecords = 0;
+	for (const auto& record : TerminalMoverAuthorities)
+	{
+		if (record.stableGroupId == 0 || record.effectorLotag != SE_12_LIGHT_SWITCH ||
+			record.ownerActorIndex < 0 || record.ownerSectorIndex < 0 ||
+			(unsigned)record.ownerSectorIndex >= sector.Size())
+		{
+			invalidRecords++;
+			continue;
+		}
+
+		auto sameSector = FindTerminalAuthorityForSector(sanitized, record.ownerSectorIndex);
+		bool collidingGroup = false;
+		for (const auto& accepted : sanitized)
+		{
+			if (&accepted != sameSector && accepted.stableGroupId == record.stableGroupId)
+			{
+				collidingGroup = true;
+				break;
+			}
+		}
+		if (collidingGroup)
+		{
+			collidingRecords++;
+			continue;
+		}
+		if (sameSector != nullptr)
+		{
+			*sameSector = record;
+			coalescedRecords++;
+		}
+		else if (sanitized.Size() >= sector.Size())
+		{
+			overflowRecords++;
+		}
+		else
+		{
+			sanitized.Push(record);
+		}
+	}
+	TerminalMoverAuthorities = std::move(sanitized);
+	if (invalidRecords != 0 || collidingRecords != 0 || coalescedRecords != 0 || overflowRecords != 0)
+	{
+		DPrintf(DMSG_WARNING,
+			"Runtime mover terminal restore sanitized: invalid=%u collision=%u coalesced=%u overflow=%u retained=%u cap=%u.\n",
+			invalidRecords, collidingRecords, coalescedRecords, overflowRecords,
+			TerminalMoverAuthorities.Size(), sector.Size());
+	}
+}
+
+void RestoreRuntimeMapMoverActorIdentityAllocator()
+{
+	int maxActorIdentity = -1;
+	TSpriteIterator<DDukeActor> iterator;
+	while (auto actor = iterator.Next())
+	{
+		maxActorIdentity = std::max(maxActorIdentity, actor->GetIndex());
+	}
+	for (const auto& terminal : TerminalMoverAuthorities)
+	{
+		maxActorIdentity = std::max(maxActorIdentity, terminal.ownerActorIndex);
+	}
+	if (maxActorIdentity == std::numeric_limits<int>::max())
+	{
+		I_Error("Save game exhausted the actor identity range.");
+	}
+	leveltimer = maxActorIdentity + 1;
 }
 
 void UpdateRuntimeMapMoverAuthority()
