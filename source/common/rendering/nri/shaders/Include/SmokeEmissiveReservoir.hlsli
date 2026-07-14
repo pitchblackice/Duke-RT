@@ -12,10 +12,18 @@
 #define NRI_SMOKE_EMISSIVE_REFERENCE 0x800u
 #define NRI_SMOKE_EMISSIVE_RECORD_VALID 0x80000000u
 #define NRI_SMOKE_EMISSIVE_MOMENT_RECORD 0x40000000u
+#define NRI_SMOKE_GRID_LIGHT_WORLD_ENABLED 0x200000u
+#define NRI_SMOKE_EMISSIVE_LEGACY_GATHER_DISABLED 0x1000000u
+#define NRI_SMOKE_EMISSIVE_QUARTER_KEY 0x2000000u
 
 bool SmokeEmissiveGridFroxel(float4 phase)
 {
 	return (gSmokeConstants.Flags & NRI_SMOKE_DIRECT_GRID_ENABLED) != 0u && phase.w > 1.5;
+}
+
+bool SmokeEmissiveWorldFieldOwnsGrid(float4 phase)
+{
+	return SmokeEmissiveGridFroxel(phase) && (gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_WORLD_ENABLED) != 0u;
 }
 
 uint SmokeEmissiveLaneCount()
@@ -186,6 +194,8 @@ uint SmokeEmissiveWorldKey(float3 receiverPosition)
 		if (isfinite(candidate) && candidate > 0.0)
 			cellSize = candidate;
 	}
+	if ((gSmokeConstants.Flags & NRI_SMOKE_EMISSIVE_QUARTER_KEY) != 0u)
+		cellSize *= 0.25;
 	const int3 cell = (int3)floor(receiverPosition / cellSize);
 	return SmokeHash(asuint(cell.x) ^ SmokeHash(asuint(cell.y)) ^ SmokeHash(asuint(cell.z)) ^
 		SmokeHash(gSmokeConstants.SimulationEpoch));

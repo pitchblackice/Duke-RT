@@ -5,6 +5,7 @@
 #include "SmokeConstants.hlsli"
 #include "SmokeData.hlsli"
 #include "SmokeGridData.hlsli"
+#include "SmokeGridLightingData.hlsli"
 
 #define NRI_SMOKE_SET_INPUTS 0
 #define NRI_SMOKE_SET_BUFFERS 1
@@ -265,6 +266,12 @@ RWStructuredBuffer<float4> gSmokeRenderGridDynamicsA : register(u26, space1);
 RWStructuredBuffer<float4> gSmokeRenderGridDynamicsB : register(u27, space1);
 RWStructuredBuffer<SmokeDirectCacheRecord> gSmokeDirectCurrent : register(u28, space1);
 RWStructuredBuffer<SmokeDirectCacheRecord> gSmokeDirectHistory : register(u29, space1);
+RWStructuredBuffer<SmokeGridLightRecord> gSmokeGridLightCurrent : register(u30, space1);
+RWStructuredBuffer<SmokeGridLightRecord> gSmokeGridLightHistory : register(u31, space1);
+RWStructuredBuffer<uint> gSmokeGridLightActive : register(u32, space1);
+RWStructuredBuffer<SmokeGridLightControl> gSmokeGridLightControl : register(u33, space1);
+RWStructuredBuffer<uint4> gSmokeGridLightLinks : register(u34, space1);
+RWStructuredBuffer<SmokeGridLightRecord> gSmokeGridLightFiltered : register(u35, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);

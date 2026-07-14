@@ -5,6 +5,7 @@
 #include "nri_smoke_contracts.h"
 #include "nri_smoke_emitters.h"
 #include "nri_smoke_grid.h"
+#include "nri_smoke_grid_lighting.h"
 #include "v_video.h"
 
 #include <array>
@@ -255,6 +256,7 @@ private:
 	NRIBufferResource mDirectHistory;
 	NRISmokeEmitterSystem mEmitters;
 	NRISmokeGrid mGrid;
+	NRISmokeGridLighting mGridLighting;
 	std::vector<NRISmokeStyleGpu> mStyles;
 	std::vector<NRISmokeInjectionCommandGpu> mPendingCommands;
 	uint32_t mResourceParticleCapacity = 0;
@@ -275,6 +277,7 @@ private:
 	bool mControlCopyPending = false;
 	bool mResourcesInitialized = false;
 	bool mViewResourcesInitialized = false;
+	bool mResourceLegacyEmissiveFull = true;
 	bool mIndirectHistoryValid = false;
 	bool mEmissiveHistoryValid = false;
 	uint32_t mLastEmissiveReuseMode = 0;

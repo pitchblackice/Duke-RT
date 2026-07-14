@@ -1,0 +1,123 @@
+#ifndef NRI_SMOKE_GRID_LIGHTING_DATA_HLSLI
+#define NRI_SMOKE_GRID_LIGHTING_DATA_HLSLI
+
+#define NRI_SMOKE_GRID_LIGHT_LOBE_COUNT 6u
+#define NRI_SMOKE_GRID_LIGHT_RECORD_WORDS 24u
+#define NRI_SMOKE_GRID_LIGHT_MAX_HISTORY 64u
+
+#define NRI_SMOKE_GRID_LIGHT_EVIDENCE_SUPPORT 0x1u
+#define NRI_SMOKE_GRID_LIGHT_EVIDENCE_PHYSICAL_ZERO 0x2u
+#define NRI_SMOKE_GRID_LIGHT_EVIDENCE_VISIBLE 0x4u
+#define NRI_SMOKE_GRID_LIGHT_EVIDENCE_VALID 0x80u
+
+struct SmokeGridLightRecord
+{
+	uint Words[NRI_SMOKE_GRID_LIGHT_RECORD_WORDS];
+};
+
+struct SmokeGridLightControl
+{
+	uint ActiveCount;
+	uint SupportCount;
+	uint SourceCount;
+	uint ScheduledCount;
+	uint Samples;
+	uint Visible;
+	uint PhysicalZero;
+	uint Missing;
+	uint StructuralErrors;
+	uint OverflowRejects;
+	uint TemporalAccepted;
+	uint TemporalRejected;
+	uint LinksOpen;
+	uint LinksBlocked;
+	uint LinksStale;
+	uint CornerAccepted;
+	uint CornerRejected;
+	uint FilterAccepted;
+	uint FilterRejected;
+	uint MaximumAge;
+	uint FrameStamp;
+	uint SimulationEpoch;
+	uint FieldPing;
+	uint Flags;
+	uint Padding[8];
+};
+
+uint SmokeGridLightPackHalf2(float2 value)
+{
+	return f32tof16(value.x) | (f32tof16(value.y) << 16u);
+}
+
+float2 SmokeGridLightUnpackHalf2(uint value)
+{
+	return float2(f16tof32(value & 0xffffu), f16tof32(value >> 16u));
+}
+
+float SmokeGridLightLoadHalf(SmokeGridLightRecord record, uint halfIndex)
+{
+	const float2 pair = SmokeGridLightUnpackHalf2(record.Words[halfIndex >> 1u]);
+	return (halfIndex & 1u) == 0u ? pair.x : pair.y;
+}
+
+void SmokeGridLightStoreHalf(inout SmokeGridLightRecord record, uint halfIndex, float value)
+{
+	const uint wordIndex = halfIndex >> 1u;
+	float2 pair = SmokeGridLightUnpackHalf2(record.Words[wordIndex]);
+	if ((halfIndex & 1u) == 0u) pair.x = value; else pair.y = value;
+	record.Words[wordIndex] = SmokeGridLightPackHalf2(pair);
+}
+
+float3 SmokeGridLightMean(SmokeGridLightRecord record, uint lobe)
+{
+	const uint base = min(lobe, 5u) * 3u;
+	return float3(SmokeGridLightLoadHalf(record, base), SmokeGridLightLoadHalf(record, base + 1u), SmokeGridLightLoadHalf(record, base + 2u));
+}
+
+float3 SmokeGridLightSecondMoment(SmokeGridLightRecord record, uint lobe)
+{
+	const uint base = 18u + min(lobe, 5u) * 3u;
+	return float3(SmokeGridLightLoadHalf(record, base), SmokeGridLightLoadHalf(record, base + 1u), SmokeGridLightLoadHalf(record, base + 2u));
+}
+
+void SmokeGridLightStoreLobe(inout SmokeGridLightRecord record, uint lobe, float3 mean, float3 secondMoment)
+{
+	const uint meanBase = min(lobe, 5u) * 3u;
+	const uint momentBase = 18u + meanBase;
+	[unroll]
+	for (uint channel = 0u; channel < 3u; ++channel)
+	{
+		SmokeGridLightStoreHalf(record, meanBase + channel, mean[channel]);
+		SmokeGridLightStoreHalf(record, momentBase + channel, secondMoment[channel]);
+	}
+}
+
+uint SmokeGridLightBrickGeneration(SmokeGridLightRecord record) { return record.Words[18]; }
+uint SmokeGridLightSimulationEpoch(SmokeGridLightRecord record) { return record.Words[19]; }
+uint SmokeGridLightSampleCount(SmokeGridLightRecord record) { return record.Words[20] & 0xffu; }
+uint SmokeGridLightSequence(SmokeGridLightRecord record) { return (record.Words[20] >> 8u) & 0xffu; }
+float SmokeGridLightConfidence(SmokeGridLightRecord record) { return (float)((record.Words[20] >> 16u) & 0xffu) / 255.0; }
+uint SmokeGridLightEvidence(SmokeGridLightRecord record) { return (record.Words[20] >> 24u) & 0xffu; }
+uint SmokeGridLightLastUpdate(SmokeGridLightRecord record) { return record.Words[21] & 0xffffu; }
+uint SmokeGridLightAge(SmokeGridLightRecord record) { return record.Words[21] >> 16u; }
+
+void SmokeGridLightSetMetadata(inout SmokeGridLightRecord record, uint generation, uint epoch,
+	uint sampleCount, uint sequence, float confidence, uint evidence, uint frameIndex, uint age)
+{
+	record.Words[18] = generation;
+	record.Words[19] = epoch;
+	record.Words[20] = min(sampleCount, 255u) | (min(sequence, 255u) << 8u) |
+		((uint)round(saturate(confidence) * 255.0) << 16u) | ((evidence & 0xffu) << 24u);
+	record.Words[21] = (frameIndex & 0xffffu) | (min(age, 65535u) << 16u);
+	record.Words[22] = 0u;
+	record.Words[23] = 0u;
+}
+
+bool SmokeGridLightRecordValid(SmokeGridLightRecord record, uint generation, uint epoch)
+{
+	return SmokeGridLightBrickGeneration(record) == generation && SmokeGridLightSimulationEpoch(record) == epoch &&
+		(SmokeGridLightEvidence(record) & (NRI_SMOKE_GRID_LIGHT_EVIDENCE_SUPPORT | NRI_SMOKE_GRID_LIGHT_EVIDENCE_VALID)) ==
+		(NRI_SMOKE_GRID_LIGHT_EVIDENCE_SUPPORT | NRI_SMOKE_GRID_LIGHT_EVIDENCE_VALID);
+}
+
+#endif

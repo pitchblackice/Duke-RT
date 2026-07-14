@@ -62,7 +62,7 @@ void SmokeResolveLegacyEmissive(
 {
 	SmokeEmissiveReservoirRecord reservoir = SmokeUnpackEmissiveReservoir(gSmokeEmissiveTemporal[froxelIndex]);
 	const uint reuseMode = SmokeEmissiveReuseMode();
-	if (reuseMode >= 2u && SmokeEmissiveRecordValid(reservoir))
+	if (reuseMode >= 2u && (gSmokeConstants.Flags & NRI_SMOKE_EMISSIVE_LEGACY_GATHER_DISABLED) == 0u && SmokeEmissiveRecordValid(reservoir))
 	{
 		static const int3 offsets[6] = {
 			int3(1, 0, 0), int3(-1, 0, 0), int3(0, 1, 0),
@@ -178,6 +178,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 	const float4 medium = gSmokeFroxelMedium[froxelIndex];
 	const float4 phase = gSmokeFroxelPhase[froxelIndex];
+	if (SmokeEmissiveWorldFieldOwnsGrid(phase))
+		return;
 	if (medium.a <= 0.0 || !any(medium.rgb > 0.0))
 		return;
 	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;
@@ -221,7 +223,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float3 neighborhoodMinimum = center.MeanRadiance;
 	float3 neighborhoodMaximum = center.MeanRadiance;
 	const uint laneCount = SmokeEmissiveLaneCount();
-	if (SmokeEmissiveReuseMode() >= 2u)
+	if (SmokeEmissiveReuseMode() >= 2u && (gSmokeConstants.Flags & NRI_SMOKE_EMISSIVE_LEGACY_GATHER_DISABLED) == 0u)
 	{
 		static const int3 offsets[6] = {
 			int3(1, 0, 0), int3(-1, 0, 0), int3(0, 1, 0),

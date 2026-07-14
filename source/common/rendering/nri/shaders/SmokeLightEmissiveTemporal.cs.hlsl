@@ -94,6 +94,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 	const float4 medium = gSmokeFroxelMedium[froxelIndex];
 	const float4 phase = gSmokeFroxelPhase[froxelIndex];
+	if (SmokeEmissiveWorldFieldOwnsGrid(phase))
+		return;
 	const float anisotropy = phase.x;
 	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;
 

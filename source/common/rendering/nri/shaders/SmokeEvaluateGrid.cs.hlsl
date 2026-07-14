@@ -1,5 +1,7 @@
 #include "Include/SmokeResources.hlsli"
 #include "Include/SmokeFroxel.hlsli"
+#include "Include/SmokeGridLightingResources.hlsli"
+#include "Include/SmokeLighting.hlsli"
 
 #define NRI_SMOKE_GRID_MAX_FOOTPRINT_SAMPLES 2u
 #define NRI_SMOKE_GRID_MAX_DEPTH_SAMPLES 8u
@@ -75,7 +77,7 @@ void SmokeRenderGridSample(float3 worldPosition, float cellSize, out float4 scal
 	optical = lerp(lerp(o00, o10, blend.y), lerp(o01, o11, blend.y), blend.z);
 }
 
-void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 scalar, out float4 optical)
+void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 scalar, out float4 optical, out float3 source)
 {
 	const float sliceNearDepth = SmokeSliceNearDepth(froxel.z);
 	const float sliceFarDepth = SmokeSliceFarDepth(froxel.z);
@@ -93,6 +95,9 @@ void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 sca
 		1u, NRI_SMOKE_GRID_MAX_DEPTH_SAMPLES);
 	float4 integratedScalar = 0.0;
 	float4 integratedOptical = 0.0;
+	float3 integratedSource = 0.0;
+	float3 integratedWorldDebug = 0.0;
+	const uint worldDebugMode = (gSmokeConstants.Flags >> NRI_SMOKE_GRID_LIGHT_DEBUG_SHIFT) & 7u;
 	[loop]
 	for (uint footprintY = 0u; footprintY < footprintSampleCount.y; ++footprintY)
 	{
@@ -114,12 +119,48 @@ void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 sca
 				SmokeRenderGridSample(samplePosition, cellSize, sampleScalar, sampleOptical);
 				integratedScalar += sampleScalar;
 				integratedOptical += sampleOptical;
+				if ((gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_WORLD_ENABLED) != 0u && any(sampleOptical.rgb > 0.0))
+				{
+					float3 lobes[6];
+					float confidence;
+					if (SmokeGridLightSample(samplePosition, cellSize, lobes, confidence))
+					{
+						const float anisotropy = sampleOptical.w > 1e-6 ? clamp(sampleScalar.w / sampleOptical.w, -0.95, 0.95) : 0.0;
+						const float3 viewRay = normalize(samplePosition - gSmokeConstants.CameraPosition);
+						float3 phaseApplied = 0.0;
+						float3 lobeSum = 0.0;
+						[unroll]
+						for (uint lobe = 0u; lobe < 6u; ++lobe)
+						{
+							lobeSum += lobes[lobe];
+							phaseApplied += lobes[lobe] * SmokeHenyeyGreenstein(dot((float3)NRI_SMOKE_GRID_LIGHT_LOBE_AXES[lobe], viewRay), anisotropy);
+						}
+						float3 incidentContribution = max(phaseApplied * gSmokeConstants.RadianceScale, 0.0);
+						const float luminance = dot(incidentContribution, float3(0.2126, 0.7152, 0.0722));
+						if (luminance > gSmokeConstants.DeltaTime)
+							incidentContribution *= gSmokeConstants.DeltaTime / luminance;
+						integratedSource += max(sampleOptical.rgb * gSmokeConstants.DensityScale, 0.0) * incidentContribution;
+						if (worldDebugMode == 1u) integratedWorldDebug += min(lobeSum * 0.05, 4.0);
+						else if (worldDebugMode == 2u) integratedWorldDebug += confidence.xxx;
+						else if (worldDebugMode == 3u) integratedWorldDebug += min(abs(lobes[0] - lobes[1]) + abs(lobes[2] - lobes[3]) + abs(lobes[4] - lobes[5]), 4.0);
+						else if (worldDebugMode == 4u) integratedWorldDebug += float3(0.0, 1.0, 0.0);
+						else if (worldDebugMode == 5u) integratedWorldDebug += min(phaseApplied, 4.0);
+						else if (worldDebugMode == 6u) integratedWorldDebug += min(incidentContribution, 4.0);
+						else if (worldDebugMode == 7u)
+						{
+							const int3 keyCell = (int3)floor(samplePosition / cellSize);
+							const uint key = SmokeHash(asuint(keyCell.x) ^ SmokeHash(asuint(keyCell.y)) ^ SmokeHash(asuint(keyCell.z)));
+							integratedWorldDebug += float3(key & 255u, (key >> 8u) & 255u, (key >> 16u) & 255u) / 255.0;
+						}
+					}
+				}
 			}
 		}
 	}
 	const float sampleWeight = rcp((float)(footprintSampleCount.x * footprintSampleCount.y * depthSampleCount));
 	scalar = integratedScalar * sampleWeight;
 	optical = integratedOptical * sampleWeight;
+	source = (worldDebugMode == 0u ? integratedSource : integratedWorldDebug) * sampleWeight;
 }
 
 [numthreads(4, 4, 4)]
@@ -142,7 +183,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint froxelIndex = SmokeFroxelIndex(dispatchThreadId.x, dispatchThreadId.y, dispatchThreadId.z);
 	float4 scalar;
 	float4 optical;
-	SmokeRenderGridIntegrateFroxel(dispatchThreadId, cellSize, scalar, optical);
+	float3 source;
+	SmokeRenderGridIntegrateFroxel(dispatchThreadId, cellSize, scalar, optical, source);
 	// Deposition stores density-weighted sigma_t and sigma_s coefficients in
 	// inverse world units. Cell size controls sampling support only; dividing the
 	// coefficients by it again made the canonical eight-unit grid 8x too faint.
@@ -155,7 +197,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	// The fourth phase lane identifies grid materialization to the shared direct
 	// light passes. Particle evaluation retains the value 1.
 	gSmokeFroxelPhase[froxelIndex] = float4(anisotropy, optical.w, 1.0, 2.0);
-	gSmokeFroxelSource[froxelIndex] = 0.0;
+	gSmokeFroxelSource[froxelIndex] = float4(source, 0.0);
 	uint occupiedCapacity;
 	gSmokeOccupiedFroxelIndices.GetDimensions(occupiedCapacity, ignoredStride);
 	uint occupiedSlot = 0u;

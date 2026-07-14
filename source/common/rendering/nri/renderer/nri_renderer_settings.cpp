@@ -218,6 +218,11 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.emissiveLights = (bool)nri_ptsmokeemissivelights;
 	settings.emissiveReuseMode = (uint32_t)std::clamp((int)nri_ptsmokeemissivereuse, 0, 2);
 	settings.emissiveReference = (bool)nri_ptsmokeemissivereference;
+	settings.emissiveBackend = (uint32_t)std::clamp((int)nri_ptsmokeemissivebackend, 0, 3);
+	settings.emissiveWorldFilter = (bool)nri_ptsmokeemissiveworldfilter;
+	settings.emissiveWorldDebug = (uint32_t)std::clamp((int)nri_ptsmokeemissiveworlddebug, 0, 7);
+	settings.emissiveLegacyGatherDisabled = (bool)nri_ptsmokeemissivelegacygatherdisable;
+	settings.emissiveQuarterKey = (bool)nri_ptsmokeemissivequarterkey;
 	settings.emissiveSourceClamp = std::clamp((float)nri_ptsmokeemissiveclamp, 1.0f, 256.0f);
 	settings.directReuseMode = (uint32_t)std::clamp((int)nri_ptsmokedirectreuse, 0, 2);
 	settings.directReferenceMode = (uint32_t)std::clamp((int)nri_ptsmokedirectreference, 0, 2);

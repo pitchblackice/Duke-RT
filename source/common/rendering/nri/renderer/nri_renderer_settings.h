@@ -100,6 +100,11 @@ struct NRISmokeSettings
 	bool emissiveLights = true;
 	uint32_t emissiveReuseMode = 2;
 	bool emissiveReference = false;
+	uint32_t emissiveBackend = 0;
+	bool emissiveWorldFilter = false;
+	uint32_t emissiveWorldDebug = 0;
+	bool emissiveLegacyGatherDisabled = false;
+	bool emissiveQuarterKey = false;
 	float emissiveSourceClamp = 32.0f;
 	uint32_t directReuseMode = 2;
 	uint32_t directReferenceMode = 0;
