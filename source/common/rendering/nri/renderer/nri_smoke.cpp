@@ -332,9 +332,9 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 		!CreateBuffer(renderer, mOccupiedFroxelIndices, froxels * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mIndirectHistory, froxels * sizeof(NRISmokeIndirectCacheGpu), sizeof(NRISmokeIndirectCacheGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mIndirectScratch, froxels * sizeof(NRISmokeIndirectCacheGpu), sizeof(NRISmokeIndirectCacheGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
-		!CreateBuffer(renderer, mEmissiveCurrent, froxels * sizeof(NRISmokeEmissiveReservoirGpu), sizeof(NRISmokeEmissiveReservoirGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
-		!CreateBuffer(renderer, mEmissiveTemporal, froxels * sizeof(NRISmokeEmissiveReservoirGpu), sizeof(NRISmokeEmissiveReservoirGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
-		!CreateBuffer(renderer, mEmissiveHistory, froxels * sizeof(NRISmokeEmissiveReservoirGpu), sizeof(NRISmokeEmissiveReservoirGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
+		!CreateBuffer(renderer, mEmissiveCurrent, froxels * sizeof(NRISmokeEmissiveStorageGpu), sizeof(NRISmokeEmissiveStorageGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
+		!CreateBuffer(renderer, mEmissiveTemporal, froxels * sizeof(NRISmokeEmissiveStorageGpu), sizeof(NRISmokeEmissiveStorageGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
+		!CreateBuffer(renderer, mEmissiveHistory, froxels * sizeof(NRISmokeEmissiveStorageGpu), sizeof(NRISmokeEmissiveStorageGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mDirectCurrent, froxels * sizeof(NRISmokeDirectCacheGpu), sizeof(NRISmokeDirectCacheGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mDirectHistory, froxels * sizeof(NRISmokeDirectCacheGpu), sizeof(NRISmokeDirectCacheGpu), storage, nri::MemoryLocation::DEVICE, false, true))
 	{
@@ -347,6 +347,12 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer)
 	mViewResourcesInitialized = false;
 	mIndirectHistoryValid = false;
 	mEmissiveHistoryValid = false;
+	mStatus.emissiveHistoryValid = false;
+	mLastEmissiveFrame = UINT32_MAX;
+	mLastEmissiveRepresentation = UINT32_MAX;
+	mLastEmissiveLaneCount = 0;
+	mLastEmissiveLightMode = 0;
+	mLastEmissiveVisibilityBackend = 0;
 	mDirectHistoryValid = false;
 	mLastDirectFrame = UINT32_MAX;
 	mStatus.directHistoryValid = false;
@@ -466,6 +472,7 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 				mStatus.emissiveSpatialRejected = control.emissiveSpatialRejected;
 				mStatus.emissiveFinalEvaluations = control.emissiveFinalEvaluations;
 				mStatus.emissiveSourceClamps = control.emissiveSourceClamps;
+				mStatus.emissiveRemovedEnergy = control.emissiveRemovedEnergy;
 				mStatus.emissiveMaximumAge = control.emissiveMaximumAge;
 				mStatus.emissiveReferenceSamples = control.emissiveReferenceSamples;
 				mStatus.emissiveReferenceRays = control.emissiveReferenceRays;
@@ -945,6 +952,8 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	const bool gridRepresentationActive = mStatus.representationEffective != 0u;
 	const uint32_t effectiveDirectReuseMode = gridRepresentationActive ? mSettings.directReuseMode : 0u;
 	const uint32_t directVisibilityBackend = constants.filteredVisibilityEnabled & 0xfu;
+	const uint32_t emissiveLaneCount = gridRepresentationActive ? (1u << std::min(mSettings.quality, 2u)) : 1u;
+	const uint32_t emissiveVisibilityBackend = constants.filteredVisibilityEnabled & 0xfu;
 	const bool directHistoryCompatible = gridRepresentationActive && mDirectHistoryValid &&
 		!renderer.mResetHistory && mLastDirectFrame + 1u == renderer.mFrameIndex &&
 		mLastDirectReuseMode == effectiveDirectReuseMode &&
@@ -971,7 +980,11 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	const bool emissiveHistoryCompatible = mEmissiveHistoryValid && !renderer.mResetHistory &&
 		mLastEmissiveFrame + 1u == renderer.mFrameIndex &&
 		mLastEmissiveReuseMode == mSettings.emissiveReuseMode &&
-		mLastEmissiveGeneration == emissiveGeneration;
+		mLastEmissiveGeneration == emissiveGeneration &&
+		mLastEmissiveRepresentation == mStatus.representationEffective &&
+		mLastEmissiveLaneCount == emissiveLaneCount &&
+		mLastEmissiveLightMode == constants.lightMode &&
+		mLastEmissiveVisibilityBackend == emissiveVisibilityBackend;
 	if (emissiveHistoryCompatible)
 		constants.flags |= 0x100u;
 	constants.flags |= (mSettings.emissiveReuseMode & 3u) << 9u;
@@ -979,6 +992,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		constants.flags |= 0x800u;
 	mStatus.emissiveReuseModeRequested = mSettings.emissiveReuseMode;
 	mStatus.emissiveReuseModeEffective = emissiveLightsReady ? mSettings.emissiveReuseMode : 0u;
+	mStatus.emissiveLaneCount = emissiveLaneCount;
 	mStatus.emissiveReference = emissiveLightsReady && mSettings.emissiveReference;
 	mStatus.emissiveHistoryValid = emissiveHistoryCompatible;
 	mStatus.directReuseModeRequested = mSettings.directReuseMode;
@@ -1146,11 +1160,20 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		mLastEmissiveReuseMode = mSettings.emissiveReuseMode;
 		mLastEmissiveGeneration = emissiveGeneration;
 		mLastEmissiveFrame = renderer.mFrameIndex;
+		mLastEmissiveRepresentation = mStatus.representationEffective;
+		mLastEmissiveLaneCount = emissiveLaneCount;
+		mLastEmissiveLightMode = constants.lightMode;
+		mLastEmissiveVisibilityBackend = emissiveVisibilityBackend;
 	}
 	else
 	{
 		mEmissiveHistoryValid = false;
+		mStatus.emissiveHistoryValid = false;
 		mLastEmissiveFrame = UINT32_MAX;
+		mLastEmissiveRepresentation = UINT32_MAX;
+		mLastEmissiveLaneCount = 0;
+		mLastEmissiveLightMode = 0;
+		mLastEmissiveVisibilityBackend = 0;
 	}
 	if (mSettings.indirect && indirectResourcesReady && mSettings.indirectScale > 0.0f)
 	{
@@ -1244,6 +1267,12 @@ bool NRISmokeSystem::DispatchRoute(NRIRenderer& renderer, const NRISmokeRouteDes
 		mVolumeHistoryValid = false;
 		mIndirectHistoryValid = false;
 		mEmissiveHistoryValid = false;
+		mStatus.emissiveHistoryValid = false;
+		mLastEmissiveFrame = UINT32_MAX;
+		mLastEmissiveRepresentation = UINT32_MAX;
+		mLastEmissiveLaneCount = 0;
+		mLastEmissiveLightMode = 0;
+		mLastEmissiveVisibilityBackend = 0;
 		mDirectHistoryValid = false;
 		mLastDirectFrame = UINT32_MAX;
 		renderer.CopyTexture(renderer.GetFrameTexture(route.inputSlot), renderer.GetFrameTexture(route.outputSlot));
@@ -1315,6 +1344,7 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.emissiveSpatialRejected = 0;
 	mStatus.emissiveFinalEvaluations = 0;
 	mStatus.emissiveSourceClamps = 0;
+	mStatus.emissiveRemovedEnergy = 0;
 	mStatus.emissiveMaximumAge = 0;
 	mStatus.emissiveReferenceSamples = 0;
 	mStatus.emissiveReferenceRays = 0;
@@ -1381,7 +1411,12 @@ void NRISmokeSystem::Reset(const char* reason)
 	mNeedsClear = true;
 	mIndirectHistoryValid = false;
 	mEmissiveHistoryValid = false;
+	mStatus.emissiveHistoryValid = false;
 	mLastEmissiveFrame = UINT32_MAX;
+	mLastEmissiveRepresentation = UINT32_MAX;
+	mLastEmissiveLaneCount = 0;
+	mLastEmissiveLightMode = 0;
+	mLastEmissiveVisibilityBackend = 0;
 	mDirectHistoryValid = false;
 	mLastDirectFrame = UINT32_MAX;
 	mStatus.directHistoryValid = false;
@@ -1408,6 +1443,12 @@ void NRISmokeSystem::DestroyViewResources(NRIRenderer& renderer)
 	mViewResourcesInitialized = false;
 	mIndirectHistoryValid = false;
 	mEmissiveHistoryValid = false;
+	mStatus.emissiveHistoryValid = false;
+	mLastEmissiveFrame = UINT32_MAX;
+	mLastEmissiveRepresentation = UINT32_MAX;
+	mLastEmissiveLaneCount = 0;
+	mLastEmissiveLightMode = 0;
+	mLastEmissiveVisibilityBackend = 0;
 	mDirectHistoryValid = false;
 	mLastDirectFrame = UINT32_MAX;
 	mStatus.indirectCacheBytes = 0;
@@ -1494,13 +1535,13 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.directSpatialAccepted, mStatus.directSpatialRejected,
 		mStatus.directHistoryMaximumAge, mStatus.directHistoryResolved,
 		mStatus.directHistoryClamps, mStatus.directNanRejects);
-	Printf("NRI PT smoke emissive reservoir: reuse_requested=%u reuse_effective=%u reference=%s history=%s reservoir_mib=%.2f initialized=%u invalid=%u temporal=%u/%u spatial=%u/%u final=%u source_clamps=%u maximum_age=%u identity_rejects=%u reference_samples=%u reference_rays=%u field_readback=0\n",
-		mStatus.emissiveReuseModeRequested, mStatus.emissiveReuseModeEffective, mStatus.emissiveReference ? "yes" : "no",
+	Printf("NRI PT smoke emissive reservoir: reuse_requested=%u reuse_effective=%u lanes=%u reference=%s history=%s reservoir_mib=%.2f initialized=%u invalid=%u temporal=%u/%u spatial=%u/%u final=%u source_clamps=%u removed_energy=%u maximum_age=%u identity_rejects=%u reference_samples=%u reference_rays=%u field_readback=0\n",
+		mStatus.emissiveReuseModeRequested, mStatus.emissiveReuseModeEffective, mStatus.emissiveLaneCount, mStatus.emissiveReference ? "yes" : "no",
 		mStatus.emissiveHistoryValid ? "valid" : "invalid", (double)mStatus.emissiveReservoirBytes / (1024.0 * 1024.0),
 		mStatus.emissiveReservoirInitial, mStatus.emissiveReservoirInvalid,
 		mStatus.emissiveTemporalAccepted, mStatus.emissiveTemporalRejected,
 		mStatus.emissiveSpatialAccepted, mStatus.emissiveSpatialRejected,
-		mStatus.emissiveFinalEvaluations, mStatus.emissiveSourceClamps, mStatus.emissiveMaximumAge,
+		mStatus.emissiveFinalEvaluations, mStatus.emissiveSourceClamps, mStatus.emissiveRemovedEnergy, mStatus.emissiveMaximumAge,
 		mStatus.emissiveIdentityRejects, mStatus.emissiveReferenceSamples, mStatus.emissiveReferenceRays);
 	Printf("NRI PT smoke indirect status: enabled=%s scale=%.3f cache_mode_requested=%u cache_mode_effective=%u samples=%u history=%s cache_mib=%.2f froxels=%u locality_rays=%u agreement=%u one_sided=%u mismatch=%u invalid=%u reference_rays=%u hits=%u misses=%u sector=%u sky=%u emission=%u clamps=%u nan=%u temporal=%u/%u spatial=%u/%u cache_age=%u cache_clamps=%u resolved=%u field_readback=0\n",
 		mSettings.indirect ? "yes" : "no", mSettings.indirectScale, mStatus.indirectCacheModeRequested, mStatus.indirectCacheModeEffective, 1u << std::min(mSettings.quality, 2u),

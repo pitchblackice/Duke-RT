@@ -83,6 +83,36 @@ struct SmokeEmissiveReservoirRecord
 	float SigmaT;
 };
 
+// The three emissive UAVs retain a fixed 48-byte stride. Particle froxels use
+// the legacy reservoir encoding while grid froxels use packed lane pairs and
+// tagged RGB moment records in the same storage.
+struct SmokeEmissiveStorageRecord
+{
+	uint4 Data0;
+	uint4 Data1;
+	uint4 Data2;
+};
+
+struct SmokeEmissiveLaneRecord
+{
+	uint CandidateIndex;
+	uint SampleSeed;
+	uint StableKeyLo;
+	uint StableKeyHi;
+	float Target;
+	float WeightSum;
+};
+
+struct SmokeEmissiveMomentRecord
+{
+	float3 MeanRadiance;
+	float3 SecondMoment;
+	float3 ReceiverPosition;
+	float SigmaT;
+	uint Direction;
+	uint Metadata;
+};
+
 struct SmokeControl
 {
 	uint WriteCursor;
@@ -219,9 +249,9 @@ RWStructuredBuffer<uint> gSmokeOccupiedFroxelIndices : register(u10, space1);
 RWStructuredBuffer<SmokeIndirectCacheRecord> gSmokeIndirectHistory : register(u11, space1);
 RWStructuredBuffer<SmokeIndirectCacheRecord> gSmokeIndirectScratch : register(u12, space1);
 RWStructuredBuffer<float> gSmokeParticleDirectionalVisibility : register(u13, space1);
-RWStructuredBuffer<SmokeEmissiveReservoirRecord> gSmokeEmissiveCurrent : register(u14, space1);
-RWStructuredBuffer<SmokeEmissiveReservoirRecord> gSmokeEmissiveTemporal : register(u15, space1);
-RWStructuredBuffer<SmokeEmissiveReservoirRecord> gSmokeEmissiveHistory : register(u16, space1);
+RWStructuredBuffer<SmokeEmissiveStorageRecord> gSmokeEmissiveCurrent : register(u14, space1);
+RWStructuredBuffer<SmokeEmissiveStorageRecord> gSmokeEmissiveTemporal : register(u15, space1);
+RWStructuredBuffer<SmokeEmissiveStorageRecord> gSmokeEmissiveHistory : register(u16, space1);
 RWStructuredBuffer<SmokeGridControl> gSmokeRenderGridControl : register(u17, space1);
 RWStructuredBuffer<SmokeGridHashEntry> gSmokeRenderGridHash : register(u18, space1);
 RWStructuredBuffer<SmokeGridBrick> gSmokeRenderGridBricks : register(u19, space1);

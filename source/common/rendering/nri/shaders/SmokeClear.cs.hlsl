@@ -187,16 +187,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	if (index < min(froxelCount, min(emissiveCurrentCount, emissiveTemporalCount)))
 	{
-		SmokeEmissiveReservoirRecord emptyReservoir = (SmokeEmissiveReservoirRecord)0;
-		emptyReservoir.CandidateIndex = 0xffffffffu;
-		gSmokeEmissiveCurrent[index] = emptyReservoir;
-		gSmokeEmissiveTemporal[index] = emptyReservoir;
+		SmokeEmissiveStorageRecord emptyRecord = (SmokeEmissiveStorageRecord)0;
+		emptyRecord.Data0.x = 0xffffffffu;
+		gSmokeEmissiveCurrent[index] = emptyRecord;
+		gSmokeEmissiveTemporal[index] = emptyRecord;
 	}
 	if (clearEmissiveHistory && index < min(froxelCount, emissiveHistoryCount))
 	{
-		SmokeEmissiveReservoirRecord emptyReservoir = (SmokeEmissiveReservoirRecord)0;
-		emptyReservoir.CandidateIndex = 0xffffffffu;
-		gSmokeEmissiveHistory[index] = emptyReservoir;
+		SmokeEmissiveStorageRecord emptyRecord = (SmokeEmissiveStorageRecord)0;
+		emptyRecord.Data0.x = 0xffffffffu;
+		gSmokeEmissiveHistory[index] = emptyRecord;
 	}
 	if (index < min(froxelCount, directCurrentCount))
 	{

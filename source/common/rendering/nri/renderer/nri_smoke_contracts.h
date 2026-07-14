@@ -216,18 +216,9 @@ struct NRISmokeDirectCacheGpu
 	uint32_t metadata = 0;
 };
 
-struct NRISmokeEmissiveReservoirGpu
+struct NRISmokeEmissiveStorageGpu
 {
-	uint32_t candidateIndex = UINT32_MAX;
-	uint32_t sampleSeed = 0;
-	uint32_t stableKeyLo = 0;
-	uint32_t stableKeyHi = 0;
-	float target = 0.0f;
-	float weightSum = 0.0f;
-	uint32_t metadata = 0;
-	uint32_t generation = 0;
-	float receiverPosition[3] = {};
-	float sigmaT = 0.0f;
+	uint32_t data[12] = {};
 };
 
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
@@ -236,7 +227,7 @@ static_assert(sizeof(NRISmokeInjectionCommandGpu) == 64);
 static_assert(sizeof(NRISmokeControlGpu) == 476);
 static_assert(sizeof(NRISmokeIndirectCacheGpu) == 32);
 static_assert(sizeof(NRISmokeDirectCacheGpu) == 32);
-static_assert(sizeof(NRISmokeEmissiveReservoirGpu) == 48);
+static_assert(sizeof(NRISmokeEmissiveStorageGpu) == 48);
 
 struct NRISmokeConstants
 {

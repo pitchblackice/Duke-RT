@@ -11,6 +11,194 @@
 #define NRI_SMOKE_EMISSIVE_REUSE_MASK 3u
 #define NRI_SMOKE_EMISSIVE_REFERENCE 0x800u
 #define NRI_SMOKE_EMISSIVE_RECORD_VALID 0x80000000u
+#define NRI_SMOKE_EMISSIVE_MOMENT_RECORD 0x40000000u
+
+bool SmokeEmissiveGridFroxel(float4 phase)
+{
+	return (gSmokeConstants.Flags & NRI_SMOKE_DIRECT_GRID_ENABLED) != 0u && phase.w > 1.5;
+}
+
+uint SmokeEmissiveLaneCount()
+{
+	return 1u << min((gSmokeConstants.Flags >> 5u) & 3u, 2u);
+}
+
+SmokeEmissiveStorageRecord SmokePackEmissiveReservoir(SmokeEmissiveReservoirRecord record)
+{
+	SmokeEmissiveStorageRecord storage;
+	storage.Data0 = uint4(record.CandidateIndex, record.SampleSeed, record.StableKeyLo, record.StableKeyHi);
+	storage.Data1 = uint4(asuint(record.Target), asuint(record.WeightSum), record.Metadata, record.Generation);
+	storage.Data2 = uint4(asuint(record.ReceiverPosition), asuint(record.SigmaT));
+	return storage;
+}
+
+SmokeEmissiveReservoirRecord SmokeUnpackEmissiveReservoir(SmokeEmissiveStorageRecord storage)
+{
+	SmokeEmissiveReservoirRecord record;
+	record.CandidateIndex = storage.Data0.x;
+	record.SampleSeed = storage.Data0.y;
+	record.StableKeyLo = storage.Data0.z;
+	record.StableKeyHi = storage.Data0.w;
+	record.Target = asfloat(storage.Data1.x);
+	record.WeightSum = asfloat(storage.Data1.y);
+	record.Metadata = storage.Data1.z;
+	record.Generation = storage.Data1.w;
+	record.ReceiverPosition = asfloat(storage.Data2.xyz);
+	record.SigmaT = asfloat(storage.Data2.w);
+	return record;
+}
+
+SmokeEmissiveLaneRecord SmokeEmptyEmissiveLane()
+{
+	SmokeEmissiveLaneRecord lane = (SmokeEmissiveLaneRecord)0;
+	lane.CandidateIndex = 0xffffffffu;
+	return lane;
+}
+
+bool SmokeEmissiveLaneValid(SmokeEmissiveLaneRecord lane)
+{
+	return lane.CandidateIndex != 0xffffffffu && isfinite(lane.Target) && lane.Target > 1e-8 &&
+		isfinite(lane.WeightSum) && lane.WeightSum > 0.0;
+}
+
+SmokeEmissiveStorageRecord SmokePackEmissiveLanePair(SmokeEmissiveLaneRecord lane0, SmokeEmissiveLaneRecord lane1)
+{
+	SmokeEmissiveStorageRecord storage;
+	storage.Data0 = uint4(lane0.CandidateIndex, lane0.SampleSeed, lane0.StableKeyLo, lane0.StableKeyHi);
+	storage.Data1 = uint4(asuint(lane0.Target), asuint(lane0.WeightSum), lane1.CandidateIndex, lane1.SampleSeed);
+	storage.Data2 = uint4(lane1.StableKeyLo, lane1.StableKeyHi, asuint(lane1.Target), asuint(lane1.WeightSum));
+	return storage;
+}
+
+SmokeEmissiveLaneRecord SmokeUnpackEmissiveLane(SmokeEmissiveStorageRecord storage, uint laneInPair)
+{
+	SmokeEmissiveLaneRecord lane;
+	if (laneInPair == 0u)
+	{
+		lane.CandidateIndex = storage.Data0.x;
+		lane.SampleSeed = storage.Data0.y;
+		lane.StableKeyLo = storage.Data0.z;
+		lane.StableKeyHi = storage.Data0.w;
+		lane.Target = asfloat(storage.Data1.x);
+		lane.WeightSum = asfloat(storage.Data1.y);
+	}
+	else
+	{
+		lane.CandidateIndex = storage.Data1.z;
+		lane.SampleSeed = storage.Data1.w;
+		lane.StableKeyLo = storage.Data2.x;
+		lane.StableKeyHi = storage.Data2.y;
+		lane.Target = asfloat(storage.Data2.z);
+		lane.WeightSum = asfloat(storage.Data2.w);
+	}
+	return lane;
+}
+
+uint SmokePackEmissiveDirection(float3 direction)
+{
+	if (!all(isfinite(direction)) || dot(direction, direction) <= 1e-8)
+		return 0u;
+	float3 oct = normalize(direction);
+	oct /= max(abs(oct.x) + abs(oct.y) + abs(oct.z), 1e-6);
+	float2 encoded = oct.xy;
+	if (oct.z < 0.0)
+		encoded = (1.0 - abs(encoded.yx)) * float2(encoded.x >= 0.0 ? 1.0 : -1.0, encoded.y >= 0.0 ? 1.0 : -1.0);
+	const uint2 packed = (uint2)round(saturate(encoded * 0.5 + 0.5) * 65535.0);
+	return packed.x | (packed.y << 16u);
+}
+
+float3 SmokeUnpackEmissiveDirection(uint packed)
+{
+	if (packed == 0u)
+		return 0.0;
+	const float2 encoded = float2(packed & 0xffffu, packed >> 16u) / 65535.0 * 2.0 - 1.0;
+	float3 direction = float3(encoded, 1.0 - abs(encoded.x) - abs(encoded.y));
+	if (direction.z < 0.0)
+		direction.xy = (1.0 - abs(direction.yx)) * float2(direction.x >= 0.0 ? 1.0 : -1.0, direction.y >= 0.0 ? 1.0 : -1.0);
+	return normalize(direction);
+}
+
+uint SmokePackEmissiveMomentMetadata(float confidence, uint mediumHash, uint age, uint laneCount)
+{
+	const uint packedConfidence = (uint)round(saturate(confidence) * 255.0);
+	return packedConfidence | ((mediumHash & 0x1fu) << 8u) | (min(age, 15u) << 13u) |
+		((gSmokeConstants.FrameIndex & 0x3fu) << 17u) | ((min(laneCount, 7u) & 0x7u) << 23u) |
+		NRI_SMOKE_EMISSIVE_MOMENT_RECORD | NRI_SMOKE_EMISSIVE_RECORD_VALID;
+}
+
+float SmokeEmissiveMomentConfidence(SmokeEmissiveMomentRecord record) { return (float)(record.Metadata & 0xffu) / 255.0; }
+uint SmokeEmissiveMomentMedium(SmokeEmissiveMomentRecord record) { return (record.Metadata >> 8u) & 0x1fu; }
+uint SmokeEmissiveMomentAge(SmokeEmissiveMomentRecord record) { return (record.Metadata >> 13u) & 0xfu; }
+uint SmokeEmissiveMomentFrame(SmokeEmissiveMomentRecord record) { return (record.Metadata >> 17u) & 0x3fu; }
+uint SmokeEmissiveMomentLaneCount(SmokeEmissiveMomentRecord record) { return (record.Metadata >> 23u) & 0x7u; }
+
+bool SmokeEmissiveMomentValid(SmokeEmissiveMomentRecord record)
+{
+	return (record.Metadata & (NRI_SMOKE_EMISSIVE_RECORD_VALID | NRI_SMOKE_EMISSIVE_MOMENT_RECORD)) ==
+		(NRI_SMOKE_EMISSIVE_RECORD_VALID | NRI_SMOKE_EMISSIVE_MOMENT_RECORD) &&
+		all(isfinite(record.MeanRadiance)) && all(record.MeanRadiance >= 0.0) &&
+		all(isfinite(record.SecondMoment)) && all(record.SecondMoment >= 0.0) &&
+		all(isfinite(record.ReceiverPosition)) && isfinite(record.SigmaT) && record.SigmaT > 0.0;
+}
+
+SmokeEmissiveStorageRecord SmokePackEmissiveMoment(SmokeEmissiveMomentRecord record)
+{
+	SmokeEmissiveStorageRecord storage;
+	storage.Data0 = uint4(asuint(record.MeanRadiance), asuint(record.SecondMoment.x));
+	storage.Data1 = uint4(asuint(record.SecondMoment.yz), asuint(record.ReceiverPosition.xy));
+	storage.Data2 = uint4(asuint(record.ReceiverPosition.z), asuint(record.SigmaT), record.Direction, record.Metadata);
+	return storage;
+}
+
+SmokeEmissiveMomentRecord SmokeUnpackEmissiveMoment(SmokeEmissiveStorageRecord storage)
+{
+	SmokeEmissiveMomentRecord record;
+	record.MeanRadiance = asfloat(storage.Data0.xyz);
+	record.SecondMoment = float3(asfloat(storage.Data0.w), asfloat(storage.Data1.xy));
+	record.ReceiverPosition = float3(asfloat(storage.Data1.zw), asfloat(storage.Data2.x));
+	record.SigmaT = asfloat(storage.Data2.y);
+	record.Direction = storage.Data2.z;
+	record.Metadata = storage.Data2.w;
+	return record;
+}
+
+uint SmokeEmissiveMediumHash(float4 medium, float anisotropy);
+
+bool SmokeEmissiveMomentCompatible(SmokeEmissiveMomentRecord record, float4 medium, float anisotropy,
+	uint expectedFrame, float3 receiverPosition, float worldTolerance, uint laneCount)
+{
+	return SmokeEmissiveMomentValid(record) &&
+		SmokeEmissiveMomentMedium(record) == SmokeEmissiveMediumHash(medium, anisotropy) &&
+		SmokeEmissiveMomentFrame(record) == (expectedFrame & 0x3fu) &&
+		SmokeEmissiveMomentLaneCount(record) == laneCount &&
+		abs(record.SigmaT - medium.a) <= max(max(record.SigmaT, medium.a) * 0.25, 0.002) &&
+		distance(record.ReceiverPosition, receiverPosition) <= worldTolerance;
+}
+
+uint SmokeEmissiveWorldKey(float3 receiverPosition)
+{
+	float cellSize = 1.0;
+	uint controlCount, ignoredStride;
+	gSmokeRenderGridControl.GetDimensions(controlCount, ignoredStride);
+	if (controlCount > 0u)
+	{
+		const float candidate = asfloat(gSmokeRenderGridControl[0].CellSizeBits);
+		if (isfinite(candidate) && candidate > 0.0)
+			cellSize = candidate;
+	}
+	const int3 cell = (int3)floor(receiverPosition / cellSize);
+	return SmokeHash(asuint(cell.x) ^ SmokeHash(asuint(cell.y)) ^ SmokeHash(asuint(cell.z)) ^
+		SmokeHash(gSmokeConstants.SimulationEpoch));
+}
+
+uint SmokeEmissiveLaneSeed(float3 receiverPosition, uint laneIndex, uint proposal, uint salt)
+{
+	uint seed = SmokeEmissiveWorldKey(receiverPosition) ^ SmokeHash(laneIndex + 1u) ^
+		SmokeHash(proposal + 1u) ^ SmokeHash(salt);
+	if (gSmokeConstants.LightMode >= 3u)
+		seed ^= SmokeHash(gSmokeConstants.FrameIndex);
+	return SmokeHash(seed);
+}
 
 uint SmokeEmissiveReuseMode()
 {
@@ -77,17 +265,15 @@ float SmokeEmissiveLuminance(float3 value)
 	return dot(max(value, 0.0), float3(0.2126, 0.7152, 0.0722));
 }
 
-bool SmokeEvaluateEmissiveCandidate(
+bool SmokeEvaluateEmissiveIncident(
 	SmokeEmissiveReservoirRecord record,
 	float3 receiverPosition,
-	float3 viewRay,
-	float anisotropy,
 	bool diagnostics,
-	out float3 integrand,
+	out float3 incidentRadiance,
 	out float3 lightDirection,
 	out float distanceToLight)
 {
-	integrand = 0.0;
+	incidentRadiance = 0.0;
 	lightDirection = 0.0;
 	distanceToLight = 0.0;
 	if (!SmokeEmissiveIdentityValid(record))
@@ -140,7 +326,28 @@ bool SmokeEvaluateEmissiveCandidate(
 	if (diagnostics && any(lightRadiance > 32.0))
 		InterlockedAdd(gSmokeControl[0].EmissiveRadianceClamps, 1u);
 	lightRadiance = min(lightRadiance, 32.0);
-	integrand = lightRadiance * (SmokeHenyeyGreenstein(dot(lightDirection, viewRay), anisotropy) * solidAngle);
+	incidentRadiance = lightRadiance * solidAngle;
+	return all(isfinite(incidentRadiance)) && SmokeEmissiveLuminance(incidentRadiance) > 1e-8;
+}
+
+bool SmokeEvaluateEmissiveCandidate(
+	SmokeEmissiveReservoirRecord record,
+	float3 receiverPosition,
+	float3 viewRay,
+	float anisotropy,
+	bool diagnostics,
+	out float3 integrand,
+	out float3 lightDirection,
+	out float distanceToLight)
+{
+	float3 incidentRadiance;
+	if (!SmokeEvaluateEmissiveIncident(record, receiverPosition, diagnostics,
+		incidentRadiance, lightDirection, distanceToLight))
+	{
+		integrand = 0.0;
+		return false;
+	}
+	integrand = incidentRadiance * SmokeHenyeyGreenstein(dot(lightDirection, viewRay), anisotropy);
 	return all(isfinite(integrand)) && SmokeEmissiveLuminance(integrand) > 1e-8;
 }
 

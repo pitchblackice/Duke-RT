@@ -60,6 +60,7 @@ struct NRISmokeStatusSnapshot
 	const char* directHistoryResetReason = "initial";
 	uint32_t emissiveReuseModeRequested = 0;
 	uint32_t emissiveReuseModeEffective = 0;
+	uint32_t emissiveLaneCount = 0;
 	bool emissiveReference = false;
 	bool emissiveHistoryValid = false;
 	bool volumeHistoryRequested = false;
@@ -127,6 +128,7 @@ struct NRISmokeStatusSnapshot
 	uint32_t emissiveSpatialRejected = 0;
 	uint32_t emissiveFinalEvaluations = 0;
 	uint32_t emissiveSourceClamps = 0;
+	uint32_t emissiveRemovedEnergy = 0;
 	uint32_t emissiveMaximumAge = 0;
 	uint32_t emissiveReferenceSamples = 0;
 	uint32_t emissiveReferenceRays = 0;
@@ -278,6 +280,10 @@ private:
 	uint32_t mLastEmissiveReuseMode = 0;
 	uint32_t mLastEmissiveGeneration = 0;
 	uint32_t mLastEmissiveFrame = UINT32_MAX;
+	uint32_t mLastEmissiveRepresentation = UINT32_MAX;
+	uint32_t mLastEmissiveLaneCount = 0;
+	uint32_t mLastEmissiveLightMode = 0;
+	uint32_t mLastEmissiveVisibilityBackend = 0;
 	bool mDirectHistoryValid = false;
 	uint32_t mLastDirectFrame = UINT32_MAX;
 	uint32_t mLastDirectReuseMode = 0;
