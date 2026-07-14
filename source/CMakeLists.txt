@@ -944,6 +944,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_map_movers.cpp
 	common/rendering/nri/renderer/nri_map_mover_rigid_route.cpp
 	common/rendering/nri/renderer/nri_map_mover_rigid_route_policy.cpp
+	common/rendering/nri/renderer/nri_se29_floor_deformer_policy.cpp
 	common/rendering/nri/renderer/nri_map_mover_shadow.cpp
 	common/rendering/nri/renderer/nri_map_mover_shadow_state.cpp
 	common/rendering/nri/renderer/nri_material_policy.cpp
