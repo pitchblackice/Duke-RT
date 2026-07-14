@@ -512,7 +512,7 @@ float3 SmokeSampleMaterialEmission(MaterialData material, float2 uv)
 	return 0.0;
 }
 
-uint SmokeSampleEmissivePrimitiveFromUnit(float sample)
+uint SmokeSampleEmissivePrimitive(inout uint randomState)
 {
 	uint headerCount, headerStride, primitiveCount, primitiveStride, cdfCount, cdfStride;
 	gSmokeEmissivePrimitiveHeaders.GetDimensions(headerCount, headerStride);
@@ -523,6 +523,7 @@ uint SmokeSampleEmissivePrimitiveFromUnit(float sample)
 	const uint activeCount = min(gSmokeEmissivePrimitiveHeaders[0].activeCount, min(primitiveCount, cdfCount));
 	if (activeCount == 0u)
 		return 0xffffffffu;
+	const float sample = SmokeRandom01(randomState);
 	uint low = 0u;
 	uint high = activeCount - 1u;
 	[unroll]
@@ -535,11 +536,6 @@ uint SmokeSampleEmissivePrimitiveFromUnit(float sample)
 			low = mid + 1u;
 	}
 	return low;
-}
-
-uint SmokeSampleEmissivePrimitive(inout uint randomState)
-{
-	return SmokeSampleEmissivePrimitiveFromUnit(SmokeRandom01(randomState));
 }
 
 float3 SmokeTransformPoint(SceneInstanceData instanceData, float3 localPosition)

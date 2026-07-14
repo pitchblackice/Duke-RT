@@ -1,47 +1,5 @@
 #include "Include/SmokeEmissiveReservoir.hlsli"
 
-uint SmokeSampleEmissiveMixture(
-	inout uint randomState,
-	uint proposalIndex,
-	uint proposalCount,
-	bool diagnostics,
-	out float mixturePdf)
-{
-	mixturePdf = 0.0;
-	uint headerCount, headerStride, primitiveCount, primitiveStride;
-	gSmokeEmissivePrimitiveHeaders.GetDimensions(headerCount, headerStride);
-	gSmokeEmissivePrimitives.GetDimensions(primitiveCount, primitiveStride);
-	if (headerCount == 0u)
-		return 0xffffffffu;
-	const uint activeCount = min(gSmokeEmissivePrimitiveHeaders[0].activeCount, primitiveCount);
-	if (activeCount == 0u)
-		return 0xffffffffu;
-
-	// Equal technique counts use the balance heuristic without random count
-	// variance. The one-proposal tier draws the same 50/50 mixture directly.
-	const bool uniformProposal = proposalCount > 1u
-		? ((proposalIndex & 1u) != 0u)
-		: (SmokeRandom01(randomState) >= 0.5);
-	uint candidateIndex = 0xffffffffu;
-	if (uniformProposal)
-	{
-		candidateIndex = min((uint)(SmokeRandom01(randomState) * (float)activeCount), activeCount - 1u);
-		if (diagnostics)
-			InterlockedAdd(gSmokeControl[0].EmissiveUniformProposals, 1u);
-	}
-	else
-	{
-		candidateIndex = SmokeSampleEmissivePrimitive(randomState);
-		if (diagnostics)
-			InterlockedAdd(gSmokeControl[0].EmissiveGlobalProposals, 1u);
-	}
-	if (candidateIndex == 0xffffffffu || candidateIndex >= activeCount)
-		return 0xffffffffu;
-	const EmissivePrimitiveData candidate = gSmokeEmissivePrimitives[candidateIndex];
-	mixturePdf = 0.5 * candidate.selectionPdf + 0.5 / (float)activeCount;
-	return mixturePdf > 0.0 && isfinite(mixturePdf) ? candidateIndex : 0xffffffffu;
-}
-
 SmokeEmissiveLaneRecord SmokeBuildEmissiveLane(
 	float3 receiverPosition,
 	uint laneIndex,
@@ -57,9 +15,7 @@ SmokeEmissiveLaneRecord SmokeBuildEmissiveLane(
 		uint randomState = SmokeEmissiveLaneSeed(receiverPosition, laneIndex, proposal, 0xe6a7c15bu);
 		if (diagnostics)
 			InterlockedAdd(gSmokeControl[0].EmissiveSamples, 1u);
-		float proposalPdf;
-		const uint candidateIndex = SmokeSampleEmissiveMixture(
-			randomState, proposal, proposalCount, diagnostics, proposalPdf);
+		const uint candidateIndex = SmokeSampleEmissivePrimitive(randomState);
 		if (candidateIndex == 0xffffffffu)
 		{
 			if (diagnostics)
@@ -80,8 +36,8 @@ SmokeEmissiveLaneRecord SmokeBuildEmissiveLane(
 			incidentRadiance, lightDirection, distanceToLight))
 			continue;
 		const float target = SmokeEmissiveLuminance(incidentRadiance);
-		SmokeReservoirMerge(reservoir, proposalRecord, target, target / max(proposalPdf, 1e-6),
-			1u, mediumHash, 0u, selectionState);
+		const float pdf = max(candidate.selectionPdf, 1e-6);
+		SmokeReservoirMerge(reservoir, proposalRecord, target, target / pdf, 1u, mediumHash, 0u, selectionState);
 	}
 
 	SmokeEmissiveLaneRecord lane = SmokeEmptyEmissiveLane();
@@ -115,9 +71,7 @@ SmokeEmissiveReservoirRecord SmokeBuildLegacyEmissiveReservoir(
 		uint randomState = SmokeLightingRandomSeed(froxel, proposal, 0xe6a7c15bu);
 		if (diagnostics)
 			InterlockedAdd(gSmokeControl[0].EmissiveSamples, 1u);
-		float proposalPdf;
-		const uint candidateIndex = SmokeSampleEmissiveMixture(
-			randomState, proposal, proposalCount, diagnostics, proposalPdf);
+		const uint candidateIndex = SmokeSampleEmissivePrimitive(randomState);
 		if (candidateIndex == 0xffffffffu)
 		{
 			if (diagnostics)
@@ -140,7 +94,7 @@ SmokeEmissiveReservoirRecord SmokeBuildLegacyEmissiveReservoir(
 			integrand, lightDirection, distanceToLight))
 			continue;
 		const float target = SmokeEmissiveLuminance(integrand);
-		SmokeReservoirMerge(reservoir, proposalRecord, target, target / max(proposalPdf, 1e-6),
+		SmokeReservoirMerge(reservoir, proposalRecord, target, target / max(candidate.selectionPdf, 1e-6),
 			1u, mediumHash, 0u, selectionState);
 	}
 	return reservoir;

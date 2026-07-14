@@ -32,7 +32,6 @@ namespace
 	constexpr uint32_t kSmokeFlagGridRepresentation = 0x20000u;
 	constexpr uint32_t kSmokeFlagDirectHistoryValid = 0x40000u;
 	constexpr uint32_t kSmokeFlagDirectReferenceShift = 19u;
-	constexpr uint32_t kSmokeFlagEmissiveReferenceTierShift = 21u;
 	const char* const kSmokePipelineNames[] = { "SmokeClear", "SmokeSimulate", "SmokeSpawn", "SmokeBin", "SmokeLightDirectionalCarriers", "SmokeEvaluateMedium", "SmokeEvaluateGrid", "SmokeLightPoint", "SmokeLightDirectional", "SmokeLightDirectTemporal", "SmokeLightDirectSpatial", "SmokeLightEmissive", "SmokeLightEmissiveTemporal", "SmokeLightEmissiveSpatial", "SmokeLightIndirectReference", "SmokeLightIndirectTemporal", "SmokeLightIndirectSpatial", "SmokeIntegrate", "SmokeResolveVolume", "SmokeTemporalVolume", "SmokeComposite" };
 	static_assert(std::size(kSmokePipelineNames) == 21u);
 
@@ -478,13 +477,6 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 				mStatus.emissiveReferenceSamples = control.emissiveReferenceSamples;
 				mStatus.emissiveReferenceRays = control.emissiveReferenceRays;
 				mStatus.emissiveIdentityRejects = control.emissiveIdentityRejects;
-				mStatus.emissiveGlobalProposals = control.emissiveGlobalProposals;
-				mStatus.emissiveUniformProposals = control.emissiveUniformProposals;
-				mStatus.emissiveNoProposalFroxels = control.emissiveNoProposalFroxels;
-				mStatus.emissiveConfirmedOccludedFroxels = control.emissiveConfirmedOccludedFroxels;
-				mStatus.emissiveHistoryRepairs = control.emissiveHistoryRepairs;
-				mStatus.emissiveReferenceVisible = control.emissiveReferenceVisible;
-				mStatus.emissiveReferenceOccluded = control.emissiveReferenceOccluded;
 				mStatus.indirectFroxelsProcessed = control.indirectFroxelsProcessed;
 				mStatus.indirectLocalityRays = control.indirectLocalityRays;
 				mStatus.indirectLocalityAgreement = control.indirectLocalityAgreement;
@@ -998,14 +990,10 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	constants.flags |= (mSettings.emissiveReuseMode & 3u) << 9u;
 	if (mSettings.emissiveReference)
 		constants.flags |= 0x800u;
-	const uint32_t emissiveReferenceTier = mSettings.emissiveReferenceSamples <= 32u ? 0u :
-		(mSettings.emissiveReferenceSamples <= 256u ? 1u : 2u);
-	constants.flags |= emissiveReferenceTier << kSmokeFlagEmissiveReferenceTierShift;
 	mStatus.emissiveReuseModeRequested = mSettings.emissiveReuseMode;
 	mStatus.emissiveReuseModeEffective = emissiveLightsReady ? mSettings.emissiveReuseMode : 0u;
 	mStatus.emissiveLaneCount = emissiveLaneCount;
 	mStatus.emissiveReference = emissiveLightsReady && mSettings.emissiveReference;
-	mStatus.emissiveReferenceSamplesRequested = mSettings.emissiveReferenceSamples;
 	mStatus.emissiveHistoryValid = emissiveHistoryCompatible;
 	mStatus.directReuseModeRequested = mSettings.directReuseMode;
 	mStatus.directReuseModeEffective = effectiveDirectReuseMode;
@@ -1361,13 +1349,6 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.emissiveReferenceSamples = 0;
 	mStatus.emissiveReferenceRays = 0;
 	mStatus.emissiveIdentityRejects = 0;
-	mStatus.emissiveGlobalProposals = 0;
-	mStatus.emissiveUniformProposals = 0;
-	mStatus.emissiveNoProposalFroxels = 0;
-	mStatus.emissiveConfirmedOccludedFroxels = 0;
-	mStatus.emissiveHistoryRepairs = 0;
-	mStatus.emissiveReferenceVisible = 0;
-	mStatus.emissiveReferenceOccluded = 0;
 	mStatus.indirectFroxelsProcessed = 0;
 	mStatus.indirectLocalityRays = 0;
 	mStatus.indirectLocalityAgreement = 0;
@@ -1554,30 +1535,14 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.directSpatialAccepted, mStatus.directSpatialRejected,
 		mStatus.directHistoryMaximumAge, mStatus.directHistoryResolved,
 		mStatus.directHistoryClamps, mStatus.directNanRejects);
-	Printf("NRI PT smoke emissive reservoir: reuse_requested=%u reuse_effective=%u lanes=%u reference=%s reference_tier=%u history=%s reservoir_mib=%.2f initialized=%u invalid=%u proposals_global=%u proposals_uniform=%u no_proposal_froxels=%u confirmed_occluded_froxels=%u history_repairs=%u temporal=%u/%u spatial=%u/%u final=%u source_clamps=%u removed_energy=%u maximum_age=%u identity_rejects=%u reference_samples=%u reference_rays=%u reference_visible=%u reference_occluded=%u field_readback=0\n",
+	Printf("NRI PT smoke emissive reservoir: reuse_requested=%u reuse_effective=%u lanes=%u reference=%s history=%s reservoir_mib=%.2f initialized=%u invalid=%u temporal=%u/%u spatial=%u/%u final=%u source_clamps=%u removed_energy=%u maximum_age=%u identity_rejects=%u reference_samples=%u reference_rays=%u field_readback=0\n",
 		mStatus.emissiveReuseModeRequested, mStatus.emissiveReuseModeEffective, mStatus.emissiveLaneCount, mStatus.emissiveReference ? "yes" : "no",
-		mStatus.emissiveReferenceSamplesRequested, mStatus.emissiveHistoryValid ? "valid" : "invalid", (double)mStatus.emissiveReservoirBytes / (1024.0 * 1024.0),
+		mStatus.emissiveHistoryValid ? "valid" : "invalid", (double)mStatus.emissiveReservoirBytes / (1024.0 * 1024.0),
 		mStatus.emissiveReservoirInitial, mStatus.emissiveReservoirInvalid,
-		mStatus.emissiveGlobalProposals, mStatus.emissiveUniformProposals, mStatus.emissiveNoProposalFroxels,
-		mStatus.emissiveConfirmedOccludedFroxels, mStatus.emissiveHistoryRepairs,
 		mStatus.emissiveTemporalAccepted, mStatus.emissiveTemporalRejected,
 		mStatus.emissiveSpatialAccepted, mStatus.emissiveSpatialRejected,
 		mStatus.emissiveFinalEvaluations, mStatus.emissiveSourceClamps, mStatus.emissiveRemovedEnergy, mStatus.emissiveMaximumAge,
-		mStatus.emissiveIdentityRejects, mStatus.emissiveReferenceSamples, mStatus.emissiveReferenceRays,
-		mStatus.emissiveReferenceVisible, mStatus.emissiveReferenceOccluded);
-	if (!renderer.mBoundEmissivePrimitiveRecords.empty())
-	{
-		const auto dominant = std::max_element(renderer.mBoundEmissivePrimitiveRecords.begin(),
-			renderer.mBoundEmissivePrimitiveRecords.end(), [](const auto& left, const auto& right)
-			{
-				return left.powerEstimate < right.powerEstimate;
-			});
-		const uint32_t dominantIndex = (uint32_t)std::distance(renderer.mBoundEmissivePrimitiveRecords.begin(), dominant);
-		Printf("NRI PT smoke emissive dominant: dominant_index=%u data_source=%u primitive=%u texture=%u power=%.6f selection_pdf=%.8f rgb=%.4f/%.4f/%.4f center=%.2f/%.2f/%.2f\n",
-			dominantIndex, dominant->dataSource, dominant->primitiveIndex, dominant->textureId,
-			dominant->powerEstimate, dominant->selectionPdf, dominant->emissiveColor[0], dominant->emissiveColor[1],
-			dominant->emissiveColor[2], dominant->center[0], dominant->center[1], dominant->center[2]);
-	}
+		mStatus.emissiveIdentityRejects, mStatus.emissiveReferenceSamples, mStatus.emissiveReferenceRays);
 	Printf("NRI PT smoke indirect status: enabled=%s scale=%.3f cache_mode_requested=%u cache_mode_effective=%u samples=%u history=%s cache_mib=%.2f froxels=%u locality_rays=%u agreement=%u one_sided=%u mismatch=%u invalid=%u reference_rays=%u hits=%u misses=%u sector=%u sky=%u emission=%u clamps=%u nan=%u temporal=%u/%u spatial=%u/%u cache_age=%u cache_clamps=%u resolved=%u field_readback=0\n",
 		mSettings.indirect ? "yes" : "no", mSettings.indirectScale, mStatus.indirectCacheModeRequested, mStatus.indirectCacheModeEffective, 1u << std::min(mSettings.quality, 2u),
 		mIndirectHistoryValid ? "valid" : "invalid", (double)mStatus.indirectCacheBytes / (1024.0 * 1024.0), mStatus.indirectFroxelsProcessed,

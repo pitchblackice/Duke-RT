@@ -10,14 +10,8 @@
 #define NRI_SMOKE_EMISSIVE_REUSE_SHIFT 9u
 #define NRI_SMOKE_EMISSIVE_REUSE_MASK 3u
 #define NRI_SMOKE_EMISSIVE_REFERENCE 0x800u
-#define NRI_SMOKE_EMISSIVE_REFERENCE_TIER_SHIFT 21u
 #define NRI_SMOKE_EMISSIVE_RECORD_VALID 0x80000000u
 #define NRI_SMOKE_EMISSIVE_MOMENT_RECORD 0x40000000u
-#define NRI_SMOKE_EMISSIVE_MOMENT_OCCLUDED 0x04000000u
-
-#define SMOKE_EMISSIVE_LANE_MISSING 0u
-#define SMOKE_EMISSIVE_LANE_VISIBLE 1u
-#define SMOKE_EMISSIVE_LANE_OCCLUDED 2u
 
 bool SmokeEmissiveGridFroxel(float4 phase)
 {
@@ -124,12 +118,11 @@ float3 SmokeUnpackEmissiveDirection(uint packed)
 	return normalize(direction);
 }
 
-uint SmokePackEmissiveMomentMetadata(float confidence, uint mediumHash, uint age, uint laneCount, bool occluded)
+uint SmokePackEmissiveMomentMetadata(float confidence, uint mediumHash, uint age, uint laneCount)
 {
 	const uint packedConfidence = (uint)round(saturate(confidence) * 255.0);
 	return packedConfidence | ((mediumHash & 0x1fu) << 8u) | (min(age, 15u) << 13u) |
 		((gSmokeConstants.FrameIndex & 0x3fu) << 17u) | ((min(laneCount, 7u) & 0x7u) << 23u) |
-		(occluded ? NRI_SMOKE_EMISSIVE_MOMENT_OCCLUDED : 0u) |
 		NRI_SMOKE_EMISSIVE_MOMENT_RECORD | NRI_SMOKE_EMISSIVE_RECORD_VALID;
 }
 
@@ -138,13 +131,6 @@ uint SmokeEmissiveMomentMedium(SmokeEmissiveMomentRecord record) { return (recor
 uint SmokeEmissiveMomentAge(SmokeEmissiveMomentRecord record) { return (record.Metadata >> 13u) & 0xfu; }
 uint SmokeEmissiveMomentFrame(SmokeEmissiveMomentRecord record) { return (record.Metadata >> 17u) & 0x3fu; }
 uint SmokeEmissiveMomentLaneCount(SmokeEmissiveMomentRecord record) { return (record.Metadata >> 23u) & 0x7u; }
-bool SmokeEmissiveMomentOccluded(SmokeEmissiveMomentRecord record) { return (record.Metadata & NRI_SMOKE_EMISSIVE_MOMENT_OCCLUDED) != 0u; }
-
-uint SmokeEmissiveReferenceSampleCount()
-{
-	const uint tier = (gSmokeConstants.Flags >> NRI_SMOKE_EMISSIVE_REFERENCE_TIER_SHIFT) & 3u;
-	return tier == 0u ? 32u : (tier == 1u ? 256u : 512u);
-}
 
 bool SmokeEmissiveMomentValid(SmokeEmissiveMomentRecord record)
 {
@@ -336,10 +322,7 @@ bool SmokeEvaluateEmissiveIncident(
 	const float projectedArea = max(effectiveArea * emitterCosine, 0.001);
 	const float falloffScale = max(material.emissiveMaskScale, 0.25);
 	const float attenuatedDistanceSquared = pow(max(distanceSquared, 0.01), falloffScale);
-	// lightRadiance is radiance, not total isotropic power. Projected area over
-	// squared distance converts the sampled emitter to receiver solid angle;
-	// HG supplies the volume phase normalization later.
-	const float solidAngle = min(projectedArea / max(attenuatedDistanceSquared, 0.01), 1.0);
+	const float solidAngle = min(projectedArea / max(12.56637061436 * attenuatedDistanceSquared, 0.01), 1.0);
 	if (diagnostics && any(lightRadiance > 32.0))
 		InterlockedAdd(gSmokeControl[0].EmissiveRadianceClamps, 1u);
 	lightRadiance = min(lightRadiance, 32.0);

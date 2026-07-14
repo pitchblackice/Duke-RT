@@ -563,9 +563,7 @@ void EvaluateSampledEmissiveLighting(
 	const float pdf = max(candidate.selectionPdf, 1e-4);
 	const float projectedArea = max(effectiveArea * emitterLambert, 0.001);
 	const float attenuatedDistanceSq = pow(max(lightDistanceSq, 0.01), falloffScale);
-	// lightColor is emitted radiance. Do not apply an isotropic-power 4*pi
-	// normalization on top of the area-to-solid-angle conversion.
-	const float solidAngleEstimate = min(projectedArea / max(attenuatedDistanceSq, 0.01), 1.0);
+	const float solidAngleEstimate = min(projectedArea / max(12.56637061436 * attenuatedDistanceSq, 0.01), 1.0);
 	const float sampleWeight = min(solidAngleEstimate / pdf, 16.0);
 	outDiffuse = GetSurfaceDiffuseColor(albedo, metalness) * (lambert * 0.80) * lightColor * sampleWeight;
 	outSpecular = EvaluateSunSpecular(albedo, metalness, receiverLightNormal, viewDir, lightDir, 1.0) * lightColor * sampleWeight;

@@ -100,7 +100,6 @@ struct NRISmokeSettings
 	bool emissiveLights = true;
 	uint32_t emissiveReuseMode = 2;
 	bool emissiveReference = false;
-	uint32_t emissiveReferenceSamples = 32;
 	float emissiveSourceClamp = 32.0f;
 	uint32_t directReuseMode = 2;
 	uint32_t directReferenceMode = 0;

@@ -62,7 +62,6 @@ struct NRISmokeStatusSnapshot
 	uint32_t emissiveReuseModeEffective = 0;
 	uint32_t emissiveLaneCount = 0;
 	bool emissiveReference = false;
-	uint32_t emissiveReferenceSamplesRequested = 32;
 	bool emissiveHistoryValid = false;
 	bool volumeHistoryRequested = false;
 	bool volumeHistoryEffective = false;
@@ -134,13 +133,6 @@ struct NRISmokeStatusSnapshot
 	uint32_t emissiveReferenceSamples = 0;
 	uint32_t emissiveReferenceRays = 0;
 	uint32_t emissiveIdentityRejects = 0;
-	uint32_t emissiveGlobalProposals = 0;
-	uint32_t emissiveUniformProposals = 0;
-	uint32_t emissiveNoProposalFroxels = 0;
-	uint32_t emissiveConfirmedOccludedFroxels = 0;
-	uint32_t emissiveHistoryRepairs = 0;
-	uint32_t emissiveReferenceVisible = 0;
-	uint32_t emissiveReferenceOccluded = 0;
 	uint32_t indirectFroxelsProcessed = 0;
 	uint32_t indirectLocalityRays = 0;
 	uint32_t indirectLocalityAgreement = 0;
