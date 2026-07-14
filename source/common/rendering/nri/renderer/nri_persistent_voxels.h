@@ -2,6 +2,7 @@
 
 #include "nri_voxel_admission_scheduler.h"
 
+#include "nri_persistent_voxel_admission_index.h"
 #include "nri_persistent_voxel_material_closure.h"
 #include "nri_frame_resources.h"
 #include "nri_persistent_voxel_shared_blas.h"
@@ -61,6 +62,7 @@ struct PersistentVoxelBatch
 	uint64_t sourceSerial = 0;
 	uint32_t surfaceCount = 0;
 	uint32_t primitiveCount = 0;
+	uint32_t indexCount = 0;
 	uint32_t materialCount = 0;
 	uint32_t activeActorCount = 0;
 	uint32_t rebuildCount = 0;
@@ -640,6 +642,33 @@ struct NRIPersistentVoxelOverlayStats
 	uint64_t byteCount = 0;
 };
 
+struct NRIPersistentVoxelMaintenanceStats
+{
+	uint32_t registryEntries = 0;
+	uint32_t activeEntries = 0;
+	uint32_t requiredReadyEntries = 0;
+	uint32_t optionalReadyEntries = 0;
+	uint32_t failedEntries = 0;
+	uint32_t entriesScannedLastPump = 0;
+	uint32_t pressureEntriesScannedLast = 0;
+	uint32_t pressureResourceRowsScannedLast = 0;
+	bool pumpFastReturnLast = false;
+	bool pressureEvaluatedLast = false;
+	bool pressureSkippedLast = false;
+	uint64_t pumpCalls = 0;
+	uint64_t pumpFastReturns = 0;
+	uint64_t entriesScanned = 0;
+	uint64_t pressureEntriesScanned = 0;
+	uint64_t pressureResourceRowsScanned = 0;
+	uint64_t pressureEvaluations = 0;
+	uint64_t pressureNoops = 0;
+	uint64_t pressureSkips = 0;
+	uint64_t memorySnapshotRebuilds = 0;
+	uint64_t memorySnapshotHits = 0;
+	uint64_t resourceStatusRebuilds = 0;
+	uint64_t resourceStatusHits = 0;
+};
+
 struct NRIPersistentVoxelMaterialWarmupStats
 {
 	uint32_t textureRequests = 0;
@@ -760,6 +789,7 @@ struct NRIPersistentVoxelBatchStats
 	uint64_t persistentVoxelOnboardingAdmittedBytes = 0;
 	uint64_t persistentVoxelOnboardingByteBudget = 0;
 	uint32_t persistentVoxelInstanceTransformUpdates = 0;
+	uint32_t persistentVoxelBatchSerialFastPathCount = 0;
 };
 
 struct NRIPersistentVoxelBatchServices
@@ -1009,6 +1039,7 @@ public:
 	void FillResourceStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const;
 	void FillBatchStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const;
 	NRIPersistentVoxelOverlayStats BuildOverlayStats() const;
+	const NRIPersistentVoxelMaintenanceStats& GetMaintenanceStats() const { return maintenanceStats; }
 	bool HasValidBatch() const;
 	bool HasRenderableOverlay() const;
 	bool HasResidentIndirectOnlyActor(int32_t actorIndex) const;
@@ -1023,6 +1054,7 @@ public:
 		PersistentVoxelMaterialVariantResource& candidate,
 		bool& outReused);
 	void RecomputeBatchState(PersistentVoxelBatch& targetBatch) const;
+	void RefreshActiveResourceReferences(uint32_t frameIndex);
 	void ClearActorInstances(const NRIPersistentVoxelResetServices& services);
 	bool ValidateActorGeometry(
 		uint64_t identityKey,
@@ -1055,6 +1087,9 @@ public:
 	bool AppendMaterialTextureKeys(uint64_t materialKeyHash, std::vector<uint64_t>& outKeys) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsRequiredAdmission(const PersistentVoxelAdmissionEntry& entry) const;
+	NRIPersistentVoxelAdmissionBucket GetAdmissionBucket(const PersistentVoxelAdmissionEntry& entry) const;
+	void RebuildAdmissionIndex(bool reactivateStaleReady);
+	void MarkMaintenanceMutation();
 	void CountAdmissionWork(uint32_t& requiredPending, uint32_t& requiredReady, uint32_t& optionalPending, uint32_t& failed) const;
 	void TraceReadiness(
 		const char* event,
@@ -1077,6 +1112,20 @@ public:
 	std::unordered_map<uint64_t, PersistentVoxelInstanceRecord> instances;
 	std::unordered_map<uint64_t, uint64_t> actorRejectedSignatures;
 	std::unordered_map<uint64_t, PersistentVoxelAdmissionEntry> admissionQueue;
+	std::unordered_map<uint64_t, uint32_t> activeMeshReferences;
+	std::unordered_map<uint64_t, uint32_t> activeMaterialReferences;
+	NRIPersistentVoxelAdmissionIndex admissionIndex;
+	uint64_t maintenanceMutationGeneration = 1;
+	mutable uint64_t cachedMemoryUsageGeneration = 0;
+	mutable NRIPersistentVoxelMemoryUsage cachedMemoryUsage = {};
+	mutable uint64_t cachedResourceStatusGeneration = 0;
+	mutable NRIPersistentVoxelStatusSnapshot cachedResourceStatus = {};
+	uint64_t pressureEvaluationGeneration = 0;
+	uint64_t pressureSettingsSignature = 0;
+	uint64_t pressureAdapterBudget = 0;
+	uint32_t pressureEvaluationFrame = 0;
+	bool pressureEvaluationValid = false;
+	mutable NRIPersistentVoxelMaintenanceStats maintenanceStats = {};
 	std::unordered_set<uint64_t> publishedMeshKeys;
 	std::unordered_set<uint64_t> publishedMaterialKeys;
 	std::unordered_set<uint64_t> dirtyMaterialResourceKeys;

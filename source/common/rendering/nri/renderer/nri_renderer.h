@@ -1320,6 +1320,7 @@ public:
 		uint32_t persistentVoxelSharedMeshResources = 0;
 		uint32_t persistentVoxelTlasInstances = 0;
 		uint32_t persistentVoxelInstanceTransformUpdates = 0;
+		uint32_t persistentVoxelBatchSerialFastPathCount = 0;
 		uint32_t persistentVoxelBakedFallbackInstances = 0;
 		uint32_t persistentVoxelBatchActorCount = 0;
 		uint32_t persistentVoxelInstanceRecordCount = 0;

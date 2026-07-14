@@ -5327,7 +5327,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.persistentVoxelOnboardingDeferredBytes,
 			(unsigned long long)shell.persistentVoxelOnboardingByteBudget);
 		Printf(
-			"PERF pt persistent voxel batch detail NRI: frame=%llu admission_pump=%.3f cache_entries=%.3f sort=%.3f instance_sync=%.3f existing_actor_map=%.3f actor_loop=%.3f material_variant=%.3f mesh_admission=%.3f material_bridge=%.3f batch_state=%.3f admission_pending=%u texture_prewarm_deferred=%u material_invalid=%u budget_deferred=%u transform_updates=%u\n",
+			"PERF pt persistent voxel batch detail NRI: frame=%llu admission_pump=%.3f cache_entries=%.3f sort=%.3f instance_sync=%.3f existing_actor_map=%.3f actor_loop=%.3f material_variant=%.3f mesh_admission=%.3f material_bridge=%.3f batch_state=%.3f admission_pending=%u texture_prewarm_deferred=%u material_invalid=%u budget_deferred=%u transform_updates=%u serial_fast_path=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneSelectPersistentVoxelAdmissionPumpMs,
 			shell.persistentVoxelBatchCacheEntryMs,
@@ -5343,7 +5343,8 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.persistentVoxelOnboardingTexturePrewarmDeferredCount,
 			shell.persistentVoxelOnboardingMaterialInvalidCount,
 			shell.persistentVoxelOnboardingBudgetDeferredCount,
-			shell.persistentVoxelInstanceTransformUpdates);
+			shell.persistentVoxelInstanceTransformUpdates,
+			shell.persistentVoxelBatchSerialFastPathCount);
 		Printf(
 			"PERF pt persistent voxel texture prewarm NRI: frame=%llu queued=%u processed=%u deferred=%u hits=%u misses=%u estimated_bytes=%llu processed_bytes=%llu deferred_bytes=%llu byte_budget=%llu ms=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,

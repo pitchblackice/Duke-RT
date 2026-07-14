@@ -863,17 +863,11 @@ NRIPersistentVoxelOverlayStats NRIPersistentVoxelResidency::BuildOverlayStats() 
 	NRIPersistentVoxelOverlayStats stats = {};
 	stats.actorCount = batch.activeActorCount;
 	stats.primitiveCount = batch.primitiveCount;
+	stats.indexCount = batch.indexCount;
 	stats.materialCount = (uint32_t)batch.materialBridge.materials.size();
 	stats.byteCount =
 		(uint64_t)batch.primitiveCount * sizeof(nri_scene::PrimitiveData) +
 		nri_scene::EstimateMaterialBridgeBytes(batch.materialBridge);
-	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
-	{
-		if (actor.active)
-		{
-			stats.indexCount += actor.indexCount;
-		}
-	}
 	stats.byteCount += (uint64_t)stats.indexCount * sizeof(uint32_t);
 	return stats;
 }
@@ -1025,6 +1019,7 @@ bool NRIPersistentVoxelResidency::PublishCanonicalMaterialResource(
 	materialResourceGeneration++;
 	publishedMaterialKeys.insert(candidate.materialKeyHash);
 	candidate = materialVariantResources[candidate.materialKeyHash];
+	MarkMaintenanceMutation();
 	return true;
 }
 
@@ -1120,6 +1115,7 @@ void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge(PersistentVoxelBatc
 void NRIPersistentVoxelResidency::RecomputeBatchState(PersistentVoxelBatch& targetBatch) const
 {
 	targetBatch.primitiveCount = 0;
+	targetBatch.indexCount = 0;
 	targetBatch.materialCount = 0;
 	targetBatch.activeActorCount = 0;
 	for (const PersistentVoxelBatch::ActorEntry& actor : targetBatch.actors)
@@ -1128,6 +1124,7 @@ void NRIPersistentVoxelResidency::RecomputeBatchState(PersistentVoxelBatch& targ
 		{
 			targetBatch.activeActorCount++;
 			targetBatch.primitiveCount += actor.primitiveCount;
+			targetBatch.indexCount += actor.indexCount;
 		}
 	}
 	targetBatch.materialCount = (uint32_t)targetBatch.materialBridge.materials.size();
@@ -1147,9 +1144,110 @@ void NRIPersistentVoxelResidency::RecomputeBatchState(PersistentVoxelBatch& targ
 		!targetBatch.materialBridge.materials.empty();
 }
 
+void NRIPersistentVoxelResidency::RefreshActiveResourceReferences(uint32_t frameIndex)
+{
+	std::unordered_map<uint64_t, uint32_t> nextMeshReferences;
+	std::unordered_map<uint64_t, uint32_t> nextMaterialReferences;
+	nextMeshReferences.reserve(batch.activeActorCount);
+	nextMaterialReferences.reserve(batch.activeActorCount);
+	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	{
+		if (actor.active)
+		{
+			if (actor.meshResourceKey != 0)
+			{
+				nextMeshReferences[actor.meshResourceKey]++;
+			}
+			if (actor.materialKeyHash != 0)
+			{
+				nextMaterialReferences[actor.materialKeyHash]++;
+			}
+		}
+	}
+	if (activeMeshReferences == nextMeshReferences &&
+		activeMaterialReferences == nextMaterialReferences)
+	{
+		return;
+	}
+
+	const bool updateCachedStatus = cachedResourceStatusGeneration == maintenanceMutationGeneration;
+	for (const auto& pair : activeMeshReferences)
+	{
+		auto resource = meshVariantResources.find(pair.first);
+		if (resource != meshVariantResources.end())
+		{
+			if (updateCachedStatus && resource->second.activeActorReferences != 0)
+			{
+				cachedResourceStatus.zeroRefMeshResourceCount++;
+				cachedResourceStatus.zeroRefResourceBytes += resource->second.residentBytes;
+			}
+			resource->second.activeActorReferences = 0;
+		}
+	}
+	for (const auto& pair : activeMaterialReferences)
+	{
+		auto resource = materialVariantResources.find(pair.first);
+		if (resource != materialVariantResources.end())
+		{
+			if (updateCachedStatus && resource->second.activeActorReferences != 0)
+			{
+				cachedResourceStatus.zeroRefMaterialResourceCount++;
+				cachedResourceStatus.zeroRefResourceBytes += resource->second.residentBytes;
+			}
+			resource->second.activeActorReferences = 0;
+		}
+	}
+	activeMeshReferences = std::move(nextMeshReferences);
+	activeMaterialReferences = std::move(nextMaterialReferences);
+	for (const auto& pair : activeMeshReferences)
+	{
+		auto resource = meshVariantResources.find(pair.first);
+		if (resource != meshVariantResources.end())
+		{
+			if (updateCachedStatus && resource->second.activeActorReferences == 0)
+			{
+				if (cachedResourceStatus.zeroRefMeshResourceCount != 0)
+				{
+					cachedResourceStatus.zeroRefMeshResourceCount--;
+				}
+				cachedResourceStatus.zeroRefResourceBytes =
+					cachedResourceStatus.zeroRefResourceBytes >= resource->second.residentBytes ?
+					cachedResourceStatus.zeroRefResourceBytes - resource->second.residentBytes : 0ull;
+			}
+			resource->second.activeActorReferences = pair.second;
+			resource->second.lastUsedFrame = frameIndex;
+			resource->second.lastUsedMapGeneration = residencyMapGeneration;
+			resource->second.cold = false;
+		}
+	}
+	for (const auto& pair : activeMaterialReferences)
+	{
+		auto resource = materialVariantResources.find(pair.first);
+		if (resource != materialVariantResources.end())
+		{
+			if (updateCachedStatus && resource->second.activeActorReferences == 0)
+			{
+				if (cachedResourceStatus.zeroRefMaterialResourceCount != 0)
+				{
+					cachedResourceStatus.zeroRefMaterialResourceCount--;
+				}
+				cachedResourceStatus.zeroRefResourceBytes =
+					cachedResourceStatus.zeroRefResourceBytes >= resource->second.residentBytes ?
+					cachedResourceStatus.zeroRefResourceBytes - resource->second.residentBytes : 0ull;
+			}
+			resource->second.activeActorReferences = pair.second;
+			resource->second.lastUsedFrame = frameIndex;
+			resource->second.lastUsedMapGeneration = residencyMapGeneration;
+			resource->second.cold = false;
+		}
+	}
+	pressureEvaluationValid = false;
+}
+
 void NRIPersistentVoxelResidency::ClearActorInstances(const NRIPersistentVoxelResetServices& services)
 {
 	batch = {};
+	RefreshActiveResourceReferences(0);
 	instances.clear();
 	const bool keepSharedVariantArena = !meshVariantResources.empty();
 	if (!keepSharedVariantArena)
@@ -1337,11 +1435,16 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 		}
 	}
 
+	const uint64_t materialBufferBytesBefore = materialBuffer.memorySize;
 	if (!services.EnsureMaterialArenaBuffer(
 		materialBuffer,
 		(uint64_t)arenaMaterialCursor * sizeof(nri_scene::MaterialData)))
 	{
 		return false;
+	}
+	if (materialBuffer.memorySize != materialBufferBytesBefore)
+	{
+		MarkMaintenanceMutation();
 	}
 
 	struct PendingMaterialUpload
@@ -2703,6 +2806,7 @@ void NRIPersistentVoxelDestroyServices::DestroyBuffer(NRIBufferResource& resourc
 
 void NRIPersistentVoxelResidency::DestroyArenaBuffers(const NRIPersistentVoxelDestroyServices& services)
 {
+	MarkMaintenanceMutation();
 	services.DestroyBuffer(vertexBuffer);
 	services.DestroyBuffer(indexBuffer);
 	services.DestroyBuffer(primitiveBuffer);
@@ -2765,6 +2869,11 @@ NRIPersistentVoxelLightAppendStats NRIPersistentVoxelResidency::AppendSceneLight
 
 NRIPersistentVoxelMemoryUsage NRIPersistentVoxelResidency::GetMemoryUsage() const
 {
+	if (cachedMemoryUsageGeneration == maintenanceMutationGeneration)
+	{
+		maintenanceStats.memorySnapshotHits++;
+		return cachedMemoryUsage;
+	}
 	NRIPersistentVoxelMemoryUsage usage = {};
 	auto accumulateBuffer = [](const NRIBufferResource& resource, uint64_t& total)
 	{
@@ -2818,6 +2927,9 @@ NRIPersistentVoxelMemoryUsage NRIPersistentVoxelResidency::GetMemoryUsage() cons
 	const NRIPersistentVoxelSharedBlasFrameStats& sharedStats = sharedBlasCache.LastFrameStats();
 	usage.sharedBlasBytes = sharedStats.residentBytes;
 	usage.accelerationStructureBytes += sharedStats.residentBytes;
+	cachedMemoryUsage = usage;
+	cachedMemoryUsageGeneration = maintenanceMutationGeneration;
+	maintenanceStats.memorySnapshotRebuilds++;
 	return usage;
 }
 
@@ -2851,23 +2963,29 @@ NRIPersistentVoxelStatusSnapshot NRIPersistentVoxelResidency::BuildStatusSnapsho
 
 void NRIPersistentVoxelResidency::FillResourceStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const
 {
+	if (cachedResourceStatusGeneration == maintenanceMutationGeneration)
+	{
+		snapshot = cachedResourceStatus;
+		maintenanceStats.resourceStatusHits++;
+		return;
+	}
+	snapshot = {};
 	snapshot.meshVariantResourceCount = (uint32_t)meshVariantResources.size();
 	snapshot.materialVariantResourceCount = (uint32_t)materialVariantResources.size();
-	snapshot.batchActorCount = (uint32_t)batch.actors.size();
-	snapshot.instanceRecordCount = (uint32_t)instances.size();
 	snapshot.admissionQueueCount = (uint32_t)admissionQueue.size();
 	CountAdmissionWork(
 		snapshot.requiredAdmissionPendingCount,
 		snapshot.requiredAdmissionReadyCount,
 		snapshot.optionalAdmissionPendingCount,
 		snapshot.failedAdmissionCount);
-	for (const auto& pair : admissionQueue)
+	for (uint64_t key : admissionIndex.ActiveKeys())
 	{
-		const PersistentVoxelAdmissionEntry& entry = pair.second;
-		if (entry.mapGeneration != residencyMapGeneration)
+		const auto found = admissionQueue.find(key);
+		if (found == admissionQueue.end())
 		{
 			continue;
 		}
+		const PersistentVoxelAdmissionEntry& entry = found->second;
 		snapshot.computeInFlightCount += entry.state == PersistentVoxelAdmissionState::DirectComputePending ? 1u : 0u;
 		snapshot.blasInFlightCount +=
 			entry.state == PersistentVoxelAdmissionState::BuildingBlas ||
@@ -2920,10 +3038,15 @@ void NRIPersistentVoxelResidency::FillResourceStatusSnapshot(NRIPersistentVoxelS
 			snapshot.zeroRefResourceBytes += resource.residentBytes;
 		}
 	}
+	cachedResourceStatus = snapshot;
+	cachedResourceStatusGeneration = maintenanceMutationGeneration;
+	maintenanceStats.resourceStatusRebuilds++;
 }
 
 void NRIPersistentVoxelResidency::FillBatchStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const
 {
+	snapshot.batchActorCount = (uint32_t)batch.actors.size();
+	snapshot.instanceRecordCount = (uint32_t)instances.size();
 	for (const auto& instancePair : instances)
 	{
 		if (instancePair.second.pending)
@@ -2961,32 +3084,52 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 	bool traceEnabled,
 	const NRIPersistentVoxelResetServices& services)
 {
-	if (meshVariantResources.empty() && materialVariantResources.empty())
+	maintenanceStats.pressureEvaluatedLast = false;
+	maintenanceStats.pressureSkippedLast = false;
+	maintenanceStats.pressureEntriesScannedLast = 0;
+	maintenanceStats.pressureResourceRowsScannedLast = 0;
+	const bool loadingPhase = phase != nullptr && std::strcmp(phase, "loading") == 0;
+	uint64_t settingsSignature = nri_scene::HashCombine64(settings.residentMaxBytes, settings.residentMinHeadroomBytes);
+	settingsSignature = nri_scene::HashCombine64(settingsSignature, settings.residentMaxColdMaps);
+	settingsSignature = nri_scene::HashCombine64(settingsSignature, settings.trimColdOnLoading ? 1ull : 0ull);
+	settingsSignature = nri_scene::HashCombine64(settingsSignature, loadingPhase ? 1ull : 0ull);
+	const bool externalPressure =
+		settings.residentMaxBytes == 0 &&
+		adapterLocalBudget > settings.residentMinHeadroomBytes &&
+		totalTrackedBytes > adapterLocalBudget - settings.residentMinHeadroomBytes;
+	const bool maintenanceCadenceDue =
+		!pressureEvaluationValid ||
+		frameIndex - pressureEvaluationFrame >= 64u;
+	if (!traceEnabled &&
+		pressureEvaluationValid &&
+		pressureEvaluationGeneration == maintenanceMutationGeneration &&
+		pressureSettingsSignature == settingsSignature &&
+		pressureAdapterBudget == adapterLocalBudget &&
+		!externalPressure &&
+		!maintenanceCadenceDue)
 	{
+		maintenanceStats.pressureSkippedLast = true;
+		maintenanceStats.pressureSkips++;
 		return;
 	}
-
-	std::unordered_map<uint64_t, uint32_t> activeMeshReferences;
-	std::unordered_map<uint64_t, uint32_t> activeMaterialReferences;
-	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	maintenanceStats.pressureEvaluatedLast = true;
+	maintenanceStats.pressureEvaluations++;
+	if (meshVariantResources.empty() && materialVariantResources.empty())
 	{
-		if (!actor.active)
-		{
-			continue;
-		}
-		if (actor.meshResourceKey != 0)
-		{
-			activeMeshReferences[actor.meshResourceKey]++;
-		}
-		if (actor.materialKeyHash != 0)
-		{
-			activeMaterialReferences[actor.materialKeyHash]++;
-		}
+		pressureEvaluationGeneration = maintenanceMutationGeneration;
+		pressureSettingsSignature = settingsSignature;
+		pressureAdapterBudget = adapterLocalBudget;
+		pressureEvaluationFrame = frameIndex;
+		pressureEvaluationValid = true;
+		maintenanceStats.pressureNoops++;
+		return;
 	}
 
 	std::unordered_set<uint64_t> admissionMeshes;
 	std::unordered_set<uint64_t> admissionMaterials;
 	uint64_t queuedBytes = 0;
+	maintenanceStats.pressureEntriesScannedLast = (uint32_t)admissionQueue.size();
+	maintenanceStats.pressureEntriesScanned += admissionQueue.size();
 	for (const auto& pair : admissionQueue)
 	{
 		const PersistentVoxelAdmissionEntry& entry = pair.second;
@@ -3004,6 +3147,9 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 	uint64_t coldBytes = 0;
 	uint32_t coldMeshCount = 0;
 	uint32_t coldMaterialCount = 0;
+	maintenanceStats.pressureResourceRowsScannedLast =
+		(uint32_t)(meshVariantResources.size() + materialVariantResources.size());
+	maintenanceStats.pressureResourceRowsScanned += maintenanceStats.pressureResourceRowsScannedLast;
 	for (auto& pair : meshVariantResources)
 	{
 		PersistentVoxelMeshVariantResource& resource = pair.second;
@@ -3049,7 +3195,7 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 	const uint64_t maxResidentBytes = settings.residentMaxBytes;
 	const uint64_t minHeadroomBytes = settings.residentMinHeadroomBytes;
 	const uint32_t maxColdMaps = settings.residentMaxColdMaps;
-	const bool loadingTrimCold = settings.trimColdOnLoading && phase != nullptr && std::strcmp(phase, "loading") == 0;
+	const bool loadingTrimCold = settings.trimColdOnLoading && loadingPhase;
 	uint64_t pressureBytes = 0;
 	if (maxResidentBytes != 0 && voxelResidentBytes > maxResidentBytes)
 	{
@@ -3227,6 +3373,20 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 			(unsigned long long)evictedBytes,
 			(evictedMeshes != 0 || evictedMaterials != 0) ? "evict" : "none");
 	}
+	if (evictedMeshes != 0 || evictedMaterials != 0)
+	{
+		MarkMaintenanceMutation();
+		RebuildAdmissionIndex(true);
+	}
+	else
+	{
+		maintenanceStats.pressureNoops++;
+	}
+	pressureEvaluationGeneration = maintenanceMutationGeneration;
+	pressureSettingsSignature = settingsSignature;
+	pressureAdapterBudget = adapterLocalBudget;
+	pressureEvaluationFrame = frameIndex;
+	pressureEvaluationValid = true;
 }
 
 bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
@@ -3244,11 +3404,65 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 	const bool loadingPhase = phase != nullptr && std::strcmp(phase, "loading") == 0;
 	const bool traceLevel1 = loadingTraceLevel >= 1 || voxelStatsEnabled;
 	const bool traceLevel2 = loadingTraceLevel >= 2 || voxelStatsEnabled;
+	maintenanceStats.pumpCalls++;
+	maintenanceStats.pumpFastReturnLast = false;
+	maintenanceStats.entriesScannedLastPump = 0;
+	auto refreshMaintenanceCounts = [&]()
+	{
+		maintenanceStats.registryEntries = (uint32_t)admissionQueue.size();
+		maintenanceStats.activeEntries = admissionIndex.ActiveCount();
+		maintenanceStats.requiredReadyEntries = admissionIndex.RequiredReadyCount();
+		maintenanceStats.optionalReadyEntries = admissionIndex.OptionalReadyCount();
+		maintenanceStats.failedEntries = admissionIndex.FailedCount();
+	};
+	auto emitMaintenanceTrace = [&]()
+	{
+		refreshMaintenanceCounts();
+		if ((int)perf_looptraceframes > 0 || voxelStatsEnabled)
+		{
+			Printf("PERF pt voxel maintenance NRI: frame=%u phase=%s registry=%u active=%u required_ready=%u optional_ready=%u failed=%u entries_scanned=%u pressure_entries_scanned=%u pressure_resource_rows=%u pump_fast_return=%u pressure_evaluated=%u pressure_skipped=%u pump_calls=%llu pump_fast_returns=%llu entries_scanned_total=%llu pressure_entries_scanned_total=%llu pressure_resource_rows_total=%llu pressure_evaluations=%llu pressure_noops=%llu pressure_skips=%llu memory_rebuilds=%llu memory_hits=%llu status_rebuilds=%llu status_hits=%llu mutation_generation=%llu\n",
+				frameIndex,
+				phase != nullptr ? phase : "unknown",
+				maintenanceStats.registryEntries,
+				maintenanceStats.activeEntries,
+				maintenanceStats.requiredReadyEntries,
+				maintenanceStats.optionalReadyEntries,
+				maintenanceStats.failedEntries,
+				maintenanceStats.entriesScannedLastPump,
+				maintenanceStats.pressureEntriesScannedLast,
+				maintenanceStats.pressureResourceRowsScannedLast,
+				maintenanceStats.pumpFastReturnLast ? 1u : 0u,
+				maintenanceStats.pressureEvaluatedLast ? 1u : 0u,
+				maintenanceStats.pressureSkippedLast ? 1u : 0u,
+				(unsigned long long)maintenanceStats.pumpCalls,
+				(unsigned long long)maintenanceStats.pumpFastReturns,
+				(unsigned long long)maintenanceStats.entriesScanned,
+				(unsigned long long)maintenanceStats.pressureEntriesScanned,
+				(unsigned long long)maintenanceStats.pressureResourceRowsScanned,
+				(unsigned long long)maintenanceStats.pressureEvaluations,
+				(unsigned long long)maintenanceStats.pressureNoops,
+				(unsigned long long)maintenanceStats.pressureSkips,
+				(unsigned long long)maintenanceStats.memorySnapshotRebuilds,
+				(unsigned long long)maintenanceStats.memorySnapshotHits,
+				(unsigned long long)maintenanceStats.resourceStatusRebuilds,
+				(unsigned long long)maintenanceStats.resourceStatusHits,
+				(unsigned long long)maintenanceMutationGeneration);
+		}
+	};
 	SyncMapGeneration(
 		buildSerial,
 		"pump-map-generation",
 		traceLevel1,
 		resetServices);
+	if (loadingPhase)
+	{
+		MarkMaintenanceMutation();
+		RebuildAdmissionIndex(true);
+	}
+	else if (admissionIndex.HasActiveWork())
+	{
+		MarkMaintenanceMutation();
+	}
 	ApplyPressurePolicy(
 		phase,
 		frameIndex,
@@ -3312,6 +3526,27 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		limits.optionalBlasLaneReserve = settings.computeMaxJobs > 1 ? 1u : 0u;
 		admissionScheduler = NRIVoxelAdmissionScheduler(limits);
 	}
+	const NRIVoxelAdmissionSnapshot initialScheduler = admissionScheduler.GetSnapshot();
+	const bool schedulerQuiescent =
+		initialScheduler.activeJobs == 0 &&
+		initialScheduler.activeBindings == 0 &&
+		initialScheduler.computeInFlight == 0 &&
+		initialScheduler.blasInFlight == 0 &&
+		initialScheduler.activeReservationBytes == 0 &&
+		initialScheduler.activeBlasBytes == 0 &&
+		initialScheduler.heldReservationBytes == 0 &&
+		initialScheduler.heldBlasBytes == 0 &&
+		initialScheduler.retirePendingBytes == 0 &&
+		initialScheduler.retirePendingBlasBytes == 0;
+	if (!admissionIndex.HasActiveWork() && schedulerQuiescent)
+	{
+		maintenanceStats.pumpFastReturnLast = true;
+		maintenanceStats.pumpFastReturns++;
+		emitMaintenanceTrace();
+		return true;
+	}
+	maintenanceStats.entriesScannedLastPump = admissionIndex.ActiveCount();
+	maintenanceStats.entriesScanned += maintenanceStats.entriesScannedLastPump;
 	const auto pumpStart = std::chrono::steady_clock::now();
 	auto elapsedMs = [&]() -> double
 	{
@@ -3395,14 +3630,17 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		}
 	};
 	std::vector<PersistentVoxelAdmissionEntry*> candidates;
-	candidates.reserve(admissionQueue.size());
-	for (auto& pair : admissionQueue)
+	candidates.reserve(admissionIndex.ActiveCount());
+	std::vector<uint64_t> drainedReadyKeys;
+	drainedReadyKeys.reserve(admissionIndex.ActiveCount());
+	for (uint64_t key : admissionIndex.ActiveKeys())
 	{
-		PersistentVoxelAdmissionEntry& entry = pair.second;
-		if (entry.mapGeneration != residencyMapGeneration)
+		auto found = admissionQueue.find(key);
+		if (found == admissionQueue.end())
 		{
 			continue;
 		}
+		PersistentVoxelAdmissionEntry& entry = found->second;
 		const uint64_t meshResourceKey = BuildPersistentVoxelVariantMeshResourceKey(entry.variant);
 		const PersistentVoxelReadinessStatus readiness = GetSharedVariantReadiness(meshResourceKey, entry.variant.materialKeyHash);
 		const bool resourcesReady = readiness.ready;
@@ -3419,6 +3657,7 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 			entry.state = PersistentVoxelAdmissionState::Ready;
 			entry.lastReason = "resident";
 			stats.ready++;
+			drainedReadyKeys.push_back(key);
 			continue;
 		}
 		if (entry.state == PersistentVoxelAdmissionState::Ready)
@@ -3453,6 +3692,17 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 			stats.runtime++;
 		}
 		candidates.push_back(&entry);
+	}
+	for (uint64_t key : drainedReadyKeys)
+	{
+		const auto found = admissionQueue.find(key);
+		if (found != admissionQueue.end())
+		{
+			admissionIndex.Transition(
+				key,
+				NRIPersistentVoxelAdmissionBucket::Active,
+				GetAdmissionBucket(found->second));
+		}
 	}
 
 	std::sort(candidates.begin(), candidates.end(), [&](const PersistentVoxelAdmissionEntry* left, const PersistentVoxelAdmissionEntry* right)
@@ -3768,6 +4018,18 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 			break;
 		}
 	}
+	for (PersistentVoxelAdmissionEntry* entry : candidates)
+	{
+		if (entry != nullptr &&
+			(entry->state == PersistentVoxelAdmissionState::Ready ||
+			 entry->state == PersistentVoxelAdmissionState::Failed))
+		{
+			admissionIndex.Transition(
+				entry->pairKey,
+				NRIPersistentVoxelAdmissionBucket::Active,
+				GetAdmissionBucket(*entry));
+		}
+	}
 
 	const bool hasQueueActivity = !candidates.empty() || stats.uploaded != 0 || stats.skippedBudget != 0 || stats.failedThisPump != 0;
 	const bool perfLoopTraceActive = (int)perf_looptraceframes > 0;
@@ -3874,6 +4136,7 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 			invariants.valid ? 1u : 0u,
 			(uint32_t)invariants.flags);
 	}
+	emitMaintenanceTrace();
 	return stats.failedThisPump == 0;
 }
 
@@ -5422,7 +5685,6 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 	NRIPersistentVoxelBatchStats& outStats)
 {
 	const uint64_t cacheSerial = nri_scene::GetPersistentVoxelCacheSerial();
-
 	std::vector<nri_scene::PersistentVoxelCacheEntryView> cacheEntries;
 	bool hasPersistentVoxelCacheEntries = false;
 	{
@@ -5434,6 +5696,79 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 	{
 		ClearActorInstances(resetServices);
 		return false;
+	}
+
+	if (batch.valid &&
+		cacheSerial == batch.sourceSerial &&
+		batchMaterialResourceGeneration == materialResourceGeneration &&
+		cacheEntries.size() == batch.activeActorCount)
+	{
+		std::unordered_map<uint64_t, PersistentVoxelBatch::ActorEntry*> activeActors;
+		activeActors.reserve(batch.activeActorCount);
+		for (PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+		{
+			if (actor.active)
+			{
+				activeActors.emplace(actor.identityKey, &actor);
+			}
+		}
+		bool serialFastPathValid = activeActors.size() == cacheEntries.size();
+		for (const nri_scene::PersistentVoxelCacheEntryView& cacheEntry : cacheEntries)
+		{
+			auto actorIt = activeActors.find(cacheEntry.identityKey);
+			auto instanceIt = instances.find(cacheEntry.identityKey);
+			if (actorIt == activeActors.end() || instanceIt == instances.end() || instanceIt->second.pending)
+			{
+				serialFastPathValid = false;
+				break;
+			}
+			PersistentVoxelBatch::ActorEntry& actor = *actorIt->second;
+			auto meshIt = meshVariantResources.find(actor.meshResourceKey);
+			if (meshIt == meshVariantResources.end() ||
+				meshIt->second.accelerationStructure.accelerationStructure == nullptr ||
+				actor.signature != cacheEntry.signature ||
+				actor.geometrySignature != ResolvePersistentVoxelCacheEntryGeometrySignature(cacheEntry) ||
+				actor.surfaceSignature != cacheEntry.surfaceSignature ||
+				actor.bakedSurfaceSignature != cacheEntry.bakedSurfaceSignature ||
+				actor.materialSignature != cacheEntry.materialSignature ||
+				actor.meshKeyHash != cacheEntry.meshKeyHash ||
+				actor.materialKeyHash != cacheEntry.materialKeyHash ||
+				actor.indirectOnly != cacheEntry.indirectOnly ||
+				actor.visibilityChunkIndex != ResolvePersistentVoxelActorVisibilityChunk(cacheEntry))
+			{
+				serialFastPathValid = false;
+				break;
+			}
+			std::array<float, 12> expectedTransform = {};
+			FillPersistentVoxelActorInstanceTransform(cacheEntry, meshIt->second, expectedTransform);
+			if (!SamePersistentVoxelInstanceTransform(actor.instanceTransform, expectedTransform.data()) ||
+				!SamePersistentVoxelInstanceTransform(instanceIt->second.currentTransform, expectedTransform.data()))
+			{
+				serialFastPathValid = false;
+				break;
+			}
+		}
+		if (serialFastPathValid)
+		{
+			for (const nri_scene::PersistentVoxelCacheEntryView& cacheEntry : cacheEntries)
+			{
+				PersistentVoxelBatch::ActorEntry& actor = *activeActors[cacheEntry.identityKey];
+				PersistentVoxelInstanceRecord& instance = instances[cacheEntry.identityKey];
+				instance.previousTransform = instance.currentTransform;
+				instance.lastSeenFrame = frameIndex;
+				instance.active = true;
+				instance.pending = false;
+				actor.previousInstanceTransform = actor.instanceTransform;
+				actor.lastSeenFrame = cacheEntry.lastSeenFrame;
+				actor.retainedFrameAge = cacheEntry.retainedFrameAge;
+				actor.sourcePicnum = cacheEntry.sourcePicnum;
+				actor.resolvedVoxelIndex = cacheEntry.resolvedVoxelIndex;
+				actor.capturedThisFrame = cacheEntry.capturedThisFrame;
+			}
+			outStats.persistentVoxelBatchSerialFastPathCount++;
+			RefreshActiveResourceReferences(frameIndex);
+			return true;
+		}
 	}
 
 	{
@@ -5807,7 +6142,12 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			return true;
 		};
 
-		PersistentVoxelMaterialVariantResource& materialResource = materialVariantResources[cacheEntry.materialKeyHash];
+		auto materialInsert = materialVariantResources.try_emplace(cacheEntry.materialKeyHash);
+		PersistentVoxelMaterialVariantResource& materialResource = materialInsert.first->second;
+		if (materialInsert.second)
+		{
+			MarkMaintenanceMutation();
+		}
 		{
 			PersistentVoxelScopedTimer perfTimer(outStats.persistentVoxelBatchMaterialVariantMs);
 			const uint64_t validatedMaterialSignature =
@@ -5940,6 +6280,10 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			{
 				dirtyMaterialResourceKeys.insert(cacheEntry.materialKeyHash);
 				materialResourceGeneration++;
+				if (!materialInsert.second)
+				{
+					MarkMaintenanceMutation();
+				}
 			}
 			materialResource.materialCount = (uint32_t)materialResource.materialBridge.materials.size();
 			materialResource.lastDesiredMapGeneration = residencyMapGeneration;
@@ -7067,6 +7411,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			PersistentVoxelScopedTimer perfTimer(outStats.persistentVoxelBatchStateMs);
 			RecomputeBatchState(batch);
 		}
+		RefreshActiveResourceReferences(frameIndex);
 		emitVoxelPromotionTrace();
 		return batch.valid;
 	}
@@ -7171,6 +7516,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 	}
 
 	batch = std::move(next);
+	RefreshActiveResourceReferences(frameIndex);
 	emitVoxelPromotionTrace();
 	return true;
 }
@@ -7385,6 +7731,10 @@ bool NRIPersistentVoxelResidency::BuildAccelerationStructures(
 	}
 
 	outStats.uniqueMeshBuilds += (uint32_t)builtMeshKeys.size();
+	if (outStats.builds != 0 || sharedBlasBuildsThisFrame != 0)
+	{
+		MarkMaintenanceMutation();
+	}
 	return true;
 }
 
@@ -7557,6 +7907,7 @@ void NRIPersistentVoxelResidency::Reset(
 	bool traceReset,
 	const NRIPersistentVoxelResetServices& services)
 {
+	MarkMaintenanceMutation();
 	if (traceReset &&
 		(!batch.actors.empty() ||
 			!instances.empty() ||
@@ -7581,6 +7932,7 @@ void NRIPersistentVoxelResidency::Reset(
 	}
 
 	batch = {};
+	RefreshActiveResourceReferences(0);
 	instances.clear();
 	actorRejectedSignatures.clear();
 	lastDesiredResidencyCount = 0;
@@ -7647,6 +7999,7 @@ void NRIPersistentVoxelResidency::Reset(
 	uploadedMaterialResourceGeneration = 0;
 	publishedMeshKeys.clear();
 	publishedMaterialKeys.clear();
+	RebuildAdmissionIndex(true);
 }
 
 void NRIPersistentVoxelResidency::ResetLevelSchedulingState(
@@ -7654,6 +8007,7 @@ void NRIPersistentVoxelResidency::ResetLevelSchedulingState(
 	bool traceReset,
 	const NRIPersistentVoxelResetServices& services)
 {
+	MarkMaintenanceMutation();
 	const uint32_t actorCount = (uint32_t)batch.actors.size();
 	const uint32_t instanceCount = (uint32_t)instances.size();
 	const uint32_t rejectedActorCount = (uint32_t)actorRejectedSignatures.size();
@@ -7680,8 +8034,10 @@ void NRIPersistentVoxelResidency::ResetLevelSchedulingState(
 		DiscardAdmissionEntry(pair.second, services);
 	}
 	admissionQueue.clear();
+	admissionIndex.Clear();
 
 	batch = {};
+	RefreshActiveResourceReferences(0);
 	instances.clear();
 	actorRejectedSignatures.clear();
 	preloadPending = false;
@@ -7731,6 +8087,8 @@ bool NRIPersistentVoxelResidency::SyncMapGeneration(
 
 	residencyLastBuildSerial = buildSerial;
 	residencyMapGeneration++;
+	MarkMaintenanceMutation();
+	admissionIndex.Clear();
 	postLoadAdmissionGraceEndFrame = 0;
 	postLoadAdmissionGraceMapGeneration = 0;
 
@@ -7762,6 +8120,7 @@ void NRIPersistentVoxelResidency::ReconcileResidency(
 	int loadingTraceLevel,
 	const NRIPersistentVoxelResetServices& services)
 {
+	MarkMaintenanceMutation();
 	SyncMapGeneration(
 		buildSerial,
 		"reconcile-map-generation",
@@ -7888,6 +8247,7 @@ void NRIPersistentVoxelResidency::ReconcileResidency(
 	{
 		if (it->second.mapGeneration != generation && desired.find(it->first) == desired.end())
 		{
+			admissionIndex.Remove(it->first, GetAdmissionBucket(it->second));
 			DiscardAdmissionEntry(it->second, services);
 			it = admissionQueue.erase(it);
 			continue;
@@ -8303,13 +8663,24 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 	auto found = admissionQueue.find(pairKey);
 	if (found != admissionQueue.end() && found->second.mapGeneration != residencyMapGeneration)
 	{
+		admissionIndex.Remove(found->first, GetAdmissionBucket(found->second));
 		DiscardAdmissionEntry(found->second, services);
 		admissionQueue.erase(found);
+		MarkMaintenanceMutation();
 		found = admissionQueue.end();
 	}
 	if (found != admissionQueue.end())
 	{
 		PersistentVoxelAdmissionEntry& entry = found->second;
+		const NRIPersistentVoxelAdmissionBucket oldBucket = GetAdmissionBucket(entry);
+		const uint32_t oldSourceBits = entry.sourceBits;
+		const int32_t oldPriorityValue = entry.priority;
+		const int32_t oldAdmissionRank = entry.admissionRank;
+		const bool oldGpuForce = entry.gpuForce;
+		const bool oldGpuPrefer = entry.gpuPrefer;
+		const bool oldRuntimeRequested = entry.runtimeRequested;
+		const nri_scene::SurfaceRef* oldSurface = entry.variant.surface;
+		const bool oldDirectOnlyAdmission = entry.variant.directOnlyAdmission;
 		const int32_t oldPriority = entry.priority;
 		const bool oldForce = entry.gpuForce;
 		const bool wasReady = entry.state == PersistentVoxelAdmissionState::Ready;
@@ -8319,8 +8690,10 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 		if (!resourcesReady && entry.variant.primitiveCount > maxBlasPrimitives)
 		{
 			traceAdmissionSkip(entry.variant, entry.estimatedBytes, "blas-primitive-budget");
+			admissionIndex.Remove(found->first, oldBucket);
 			DiscardAdmissionEntry(entry, services);
 			admissionQueue.erase(found);
+			MarkMaintenanceMutation();
 			return false;
 		}
 		const bool runtimeDirectCandidate =
@@ -8359,6 +8732,7 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 			entry.state != PersistentVoxelAdmissionState::UploadingIndices &&
 			entry.state != PersistentVoxelAdmissionState::UploadingPrimitives &&
 			entry.state != PersistentVoxelAdmissionState::BuildingBlas;
+		bool admissionPayloadChanged = false;
 		if (shouldPromoteRuntimeVariant || shouldPromotePreloadDirectVariant)
 		{
 			nri_scene::PrecachedVoxelVariantView promotedVariant = variant;
@@ -8380,6 +8754,7 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 			entry.retryCount = 0;
 			entry.estimatedBytes = estimateAdmissionBytes(entry.variant);
 			entry.lastReason = shouldPromotePreloadDirectVariant ? "preload-direct-promote" : "runtime-direct-promote";
+			admissionPayloadChanged = true;
 		}
 		else if (!resourcesReady &&
 			entry.variant.directOnlyAdmission &&
@@ -8399,6 +8774,7 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 			{
 				entry.lastReason = "direct-fallback-surface";
 			}
+			admissionPayloadChanged = true;
 		}
 		entry.sourceBits |= variant.sourceBits;
 		entry.priority = std::min(entry.priority, variant.priority);
@@ -8411,6 +8787,11 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 		entry.variant.admissionRank = entry.admissionRank;
 		entry.variant.gpuForce = entry.gpuForce;
 		entry.variant.gpuPrefer = entry.gpuPrefer;
+		if (!resourcesReady && entry.state == PersistentVoxelAdmissionState::Ready)
+		{
+			entry.state = PersistentVoxelAdmissionState::Pending;
+			entry.lastReason = "stale-ready";
+		}
 		if (entry.state == PersistentVoxelAdmissionState::Deferred &&
 			(entry.priority != oldPriority || (!oldForce && entry.gpuForce)))
 		{
@@ -8422,6 +8803,20 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 		{
 			entry.state = PersistentVoxelAdmissionState::Pending;
 			entry.lastReason = "retry-priority";
+		}
+		admissionIndex.Transition(found->first, oldBucket, GetAdmissionBucket(entry));
+		if (admissionPayloadChanged ||
+			oldBucket != GetAdmissionBucket(entry) ||
+			oldSourceBits != entry.sourceBits ||
+			oldPriorityValue != entry.priority ||
+			oldAdmissionRank != entry.admissionRank ||
+			oldGpuForce != entry.gpuForce ||
+			oldGpuPrefer != entry.gpuPrefer ||
+			oldRuntimeRequested != entry.runtimeRequested ||
+			oldSurface != entry.variant.surface ||
+			oldDirectOnlyAdmission != entry.variant.directOnlyAdmission)
+		{
+			MarkMaintenanceMutation();
 		}
 		if (loadingTraceLevel >= 2 || voxelStatsEnabled)
 		{
@@ -8470,6 +8865,8 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 	entry.estimatedBytes = estimatedBytes;
 	entry.lastReason = entry.state == PersistentVoxelAdmissionState::Ready ? "resident" : "queued";
 	admissionQueue[pairKey] = entry;
+	admissionIndex.Add(pairKey, GetAdmissionBucket(admissionQueue[pairKey]));
+	MarkMaintenanceMutation();
 	if (resourcesReady && runtimeRequested)
 	{
 		TraceReadiness(
@@ -9430,36 +9827,71 @@ bool NRIPersistentVoxelResidency::IsRequiredAdmission(const PersistentVoxelAdmis
 			(entry.gpuPrefer && (entry.sourceBits & nri_scene::PrecachedVoxelSourceBit_MountedPreloadMap) != 0));
 }
 
-void NRIPersistentVoxelResidency::CountAdmissionWork(uint32_t& requiredPending, uint32_t& requiredReady, uint32_t& optionalPending, uint32_t& failed) const
+NRIPersistentVoxelAdmissionBucket NRIPersistentVoxelResidency::GetAdmissionBucket(
+	const PersistentVoxelAdmissionEntry& entry) const
 {
-	requiredPending = 0;
-	requiredReady = 0;
-	optionalPending = 0;
-	failed = 0;
-
-	for (const auto& pair : admissionQueue)
+	if (entry.state == PersistentVoxelAdmissionState::Ready)
 	{
-		const PersistentVoxelAdmissionEntry& entry = pair.second;
+		return IsRequiredAdmission(entry) ?
+			NRIPersistentVoxelAdmissionBucket::RequiredReady :
+			NRIPersistentVoxelAdmissionBucket::OptionalReady;
+	}
+	if (entry.state == PersistentVoxelAdmissionState::Failed)
+	{
+		return NRIPersistentVoxelAdmissionBucket::Failed;
+	}
+	return NRIPersistentVoxelAdmissionBucket::Active;
+}
+
+void NRIPersistentVoxelResidency::RebuildAdmissionIndex(bool reactivateStaleReady)
+{
+	admissionIndex.Clear();
+	for (auto& pair : admissionQueue)
+	{
+		PersistentVoxelAdmissionEntry& entry = pair.second;
 		if (entry.mapGeneration != residencyMapGeneration)
 		{
 			continue;
 		}
+		if (reactivateStaleReady &&
+			entry.state == PersistentVoxelAdmissionState::Ready &&
+			!IsSharedVariantReady(BuildPersistentVoxelVariantMeshResourceKey(entry.variant), entry.variant.materialKeyHash))
+		{
+			entry.state = PersistentVoxelAdmissionState::Pending;
+			entry.lastReason = "resource-invalidated";
+		}
+		admissionIndex.Add(pair.first, GetAdmissionBucket(entry));
+	}
+}
 
+void NRIPersistentVoxelResidency::MarkMaintenanceMutation()
+{
+	maintenanceMutationGeneration++;
+	if (maintenanceMutationGeneration == 0)
+	{
+		maintenanceMutationGeneration = 1;
+		cachedMemoryUsageGeneration = 0;
+		cachedResourceStatusGeneration = 0;
+		pressureEvaluationGeneration = 0;
+	}
+}
+
+void NRIPersistentVoxelResidency::CountAdmissionWork(uint32_t& requiredPending, uint32_t& requiredReady, uint32_t& optionalPending, uint32_t& failed) const
+{
+	requiredPending = 0;
+	requiredReady = admissionIndex.RequiredReadyCount();
+	optionalPending = 0;
+	failed = admissionIndex.FailedCount();
+
+	for (uint64_t key : admissionIndex.ActiveKeys())
+	{
+		const auto found = admissionQueue.find(key);
+		if (found == admissionQueue.end())
+		{
+			continue;
+		}
+		const PersistentVoxelAdmissionEntry& entry = found->second;
 		const bool required = IsRequiredAdmission(entry);
-		const bool ready = IsSharedVariantReady(BuildPersistentVoxelVariantMeshResourceKey(entry.variant), entry.variant.materialKeyHash);
-		if (ready)
-		{
-			if (required)
-			{
-				requiredReady++;
-			}
-			continue;
-		}
-		if (entry.state == PersistentVoxelAdmissionState::Failed)
-		{
-			failed++;
-			continue;
-		}
 		if (required)
 		{
 			requiredPending++;
