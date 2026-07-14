@@ -133,6 +133,14 @@ public:
 		NRIMapMoverShadowObservationResult& outResult);
 
 	const NRIMapMoverShadowRecord* Find(uint64_t stableGroupId, uint32_t chunkIndex) const;
+	template<class Visitor>
+	void ForEachRecord(Visitor&& visitor) const
+	{
+		for (const auto& entry : m_records)
+		{
+			visitor(entry.second);
+		}
+	}
 	uint32_t GetRecordCount() const { return (uint32_t)m_records.size(); }
 	uint64_t EstimateRetainedCpuBytes() const;
 	const NRIMapMoverShadowStateStats& GetStats() const { return m_stats; }

@@ -13,6 +13,7 @@
 #include "nri_renderer_context.h"
 #include "nri_resources.h"
 #include "nri_map_movers.h"
+#include "nri_map_mover_rigid_route.h"
 #include "nri_map_mover_shadow.h"
 #include "nri_runtime_mutation.h"
 #include "nri_runtime_space_link_state.h"
@@ -2593,6 +2594,7 @@ private:
 	NRIStaticSceneResidency mStaticSceneResidency;
 	NRIMapMoverSystem mMapMovers;
 	NRIMapMoverShadow mMapMoverShadow;
+	NRIMapMoverRigidRoute mMapMoverRigidRoute;
 	NRIRuntimeMutationSystem mRuntimeMutation;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	NRIPersistentVoxelResidency mPersistentVoxels;

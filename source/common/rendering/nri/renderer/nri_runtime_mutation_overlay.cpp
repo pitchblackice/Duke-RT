@@ -846,6 +846,18 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	{
 		return false;
 	}
+	NRIMapMoverRigidRouteFrameInput rigidRouteInput;
+	rigidRouteInput.movers = &mMapMovers;
+	rigidRouteInput.shadowState = &mMapMoverShadow.GetState();
+	rigidRouteInput.mapWorld = &mMapWorld;
+	rigidRouteInput.staticScene = &mStaticMapScene;
+	rigidRouteInput.atlas = &mStaticMapChunkAtlas;
+	rigidRouteInput.registry = &mStaticSceneResidency.Registry();
+	rigidRouteInput.runtimeMutation = &mRuntimeMutation;
+	rigidRouteInput.frameIndex = mFrameIndex;
+	rigidRouteInput.mode = (int)nri_ptmapmovermode;
+	rigidRouteInput.traceMode = (int)nri_ptmapmovershadow;
+	mMapMoverRigidRoute.Update(rigidRouteInput);
 	static constexpr uint8_t kVisibleResidentValidationWindow = 8;
 	static constexpr uint8_t kVisibleResidentUnresolvedTextureValidationWindow = 64;
 	static constexpr uint8_t kStartupVisibleResidentValidationWindow = 64;
@@ -1064,6 +1076,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	for (uint32_t candidateListIndex = 0; candidateListIndex < (uint32_t)mMapWorld.chunks.size(); ++candidateListIndex)
 	{
 		const auto& mapChunk = mMapWorld.chunks[candidateListIndex];
+		if (mMapMoverRigidRoute.ShouldBypassExactChunk(mapChunk.chunkIndex))
+		{
+			continue;
+		}
 		const auto* replacement = mRuntimeMutation.FindReplacement(candidateListIndex);
 		if (replacement == nullptr)
 		{
@@ -1639,6 +1655,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	for (size_t chunkIndex = 0; chunkIndex < mMapWorld.chunks.size(); ++chunkIndex)
 	{
 		const auto& mapChunk = mMapWorld.chunks[chunkIndex];
+		if (mMapMoverRigidRoute.ShouldBypassExactChunk(mapChunk.chunkIndex))
+		{
+			continue;
+		}
 		auto* replacementPtr = mRuntimeMutation.FindReplacement((uint32_t)chunkIndex);
 		if (replacementPtr == nullptr)
 		{

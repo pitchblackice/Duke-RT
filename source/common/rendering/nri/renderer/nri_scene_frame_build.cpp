@@ -1016,6 +1016,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectStaticInstancesMs);
 				BuildStaticMapInstances(instances, sceneInstances);
+				mMapMoverRigidRoute.PatchStaticInstances(instances, sceneInstances);
 			}
 			const uint32_t staticSceneInstanceBaselineCount = (uint32_t)sceneInstances.size();
 			selectedStaticSceneInstanceCount = staticSceneInstanceBaselineCount;
