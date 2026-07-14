@@ -84,6 +84,12 @@ struct RuntimeMutationCacheStats
 	uint32_t cachedMaterialStateCount = 0;
 };
 
+struct RuntimeMutationResidentElementSpan
+{
+	uint32_t firstElement = 0;
+	uint32_t elementCount = 0;
+};
+
 struct RuntimeMapMutationCache
 {
 	struct ChunkReplacement
@@ -126,6 +132,10 @@ struct RuntimeMapMutationCache
 		uint64_t deferredMaterialFrame = 0;
 		bool deferredStructuralRebuild = false;
 		uint64_t deferredStructuralFrame = 0;
+		bool fixedLayoutDeformer = false;
+		uint64_t fixedLayoutDeformerKey = 0;
+		std::vector<RuntimeMutationResidentElementSpan> fixedLayoutVertexSpans;
+		std::vector<RuntimeMutationResidentElementSpan> fixedLayoutPrimitiveSpans;
 		uint32_t surfaceCount = 0;
 		uint32_t triangleCount = 0;
 		SceneLightSystem::SurfaceIdentityOverrides lightIdentityOverrides;

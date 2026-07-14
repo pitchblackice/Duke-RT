@@ -679,6 +679,10 @@ void NRIRuntimeMutationSystem::ClearReplacementPayload(RuntimeMapMutationCache::
 	replacement.deferredMaterialFrame = 0;
 	replacement.deferredStructuralRebuild = false;
 	replacement.deferredStructuralFrame = 0;
+	replacement.fixedLayoutDeformer = false;
+	replacement.fixedLayoutDeformerKey = 0;
+	replacement.fixedLayoutVertexSpans.clear();
+	replacement.fixedLayoutPrimitiveSpans.clear();
 	if (clearMaterialStateCache)
 	{
 		replacement.materialStateCache.clear();

@@ -1985,6 +1985,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mObservedMapWorldBuildSerial = 0;
 	mMapMoverShadow.Reset();
 	mMapMoverRigidRoute.Reset();
+	mSE29FloorDeformerRoute.Reset();
 
 	DestroyCachedTextures();
 	ResetPersistentDynamicEmissiveCache();
@@ -2130,6 +2131,7 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 	mObservedMapWorldBuildSerial = 0;
 	mMapMoverShadow.Reset();
 	mMapMoverRigidRoute.Reset();
+	mSE29FloorDeformerRoute.Reset();
 	mAllowStartupMapWorldCorrection = false;
 	mAllowStartupMutationRebaseline = false;
 	mPendingStartupMutationRebaseline = false;
@@ -3380,6 +3382,7 @@ void NRIRenderer::RefreshMapWorld()
 		mMapWorld.level = currentLevel;
 		mMapMoverShadow.Reset();
 		mMapMoverRigidRoute.Reset();
+		mSE29FloorDeformerRoute.Reset();
 		mObservedMapWorldBuildSerial = pendingBuildSerial;
 		mPendingStartupVisibleChunkValidation.clear();
 		mRuntimeMutation.ResetForMapWorldBuildFailure();
@@ -3514,4 +3517,9 @@ uint32_t NRIRenderer::GetCurrentQueuedFrameIndex() const
 	}
 
 	return std::min<uint32_t>(mFrameBuffer->mCurrentQueuedFrameIndex, (uint32_t)mFrameBuffer->mQueuedFrames.size() - 1u);
+}
+
+NRISE29FloorDeformerRouteFrameStats NRIRenderer::GetSE29FloorDeformerRouteFrameStats() const
+{
+	return mSE29FloorDeformerRoute.GetFrameStats();
 }

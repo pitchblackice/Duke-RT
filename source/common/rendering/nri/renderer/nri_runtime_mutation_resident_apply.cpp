@@ -498,6 +498,11 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			mutableChunk.residentBlasVertexNum = 0;
 			mutableChunk.residentBlasIndexOffset = 0;
 			mutableChunk.residentBlasIndexNum = 0;
+			mutableChunk.fixedLayoutDeformerKey = 0;
+			mutableChunk.fixedLayoutVertexSpanCount = 0;
+			mutableChunk.fixedLayoutPrimitiveSpanCount = 0;
+			mutableChunk.fixedLayoutVertexBytes = 0;
+			mutableChunk.fixedLayoutPrimitiveBytes = 0;
 			mutableChunk.vertexCount = 0;
 			mutableChunk.indexCount = 0;
 			mutableChunk.primitiveCount = 0;
@@ -588,6 +593,28 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		bool preserveResidentIndexSlice = false;
 		bool preserveResidentPrimitiveSlice = false;
 		bool preserveResidentBlasRefitOnly = false;
+		bool useFixedLayoutVertexSpans = false;
+		bool useFixedLayoutPrimitiveSpans = false;
+		const auto fixedLayoutSpansValid = [](
+			const std::vector<RuntimeMutationResidentElementSpan>& spans,
+			uint32_t elementCapacity)
+		{
+			for (const RuntimeMutationResidentElementSpan& span : spans)
+			{
+				if (span.elementCount == 0 || span.firstElement >= elementCapacity ||
+					span.elementCount > elementCapacity - span.firstElement)
+				{
+					return false;
+				}
+			}
+			return true;
+		};
+		const bool fixedLayoutVertexSpansValid =
+			!replacement.fixedLayoutDeformer ||
+			fixedLayoutSpansValid(replacement.fixedLayoutVertexSpans, effectiveResidentVertexCount);
+		const bool fixedLayoutPrimitiveSpansValid =
+			!replacement.fixedLayoutDeformer ||
+			fixedLayoutSpansValid(replacement.fixedLayoutPrimitiveSpans, effectiveResidentPrimitiveCount);
 		{
 			ScopedPtPerfTimer detailPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyAtlasBookkeepingMs);
 			sourceChunk.vertexOffset = 0;
@@ -880,6 +907,18 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			{
 				mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitOnlyCount++;
 			}
+			useFixedLayoutVertexSpans =
+				replacement.fixedLayoutDeformer &&
+				fixedLayoutVertexSpansValid &&
+				keptGeometrySlices &&
+				preserveResidentIndexSlice;
+			useFixedLayoutPrimitiveSpans =
+				replacement.fixedLayoutDeformer &&
+				fixedLayoutPrimitiveSpansValid &&
+				keptGeometrySlices &&
+				preserveResidentIndexSlice &&
+				keptMaterialSlice &&
+				!preserveResidentPrimitiveSlice;
 
 			mStaticMapChunkAtlas = std::move(nextAtlasState);
 			mStaticMapChunkAtlas.chunks[chunkListIndex] = nextAtlasChunk;
@@ -908,14 +947,33 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 							nextAtlasChunk,
 							mStaticMapScene.geometry.vertices);
 					}
-					const uint64_t vertexBytes = (uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex);
-					if (!mRuntimeMutation.QueueResidentGeometryUploadRange(
-							ResidentUploadKind_Vertex,
-							(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
-							vertexBytes,
-							NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
+					if (useFixedLayoutVertexSpans)
 					{
-						return false;
+						for (const RuntimeMutationResidentElementSpan& span : replacement.fixedLayoutVertexSpans)
+						{
+							if (span.elementCount == 0 || span.firstElement >= nextAtlasChunk.vertexCount ||
+								span.elementCount > nextAtlasChunk.vertexCount - span.firstElement ||
+								!mRuntimeMutation.QueueResidentGeometryUploadRange(
+									ResidentUploadKind_Vertex,
+									(uint64_t)(nextAtlasChunk.vertexOffset + span.firstElement) * sizeof(nri_scene::SceneVertex),
+									(uint64_t)span.elementCount * sizeof(nri_scene::SceneVertex),
+									NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
+							{
+								return false;
+							}
+						}
+					}
+					else
+					{
+						const uint64_t vertexBytes = (uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex);
+						if (!mRuntimeMutation.QueueResidentGeometryUploadRange(
+								ResidentUploadKind_Vertex,
+								(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
+								vertexBytes,
+								NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
+						{
+							return false;
+						}
 					}
 				}
 				else
@@ -979,25 +1037,63 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 								mStaticMapScene.geometry.primitiveProvenance.data() + nextAtlasChunk.primitiveOffset);
 						}
 					}
-					const uint64_t primitiveBytes = (uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData);
-					if (!mRuntimeMutation.QueueResidentGeometryUploadRange(
-							ResidentUploadKind_Primitive,
-							(uint64_t)nextAtlasChunk.primitiveOffset * sizeof(nri_scene::PrimitiveData),
-							primitiveBytes,
-							NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
+					if (useFixedLayoutPrimitiveSpans)
 					{
-						return false;
+						for (const RuntimeMutationResidentElementSpan& span : replacement.fixedLayoutPrimitiveSpans)
+						{
+							if (span.elementCount == 0 || span.firstElement >= nextAtlasChunk.primitiveCount ||
+								span.elementCount > nextAtlasChunk.primitiveCount - span.firstElement ||
+								!mRuntimeMutation.QueueResidentGeometryUploadRange(
+									ResidentUploadKind_Primitive,
+									(uint64_t)(nextAtlasChunk.primitiveOffset + span.firstElement) * sizeof(nri_scene::PrimitiveData),
+									(uint64_t)span.elementCount * sizeof(nri_scene::PrimitiveData),
+									NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
+							{
+								return false;
+							}
+						}
+					}
+					else
+					{
+						const uint64_t primitiveBytes = (uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData);
+						if (!mRuntimeMutation.QueueResidentGeometryUploadRange(
+								ResidentUploadKind_Primitive,
+								(uint64_t)nextAtlasChunk.primitiveOffset * sizeof(nri_scene::PrimitiveData),
+								primitiveBytes,
+								NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
+						{
+							return false;
+						}
 					}
 				}
 			}
-			mLastPerfResourceTraceStats.residentChunkBatchVertexBytes +=
-				(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex);
+			if (useFixedLayoutVertexSpans)
+			{
+				for (const RuntimeMutationResidentElementSpan& span : replacement.fixedLayoutVertexSpans)
+				{
+					mLastPerfResourceTraceStats.residentChunkBatchVertexBytes +=
+						(uint64_t)span.elementCount * sizeof(nri_scene::SceneVertex);
+				}
+			}
+			else
+			{
+				mLastPerfResourceTraceStats.residentChunkBatchVertexBytes +=
+					(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex);
+			}
 			if (!preserveResidentIndexSlice)
 			{
 				mLastPerfResourceTraceStats.residentChunkBatchIndexBytes +=
 					(uint64_t)nextAtlasChunk.indexCount * sizeof(uint32_t);
 			}
-			if (!preserveResidentPrimitiveSlice)
+			if (useFixedLayoutPrimitiveSpans)
+			{
+				for (const RuntimeMutationResidentElementSpan& span : replacement.fixedLayoutPrimitiveSpans)
+				{
+					mLastPerfResourceTraceStats.residentChunkBatchPrimitiveBytes +=
+						(uint64_t)span.elementCount * sizeof(nri_scene::PrimitiveData);
+				}
+			}
+			else if (!preserveResidentPrimitiveSlice)
 			{
 				mLastPerfResourceTraceStats.residentChunkBatchPrimitiveBytes +=
 					(uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData);
@@ -1026,6 +1122,30 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mutableChunk.lastResidentBlasTopologyChanged =
 			hasResidentChunk &&
 			previousGeometryTopologySignature != residentGeometryTopologySignature;
+		mutableChunk.fixedLayoutDeformerKey =
+			replacement.fixedLayoutDeformer ? replacement.fixedLayoutDeformerKey : 0;
+		mutableChunk.fixedLayoutVertexSpanCount =
+			useFixedLayoutVertexSpans ? (uint32_t)replacement.fixedLayoutVertexSpans.size() : 0;
+		mutableChunk.fixedLayoutPrimitiveSpanCount =
+			useFixedLayoutPrimitiveSpans ? (uint32_t)replacement.fixedLayoutPrimitiveSpans.size() : 0;
+		mutableChunk.fixedLayoutVertexBytes = 0;
+		mutableChunk.fixedLayoutPrimitiveBytes = 0;
+		if (useFixedLayoutVertexSpans)
+		{
+			for (const RuntimeMutationResidentElementSpan& span : replacement.fixedLayoutVertexSpans)
+			{
+				mutableChunk.fixedLayoutVertexBytes +=
+					(uint64_t)span.elementCount * sizeof(nri_scene::SceneVertex);
+			}
+		}
+		if (useFixedLayoutPrimitiveSpans)
+		{
+			for (const RuntimeMutationResidentElementSpan& span : replacement.fixedLayoutPrimitiveSpans)
+			{
+				mutableChunk.fixedLayoutPrimitiveBytes +=
+					(uint64_t)span.elementCount * sizeof(nri_scene::PrimitiveData);
+			}
+		}
 		if (!preserveResidentMaterialSlice)
 		{
 			mutableChunk.materialBridge = residentMaterials;

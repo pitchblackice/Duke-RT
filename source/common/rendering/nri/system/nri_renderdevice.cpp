@@ -5579,6 +5579,36 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationResidentApplyBlasRefitRejectPrimitiveCountMismatchCount,
 			shell.runtimeMutationResidentApplyBlasRefitRejectZeroIndexCount,
 			shell.runtimeMutationResidentApplyBlasRefitRejectZeroPrimitiveCount);
+		const NRISE29FloorDeformerRouteFrameStats se29Deformer =
+			mRenderer->GetSE29FloorDeformerRouteFrameStats();
+		Printf(
+			"PERF pt SE29 deformer NRI: frame=%llu candidates=%u admitted=%u exact_fallbacks=%u resident_rejects=%u layout_reject_mask=0x%x policy_reject_mask=0x%x dependency_groups=%u scheduled=%u budget_deferred=%u pending=%u pending_high_water=%u max_pending_age=%llu planned_vertex_spans=%u planned_primitive_spans=%u planned_vertex_bytes=%llu planned_primitive_bytes=%llu planned_refit_chunks=%u partial_upload_chunks=%u partial_vertex_spans=%u partial_primitive_spans=%u partial_vertex_bytes=%llu partial_primitive_bytes=%llu apply_failures=%u blas_updated=%u blas_recreated=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			se29Deformer.candidates,
+			se29Deformer.admitted,
+			se29Deformer.exactFallbacks,
+			se29Deformer.residentRejects,
+			se29Deformer.layoutRejectMaskOr,
+			se29Deformer.policyRejectMaskOr,
+			se29Deformer.dependencyGroups,
+			se29Deformer.scheduled,
+			se29Deformer.budgetDeferred,
+			se29Deformer.pending,
+			se29Deformer.pendingHighWater,
+			(unsigned long long)se29Deformer.maxPendingAge,
+			se29Deformer.vertexSpans,
+			se29Deformer.primitiveSpans,
+			(unsigned long long)se29Deformer.vertexBytes,
+			(unsigned long long)se29Deformer.primitiveBytes,
+			se29Deformer.plannedRefitChunks,
+			se29Deformer.partialUploadChunks,
+			se29Deformer.partialUploadVertexSpans,
+			se29Deformer.partialUploadPrimitiveSpans,
+			(unsigned long long)se29Deformer.partialUploadVertexBytes,
+			(unsigned long long)se29Deformer.partialUploadPrimitiveBytes,
+			se29Deformer.applyFailures,
+			se29Deformer.blasUpdated,
+			se29Deformer.blasRecreated);
 		for (size_t index = 0; index < NRIRenderer::RuntimeResidentBlasRecreateTraceCount; ++index)
 		{
 			const auto& entry = shell.runtimeResidentBlasRecreateEntries[index];

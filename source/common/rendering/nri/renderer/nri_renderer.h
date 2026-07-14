@@ -15,6 +15,7 @@
 #include "nri_map_movers.h"
 #include "nri_map_mover_rigid_route.h"
 #include "nri_map_mover_shadow.h"
+#include "nri_se29_floor_deformer_route.h"
 #include "nri_runtime_mutation.h"
 #include "nri_runtime_space_link_state.h"
 #include "nri_scene_data_frame_ring.h"
@@ -1909,6 +1910,7 @@ public:
 	const PerfShellTraceStats& GetLastPerfShellTraceStats() const { return mLastPerfShellTraceStats; }
 	const PerfResourceTraceStats& GetLastPerfResourceTraceStats() const { return mLastPerfResourceTraceStats; }
 	const PerfTraceShaderStats& GetLastPerfTraceShaderStats() const { return mLastPerfTraceShaderStats; }
+	NRISE29FloorDeformerRouteFrameStats GetSE29FloorDeformerRouteFrameStats() const;
 	MemoryTelemetry GetMemoryTelemetry() const;
 	static const char* GetMaterialBuildTraceSlotName(MaterialBuildTraceSlot slot);
 	enum class FrameTextureSlot : uint32_t
@@ -2625,6 +2627,7 @@ private:
 	NRIMapMoverSystem mMapMovers;
 	NRIMapMoverShadow mMapMoverShadow;
 	NRIMapMoverRigidRoute mMapMoverRigidRoute;
+	NRISE29FloorDeformerRoute mSE29FloorDeformerRoute;
 	NRIRuntimeMutationSystem mRuntimeMutation;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	NRIPersistentVoxelResidency mPersistentVoxels;

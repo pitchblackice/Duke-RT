@@ -122,6 +122,9 @@ struct NRISE29FloorDeformerPendingWork
 	NRISE29FloorDeformerLayoutFingerprint currentLayout;
 	NRISE29FloorDeformerDependencyStamp capturedStamp;
 	NRISE29FloorDeformerDependencyStamp currentStamp;
+	// Monotonic renderer observation order. Generation fields are opaque
+	// content identities and must never be numerically ordered for freshness.
+	uint64_t observationFrame = 0;
 	uint64_t pendingSinceFrame = 0;
 	uint32_t effectorLotag = 0;
 	bool floorPlaneOnly = false;

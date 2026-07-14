@@ -2376,6 +2376,11 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 		renderer->mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*outAccelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
 		outAccelerationStructure.memorySize = memoryDesc.size;
 		outAccelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
+		outAccelerationStructure.buildFlags = desc.flags;
+		outAccelerationStructure.buildType = desc.type;
+		outAccelerationStructure.buildTypeValid = true;
+		outAccelerationStructure.uncompactedMemorySize = memoryDesc.size;
+		outAccelerationStructure.compacted = false;
 		return true;
 	};
 	services.getAccelerationStructureBuildScratchBufferSize = [](void* user, const NRIAccelerationStructureResource& accelerationStructure)
@@ -2497,6 +2502,11 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures(
 		renderer->mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*outAccelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
 		outAccelerationStructure.memorySize = memoryDesc.size;
 		outAccelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
+		outAccelerationStructure.buildFlags = desc.flags;
+		outAccelerationStructure.buildType = desc.type;
+		outAccelerationStructure.buildTypeValid = true;
+		outAccelerationStructure.uncompactedMemorySize = memoryDesc.size;
+		outAccelerationStructure.compacted = false;
 		return true;
 	};
 	services.getAccelerationStructureBuildScratchBufferSize = [](void* user, const NRIAccelerationStructureResource& accelerationStructure)

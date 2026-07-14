@@ -36,6 +36,9 @@ enum MapDeformerLayoutReject : uint32_t
 	MapDeformerLayoutReject_AmbiguousKey = 1u << 11,
 	MapDeformerLayoutReject_UnmatchedTriangle = 1u << 12,
 	MapDeformerLayoutReject_DuplicateTriangle = 1u << 13,
+	// Live callers may impose a tighter bounded-work limit than the general
+	// mapper. This is a fail-closed exact-path result, not a layout mismatch.
+	MapDeformerLayoutReject_WorkBudget = 1u << 14,
 };
 
 struct MapDeformerChangedSpan

@@ -460,6 +460,19 @@ NRIRuntimeMutationResidentSceneRefreshServices BuildNRIRuntimeMutationResidentSc
 	services.recoverFailure = [](void* user, const char* reason) -> bool
 	{
 		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		for (auto& chunk : renderer->mStaticMapScene.chunks)
+		{
+			if (chunk.fixedLayoutDeformerKey == 0)
+			{
+				continue;
+			}
+			renderer->mSE29FloorDeformerRoute.NoteApplyFailure(chunk.fixedLayoutDeformerKey);
+			chunk.fixedLayoutDeformerKey = 0;
+			chunk.fixedLayoutVertexSpanCount = 0;
+			chunk.fixedLayoutPrimitiveSpanCount = 0;
+			chunk.fixedLayoutVertexBytes = 0;
+			chunk.fixedLayoutPrimitiveBytes = 0;
+		}
 		renderer->DestroyStaticMapSceneCache(reason != nullptr ? reason : "runtime-mutation-resident-refresh-failed");
 		renderer->mStaticMapScene = {};
 		renderer->mStaticAccelerationBuildSerial = 0;

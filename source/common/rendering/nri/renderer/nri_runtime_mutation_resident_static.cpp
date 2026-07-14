@@ -254,6 +254,15 @@ namespace
             nri::AccelerationStructureBits::ALLOW_UPDATE;
     }
 
+    static bool IsStaticMapChunkBlasUpdateCompatible(const NRIAccelerationStructureResource& resource)
+    {
+        return
+            resource.buildTypeValid &&
+            resource.buildType == nri::AccelerationStructureType::BOTTOM_LEVEL &&
+            ((uint32_t)resource.buildFlags & (uint32_t)nri::AccelerationStructureBits::ALLOW_UPDATE) != 0 &&
+            !resource.compacted;
+    }
+
 }
 
 
@@ -670,6 +679,7 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 			const bool canUpdateResidentBlas =
 				chunk.blasUpdateEligible &&
 				hadAccelerationStructure &&
+				IsStaticMapChunkBlasUpdateCompatible(chunk.accelerationStructure) &&
 				geometryDescMatches;
 			chunk.blasUpdateEligible = canUpdateResidentBlas;
 			auto* accelerationStructure = chunk.accelerationStructure.accelerationStructure;
@@ -790,6 +800,11 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 					mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*chunk.accelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
 					chunk.accelerationStructure.memorySize = memoryDesc.size;
 					chunk.accelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
+					chunk.accelerationStructure.buildFlags = blasDesc.flags;
+					chunk.accelerationStructure.buildType = blasDesc.type;
+					chunk.accelerationStructure.buildTypeValid = true;
+					chunk.accelerationStructure.uncompactedMemorySize = memoryDesc.size;
+					chunk.accelerationStructure.compacted = false;
 				}
 
 				{
@@ -886,6 +901,28 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 			mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &build, 1);
 			NoteWorldBlasContentChanged();
 			mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasBuildCommandCount++;
+			if (chunk.fixedLayoutDeformerKey != 0)
+			{
+				mSE29FloorDeformerRoute.NotePartialUpload(
+					chunk.fixedLayoutDeformerKey,
+					chunk.fixedLayoutVertexSpanCount,
+					chunk.fixedLayoutPrimitiveSpanCount,
+					chunk.fixedLayoutVertexBytes,
+					chunk.fixedLayoutPrimitiveBytes);
+				if (chunk.blasUpdateEligible)
+				{
+					mSE29FloorDeformerRoute.NoteBlasUpdated(chunk.fixedLayoutDeformerKey);
+				}
+				else
+				{
+					mSE29FloorDeformerRoute.NoteBlasRecreated(chunk.fixedLayoutDeformerKey);
+				}
+				chunk.fixedLayoutDeformerKey = 0;
+				chunk.fixedLayoutVertexSpanCount = 0;
+				chunk.fixedLayoutPrimitiveSpanCount = 0;
+				chunk.fixedLayoutVertexBytes = 0;
+				chunk.fixedLayoutPrimitiveBytes = 0;
+			}
 
 			if (i + 1 < activeChunkListIndices.size())
 			{

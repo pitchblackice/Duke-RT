@@ -269,14 +269,9 @@ NRISE29FloorDeformerPendingUpdate NRISE29FloorDeformerPendingSet::QueueLatest(
 
 	if (work.capturedStamp.mapEpoch < found->capturedStamp.mapEpoch ||
 		(work.capturedStamp.mapEpoch == found->capturedStamp.mapEpoch &&
-			work.capturedStamp.authorityGeneration < found->capturedStamp.authorityGeneration))
+			work.observationFrame < found->observationFrame))
 	{
 		return NRISE29FloorDeformerPendingUpdate::StaleIgnored;
-	}
-	if (work.capturedStamp.mapEpoch == found->capturedStamp.mapEpoch &&
-		work.capturedStamp.authorityGeneration == found->capturedStamp.authorityGeneration)
-	{
-		return NRISE29FloorDeformerPendingUpdate::DuplicateIgnored;
 	}
 
 	NRISE29FloorDeformerPendingWork replacement = work;

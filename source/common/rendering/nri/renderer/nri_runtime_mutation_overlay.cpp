@@ -858,6 +858,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	rigidRouteInput.mode = (int)nri_ptmapmovermode;
 	rigidRouteInput.traceMode = (int)nri_ptmapmovershadow;
 	mMapMoverRigidRoute.Update(rigidRouteInput);
+	mSE29FloorDeformerRoute.BeginFrame(
+		mFrameIndex,
+		mMapWorld.buildSerial,
+		mMapMovers.GetMapEpoch());
 	static constexpr uint8_t kVisibleResidentValidationWindow = 8;
 	static constexpr uint8_t kVisibleResidentUnresolvedTextureValidationWindow = 64;
 	static constexpr uint8_t kStartupVisibleResidentValidationWindow = 64;
@@ -2417,14 +2421,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 			nri_scene::GeometryData liveGeometry;
 			nri_scene::MaterialBridgeData liveMaterials;
+			NRISE29FloorDeformerRouteResult deformerRouteResult;
 			{
 				Clocker clock(NriPTGeometryBuild);
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildRuntimeMutationRebuildMs);
 				nri_scene::BuildGeometry(liveChunkView, liveGeometry);
 				AssignGeometryPortalIndices(mMapWorld, liveGeometry);
 			}
-			mLastPerfShellTraceStats.geometryBuildRuntimeMutationRebuildCalls++;
-			mLastPerfShellTraceStats.geometryBuildRuntimeMutationPrimitives += (uint32_t)liveGeometry.primitives.size();
 			if (tryGetCachedRuntimeMutationMaterials(
 				liveAnimatedGeometrySignature,
 				liveAnimatedMaterialSignature,
@@ -2449,6 +2452,32 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			}
 			tryMergeSectorMaterialOnlyPreparedMaterials(liveChunkView, liveMaterials);
 			recordPreparedLiveChunkMaterialOnlyMismatch(liveChunkView, liveMaterials, false);
+			// Canonical mapping allocates temporary graph/search state. Run it after
+			// material construction so that bounded deformer work cannot perturb the
+			// immediately following allocation-heavy material bridge hot path.
+			{
+				Clocker clock(NriPTGeometryBuild);
+				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildRuntimeMutationRebuildMs);
+				NRISE29FloorDeformerRouteInput deformerRouteInput;
+				deformerRouteInput.movers = &mMapMovers;
+				deformerRouteInput.mapWorld = &mMapWorld;
+				deformerRouteInput.staticScene = &mStaticMapScene;
+				deformerRouteInput.atlas = &mStaticMapChunkAtlas;
+				deformerRouteInput.registry = &mStaticSceneResidency.Registry();
+				deformerRouteInput.mapChunk = &mapChunk;
+				deformerRouteInput.exactCurrentGeometry = &liveGeometry;
+				deformerRouteInput.frameIndex = mFrameIndex;
+				deformerRouteInput.rayVisible = chunkVisibleNow;
+				deformerRouteInput.required = chunkVisibleNow;
+				deformerRouteInput.enabled = (int)nri_ptmapmovermode >= 1;
+				deformerRouteResult = mSE29FloorDeformerRoute.TryCanonicalize(deformerRouteInput);
+				if (deformerRouteResult.admitted)
+				{
+					liveGeometry = std::move(deformerRouteResult.canonicalGeometry);
+				}
+			}
+			mLastPerfShellTraceStats.geometryBuildRuntimeMutationRebuildCalls++;
+			mLastPerfShellTraceStats.geometryBuildRuntimeMutationPrimitives += (uint32_t)liveGeometry.primitives.size();
 			nri_scene::PTMapChunkMutationBaseline liveBaseline;
 			if (!nri_scene::CaptureMapChunkMutationBaseline(mapChunk, liveBaseline))
 			{
@@ -2460,6 +2489,18 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.geometry = std::move(liveGeometry);
 			replacement.materialBridge = std::move(liveMaterials);
 			replacement.replacementBaseline = std::move(liveBaseline);
+			replacement.fixedLayoutDeformer = deformerRouteResult.admitted;
+			replacement.fixedLayoutDeformerKey = deformerRouteResult.admitted ? deformerRouteResult.stableKey : 0;
+			replacement.fixedLayoutVertexSpans.clear();
+			replacement.fixedLayoutPrimitiveSpans.clear();
+			for (const auto& span : deformerRouteResult.vertexSpans)
+			{
+				replacement.fixedLayoutVertexSpans.push_back({ span.firstElement, span.elementCount });
+			}
+			for (const auto& span : deformerRouteResult.primitiveSpans)
+			{
+				replacement.fixedLayoutPrimitiveSpans.push_back({ span.firstElement, span.elementCount });
+			}
 			replacement.surfaceCount = liveSurfaceCount;
 			replacement.triangleCount = (uint32_t)replacement.geometry.primitives.size();
 			replacement.animatedMaterialSignature = liveAnimatedMaterialSignature;
@@ -3453,6 +3494,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				mRuntimeMutation.NoteResidentFallback();
 			}
+			mSE29FloorDeformerRoute.NoteApplyFailure(replacement.fixedLayoutDeformerKey);
 			replacement.active = false;
 			replacement.excludeStaticChunk = false;
 			replacement.stableMutationFrameCount = 0;

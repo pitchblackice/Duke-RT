@@ -945,6 +945,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_map_mover_rigid_route.cpp
 	common/rendering/nri/renderer/nri_map_mover_rigid_route_policy.cpp
 	common/rendering/nri/renderer/nri_se29_floor_deformer_policy.cpp
+	common/rendering/nri/renderer/nri_se29_floor_deformer_route.cpp
 	common/rendering/nri/renderer/nri_map_mover_shadow.cpp
 	common/rendering/nri/renderer/nri_map_mover_shadow_state.cpp
 	common/rendering/nri/renderer/nri_material_policy.cpp
@@ -1012,6 +1013,7 @@ set (NRI_SOURCES
 	common/rendering/nri/scene/nri_map_mover_adapter.cpp
 	common/rendering/nri/scene/nri_map_mover_authored_topology.cpp
 	common/rendering/nri/scene/nri_map_mover_geometry.cpp
+	common/rendering/nri/scene/nri_map_deformer_layout.cpp
 	common/rendering/nri/scene/nri_scene_stats.cpp
 	common/rendering/nri/scene/nri_scene_texture_utils.cpp
 	common/rendering/nri/scene/nri_texture_signature.cpp

@@ -154,6 +154,11 @@ struct StaticMapSceneCache
 		uint32_t residentBlasVertexNum = 0;
 		uint64_t residentBlasIndexOffset = 0;
 		uint32_t residentBlasIndexNum = 0;
+		uint64_t fixedLayoutDeformerKey = 0;
+		uint32_t fixedLayoutVertexSpanCount = 0;
+		uint32_t fixedLayoutPrimitiveSpanCount = 0;
+		uint64_t fixedLayoutVertexBytes = 0;
+		uint64_t fixedLayoutPrimitiveBytes = 0;
 		bool hasAnimatedTextureCandidates = false;
 		bool animatedRefreshSuppressed = false;
 		nri_scene::MaterialBridgeData materialBridge;
