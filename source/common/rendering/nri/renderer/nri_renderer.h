@@ -28,6 +28,7 @@
 #include "nri_static_scene_geometry_upload.h"
 #include "nri_trace_stats.h"
 #include "nri_upscaler.h"
+#include "nri_world_tlas_slots.h"
 #include "../framegen/nri_framegen.h"
 
 #include "../scene/nri_map_builder.h"
@@ -2310,14 +2311,16 @@ private:
 	NRIBufferResource& GetCurrentDynamicMaterialBuffer();
 	NRIAccelerationStructureResource& GetCurrentDynamicBottomLevelAS();
 	NRIBufferResource& GetCurrentTlasInstanceBuffer();
+	NRIWorldTlasFrameSlot& GetCurrentWorldTlasFrameSlot();
 	const NRIBufferResource& GetCurrentDynamicVertexBuffer() const;
 	const NRIBufferResource& GetCurrentDynamicIndexBuffer() const;
 	const NRIBufferResource& GetCurrentDynamicPrimitiveBuffer() const;
 	const NRIBufferResource& GetCurrentDynamicMaterialBuffer() const;
 	const NRIAccelerationStructureResource* GetCurrentDynamicBottomLevelAS() const;
-	const NRIBufferResource& GetCurrentTlasInstanceBuffer() const;
+	const NRIWorldTlasFrameSlot* GetCurrentWorldTlasFrameSlot() const;
 	bool HasAnyDynamicBottomLevelAS() const;
 	void DestroyDynamicBottomLevelAccelerationStructures();
+	void DestroyWorldTlasFrameSlots();
 	ResidentUploadScratchFrame& GetResidentUploadScratchFrame();
 	void ResetResidentUploadScratchFrame(const char* reason);
 	nri::DescriptorSet* GetCurrentSceneTextureSet() const;
@@ -2506,8 +2509,7 @@ private:
 	NRIBufferResource mStaticIndexBuffer;
 	NRIBufferResource mStaticPrimitiveBuffer;
 	NRIBufferResource mStaticMaterialBuffer;
-	NRIBufferResource mTlasInstanceBuffer;
-	std::vector<NRIBufferResource> mTlasInstanceBufferRing;
+	NRIWorldTlasFrameSlots mWorldTlasFrameSlots;
 	NRIBufferResource mSceneInstanceBuffer;
 	NRIBufferResource mPortalBuffer;
 	NRIBufferResource mRuntimeLightBuffer;
@@ -2526,7 +2528,6 @@ private:
 	NRITraceShaderStats mTraceShaderStats;
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mResidentStaticBlasScratchBuffer;
-	NRIBufferResource mTopLevelScratchBuffer;
 	NRIBufferResource mEmissiveTopLevelScratchBuffer;
 	SelectPrimitiveRewriteCache mSelectPrimitiveRewriteCache = {};
 	std::vector<nri_scene::MaterialData> mSelectCapturedGpuMaterialScratch;
@@ -2582,7 +2583,6 @@ private:
 	PerfTraceShaderStats mLastPerfTraceShaderStats = {};
 	uint64_t mPendingAutoExposureStatsFrame = 0;
 
-	NRIAccelerationStructureResource mTopLevelAS;
 	NRIAccelerationStructureResource mEmissiveTopLevelAS;
 
 	NRISkyEnvironment mSkyEnvironment;

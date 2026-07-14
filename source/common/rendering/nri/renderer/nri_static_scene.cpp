@@ -1427,13 +1427,10 @@ bool nri_static_scene::BuildLiveStaticMapAccelerationStructures(
 		input.staticIndexBuffer == nullptr ||
 		input.staticPrimitiveBuffer == nullptr ||
 		input.staticMaterialBuffer == nullptr ||
-		input.tlasInstanceBuffer == nullptr ||
 		input.emissiveTlasInstanceBuffer == nullptr ||
 		input.sceneInstanceBuffer == nullptr ||
 		input.scratchBuffer == nullptr ||
-		input.topLevelScratchBuffer == nullptr ||
 		input.emissiveTopLevelScratchBuffer == nullptr ||
-		input.topLevelAS == nullptr ||
 		input.emissiveTopLevelAS == nullptr)
 	{
 		return false;
@@ -1451,14 +1448,12 @@ bool nri_static_scene::BuildLiveStaticMapAccelerationStructures(
 		services.hasAnyDynamicBottomLevelAS != nullptr &&
 		services.hasAnyDynamicBottomLevelAS(services.user);
 	const bool needsWait =
-		input.topLevelAS->accelerationStructure != nullptr ||
+		input.hasWorldTlasFrameSlotResources ||
 		input.emissiveTopLevelAS->accelerationStructure != nullptr ||
 		hasDynamicBottomLevelAS ||
-		input.tlasInstanceBuffer->buffer != nullptr ||
 		input.emissiveTlasInstanceBuffer->buffer != nullptr ||
 		input.sceneInstanceBuffer->buffer != nullptr ||
 		input.scratchBuffer->buffer != nullptr ||
-		input.topLevelScratchBuffer->buffer != nullptr ||
 		input.emissiveTopLevelScratchBuffer->buffer != nullptr;
 	if (needsWait && services.waitForCommandsTracked != nullptr)
 	{
@@ -1467,12 +1462,14 @@ bool nri_static_scene::BuildLiveStaticMapAccelerationStructures(
 
 	if (services.destroyBufferResource != nullptr)
 	{
-		services.destroyBufferResource(services.user, *input.tlasInstanceBuffer);
 		services.destroyBufferResource(services.user, *input.emissiveTlasInstanceBuffer);
 		services.destroyBufferResource(services.user, *input.sceneInstanceBuffer);
 		services.destroyBufferResource(services.user, *input.scratchBuffer);
-		services.destroyBufferResource(services.user, *input.topLevelScratchBuffer);
 		services.destroyBufferResource(services.user, *input.emissiveTopLevelScratchBuffer);
+	}
+	if (services.destroyWorldTlasFrameSlots != nullptr)
+	{
+		services.destroyWorldTlasFrameSlots(services.user);
 	}
 	if (services.destroyDynamicBottomLevelAccelerationStructures != nullptr)
 	{
@@ -1484,7 +1481,6 @@ bool nri_static_scene::BuildLiveStaticMapAccelerationStructures(
 	}
 	if (services.destroyAccelerationStructureResource != nullptr)
 	{
-		services.destroyAccelerationStructureResource(services.user, *input.topLevelAS);
 		services.destroyAccelerationStructureResource(services.user, *input.emissiveTopLevelAS);
 		DestroyStaticSegmentBlasCacheResources(staticScene.segmentBlasCache, services);
 		for (auto& chunk : staticScene.chunks)
@@ -2304,14 +2300,12 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	input.staticIndexBuffer = &mStaticIndexBuffer;
 	input.staticPrimitiveBuffer = &mStaticPrimitiveBuffer;
 	input.staticMaterialBuffer = &mStaticMaterialBuffer;
-	input.tlasInstanceBuffer = &mTlasInstanceBuffer;
 	input.emissiveTlasInstanceBuffer = &mEmissiveTlasInstanceBuffer;
 	input.sceneInstanceBuffer = &mSceneInstanceBuffer;
 	input.scratchBuffer = &mScratchBuffer;
-	input.topLevelScratchBuffer = &mTopLevelScratchBuffer;
 	input.emissiveTopLevelScratchBuffer = &mEmissiveTopLevelScratchBuffer;
-	input.topLevelAS = &mTopLevelAS;
 	input.emissiveTopLevelAS = &mEmissiveTopLevelAS;
+	input.hasWorldTlasFrameSlotResources = mWorldTlasFrameSlots.HasResources();
 	input.staticAccelerationBuildSerial = &mStaticAccelerationBuildSerial;
 
 	NRIStaticSceneLiveAccelerationBuildServices services = {};
@@ -2340,6 +2334,10 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	services.destroyDynamicBottomLevelAccelerationStructures = [](void* user)
 	{
 		static_cast<NRIRenderer*>(user)->DestroyDynamicBottomLevelAccelerationStructures();
+	};
+	services.destroyWorldTlasFrameSlots = [](void* user)
+	{
+		static_cast<NRIRenderer*>(user)->DestroyWorldTlasFrameSlots();
 	};
 	services.resetPersistentVoxelsForStaticAccelerationRebuild = [](void* user)
 	{

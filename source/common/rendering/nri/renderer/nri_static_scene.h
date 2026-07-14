@@ -344,14 +344,12 @@ struct NRIStaticSceneLiveAccelerationBuildInput
 	NRIBufferResource* staticIndexBuffer = nullptr;
 	NRIBufferResource* staticPrimitiveBuffer = nullptr;
 	NRIBufferResource* staticMaterialBuffer = nullptr;
-	NRIBufferResource* tlasInstanceBuffer = nullptr;
 	NRIBufferResource* emissiveTlasInstanceBuffer = nullptr;
 	NRIBufferResource* sceneInstanceBuffer = nullptr;
 	NRIBufferResource* scratchBuffer = nullptr;
-	NRIBufferResource* topLevelScratchBuffer = nullptr;
 	NRIBufferResource* emissiveTopLevelScratchBuffer = nullptr;
-	NRIAccelerationStructureResource* topLevelAS = nullptr;
 	NRIAccelerationStructureResource* emissiveTopLevelAS = nullptr;
+	bool hasWorldTlasFrameSlotResources = false;
 	uint64_t* staticAccelerationBuildSerial = nullptr;
 };
 
@@ -364,6 +362,7 @@ struct NRIStaticSceneLiveAccelerationBuildServices
 	void (*destroyBufferResource)(void* user, NRIBufferResource& resource) = nullptr;
 	void (*destroyAccelerationStructureResource)(void* user, NRIAccelerationStructureResource& resource) = nullptr;
 	void (*destroyDynamicBottomLevelAccelerationStructures)(void* user) = nullptr;
+	void (*destroyWorldTlasFrameSlots)(void* user) = nullptr;
 	void (*resetPersistentVoxelsForStaticAccelerationRebuild)(void* user) = nullptr;
 	bool (*createBottomLevelAccelerationStructure)(void* user, const nri::AccelerationStructureDesc& desc, NRIAccelerationStructureResource& outAccelerationStructure) = nullptr;
 	uint64_t (*getAccelerationStructureBuildScratchBufferSize)(void* user, const NRIAccelerationStructureResource& accelerationStructure) = nullptr;

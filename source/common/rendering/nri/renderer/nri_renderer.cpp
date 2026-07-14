@@ -2252,7 +2252,7 @@ NRIRenderer::LevelTransitionSnapshot NRIRenderer::BuildLevelTransitionSnapshot()
 	snapshot.visibleFlatBufferBytes = mVisibleFlatPlaneBuffer.memorySize;
 	snapshot.reprojectionBufferBytes = mReprojectionBuffer.memorySize;
 	snapshot.dynamicScratchBufferBytes = mScratchBuffer.memorySize;
-	snapshot.worldTlasScratchBufferBytes = mTopLevelScratchBuffer.memorySize;
+	snapshot.worldTlasScratchBufferBytes = mWorldTlasFrameSlots.GetMemoryUsage().scratchBufferBytes;
 	return snapshot;
 }
 
@@ -2662,10 +2662,11 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	const NRIPersistentVoxelMemoryUsage persistentVoxelMemory = mPersistentVoxels.GetMemoryUsage();
 	telemetry.sceneBufferBytes += persistentVoxelMemory.sceneBufferBytes;
 	telemetry.accelerationStructureBytes += persistentVoxelMemory.accelerationStructureBytes;
-	accumulateBuffer(mTlasInstanceBuffer, telemetry.sceneBufferBytes);
-	for (const NRIBufferResource& tlasInstanceBuffer : mTlasInstanceBufferRing)
+	for (const NRIWorldTlasFrameSlot& frameSlot : mWorldTlasFrameSlots.Slots())
 	{
-		accumulateBuffer(tlasInstanceBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(frameSlot.instanceBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(frameSlot.scratchBuffer, telemetry.sceneBufferBytes);
+		accumulateAs(frameSlot.accelerationStructure, telemetry.accelerationStructureBytes);
 	}
 	accumulateBuffer(mSceneInstanceBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mPortalBuffer, telemetry.sceneBufferBytes);
@@ -2701,10 +2702,8 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	}
 	accumulateBuffer(mScratchBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mResidentStaticBlasScratchBuffer, telemetry.sceneBufferBytes);
-	accumulateBuffer(mTopLevelScratchBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mEmissiveTopLevelScratchBuffer, telemetry.sceneBufferBytes);
 
-	accumulateAs(mTopLevelAS, telemetry.accelerationStructureBytes);
 	accumulateAs(mEmissiveTopLevelAS, telemetry.accelerationStructureBytes);
 	for (const auto& chunk : mStaticMapScene.chunks)
 	{
@@ -3475,9 +3474,10 @@ void NRIRenderer::ReadbackAutoExposureStats()
 
 void NRIRenderer::BindSceneRootDescriptors()
 {
-	if (mTopLevelAS.descriptor != nullptr)
+	const NRIWorldTlasFrameSlot& frameSlot = GetCurrentWorldTlasFrameSlot();
+	if (frameSlot.accelerationStructure.descriptor != nullptr)
 	{
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
+		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, frameSlot.accelerationStructure.descriptor, 0, nri::BindPoint::COMPUTE });
 	}
 }
 

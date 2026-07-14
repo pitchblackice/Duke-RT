@@ -262,7 +262,6 @@ void NRIRenderer::DestroySceneBuffers()
 	mSceneDataFrameRingSlotWaitCount = 0;
 	mSceneDataFrameRingDisabledFrameIndex = UINT32_MAX;
 	mSceneDataFrameRingOverCapFrameIndex = UINT32_MAX;
-	DestroyBufferResource(mTlasInstanceBuffer);
 	DestroyBufferResource(mEmissiveTlasInstanceBuffer);
 	DestroyBufferResource(mSceneInstanceBuffer);
 	DestroyBufferResource(mPortalBuffer);
@@ -281,13 +280,7 @@ void NRIRenderer::DestroySceneBuffers()
 	mTraceShaderStats.Destroy(BuildResourceServices());
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mResidentStaticBlasScratchBuffer);
-	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
-	for (NRIBufferResource& tlasInstanceBuffer : mTlasInstanceBufferRing)
-	{
-		DestroyBufferResource(tlasInstanceBuffer);
-	}
-	mTlasInstanceBufferRing.clear();
 	for (auto& frameScratch : mResidentUploadScratchFrames)
 	{
 		DestroyBufferResource(frameScratch.vertex.buffer);

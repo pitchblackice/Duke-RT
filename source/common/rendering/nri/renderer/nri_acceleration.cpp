@@ -580,13 +580,14 @@ bool NRIAccelerationStructureManager::BuildEmissiveTopLevel(NRIRenderer& rendere
 
 bool NRIAccelerationStructureManager::BuildTopLevel(NRIRenderer& renderer, const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask)
 {
+	NRIWorldTlasFrameSlot& frameSlot = renderer.GetCurrentWorldTlasFrameSlot();
 	return BuildTopLevel(
 		renderer,
 		instances,
 		sceneBufferMask,
-		renderer.mTopLevelAS,
-		renderer.GetCurrentTlasInstanceBuffer(),
-		renderer.mTopLevelScratchBuffer,
+		frameSlot.accelerationStructure,
+		frameSlot.instanceBuffer,
+		frameSlot.scratchBuffer,
 		&renderer.mStaticVertexBuffer,
 		&renderer.mStaticIndexBuffer,
 		&renderer.mActiveTlasInstanceCount,
@@ -672,14 +673,30 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 		if (topLevelScratchBuffer.buffer == nullptr || topLevelScratchBuffer.size < requiredScratchSize)
 		{
 			renderer.mLastPerfShellTraceStats.worldTlasScratchGrowCount++;
-			if (topLevelScratchBuffer.buffer != nullptr)
+			if (!tlasInstanceWritesQuiesced && topLevelScratchBuffer.buffer != nullptr)
 			{
 				renderer.WaitForCommandsTracked("world_tlas_scratch_resize");
 			}
-			renderer.DestroyBufferResource(topLevelScratchBuffer);
-			if (!renderer.CreateBufferWithoutView(topLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+
+			NRIBufferResource oldScratchBuffer = topLevelScratchBuffer;
+			topLevelScratchBuffer = {};
+			if (!renderer.CreateBufferWithoutViewAtLocation(
+				topLevelScratchBuffer,
+				requiredScratchSize,
+				16,
+				nri::BufferUsageBits::SCRATCH_BUFFER,
+				nri::MemoryLocation::DEVICE))
 			{
+				topLevelScratchBuffer = oldScratchBuffer;
 				return false;
+			}
+			if (tlasInstanceWritesQuiesced)
+			{
+				renderer.RetireResidentBufferResource(oldScratchBuffer);
+			}
+			else
+			{
+				renderer.DestroyBufferResource(oldScratchBuffer);
 			}
 		}
 	}
@@ -789,16 +806,29 @@ bool NRIAccelerationStructureManager::EnsureTopLevelCapacity(NRIRenderer& render
 
 	const uint64_t instanceBytes = (uint64_t)instanceCount * sizeof(nri::TopLevelInstance);
 	static NRIRenderer::SceneBufferDebugStats sTlasInstancePreGrowStats = { "TLASInstancePreGrow" };
-	(void)renderer.GetCurrentTlasInstanceBuffer();
-	for (NRIBufferResource& tlasInstanceBuffer : renderer.mTlasInstanceBufferRing)
+	const uint32_t queuedFrameCount =
+		renderer.mFrameBuffer != nullptr && !renderer.mFrameBuffer->mQueuedFrames.empty() ?
+		(uint32_t)renderer.mFrameBuffer->mQueuedFrames.size() :
+		1u;
+	renderer.mWorldTlasFrameSlots.EnsureSlotCount(queuedFrameCount);
+	NRIWorldTlasFrameSlot* currentFrameSlot = &renderer.GetCurrentWorldTlasFrameSlot();
+	for (NRIWorldTlasFrameSlot& frameSlot : renderer.mWorldTlasFrameSlots.Slots())
 	{
-		if (!NRISceneUploadManager::EnsureStructuredBufferCapacity(
-			renderer,
-			tlasInstanceBuffer,
+		if (&frameSlot != currentFrameSlot &&
+			frameSlot.instanceBuffer.buffer != nullptr &&
+			frameSlot.instanceBuffer.size < instanceBytes)
+		{
+			continue;
+		}
+		if (!renderer.EnsureStructuredBuffer(
+			frameSlot.instanceBuffer,
 			sTlasInstancePreGrowStats,
+			nullptr,
 			instanceBytes,
 			sizeof(nri::TopLevelInstance),
 			nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT,
+			NRIResourceAccelerationStructureBuildInputAccess(),
+			true,
 			"world_tlas_instance_upload"))
 		{
 			return false;
@@ -834,22 +864,34 @@ bool NRIAccelerationStructureManager::EnsureTopLevelCapacity(NRIRenderer& render
 	renderer.mLastPerfShellTraceStats.worldTlasPreGrowScratchRequestedBytes =
 		std::max(renderer.mLastPerfShellTraceStats.worldTlasPreGrowScratchRequestedBytes, requiredScratchSize);
 
-	if (renderer.mTopLevelScratchBuffer.buffer == nullptr || renderer.mTopLevelScratchBuffer.size < requiredScratchSize)
+	for (NRIWorldTlasFrameSlot& frameSlot : renderer.mWorldTlasFrameSlots.Slots())
 	{
-		renderer.mLastPerfShellTraceStats.worldTlasPreGrowScratchGrowCount++;
-		if (renderer.mTopLevelScratchBuffer.buffer != nullptr)
+		NRIBufferResource& scratchBuffer = frameSlot.scratchBuffer;
+		if (scratchBuffer.buffer != nullptr && scratchBuffer.size >= requiredScratchSize)
 		{
-			const auto waitStart = std::chrono::steady_clock::now();
-			renderer.WaitForCommandsTracked("world_tlas_scratch_resize");
-			renderer.mLastPerfShellTraceStats.worldTlasPreGrowWaitMs += DurationMs(waitStart, std::chrono::steady_clock::now());
+			continue;
 		}
-		renderer.DestroyBufferResource(renderer.mTopLevelScratchBuffer);
-		if (!renderer.CreateBufferWithoutView(renderer.mTopLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+
+		if (&frameSlot != currentFrameSlot && scratchBuffer.buffer != nullptr)
+		{
+			continue;
+		}
+
+		renderer.mLastPerfShellTraceStats.worldTlasPreGrowScratchGrowCount++;
+		NRIBufferResource oldScratchBuffer = scratchBuffer;
+		NRIBufferResource newScratchBuffer = {};
+		if (!renderer.CreateBufferWithoutViewAtLocation(
+			newScratchBuffer,
+			requiredScratchSize,
+			16,
+			nri::BufferUsageBits::SCRATCH_BUFFER,
+			nri::MemoryLocation::DEVICE))
 		{
 			return false;
 		}
-		renderer.mLastPerfShellTraceStats.worldTlasPreGrowScratchAllocatedBytes =
-			std::max(renderer.mLastPerfShellTraceStats.worldTlasPreGrowScratchAllocatedBytes, renderer.mTopLevelScratchBuffer.size);
+		scratchBuffer = newScratchBuffer;
+		renderer.RetireResidentBufferResource(oldScratchBuffer);
+		renderer.mLastPerfShellTraceStats.worldTlasPreGrowScratchAllocatedBytes += scratchBuffer.size;
 	}
 
 	return true;
@@ -857,17 +899,14 @@ bool NRIAccelerationStructureManager::EnsureTopLevelCapacity(NRIRenderer& render
 
 void NRIRenderer::ReleaseWorldAccelerationBuildScratch(const char* reason)
 {
-	const uint64_t scratchBytes = mScratchBuffer.memorySize + mTopLevelScratchBuffer.memorySize;
-	const uint32_t scratchBuffers =
-		(mScratchBuffer.buffer != nullptr ? 1u : 0u) +
-		(mTopLevelScratchBuffer.buffer != nullptr ? 1u : 0u);
+	const uint64_t scratchBytes = mScratchBuffer.memorySize;
+	const uint32_t scratchBuffers = mScratchBuffer.buffer != nullptr ? 1u : 0u;
 	if (scratchBuffers == 0)
 	{
 		return;
 	}
 
 	DestroyBufferResource(mScratchBuffer);
-	DestroyBufferResource(mTopLevelScratchBuffer);
 	if ((int)nri_ptloadingtrace >= 1)
 	{
 		Printf("NRI PT transient scratch: event=release reason=%s buffers=%u bytes=%llu\n",
@@ -984,6 +1023,21 @@ void NRIRenderer::DestroyDynamicBottomLevelAccelerationStructures()
 	}
 }
 
+void NRIRenderer::DestroyWorldTlasFrameSlots()
+{
+	NRIWorldTlasSlotLifecycleServices lifecycleServices = {};
+	lifecycleServices.user = this;
+	lifecycleServices.destroyBufferResource = [](void* user, NRIBufferResource& resource)
+	{
+		static_cast<NRIRenderer*>(user)->DestroyBufferResource(resource);
+	};
+	lifecycleServices.destroyAccelerationStructureResource = [](void* user, NRIAccelerationStructureResource& resource)
+	{
+		static_cast<NRIRenderer*>(user)->DestroyAccelerationStructureResource(resource);
+	};
+	mWorldTlasFrameSlots.Destroy(lifecycleServices);
+}
+
 void NRIRenderer::DestroyAccelerationStructures()
 {
 	mStaticMapScene.accelerationResident = false;
@@ -996,7 +1050,7 @@ void NRIRenderer::DestroyAccelerationStructures()
 	}
 	DestroyDynamicBottomLevelAccelerationStructures();
 	mPersistentVoxels.Reset("destroy-acceleration-structures", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildNRIPersistentVoxelResetServices(*this));
-	DestroyAccelerationStructureResource(mTopLevelAS);
+	DestroyWorldTlasFrameSlots();
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 	mStaticAccelerationBuildSerial = 0;
 	mActiveTlasInstanceCount = 0;

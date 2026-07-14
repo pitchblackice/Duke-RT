@@ -777,7 +777,10 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 	mLastPerfShellTraceStats.voxelLocalSpaceInvariantUnknownSpaceActors = sharedBlasStats.invariantUnknownSpaceActors;
 	mLastPerfShellTraceStats.voxelLocalSpaceInvariantMaxBoundsCenterMagnitude = sharedBlasStats.invariantMaxBoundsCenterMagnitude;
 	mLastPerfShellTraceStats.voxelLocalSpaceInvariantMaxBoundsAbs = sharedBlasStats.invariantMaxBoundsAbs;
-	mLastPerfShellTraceStats.asWorldTlasObjects = mTopLevelAS.accelerationStructure != nullptr && mActiveTlasInstanceCount > 0 ? 1u : 0u;
+	const NRIWorldTlasFrameSlot& worldTlasFrameSlot = GetCurrentWorldTlasFrameSlot();
+	mLastPerfShellTraceStats.asWorldTlasObjects =
+		worldTlasFrameSlot.accelerationStructure.accelerationStructure != nullptr &&
+		mActiveTlasInstanceCount > 0 ? 1u : 0u;
 	mLastPerfShellTraceStats.asWorldTlasEntries = mActiveTlasInstanceCount;
 	mLastPerfShellTraceStats.asWorldTlasMaskAllWorkloadsRefs = mLastPerfShellTraceStats.asWorldTlasEntries;
 	mLastPerfShellTraceStats.asWorldTlasMaskOtherRefs = 0;

@@ -455,16 +455,16 @@ NRIAccelerationStructureResource& NRIRenderer::GetCurrentDynamicBottomLevelAS()
 
 NRIBufferResource& NRIRenderer::GetCurrentTlasInstanceBuffer()
 {
+	return GetCurrentWorldTlasFrameSlot().instanceBuffer;
+}
+
+NRIWorldTlasFrameSlot& NRIRenderer::GetCurrentWorldTlasFrameSlot()
+{
 	const uint32_t queuedFrameCount =
 		mFrameBuffer != nullptr && !mFrameBuffer->mQueuedFrames.empty() ?
 		(uint32_t)mFrameBuffer->mQueuedFrames.size() :
 		1u;
-	if (mTlasInstanceBufferRing.size() < queuedFrameCount)
-	{
-		mTlasInstanceBufferRing.resize(queuedFrameCount);
-	}
-
-	return mTlasInstanceBufferRing[GetCurrentQueuedFrameIndex() % (uint32_t)mTlasInstanceBufferRing.size()];
+	return mWorldTlasFrameSlots.Get(GetCurrentQueuedFrameIndex(), queuedFrameCount);
 }
 
 const NRIBufferResource& NRIRenderer::GetCurrentDynamicVertexBuffer() const
@@ -497,14 +497,9 @@ const NRIAccelerationStructureResource* NRIRenderer::GetCurrentDynamicBottomLeve
 	return slot != nullptr ? &slot->dynamicBottomLevelAS : nullptr;
 }
 
-const NRIBufferResource& NRIRenderer::GetCurrentTlasInstanceBuffer() const
+const NRIWorldTlasFrameSlot* NRIRenderer::GetCurrentWorldTlasFrameSlot() const
 {
-	if (mTlasInstanceBufferRing.empty())
-	{
-		return mTlasInstanceBuffer;
-	}
-
-	return mTlasInstanceBufferRing[GetCurrentQueuedFrameIndex() % (uint32_t)mTlasInstanceBufferRing.size()];
+	return mWorldTlasFrameSlots.Find(GetCurrentQueuedFrameIndex());
 }
 
 bool NRIRenderer::HasAnyDynamicBottomLevelAS() const
