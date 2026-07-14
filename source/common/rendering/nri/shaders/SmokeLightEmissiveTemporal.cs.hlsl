@@ -1,6 +1,6 @@
 #include "Include/SmokeEmissiveReservoir.hlsli"
 
-bool SmokeEvaluateEmissiveLaneAtReceiver(
+uint SmokeEvaluateEmissiveLaneAtReceiver(
 	SmokeEmissiveLaneRecord lane,
 	float3 receiverPosition,
 	uint proposalCount,
@@ -11,7 +11,7 @@ bool SmokeEvaluateEmissiveLaneAtReceiver(
 	incident = 0.0;
 	direction = 0.0;
 	if (!SmokeEmissiveLaneValid(lane))
-		return false;
+		return SMOKE_EMISSIVE_LANE_MISSING;
 	SmokeEmissiveReservoirRecord record = SmokeEmptyEmissiveReservoir();
 	record.CandidateIndex = lane.CandidateIndex;
 	record.SampleSeed = lane.SampleSeed;
@@ -20,10 +20,10 @@ bool SmokeEvaluateEmissiveLaneAtReceiver(
 	record.Generation = gSmokeConstants.CommandCount;
 	float distanceToLight;
 	if (!SmokeEvaluateEmissiveIncident(record, receiverPosition, diagnostics, incident, direction, distanceToLight))
-		return false;
+		return SMOKE_EMISSIVE_LANE_MISSING;
 	const float normalization = lane.WeightSum / max((float)proposalCount * lane.Target, 1e-8);
 	if (!isfinite(normalization) || normalization <= 0.0)
-		return false;
+		return SMOKE_EMISSIVE_LANE_MISSING;
 	if (gSmokeConstants.LightMode >= 2u)
 	{
 		if (diagnostics)
@@ -41,16 +41,17 @@ bool SmokeEvaluateEmissiveLaneAtReceiver(
 		if (!visible)
 		{
 			incident = 0.0;
-			return true;
+			return SMOKE_EMISSIVE_LANE_OCCLUDED;
 		}
 	}
 	incident *= normalization;
 	if (!all(isfinite(incident)))
 	{
 		incident = 0.0;
-		return false;
+		return SMOKE_EMISSIVE_LANE_MISSING;
 	}
-	return true;
+	return SmokeEmissiveLuminance(incident) > 1e-8 ?
+		SMOKE_EMISSIVE_LANE_VISIBLE : SMOKE_EMISSIVE_LANE_MISSING;
 }
 
 bool SmokeEmissiveMomentsSignalCompatible(
@@ -159,6 +160,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float3 secondMomentSum = 0.0;
 	float3 directionSum = 0.0;
 	uint evaluatedLaneCount = 0u;
+	uint occludedLaneCount = 0u;
 	[unroll]
 	for (uint laneIndex = 0u; laneIndex < 4u; ++laneIndex)
 	{
@@ -170,10 +172,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		else
 			lane = SmokeUnpackEmissiveLane(secondPair, laneIndex & 1u);
 		float3 laneIncident, laneDirection;
-		if (!SmokeEvaluateEmissiveLaneAtReceiver(lane, receiverPosition, proposalCount, diagnostics,
-			laneIncident, laneDirection))
+		const uint laneEvidence = SmokeEvaluateEmissiveLaneAtReceiver(
+			lane, receiverPosition, proposalCount, diagnostics, laneIncident, laneDirection);
+		if (laneEvidence == SMOKE_EMISSIVE_LANE_MISSING)
 			continue;
 		++evaluatedLaneCount;
+		if (laneEvidence == SMOKE_EMISSIVE_LANE_OCCLUDED)
+			++occludedLaneCount;
 		incidentSum += laneIncident;
 		secondMomentSum += laneIncident * laneIncident;
 		directionSum += laneDirection * SmokeEmissiveLuminance(laneIncident);
@@ -185,18 +190,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	current.ReceiverPosition = receiverPosition;
 	current.SigmaT = medium.a;
 	current.Direction = SmokePackEmissiveDirection(directionSum);
+	const bool confirmedOccluded = evaluatedLaneCount > 0u && occludedLaneCount == evaluatedLaneCount &&
+		SmokeEmissiveLuminance(current.MeanRadiance) <= 1e-8;
 	current.Metadata = SmokePackEmissiveMomentMetadata(
 		(float)evaluatedLaneCount / (float)requestedLaneCount,
-		SmokeEmissiveMediumHash(medium, anisotropy), 0u, requestedLaneCount);
-	const bool currentValid = evaluatedLaneCount > 0u && SmokeEmissiveLuminance(current.MeanRadiance) > 1e-8 &&
-		SmokeEmissiveMomentValid(current);
-	if (!currentValid)
-	{
-		gSmokeEmissiveCurrent[froxelIndex] = SmokePackEmissiveMoment(SmokeEmptyEmissiveMoment());
-		if (diagnostics && SmokeEmissiveReuseMode() >= 1u)
-			InterlockedAdd(gSmokeControl[0].EmissiveTemporalRejected, 1u);
-		return;
-	}
+		SmokeEmissiveMediumHash(medium, anisotropy), 0u, requestedLaneCount, confirmedOccluded);
+	const bool currentValid = evaluatedLaneCount > 0u && SmokeEmissiveMomentValid(current);
+	if (diagnostics && evaluatedLaneCount == 0u)
+		InterlockedAdd(gSmokeControl[0].EmissiveNoProposalFroxels, 1u);
+	if (diagnostics && confirmedOccluded)
+		InterlockedAdd(gSmokeControl[0].EmissiveConfirmedOccludedFroxels, 1u);
 
 	SmokeEmissiveMomentRecord resolved = current;
 	const bool temporalEnabled = SmokeEmissiveReuseMode() >= 1u &&
@@ -208,26 +211,43 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		if (SmokePreviousFroxel(receiverPosition, previousIndex) && previousIndex < historyCount)
 		{
 			const SmokeEmissiveMomentRecord history = SmokeUnpackEmissiveMoment(gSmokeEmissiveHistory[previousIndex]);
-			historyValid = SmokeEmissiveMomentCompatible(history, medium, anisotropy,
-				gSmokeConstants.FrameIndex - 1u, receiverPosition, SmokeIndirectWorldTolerance(froxel), requestedLaneCount) &&
-				SmokeEmissiveMomentsSignalCompatible(current, history);
+			const bool compatibleHistory = SmokeEmissiveMomentCompatible(history, medium, anisotropy,
+				gSmokeConstants.FrameIndex - 1u, receiverPosition, SmokeIndirectWorldTolerance(froxel), requestedLaneCount);
+			const bool missingCurrent = evaluatedLaneCount == 0u;
+			historyValid = compatibleHistory && !confirmedOccluded &&
+				((currentValid && SmokeEmissiveMomentsSignalCompatible(current, history)) ||
+				(missingCurrent && SmokeEmissiveMomentAge(history) <= 2u));
 			if (historyValid)
 			{
-				const float historyWeight = min(0.875, 0.5 + 0.025 * (float)SmokeEmissiveMomentAge(history));
-				resolved.MeanRadiance = lerp(current.MeanRadiance, history.MeanRadiance, historyWeight);
-				resolved.SecondMoment = lerp(current.SecondMoment, history.SecondMoment, historyWeight);
-				const float3 currentDirection = SmokeUnpackEmissiveDirection(current.Direction);
-				const float3 historyDirection = SmokeUnpackEmissiveDirection(history.Direction);
-				resolved.Direction = SmokePackEmissiveDirection(lerp(currentDirection, historyDirection, historyWeight));
+				if (missingCurrent)
+				{
+					resolved = history;
+					resolved.ReceiverPosition = receiverPosition;
+					resolved.SigmaT = medium.a;
+					if (diagnostics)
+						InterlockedAdd(gSmokeControl[0].EmissiveHistoryRepairs, 1u);
+				}
+				else
+				{
+					const float historyWeight = min(0.875, 0.5 + 0.025 * (float)SmokeEmissiveMomentAge(history));
+					resolved.MeanRadiance = lerp(current.MeanRadiance, history.MeanRadiance, historyWeight);
+					resolved.SecondMoment = lerp(current.SecondMoment, history.SecondMoment, historyWeight);
+					const float3 currentDirection = SmokeUnpackEmissiveDirection(current.Direction);
+					const float3 historyDirection = SmokeUnpackEmissiveDirection(history.Direction);
+					resolved.Direction = SmokePackEmissiveDirection(lerp(currentDirection, historyDirection, historyWeight));
+				}
 				const uint age = min(SmokeEmissiveMomentAge(history) + 1u, 15u);
 				resolved.Metadata = SmokePackEmissiveMomentMetadata(
-					min(SmokeEmissiveMomentConfidence(current), SmokeEmissiveMomentConfidence(history)),
-					SmokeEmissiveMediumHash(medium, anisotropy), age, requestedLaneCount);
+					missingCurrent ? SmokeEmissiveMomentConfidence(history) * 0.75 :
+						min(SmokeEmissiveMomentConfidence(current), SmokeEmissiveMomentConfidence(history)),
+					SmokeEmissiveMediumHash(medium, anisotropy), age, requestedLaneCount, false);
 				if (diagnostics)
 					InterlockedMax(gSmokeControl[0].EmissiveMaximumAge, age);
 			}
 		}
 	}
+	if (!currentValid && !historyValid)
+		resolved = SmokeEmptyEmissiveMoment();
 	if (diagnostics && temporalEnabled)
 	{
 		if (historyValid)

@@ -9,13 +9,14 @@ void SmokeAccumulateReference(
 	float3 viewRay,
 	bool diagnostics)
 {
-	const uint sampleCount = 32u;
+	const uint sampleCount = SmokeEmissiveReferenceSampleCount();
 	float3 estimate = 0.0;
 	[loop]
 	for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
 	{
 		uint randomState = SmokeStableEmissiveReferenceSeed(froxel, sampleIndex);
-		const uint candidateIndex = SmokeSampleEmissivePrimitive(randomState);
+		const float stratifiedCdfSample = ((float)sampleIndex + SmokeRandom01(randomState)) / (float)sampleCount;
+		const uint candidateIndex = SmokeSampleEmissivePrimitiveFromUnit(stratifiedCdfSample);
 		if (diagnostics)
 			InterlockedAdd(gSmokeControl[0].EmissiveReferenceSamples, 1u);
 		if (candidateIndex == 0xffffffffu)
@@ -43,6 +44,13 @@ void SmokeAccumulateReference(
 			visibility = (SmokeFilteredVisibilityEffective()
 				? SmokePointLightVisibleFiltered(receiverPosition, lightDirection, distanceToLight, diagnostics)
 				: SmokePointLightVisible(receiverPosition, lightDirection, distanceToLight, diagnostics)) ? 1.0 : 0.0;
+			if (diagnostics)
+			{
+				if (visibility > 0.0)
+					InterlockedAdd(gSmokeControl[0].EmissiveReferenceVisible, 1u);
+				else
+					InterlockedAdd(gSmokeControl[0].EmissiveReferenceOccluded, 1u);
+			}
 		}
 		estimate += integrand * visibility / max(candidate.selectionPdf, 1e-6);
 	}
@@ -212,6 +220,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gSmokeEmissiveHistory[froxelIndex] = SmokePackEmissiveMoment(emptyMoment);
 		return;
 	}
+	// A current visibility ray established this exact zero. Keep it as blocker
+	// evidence; neighbor reconstruction is only allowed to repair estimator
+	// misses, never to leak lighting through known occluders.
+	if (SmokeEmissiveMomentOccluded(center) && SmokeEmissiveLuminance(center.MeanRadiance) <= 1e-8)
+	{
+		gSmokeEmissiveHistory[froxelIndex] = SmokePackEmissiveMoment(center);
+		return;
+	}
 
 	float3 reconstructedMean = center.MeanRadiance;
 	float3 reconstructedSecond = center.SecondMoment;
@@ -295,7 +311,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	resolved.SigmaT = medium.a;
 	resolved.Direction = SmokePackEmissiveDirection(directionSum);
 	resolved.Metadata = SmokePackEmissiveMomentMetadata(SmokeEmissiveMomentConfidence(center),
-		SmokeEmissiveMediumHash(medium, anisotropy), SmokeEmissiveMomentAge(center), laneCount);
+		SmokeEmissiveMediumHash(medium, anisotropy), SmokeEmissiveMomentAge(center), laneCount, false);
 	gSmokeEmissiveHistory[froxelIndex] = SmokePackEmissiveMoment(resolved);
 	if (diagnostics)
 	{

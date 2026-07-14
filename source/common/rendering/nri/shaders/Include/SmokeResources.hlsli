@@ -197,6 +197,13 @@ struct SmokeControl
 	uint EmissiveReferenceSamples;
 	uint EmissiveReferenceRays;
 	uint EmissiveIdentityRejects;
+	uint EmissiveGlobalProposals;
+	uint EmissiveUniformProposals;
+	uint EmissiveNoProposalFroxels;
+	uint EmissiveConfirmedOccludedFroxels;
+	uint EmissiveHistoryRepairs;
+	uint EmissiveReferenceVisible;
+	uint EmissiveReferenceOccluded;
 	uint IndirectFroxelsProcessed;
 	uint IndirectLocalityRays;
 	uint IndirectLocalityAgreement;

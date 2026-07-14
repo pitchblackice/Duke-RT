@@ -104,6 +104,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gSmokeControl[0].EmissiveReferenceSamples = 0u;
 			gSmokeControl[0].EmissiveReferenceRays = 0u;
 			gSmokeControl[0].EmissiveIdentityRejects = 0u;
+			gSmokeControl[0].EmissiveGlobalProposals = 0u;
+			gSmokeControl[0].EmissiveUniformProposals = 0u;
+			gSmokeControl[0].EmissiveNoProposalFroxels = 0u;
+			gSmokeControl[0].EmissiveConfirmedOccludedFroxels = 0u;
+			gSmokeControl[0].EmissiveHistoryRepairs = 0u;
+			gSmokeControl[0].EmissiveReferenceVisible = 0u;
+			gSmokeControl[0].EmissiveReferenceOccluded = 0u;
 			gSmokeControl[0].IndirectFroxelsProcessed = 0u;
 			gSmokeControl[0].IndirectLocalityRays = 0u;
 			gSmokeControl[0].IndirectLocalityAgreement = 0u;
