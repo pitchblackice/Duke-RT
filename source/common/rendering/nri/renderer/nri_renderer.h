@@ -27,6 +27,7 @@
 #include "nri_surface_probe.h"
 #include "nri_material_policy.h"
 #include "nri_static_scene.h"
+#include "nri_static_scene_diagnostics.h"
 #include "nri_static_scene_geometry_upload.h"
 #include "nri_trace_stats.h"
 #include "nri_upscaler.h"
@@ -484,6 +485,8 @@ public:
 		double traceOpaqueReadbackMs = 0.0;
 		double traceOpaqueCommandMs = 0.0;
 		double traceOpaqueStatsCopyMs = 0.0;
+		double postFrameDiagnosticsMs = 0.0;
+		double unattributedMs = 0.0;
 		double otherMs = 0.0;
 		double staticSceneMs = 0.0;
 		double runtimeMutationMs = 0.0;
@@ -1244,6 +1247,9 @@ public:
 		uint32_t dynamicCaptureVoxelCanonicalSurfaceBuilds = 0;
 		uint32_t dynamicCaptureVoxelCanonicalSurfaceHits = 0;
 		uint32_t dynamicCaptureVoxelCanonicalSurfaceInvalid = 0;
+		uint32_t dynamicCaptureVoxelDuplicationAuditCalls = 0;
+		uint32_t dynamicCaptureVoxelDuplicationAuditEntriesScanned = 0;
+		uint32_t dynamicCaptureVoxelDuplicationAuditTemporaryContainersBuilt = 0;
 		uint32_t dynamicCaptureModelActorCandidates = 0;
 		uint32_t dynamicCaptureModelActorSorted = 0;
 		uint32_t dynamicCaptureModelActorSortSkipped = 0;
@@ -1443,6 +1449,21 @@ public:
 		uint32_t asStaticSegmentRouteRejectMissingBlas = 0;
 		uint32_t asStaticSegmentRouteSegmentBlasRefs = 0;
 		uint32_t asStaticSegmentRouteChunkBlasRefs = 0;
+		bool successDiagnosticsBasicCollected = false;
+		bool successDiagnosticsInstanceCompositionCollected = false;
+		bool successDiagnosticsPersistentVoxelStatusCollected = false;
+		bool successDiagnosticsAsSummaryCollected = false;
+		bool successDiagnosticsDeepSceneAuditCollected = false;
+		uint32_t successDiagnosticsDeepSceneAuditCacheHits = 0;
+		uint32_t successDiagnosticsDeepSceneAuditRebuilds = 0;
+		uint32_t successDiagnosticsInstanceRowsScanned = 0;
+		uint32_t successDiagnosticsPersistentStatusCalls = 0;
+		uint32_t successDiagnosticsStaticChunkRowsScanned = 0;
+		uint32_t successDiagnosticsStaticChunkRowsIncrementallyUpdated = 0;
+		uint32_t successDiagnosticsStaticSurfaceRowsScanned = 0;
+		uint32_t successDiagnosticsStaticSurfaceRowsIncrementallyUpdated = 0;
+		uint32_t successDiagnosticsRegistryRowsScanned = 0;
+		uint32_t successDiagnosticsTemporaryContainersBuilt = 0;
 		uint32_t emissiveAsRecords = 0;
 		bool emissiveAsEnabled = false;
 		uint32_t emissiveAsRecordsStatic = 0;
@@ -2629,6 +2650,7 @@ private:
 	StaticMapSceneCache mStaticMapScene;
 	StaticMapChunkAtlas mStaticMapChunkAtlas = {};
 	NRIStaticSceneResidency mStaticSceneResidency;
+	NRIStaticSceneDiagnosticsCache mStaticSceneDiagnostics;
 	NRIMapMoverSystem mMapMovers;
 	NRIMapMoverShadow mMapMoverShadow;
 	NRIMapMoverRigidRoute mMapMoverRigidRoute;

@@ -216,6 +216,9 @@ struct DynamicCapturePerfStats
 	uint32_t voxelCanonicalSurfaceBuilds = 0;
 	uint32_t voxelCanonicalSurfaceHits = 0;
 	uint32_t voxelCanonicalSurfaceInvalid = 0;
+	uint32_t voxelDuplicationAuditCalls = 0;
+	uint32_t voxelDuplicationAuditEntriesScanned = 0;
+	uint32_t voxelDuplicationAuditTemporaryContainersBuilt = 0;
 	uint32_t modelActorCandidates = 0;
 	uint32_t modelActorSorted = 0;
 	uint32_t modelActorSortSkipped = 0;

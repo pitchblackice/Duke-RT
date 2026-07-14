@@ -599,6 +599,9 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				mLastPerfShellTraceStats.dynamicCaptureVoxelCanonicalSurfaceBuilds += captureStats.voxelCanonicalSurfaceBuilds;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelCanonicalSurfaceHits += captureStats.voxelCanonicalSurfaceHits;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelCanonicalSurfaceInvalid += captureStats.voxelCanonicalSurfaceInvalid;
+				mLastPerfShellTraceStats.dynamicCaptureVoxelDuplicationAuditCalls += captureStats.voxelDuplicationAuditCalls;
+				mLastPerfShellTraceStats.dynamicCaptureVoxelDuplicationAuditEntriesScanned += captureStats.voxelDuplicationAuditEntriesScanned;
+				mLastPerfShellTraceStats.dynamicCaptureVoxelDuplicationAuditTemporaryContainersBuilt += captureStats.voxelDuplicationAuditTemporaryContainersBuilt;
 				mLastPerfShellTraceStats.dynamicCaptureModelActorCandidates += captureStats.modelActorCandidates;
 				mLastPerfShellTraceStats.dynamicCaptureModelActorSorted += captureStats.modelActorSorted;
 				mLastPerfShellTraceStats.dynamicCaptureModelActorSortSkipped += captureStats.modelActorSortSkipped;
@@ -1654,6 +1657,18 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		}
 		return false;
 	}
+
+	selectedSceneInstanceCount = (uint32_t)mBoundSceneInstances.size();
+	if (!mGpuSceneHasDynamicOverlay)
+	{
+		selectedStaticSceneInstanceCount = sceneLightUsesStaticMapScene ? selectedSceneInstanceCount : 0u;
+		selectedDynamicSceneInstanceCount = sceneLightUsesStaticMapScene ? 0u : selectedSceneInstanceCount;
+		selectedPersistentVoxelSceneInstanceCount = 0u;
+	}
+	mLastPerfShellTraceStats.sceneInstanceCount = selectedSceneInstanceCount;
+	mLastPerfShellTraceStats.sceneInstanceStaticCount = selectedStaticSceneInstanceCount;
+	mLastPerfShellTraceStats.sceneInstanceDynamicCount = selectedDynamicSceneInstanceCount;
+	mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount = selectedPersistentVoxelSceneInstanceCount;
 
 	RefreshSceneLightSystem(
 		sceneLightUsesStaticMapScene,

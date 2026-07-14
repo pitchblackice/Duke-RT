@@ -4437,8 +4437,16 @@ namespace
 		std::unordered_set<uint64_t> basisSignatures;
 	};
 
+	bool ShouldCollectVoxelActorCacheDuplicationStats()
+	{
+		return (bool)nri_voxelstats ||
+			((bool)nri_ptslowdowntrace && (int)nri_ptslowdowntop > 0);
+	}
+
 	void CollectVoxelActorCacheDuplicationStats(SceneDebugStats& stats)
 	{
+		gDynamicCapturePerfStats.voxelDuplicationAuditCalls++;
+		gDynamicCapturePerfStats.voxelDuplicationAuditEntriesScanned += (uint32_t)gVoxelActorCache.size();
 		stats.voxelCachePrimitives = 0;
 		stats.voxelCacheActorSurfaces = 0;
 		stats.voxelCacheUniqueMeshKeys = 0;
@@ -4554,6 +4562,8 @@ namespace
 		stats.voxelCacheUniqueTransformBases = (unsigned int)basisSignatures.size();
 
 		std::vector<VoxelDuplicateVariantAggregate> aggregates;
+		gDynamicCapturePerfStats.voxelDuplicationAuditTemporaryContainersBuilt +=
+			5u + (uint32_t)meshAggregates.size();
 		aggregates.reserve(meshAggregates.size());
 		for (const auto& pair : meshAggregates)
 		{
@@ -4658,7 +4668,10 @@ namespace
 		}
 
 		stats.voxelCacheEntries = (unsigned int)gVoxelActorCache.size();
-		CollectVoxelActorCacheDuplicationStats(stats);
+		if (ShouldCollectVoxelActorCacheDuplicationStats())
+		{
+			CollectVoxelActorCacheDuplicationStats(stats);
+		}
 	}
 
 	void EndVoxelActorCacheFrame(SceneDebugStats& stats, bool rootCapture)

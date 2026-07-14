@@ -937,6 +937,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_cvars.cpp
 	common/rendering/nri/renderer/nri_exposure.cpp
 	common/rendering/nri/renderer/nri_frame_graph.cpp
+	common/rendering/nri/renderer/nri_frame_diagnostics_policy.cpp
 	common/rendering/nri/renderer/nri_frame_output.cpp
 	common/rendering/nri/renderer/nri_frame_resources.cpp
 	common/rendering/nri/renderer/nri_map_chunk_diagnostics.cpp
@@ -998,6 +999,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_scene_upload.cpp
 	common/rendering/nri/renderer/nri_scene_upload_ranges.cpp
 	common/rendering/nri/renderer/nri_static_scene.cpp
+	common/rendering/nri/renderer/nri_static_scene_diagnostics.cpp
 	common/rendering/nri/renderer/nri_static_scene_residency.cpp
 	common/rendering/nri/renderer/nri_surface_probe.cpp
 	common/rendering/nri/renderer/nri_surface_light_overlay.cpp

@@ -515,6 +515,7 @@ namespace
 void NRIRenderer::ResetResidentMapChunkRegistry()
 {
 	mStaticSceneResidency.Registry() = {};
+	mStaticSceneDiagnostics.Invalidate();
 }
 
 void NRIRenderer::QueueStaticMapSceneLightingInvalidation()
@@ -609,6 +610,9 @@ void NRIRenderer::SyncResidentMapChunkRegistryFromStaticScene()
 
 bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 {
+	const uint64_t staticBuildSerialBefore = mStaticMapScene.buildSerial;
+	const uint32_t animatedSuppressedCountBefore = mStaticMapScene.animatedRefreshSuppressedChunkCount;
+	const bool staticValidBefore = mStaticMapScene.valid;
 	const nri_scene::SceneView* preservedSkyView =
 		(mSkyEnvironment.PreservedStaticMapSky().valid && mSkyEnvironment.PreservedStaticMapSky().buildSerial == mMapWorld.buildSerial)
 		? &mSkyEnvironment.PreservedStaticMapSky().sceneView
@@ -673,12 +677,24 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 		static_cast<NRIRenderer*>(user)->mUploadedStaticMapSceneLastFrame = true;
 	};
 
-	return nri_static_scene::RefreshStaticMapAnimatedMaterials(input, services);
+	const bool result = nri_static_scene::RefreshStaticMapAnimatedMaterials(input, services);
+	if (mStaticMapScene.buildSerial != staticBuildSerialBefore ||
+		mStaticMapScene.animatedRefreshSuppressedChunkCount != animatedSuppressedCountBefore ||
+		mStaticMapScene.valid != staticValidBefore)
+	{
+		mStaticSceneDiagnostics.Invalidate();
+	}
+	return result;
 }
 
 bool NRIRenderer::EnsureStaticMapScene()
 {
 	ScopedStaticScenePerfTimer perfTimer(mLastPerfShellTraceStats.staticSceneMs);
+	const uint64_t staticBuildSerialBefore = mStaticMapScene.buildSerial;
+	const uint32_t sceneBuildCountBefore = mStaticMapScene.sceneBuildCount;
+	const uint32_t accelerationBuildCountBefore = mStaticMapScene.accelerationBuildCount;
+	const size_t staticChunkCountBefore = mStaticMapScene.chunks.size();
+	const bool staticValidBefore = mStaticMapScene.valid;
 
 	NRIStaticSceneCacheBuildServices staticSceneCacheBuildServices = {};
 	staticSceneCacheBuildServices.user = this;
@@ -781,7 +797,16 @@ bool NRIRenderer::EnsureStaticMapScene()
 		return true;
 	};
 
-	return nri_static_scene::EnsureStaticMapScene(input, services);
+	const bool result = nri_static_scene::EnsureStaticMapScene(input, services);
+	if (mStaticMapScene.buildSerial != staticBuildSerialBefore ||
+		mStaticMapScene.sceneBuildCount != sceneBuildCountBefore ||
+		mStaticMapScene.accelerationBuildCount != accelerationBuildCountBefore ||
+		mStaticMapScene.chunks.size() != staticChunkCountBefore ||
+		mStaticMapScene.valid != staticValidBefore)
+	{
+		mStaticSceneDiagnostics.Invalidate();
+	}
+	return result;
 }
 
 bool nri_static_scene::RebuildResidentStaticMaterialBridgeFromChunks(
@@ -2612,6 +2637,7 @@ void NRIRenderer::DestroyStaticMapSceneResources(StaticMapSceneCache& staticScen
 
 void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)
 {
+	mStaticSceneDiagnostics.Invalidate();
 	if (nri_ptscenestats)
 	{
 		Printf("NRI PT static scene trace: event=destroy reason=%s frame=%u scene_valid=%s textures=%s buffers=%s acceleration=%s scene_build_serial=%llu map_build_serial=%llu chunks=%u\n",

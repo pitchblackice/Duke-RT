@@ -153,10 +153,12 @@ namespace
 			shell.sceneTextureTransitionMs;
 
 		Printf(
-			"PERF pt progressive slowdown NRI: frame=%llu interval=%d total=%.3f select=%.3f lights=%.3f dynamic_capture=%.3f dynamic_as=%.3f persistent_batch=%.3f persistent_voxel_cpu=%.3f persistent_voxel_tlas=%.3f persistent_voxel_stats=%.3f persistent_voxel_as=%.3f world_tlas=%.3f runtime_cpu=%.3f material=%.3f material_override=%.3f texture=%.3f texture_lookup=%.3f texture_realize=%.3f texture_descriptor=%.3f texture_transition=%.3f active_prims=%u dyn_prims=%u delta_dyn_prims=%lld high_dyn_prims=%u scene_instances=%u delta_scene_instances=%lld high_scene_instances=%u runtime_chunks=%u delta_runtime_chunks=%lld high_runtime_chunks=%u runtime_cached_tris=%u delta_runtime_tris=%lld high_runtime_tris=%u voxel_cache_entries=%u voxel_batch_actors=%u voxel_instances=%u delta_voxel_instances=%lld high_voxel_instances=%u voxel_pending=%u voxel_mesh_resources=%u voxel_material_resources=%u voxel_resident_bytes=%llu voxel_zero_ref_meshes=%u voxel_zero_ref_materials=%u voxel_zero_ref_bytes=%llu delta_zero_ref_bytes=%lld high_zero_ref_bytes=%llu admission_queue=%u scene_light_records=%u material_calls=%u texture_cache=%u texture_misses=%u resource_upload_bytes=%llu resource_wait_ms=%.3f\n",
+			"PERF pt progressive slowdown NRI: frame=%llu interval=%d total=%.3f post_frame_diagnostics_ms=%.3f unattributed_ms=%.3f select=%.3f lights=%.3f dynamic_capture=%.3f dynamic_as=%.3f persistent_batch=%.3f persistent_voxel_cpu=%.3f persistent_voxel_tlas=%.3f persistent_voxel_stats=%.3f persistent_voxel_as=%.3f world_tlas=%.3f runtime_cpu=%.3f material=%.3f material_override=%.3f texture=%.3f texture_lookup=%.3f texture_realize=%.3f texture_descriptor=%.3f texture_transition=%.3f active_prims=%u dyn_prims=%u delta_dyn_prims=%lld high_dyn_prims=%u scene_instances=%u delta_scene_instances=%lld high_scene_instances=%u runtime_chunks=%u delta_runtime_chunks=%lld high_runtime_chunks=%u runtime_cached_tris=%u delta_runtime_tris=%lld high_runtime_tris=%u voxel_cache_entries=%u voxel_batch_actors=%u voxel_instances=%u delta_voxel_instances=%lld high_voxel_instances=%u voxel_pending=%u voxel_mesh_resources=%u voxel_material_resources=%u voxel_resident_bytes=%llu voxel_zero_ref_meshes=%u voxel_zero_ref_materials=%u voxel_zero_ref_bytes=%llu delta_zero_ref_bytes=%lld high_zero_ref_bytes=%llu admission_queue=%u scene_light_records=%u material_calls=%u texture_cache=%u texture_misses=%u resource_upload_bytes=%llu resource_wait_ms=%.3f\n",
 			(unsigned long long)frameNumber,
 			(int)nri_ptslowdowntraceinterval,
 			shell.totalMs,
+			shell.postFrameDiagnosticsMs,
+			shell.unattributedMs,
 			shell.sceneSelectMs,
 			shell.sceneLightsMs,
 			shell.dynamicCaptureMs,
@@ -3998,7 +4000,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 		Printf("----------perf trace frame %llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber);
 		Printf(
-			"PERF pt shell trace NRI: frame=%llu total=%.3f init=%.3f map=%.3f state=%.3f select=%.3f lights=%.3f resident=%.3f emissive=%.3f emissive_tlas=%.3f surface=%.3f graph=%.3f other=%.3f used_static=%d used_dynamic=%d persistent=%d prims=%u dyn_prims=%u mats=%u scene_instances=%u\n",
+			"PERF pt shell trace NRI: frame=%llu total=%.3f init=%.3f map=%.3f state=%.3f select=%.3f lights=%.3f resident=%.3f emissive=%.3f emissive_tlas=%.3f surface=%.3f graph=%.3f post_frame_diagnostics_ms=%.3f unattributed_ms=%.3f other=%.3f used_static=%d used_dynamic=%d persistent=%d prims=%u dyn_prims=%u mats=%u scene_instances=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.totalMs,
 			shell.initResourcesMs,
@@ -4011,6 +4013,8 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.emissiveTlasMs,
 			shell.surfaceProbeMs,
 			shell.frameGraphMs,
+			shell.postFrameDiagnosticsMs,
+			shell.unattributedMs,
 			shell.otherMs,
 			shell.usedStaticMapScene ? 1 : 0,
 			shell.usedDynamicOverlay ? 1 : 0,
@@ -4019,6 +4023,27 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.dynamicPrimitiveCount,
 			shell.activeMaterialCount,
 			shell.sceneInstanceCount);
+		Printf(
+			"PERF pt success diagnostics NRI: frame=%llu basic=%u composition=%u persistent_status=%u as_summary=%u deep_scene=%u deep_cache_hits=%u deep_rebuilds=%u instance_rows=%u persistent_status_calls=%u static_chunk_rows=%u static_chunk_updates=%u static_surface_rows=%u static_surface_updates=%u registry_rows=%u temp_containers=%u voxel_dup_audits=%u voxel_dup_rows=%u voxel_dup_temp_containers=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.successDiagnosticsBasicCollected ? 1u : 0u,
+			shell.successDiagnosticsInstanceCompositionCollected ? 1u : 0u,
+			shell.successDiagnosticsPersistentVoxelStatusCollected ? 1u : 0u,
+			shell.successDiagnosticsAsSummaryCollected ? 1u : 0u,
+			shell.successDiagnosticsDeepSceneAuditCollected ? 1u : 0u,
+			shell.successDiagnosticsDeepSceneAuditCacheHits,
+			shell.successDiagnosticsDeepSceneAuditRebuilds,
+			shell.successDiagnosticsInstanceRowsScanned,
+			shell.successDiagnosticsPersistentStatusCalls,
+			shell.successDiagnosticsStaticChunkRowsScanned,
+			shell.successDiagnosticsStaticChunkRowsIncrementallyUpdated,
+			shell.successDiagnosticsStaticSurfaceRowsScanned,
+			shell.successDiagnosticsStaticSurfaceRowsIncrementallyUpdated,
+			shell.successDiagnosticsRegistryRowsScanned,
+			shell.successDiagnosticsTemporaryContainersBuilt,
+			shell.dynamicCaptureVoxelDuplicationAuditCalls,
+			shell.dynamicCaptureVoxelDuplicationAuditEntriesScanned,
+			shell.dynamicCaptureVoxelDuplicationAuditTemporaryContainersBuilt);
 		Printf(
 			"PERF pt scene composition NRI: frame=%llu inst_static=%u inst_dynamic=%u inst_persistent_voxel=%u voxel_mesh_variants=%u voxel_instances=%u voxel_prims=%u voxel_mats=%u voxel_prim_min=%u voxel_prim_max=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
@@ -4061,8 +4086,10 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.asBlasCacheHits,
 			shell.asBlasBuiltThisFrame,
 			shell.asMonolithicDynamicBlasBuilds);
-		Printf(
-			"PERF pt static segment diagnostics NRI: frame=%llu candidate_chunks=%u unique_geometry_signatures=%u duplicate_keys=%u duplicate_refs=%u portal_chunks=%u local_space_chunks=%u animated_chunks=%u atlas_eligible_chunks=%u registry_mapped_chunks=%u candidate_surfaces=%u wall_candidates=%u floor_candidates=%u ceiling_candidates=%u portal_candidates=%u local_space_surfaces=%u animated_surfaces=%u material_risk_surfaces=%u contiguous_chunk_surfaces=%u chunk_owned_blas=%u segment_blas=%u\n",
+		if (shell.successDiagnosticsDeepSceneAuditCollected)
+		{
+			Printf(
+				"PERF pt static segment diagnostics NRI: frame=%llu candidate_chunks=%u unique_geometry_signatures=%u duplicate_keys=%u duplicate_refs=%u portal_chunks=%u local_space_chunks=%u animated_chunks=%u atlas_eligible_chunks=%u registry_mapped_chunks=%u candidate_surfaces=%u wall_candidates=%u floor_candidates=%u ceiling_candidates=%u portal_candidates=%u local_space_surfaces=%u animated_surfaces=%u material_risk_surfaces=%u contiguous_chunk_surfaces=%u chunk_owned_blas=%u segment_blas=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.asStaticSegmentCandidateChunks,
 			shell.asStaticSegmentUniqueGeometrySignatures,
@@ -4084,8 +4111,8 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.asStaticSegmentContiguousChunkSurfaces,
 			shell.asStaticChunkOwnedBlas,
 			shell.asStaticSegmentBlas);
-		Printf(
-			"PERF pt static segment cache NRI: frame=%llu candidates=%u entries=%u hits=%u misses=%u duplicate_refs=%u resident_blas=%u builds_this_frame=%u builds_last_rebuild=%u invalidations=%u resident_bytes=%llu blas_build_enabled=%u\n",
+			Printf(
+				"PERF pt static segment cache NRI: frame=%llu candidates=%u entries=%u hits=%u misses=%u duplicate_refs=%u resident_blas=%u builds_this_frame=%u builds_last_rebuild=%u invalidations=%u resident_bytes=%llu blas_build_enabled=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.asStaticSegmentCacheCandidates,
 			shell.asStaticSegmentCacheEntries,
@@ -4098,8 +4125,8 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.asStaticSegmentCacheInvalidations,
 			(unsigned long long)shell.asStaticSegmentCacheResidentBytes,
 			shell.asStaticSegmentCacheBlasBuildEnabled ? 1u : 0u);
-		Printf(
-			"PERF pt static segment route NRI: frame=%llu routed_segment=%u chunk_fallback=%u reject_disabled=%u reject_missing_cache=%u reject_missing_blas=%u segment_blas_refs=%u chunk_blas_refs=%u\n",
+			Printf(
+				"PERF pt static segment route NRI: frame=%llu routed_segment=%u chunk_fallback=%u reject_disabled=%u reject_missing_cache=%u reject_missing_blas=%u segment_blas_refs=%u chunk_blas_refs=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.asStaticSegmentRouteRouted,
 			shell.asStaticSegmentRouteChunkFallback,
@@ -4107,7 +4134,8 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.asStaticSegmentRouteRejectMissingCache,
 			shell.asStaticSegmentRouteRejectMissingBlas,
 			shell.asStaticSegmentRouteSegmentBlasRefs,
-			shell.asStaticSegmentRouteChunkBlasRefs);
+				shell.asStaticSegmentRouteChunkBlasRefs);
+		}
 		Printf(
 			"PERF pt emissive as model NRI: frame=%llu enabled=%u records=%u records_static=%u records_dynamic=%u records_persistent_voxel=%u static_record_matched_chunks=%u static_record_unmatched_chunks=%u dynamic_records=%u persistent_voxel_ignored_records=%u static_chunk_refs=%u dynamic_aggregate_refs=%u mask_all_workloads_refs=%u mask_other_refs=%u payload_cache_hits=%u payload_cache_misses=%u sampling_surface_static=%u sampling_surface_captured=%u sampling_surface_runtime_mutation=%u sampling_surface_dynamic=%u sampling_surface_persistent_voxel=%u sampling_output_static=%u sampling_output_dynamic=%u sampling_output_persistent_voxel=%u sampling_skipped_persistent_voxel=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
@@ -4209,8 +4237,10 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.worldTlasMemoryBytes,
 			shell.worldTlasDescriptorCreateCalls,
 			shell.worldTlasBarrierCount);
-		Printf(
-			"PERF pt scene record audit NRI: frame=%llu records=%u static=%u dynamic=%u persistent_voxel=%u invalid_source=%u visibility_chunked=%u legacy_compatible=%u material_indirection=%u\n",
+		if (shell.successDiagnosticsDeepSceneAuditCollected)
+		{
+			Printf(
+				"PERF pt scene record audit NRI: frame=%llu records=%u static=%u dynamic=%u persistent_voxel=%u invalid_source=%u visibility_chunked=%u legacy_compatible=%u material_indirection=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneRecordAuditRecords,
 			shell.sceneRecordAuditStatic,
@@ -4220,14 +4250,15 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneRecordAuditVisibilityChunked,
 			shell.sceneRecordAuditLegacyCompatible,
 			shell.sceneRecordAuditMaterialIndirection);
-		Printf(
-			"PERF pt hit metadata NRI: frame=%llu records=%u primitive_base_mismatches=%u material_base_mismatches=%u legacy_primitive_offset_matches=%u persistent_material_base_records=%u\n",
+			Printf(
+				"PERF pt hit metadata NRI: frame=%llu records=%u primitive_base_mismatches=%u material_base_mismatches=%u legacy_primitive_offset_matches=%u persistent_material_base_records=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.hitMetadataAuditRecords,
 			shell.hitMetadataPrimitiveBaseMismatches,
 			shell.hitMetadataMaterialBaseMismatches,
 			shell.hitMetadataLegacyPrimitiveOffsetMatches,
-			shell.hitMetadataPersistentMaterialBaseRecords);
+				shell.hitMetadataPersistentMaterialBaseRecords);
+		}
 		Printf(
 			"PERF pt voxel shared blas NRI: frame=%llu active_actors=%u unique_desired_keys=%u resident_shared_assets=%u queued_shared_assets=%u eligible_build_keys=%u build_attempts=%u build_successes=%u build_failures=%u cache_hits=%u cache_misses=%u actor_refs=%u routed_legacy=%u routed_shared=%u fallback_last_valid=%u active_referenced_assets=%u unreferenced_resident_assets=%u resident_bytes=%llu active_referenced_bytes=%llu unreferenced_resident_bytes=%llu route_eligible_actors=%u route_reject_missing_resident=%u route_reject_non_local=%u route_reject_transform_keyed=%u route_reject_invalid_material=%u route_reject_invalid_transform=%u route_reject_geometry_mismatch=%u reject_missing_key=%u reject_disabled=%u reject_non_local=%u reject_transform_keyed=%u reject_missing_buffers=%u reject_invalid_counts=%u reject_build_budget=%u reject_geometry_mismatch=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
@@ -5100,7 +5131,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.sceneSelectStateCommitGenSceneConstants,
 			shell.sceneSelectStateCommitChangedSceneConstants);
 		Printf(
-			"PERF pt dynamic capture detail NRI: frame=%llu calls=%u walls=%u flats=%u sprites=%u voxel_proxies=%u unsupported_models=%u voxel_stores=%u voxel_rebuilds=%u voxel_deferred=%u mesh_builds=%u mesh_deferred=%u mesh_hits=%u mesh_misses=%u mesh_invalid=%u model_candidates=%u model_sorted=%u model_sort_skipped=%u scratch_reuses=%u scratch_grows=%u scratch_fallbacks=%u budget_truncations=%u surface_builds=%u count=%.3f wall=%.3f flat=%.3f facing=%.3f model=%.3f model_classify=%.3f model_mesh=%.3f model_mesh_build=%.3f model_sort=%.3f model_surface=%.3f model_store=%.3f voxel_frame=%.3f stats=%.3f\n",
+			"PERF pt dynamic capture detail NRI: frame=%llu calls=%u walls=%u flats=%u sprites=%u voxel_proxies=%u unsupported_models=%u voxel_stores=%u voxel_rebuilds=%u voxel_deferred=%u mesh_builds=%u mesh_deferred=%u mesh_hits=%u mesh_misses=%u mesh_invalid=%u duplication_audits=%u duplication_entries_scanned=%u duplication_temp_containers=%u model_candidates=%u model_sorted=%u model_sort_skipped=%u scratch_reuses=%u scratch_grows=%u scratch_fallbacks=%u budget_truncations=%u surface_builds=%u count=%.3f wall=%.3f flat=%.3f facing=%.3f model=%.3f model_classify=%.3f model_mesh=%.3f model_mesh_build=%.3f model_sort=%.3f model_surface=%.3f model_store=%.3f voxel_frame=%.3f stats=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.dynamicCaptureCalls,
 			shell.dynamicCaptureWallSurfaces,
@@ -5116,6 +5147,9 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.dynamicCaptureVoxelMeshHits,
 			shell.dynamicCaptureVoxelMeshMisses,
 			shell.dynamicCaptureVoxelMeshInvalid,
+			shell.dynamicCaptureVoxelDuplicationAuditCalls,
+			shell.dynamicCaptureVoxelDuplicationAuditEntriesScanned,
+			shell.dynamicCaptureVoxelDuplicationAuditTemporaryContainersBuilt,
 			shell.dynamicCaptureModelActorCandidates,
 			shell.dynamicCaptureModelActorSorted,
 			shell.dynamicCaptureModelActorSortSkipped,

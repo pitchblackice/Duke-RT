@@ -133,6 +133,41 @@ namespace
 		if ((entry.rejectMask & RuntimeResidentBlasRefitReject_ZeroPrimitiveCount) != 0) score += 1u << 16;
 		return score;
 	}
+
+	class ScopedStaticDiagnosticsChunkMutation
+	{
+	public:
+		ScopedStaticDiagnosticsChunkMutation(
+			NRIStaticSceneDiagnosticsCache& cache,
+			const NRIStaticSceneDiagnosticsInput& input,
+			uint32_t chunkListIndex,
+			bool enabled)
+			: mCache(cache),
+			  mInput(input),
+			  mChunkListIndex(chunkListIndex),
+			  mEnabled(enabled)
+		{
+			if (mEnabled)
+			{
+				mBefore = NRIStaticSceneDiagnosticsCache::CaptureChunkState(mInput, mChunkListIndex);
+			}
+		}
+
+		~ScopedStaticDiagnosticsChunkMutation()
+		{
+			if (mEnabled)
+			{
+				mCache.NotifyChunkMutation(mInput, mChunkListIndex, mBefore);
+			}
+		}
+
+	private:
+		NRIStaticSceneDiagnosticsCache& mCache;
+		NRIStaticSceneDiagnosticsInput mInput;
+		uint32_t mChunkListIndex = UINT32_MAX;
+		bool mEnabled = false;
+		NRIStaticSceneDiagnosticsChunkState mBefore = {};
+	};
 }
 
 // Runtime mutation resident-apply renderer-service implementation.
@@ -175,6 +210,16 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	const bool hasChunkSlot =
 		resolvedChunkListIndex < mStaticMapScene.chunks.size() &&
 		resolvedChunkListIndex < mStaticMapChunkAtlas.chunks.size();
+	NRIStaticSceneDiagnosticsInput staticDiagnosticsInput = {};
+	staticDiagnosticsInput.mapWorld = &mMapWorld;
+	staticDiagnosticsInput.staticScene = &mStaticMapScene;
+	staticDiagnosticsInput.atlas = &mStaticMapChunkAtlas;
+	staticDiagnosticsInput.registry = &mStaticSceneResidency.Registry();
+	ScopedStaticDiagnosticsChunkMutation staticDiagnosticsMutation(
+		mStaticSceneDiagnostics,
+		staticDiagnosticsInput,
+		resolvedChunkListIndex,
+		ShouldTracePtPerf() && nri_ptscenestats && mStaticSceneDiagnostics.HasCachedStructuralSnapshot());
 	if (hasChunkSlot)
 	{
 		entry.staticSceneChunkListIndex = resolvedChunkListIndex;
