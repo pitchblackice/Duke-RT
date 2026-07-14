@@ -161,6 +161,34 @@ namespace
 		return a.translation == b.translation && a.rotation == b.rotation;
 	}
 
+	bool SameDeformerTarget(const RuntimeMapMoverDeformerPayload& a, const RuntimeMapMoverDeformerPayload& b)
+	{
+		return a.kind == b.kind && a.sectorIndex == b.sectorIndex;
+	}
+
+	bool SameDeformerState(const RuntimeMapMoverDeformerState& a, const RuntimeMapMoverDeformerState& b)
+	{
+		return a.floorZ == b.floorZ && a.floorHeinum == b.floorHeinum;
+	}
+
+	RuntimeMapMoverDeformerPayload CaptureDeformer(const MoverCandidate& candidate)
+	{
+		RuntimeMapMoverDeformerPayload deformer = {};
+		if (candidate.snapshot.capability != RuntimeMapMoverCapability::StableTopologyDeformer ||
+			candidate.sources.Size() != 1 || candidate.sources[0].actor->spr.lotag != SE_29_WAVES)
+		{
+			return deformer;
+		}
+
+		const auto& source = candidate.sources[0];
+		const auto sector = source.actor->sector();
+		deformer.kind = RuntimeMapMoverDeformerKind::SectorFloorPlane;
+		deformer.sectorIndex = source.sectorIndex;
+		deformer.simulationCurrent.floorZ = sector->floorz;
+		deformer.simulationCurrent.floorHeinum = sector->floorheinum;
+		return deformer;
+	}
+
 	MoverCandidate* FindCandidate(TArray<MoverCandidate>& candidates, uint64_t id)
 	{
 		for (auto& candidate : candidates)
@@ -364,11 +392,15 @@ namespace
 				}
 			}
 		}
+		candidate.snapshot.deformer = CaptureDeformer(candidate);
 
 		uint64_t topology = HashOffset, geometry = HashOffset, material = HashOffset;
 		uint64_t visibility = HashOffset, light = HashOffset;
 		const uint8_t capability = (uint8_t)candidate.snapshot.capability;
+		const uint8_t deformerKind = (uint8_t)candidate.snapshot.deformer.kind;
 		HashValue(topology, capability);
+		HashValue(topology, deformerKind);
+		HashValue(topology, candidate.snapshot.deformer.sectorIndex);
 		for (const auto& member : candidate.snapshot.members)
 		{
 			HashValue(topology, member.sectorIndex);
@@ -393,19 +425,27 @@ namespace
 			snapshot.topologyGeneration = snapshot.geometryGeneration = snapshot.materialGeneration = 1;
 			snapshot.transformGeneration = snapshot.visibilityGeneration = snapshot.lightGeneration = 1;
 			snapshot.simulationPreviousPose = pose;
+			snapshot.deformer.simulationPrevious = snapshot.deformer.simulationCurrent;
 		}
 		else
 		{
 			snapshot.topologyGeneration = previous->topologyGeneration + (previous->topologySignature != topology);
-			snapshot.geometryGeneration = previous->geometryGeneration + (previous->geometrySignature != geometry);
+			const bool deformerChanged = !SameDeformerTarget(previous->deformer, snapshot.deformer) ||
+				!SameDeformerState(previous->deformer.simulationCurrent, snapshot.deformer.simulationCurrent);
+			snapshot.geometryGeneration = previous->geometryGeneration +
+				(previous->geometrySignature != geometry || deformerChanged);
 			snapshot.materialGeneration = previous->materialGeneration + (previous->materialSignature != material);
 			snapshot.visibilityGeneration = previous->visibilityGeneration + (previous->visibilitySignature != visibility);
 			snapshot.lightGeneration = previous->lightGeneration + (previous->lightSignature != light);
 			snapshot.transformGeneration = previous->transformGeneration + !SamePose(previous->simulationCurrentPose, pose);
 			snapshot.simulationPreviousPose = previous->simulationCurrentPose;
+			snapshot.deformer.simulationPrevious = SameDeformerTarget(previous->deformer, snapshot.deformer)
+				? previous->deformer.simulationCurrent : snapshot.deformer.simulationCurrent;
 		}
 		snapshot.presentationPreviousPose = snapshot.simulationPreviousPose;
 		snapshot.presentationCurrentPose = snapshot.simulationCurrentPose;
+		snapshot.deformer.presentationPrevious = snapshot.deformer.simulationPrevious;
+		snapshot.deformer.presentationCurrent = snapshot.deformer.simulationCurrent;
 	}
 
 	bool SameAuthorityState(const TArray<RuntimeMapMoverSnapshot>& a, const TArray<RuntimeMapMoverSnapshot>& b)
@@ -433,7 +473,12 @@ namespace
 				left.visibilitySignature != right.visibilitySignature ||
 				left.lightSignature != right.lightSignature ||
 				!SamePose(left.simulationPreviousPose, right.simulationPreviousPose) ||
-				!SamePose(left.simulationCurrentPose, right.simulationCurrentPose))
+				!SamePose(left.simulationCurrentPose, right.simulationCurrentPose) ||
+				!SameDeformerTarget(left.deformer, right.deformer) ||
+				!SameDeformerState(left.deformer.simulationPrevious, right.deformer.simulationPrevious) ||
+				!SameDeformerState(left.deformer.simulationCurrent, right.deformer.simulationCurrent) ||
+				!SameDeformerState(left.deformer.presentationPrevious, right.deformer.presentationPrevious) ||
+				!SameDeformerState(left.deformer.presentationCurrent, right.deformer.presentationCurrent))
 			{
 				return false;
 			}

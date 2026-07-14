@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <set>
 
+#include "xs_Float.h"
+
 namespace
 {
 	RuntimeMapMoverPose InterpolatePose(
@@ -22,6 +24,29 @@ namespace
 	bool SamePose(const RuntimeMapMoverPose& a, const RuntimeMapMoverPose& b)
 	{
 		return a.translation == b.translation && a.rotation == b.rotation;
+	}
+
+	bool SameDeformerTarget(const RuntimeMapMoverDeformerPayload& a, const RuntimeMapMoverDeformerPayload& b)
+	{
+		return a.kind == b.kind && a.sectorIndex == b.sectorIndex;
+	}
+
+	bool SameDeformerState(const RuntimeMapMoverDeformerState& a, const RuntimeMapMoverDeformerState& b)
+	{
+		return a.floorZ == b.floorZ && a.floorHeinum == b.floorHeinum;
+	}
+
+	RuntimeMapMoverDeformerState InterpolateDeformerState(
+		const RuntimeMapMoverDeformerState& previous,
+		const RuntimeMapMoverDeformerState& current,
+		double fraction)
+	{
+		fraction = std::clamp(fraction, 0.0, 1.0);
+		RuntimeMapMoverDeformerState result = {};
+		result.floorZ = previous.floorZ + (current.floorZ - previous.floorZ) * fraction;
+		result.floorHeinum = (int16_t)xs_CRoundToInt(
+			previous.floorHeinum + (current.floorHeinum - previous.floorHeinum) * fraction);
+		return result;
 	}
 
 	bool SameMember(const RuntimeMapMoverMember& a, const RuntimeMapMoverMember& b)
@@ -56,6 +81,7 @@ namespace
 			a.capability == b.capability &&
 			a.ownerSectorIndex == b.ownerSectorIndex &&
 			a.effectorLotag == b.effectorLotag &&
+			SameDeformerTarget(a.deformer, b.deformer) &&
 			SameMembers(a.members, b.members);
 	}
 
@@ -124,6 +150,8 @@ namespace
 		destination.effectorHitag = source.effectorHitag;
 		destination.simulationPreviousPose = source.simulationPreviousPose;
 		destination.simulationCurrentPose = source.simulationCurrentPose;
+		destination.deformer.simulationPrevious = source.deformer.simulationPrevious;
+		destination.deformer.simulationCurrent = source.deformer.simulationCurrent;
 	}
 }
 
@@ -232,6 +260,9 @@ void NRIMapMoverSystem::IngestFrame(
 			inserted->second.presentationCurrentPose = InterpolatePose(
 				snapshot.simulationPreviousPose, snapshot.simulationCurrentPose, presentationFraction);
 			inserted->second.presentationPreviousPose = inserted->second.presentationCurrentPose;
+			inserted->second.deformer.presentationCurrent = InterpolateDeformerState(
+				snapshot.deformer.simulationPrevious, snapshot.deformer.simulationCurrent, presentationFraction);
+			inserted->second.deformer.presentationPrevious = inserted->second.deformer.presentationCurrent;
 			m_frameStats.addedGroups++;
 			QueueChangedGroup(inserted->second, NRIMapMoverChange_Added, false);
 			sectorLookupDirty = true;
@@ -240,6 +271,7 @@ void NRIMapMoverSystem::IngestFrame(
 
 		const RuntimeMapMoverSnapshot& previous = existing->second;
 		const RuntimeMapMoverPose previousPresentation = previous.presentationCurrentPose;
+		const RuntimeMapMoverDeformerState previousPresentationDeformer = previous.deformer.presentationCurrent;
 		const bool topologyFactsChanged = !SameTopologyFacts(previous, snapshot);
 		uint32_t changeMask = NRIMapMoverChange_None;
 		ClassifyGeneration(previous.topologyGeneration, snapshot.topologyGeneration,
@@ -248,7 +280,9 @@ void NRIMapMoverSystem::IngestFrame(
 			m_frameStats.redundantGenerations.topology, m_frameStats.regressedGenerations.topology,
 			adjacentAuthoritySample);
 		ClassifyGeneration(previous.geometryGeneration, snapshot.geometryGeneration,
-			previous.geometrySignature != snapshot.geometrySignature, NRIMapMoverChange_Geometry, changeMask,
+			previous.geometrySignature != snapshot.geometrySignature ||
+				!SameDeformerState(previous.deformer.simulationCurrent, snapshot.deformer.simulationCurrent),
+			NRIMapMoverChange_Geometry, changeMask,
 			m_frameStats.changed.geometry, m_frameStats.missedGenerations.geometry,
 			m_frameStats.redundantGenerations.geometry, m_frameStats.regressedGenerations.geometry,
 			adjacentAuthoritySample);
@@ -286,6 +320,11 @@ void NRIMapMoverSystem::IngestFrame(
 		existing->second.presentationCurrentPose = InterpolatePose(
 			existing->second.simulationPreviousPose,
 			existing->second.simulationCurrentPose,
+			presentationFraction);
+		existing->second.deformer.presentationPrevious = previousPresentationDeformer;
+		existing->second.deformer.presentationCurrent = InterpolateDeformerState(
+			existing->second.deformer.simulationPrevious,
+			existing->second.deformer.simulationCurrent,
 			presentationFraction);
 		if (changeMask != NRIMapMoverChange_None)
 		{
@@ -350,6 +389,11 @@ void NRIMapMoverSystem::RefreshPresentationPoses(double presentationFraction)
 		snapshot.presentationCurrentPose = InterpolatePose(
 			snapshot.simulationPreviousPose,
 			snapshot.simulationCurrentPose,
+			presentationFraction);
+		snapshot.deformer.presentationPrevious = snapshot.deformer.presentationCurrent;
+		snapshot.deformer.presentationCurrent = InterpolateDeformerState(
+			snapshot.deformer.simulationPrevious,
+			snapshot.deformer.simulationCurrent,
 			presentationFraction);
 	}
 }

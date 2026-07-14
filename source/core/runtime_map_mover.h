@@ -36,6 +36,28 @@ struct RuntimeMapMoverPose
 	DAngle rotation = {};
 };
 
+enum class RuntimeMapMoverDeformerKind : uint8_t
+{
+	None,
+	SectorFloorPlane,
+};
+
+struct RuntimeMapMoverDeformerState
+{
+	double floorZ = 0.0;
+	int16_t floorHeinum = 0;
+};
+
+struct RuntimeMapMoverDeformerPayload
+{
+	RuntimeMapMoverDeformerKind kind = RuntimeMapMoverDeformerKind::None;
+	int32_t sectorIndex = -1;
+	RuntimeMapMoverDeformerState simulationPrevious = {};
+	RuntimeMapMoverDeformerState simulationCurrent = {};
+	RuntimeMapMoverDeformerState presentationPrevious = {};
+	RuntimeMapMoverDeformerState presentationCurrent = {};
+};
+
 struct RuntimeMapMoverMember
 {
 	int32_t sectorIndex = -1;
@@ -70,6 +92,7 @@ struct RuntimeMapMoverSnapshot
 	RuntimeMapMoverPose simulationCurrentPose = {};
 	RuntimeMapMoverPose presentationPreviousPose = {};
 	RuntimeMapMoverPose presentationCurrentPose = {};
+	RuntimeMapMoverDeformerPayload deformer = {};
 	TArray<RuntimeMapMoverMember> members;
 };
 
