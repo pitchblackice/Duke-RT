@@ -1,6 +1,46 @@
 #include "nri_world_tlas_slots.h"
 
 #include <algorithm>
+#include <cstring>
+
+bool NRIWorldTlasFrameSlot::PublishedInstanceBytesEqual(const std::vector<nri::TopLevelInstance>& instances) const
+{
+	return publishedInstances.size() == instances.size() &&
+		(instances.empty() || std::memcmp(
+			publishedInstances.data(),
+			instances.data(),
+			instances.size() * sizeof(nri::TopLevelInstance)) == 0);
+}
+
+void NRIWorldTlasFrameSlot::Publish(
+	const std::vector<nri::TopLevelInstance>& instances,
+	uint64_t mapEpoch,
+	uint64_t buildEpoch,
+	uint64_t recordingFence,
+	uint64_t blasGeneration,
+	uint64_t instancePayloadHash)
+{
+	publishedInstances = instances;
+	publishedMapEpoch = mapEpoch;
+	publishedBuildEpoch = buildEpoch;
+	publishedRecordingFence = recordingFence;
+	publishedBlasGeneration = blasGeneration;
+	publishedInstancePayloadHash = instancePayloadHash;
+	publishedInstanceCapacity = (uint32_t)instances.size();
+	publicationValid = true;
+}
+
+void NRIWorldTlasFrameSlot::InvalidatePublication()
+{
+	publishedInstances.clear();
+	publishedMapEpoch = 0;
+	publishedBuildEpoch = 0;
+	publishedRecordingFence = 0;
+	publishedBlasGeneration = 0;
+	publishedInstancePayloadHash = 0;
+	publishedInstanceCapacity = 0;
+	publicationValid = false;
+}
 
 NRIWorldTlasFrameSlot& NRIWorldTlasFrameSlots::Get(uint32_t frameSlotIndex, uint32_t frameSlotCount)
 {

@@ -4165,7 +4165,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.dynamicOverlayBlasRoutedInstances,
 			shell.dynamicOverlayBlasMonolithicRefs);
 		Printf(
-			"PERF pt world tlas detail NRI: frame=%llu total=%.3f retire=%.3f instance_upload=%.3f create=%.3f memory=%.3f scratch=%.3f descriptor=%.3f build=%.3f barrier=%.3f calls=%u instances=%u creates=%u scratch_queries=%u scratch_grows=%u scratch_requested=%llu memory_bytes=%llu descriptor_creates=%u barriers=%u\n",
+			"PERF pt world tlas detail NRI: frame=%llu total=%.3f retire=%.3f instance_upload=%.3f create=%.3f memory=%.3f scratch=%.3f descriptor=%.3f build=%.3f barrier=%.3f calls=%u exact_reuses=%u full_builds=%u full_reason_mask=0x%08x same_command_rotations=%u blas_generation=%llu instances=%u creates=%u scratch_queries=%u scratch_grows=%u scratch_requested=%llu memory_bytes=%llu descriptor_creates=%u barriers=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.worldTlasMs,
 			shell.worldTlasRetireMs,
@@ -4177,6 +4177,11 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.worldTlasBuildMs,
 			shell.worldTlasBarrierMs,
 			shell.worldTlasBuildCalls,
+			shell.worldTlasExactReuseCalls,
+			shell.worldTlasFullBuildCalls,
+			shell.worldTlasFullBuildReasonMask,
+			shell.worldTlasSameCommandResourceRotations,
+			(unsigned long long)shell.worldTlasBlasContentGeneration,
 			shell.worldTlasInstanceCount,
 			shell.worldTlasCreateCalls,
 			shell.worldTlasScratchQueries,

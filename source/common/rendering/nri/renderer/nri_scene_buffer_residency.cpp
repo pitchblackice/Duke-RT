@@ -50,6 +50,7 @@ bool NRISceneUploadManager::CreateStructuredBuffer(
 	resource.memoryLocation = nri::MemoryLocation::DEVICE_UPLOAD;
 	resource.usedSize = size;
 	resource.stride = stride;
+	resource.usage = desc.usage;
 
 	nri::BufferViewDesc viewDesc = {};
 	viewDesc.buffer = resource.buffer;
@@ -103,6 +104,7 @@ bool NRISceneUploadManager::EnsureStructuredBuffer(
 		resource.buffer == nullptr ||
 		resource.shaderView == nullptr ||
 		resource.stride != stride ||
+		!NRIResourceUsageIncludes(resource.usage, usage) ||
 		resource.size < requiredSize;
 
 	stats.bytesUploadedLastFrame = size;
@@ -152,6 +154,7 @@ bool NRISceneUploadManager::EnsureStructuredBuffer(
 		resource.memoryLocation = nri::MemoryLocation::DEVICE_UPLOAD;
 		resource.usedSize = size;
 		resource.stride = stride;
+		resource.usage = desc.usage;
 
 		nri::BufferViewDesc viewDesc = {};
 		viewDesc.buffer = resource.buffer;
@@ -240,6 +243,7 @@ bool NRISceneUploadManager::EnsureStructuredBufferCapacity(
 	if (resource.buffer != nullptr &&
 		resource.shaderView != nullptr &&
 		resource.stride == stride &&
+		NRIResourceUsageIncludes(resource.usage, usage) &&
 		resource.size >= requiredSize)
 	{
 		return true;
@@ -278,6 +282,7 @@ bool NRISceneUploadManager::EnsureStructuredBufferCapacity(
 	resource.memoryLocation = nri::MemoryLocation::DEVICE_UPLOAD;
 	resource.usedSize = 0;
 	resource.stride = stride;
+	resource.usage = desc.usage;
 
 	nri::BufferViewDesc viewDesc = {};
 	viewDesc.buffer = resource.buffer;

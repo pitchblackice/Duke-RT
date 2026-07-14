@@ -1328,6 +1328,11 @@ public:
 		uint64_t persistentVoxelResidentResourceBytes = 0;
 		uint64_t persistentVoxelZeroRefResourceBytes = 0;
 		uint32_t worldTlasBuildCalls = 0;
+		uint32_t worldTlasExactReuseCalls = 0;
+		uint32_t worldTlasFullBuildCalls = 0;
+		uint32_t worldTlasFullBuildReasonMask = 0;
+		uint32_t worldTlasSameCommandResourceRotations = 0;
+		uint64_t worldTlasBlasContentGeneration = 0;
 		uint32_t worldTlasInstanceCount = 0;
 		double worldTlasRetireMs = 0.0;
 		double worldTlasInstanceUploadMs = 0.0;
@@ -2273,6 +2278,7 @@ private:
 		bool updateDynamicPerfStats,
 		NRIBufferResource* buildScratchBuffer = nullptr,
 		nri::AccelerationStructureBits buildFlags = nri::AccelerationStructureBits::PREFER_FAST_BUILD);
+	void NoteWorldBlasContentChanged();
 	bool PreloadStaticMapResources();
 	bool PreloadPersistentVoxelResources();
 	bool PreloadMaterialResources();
@@ -2756,6 +2762,7 @@ private:
 	uint64_t mLastWorldTlasSceneInstancePayloadHash = 0;
 	uint64_t mLastWorldTlasInstanceFrameIndex = UINT64_MAX;
 	uint32_t mLastWorldTlasInstanceCount = 0;
+	uint64_t mWorldBlasContentGeneration = 1;
 	uint32_t mBoundEmissivePrimitiveCount = 0;
 	uint32_t mBoundEmissiveDominantPrimitive = UINT32_MAX;
 	uint32_t mBoundEmissiveDominantTile = 0;

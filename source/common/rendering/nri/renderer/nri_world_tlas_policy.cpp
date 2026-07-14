@@ -110,3 +110,57 @@ NRIWorldTlasDecision ClassifyNRIWorldTlasInstances(
 	decision.kind = NRIWorldTlasDecisionKind::ExactReuse;
 	return decision;
 }
+
+NRIWorldTlasExactReuseDecision EvaluateNRIWorldTlasExactReuse(const NRIWorldTlasExactReuseInput& input)
+{
+	NRIWorldTlasExactReuseDecision decision = {};
+	decision.sameRecordingFence =
+		input.publishedRecordingFence != 0 &&
+		input.publishedRecordingFence == input.currentRecordingFence;
+	if (!input.publicationValid)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasExactReuseRejectReason_Unpublished;
+	}
+	if (!input.hasAccelerationStructure)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasExactReuseRejectReason_AccelerationStructure;
+	}
+	if (!input.hasDescriptor)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasExactReuseRejectReason_Descriptor;
+	}
+	if (!input.hasInstanceBuffer)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasExactReuseRejectReason_InstanceBuffer;
+	}
+	if (input.publishedInstanceCapacity < input.requiredInstanceCount ||
+		input.instanceBufferCapacityBytes < input.requiredInstanceBytes)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasExactReuseRejectReason_Capacity;
+	}
+	if (input.currentMapEpoch == 0 || input.publishedMapEpoch != input.currentMapEpoch)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasExactReuseRejectReason_MapEpoch;
+	}
+	if (input.currentBuildEpoch == 0 || input.publishedBuildEpoch != input.currentBuildEpoch)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasExactReuseRejectReason_BuildEpoch;
+	}
+	if (input.publishedRecordingFence == 0 ||
+		input.currentRecordingFence == 0 ||
+		(!decision.sameRecordingFence && !input.publishedFenceComplete))
+	{
+		decision.rejectReasonMask |= NRIWorldTlasExactReuseRejectReason_Fence;
+	}
+	if (input.currentBlasGeneration == 0 || input.publishedBlasGeneration != input.currentBlasGeneration)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasExactReuseRejectReason_BlasGeneration;
+	}
+	if (!input.instanceBytesEqual)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasExactReuseRejectReason_InstanceBytes;
+	}
+
+	decision.reuse = decision.rejectReasonMask == NRIWorldTlasExactReuseRejectReason_None;
+	return decision;
+}

@@ -843,6 +843,7 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 			build.scratchBuffer = mResidentStaticBlasScratchBuffer.buffer;
 			build.scratchOffset = 0;
 			mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &build, 1);
+			NoteWorldBlasContentChanged();
 			mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasBuildCommandCount++;
 
 			if (i + 1 < activeChunkListIndices.size())

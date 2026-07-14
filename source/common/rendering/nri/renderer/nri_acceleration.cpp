@@ -7,6 +7,7 @@
 #include "nri_scene_upload.h"
 #include "nri_shader_contracts.h"
 #include "nri_upload_hash.h"
+#include "nri_world_tlas_policy.h"
 #include "../scene/nri_hash.h"
 #include "../system/nri_renderdevice.h"
 #include "../../hwrenderer/data/hw_clock.h"
@@ -275,6 +276,7 @@ bool NRIAccelerationStructureManager::BuildBottomLevel(
 	{
 		ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.dynamicAsBuildMs);
 		renderer.mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*renderer.mFrameBuffer->mCommandBuffer, &dynamicBuild, 1);
+		renderer.NoteWorldBlasContentChanged();
 	}
 
 	nri::BufferBarrierDesc barriers[2] = {};
@@ -965,9 +967,112 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 	return NRIAccelerationStructureManager::BuildEmissiveTopLevel(*this);
 }
 
+void NRIRenderer::NoteWorldBlasContentChanged()
+{
+	mWorldBlasContentGeneration++;
+	if (mWorldBlasContentGeneration == 0)
+	{
+		mWorldBlasContentGeneration = 1;
+	}
+}
+
 bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask)
 {
-	return NRIAccelerationStructureManager::BuildTopLevel(*this, instances, sceneBufferMask);
+	const auto decisionStart = std::chrono::steady_clock::now();
+	NRIWorldTlasFrameSlot& frameSlot = GetCurrentWorldTlasFrameSlot();
+	const uint64_t recordingFence = GetRecordingCommandFenceValue();
+	const uint64_t mapEpoch = mMapWorld.valid ? mMapWorld.buildSerial : 0;
+	const uint64_t buildEpoch = mStaticMapScene.valid ? mStaticMapScene.buildSerial : 0;
+	const uint64_t requiredInstanceBytes = instances.size() * sizeof(nri::TopLevelInstance);
+	const bool instanceBytesEqual = frameSlot.PublishedInstanceBytesEqual(instances);
+
+	NRIWorldTlasExactReuseInput reuseInput = {};
+	reuseInput.publicationValid = frameSlot.publicationValid;
+	reuseInput.hasAccelerationStructure = frameSlot.accelerationStructure.accelerationStructure != nullptr;
+	reuseInput.hasDescriptor = frameSlot.accelerationStructure.descriptor != nullptr;
+	reuseInput.hasInstanceBuffer =
+		frameSlot.instanceBuffer.buffer != nullptr &&
+		frameSlot.instanceBuffer.shaderView != nullptr &&
+		frameSlot.instanceBuffer.stride == sizeof(nri::TopLevelInstance) &&
+		NRIResourceUsageIncludes(
+			frameSlot.instanceBuffer.usage,
+			nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT);
+	reuseInput.publishedInstanceCapacity = frameSlot.publishedInstanceCapacity;
+	reuseInput.requiredInstanceCount = (uint32_t)instances.size();
+	reuseInput.instanceBufferCapacityBytes = frameSlot.instanceBuffer.size;
+	reuseInput.requiredInstanceBytes = requiredInstanceBytes;
+	reuseInput.publishedMapEpoch = frameSlot.publishedMapEpoch;
+	reuseInput.currentMapEpoch = mapEpoch;
+	reuseInput.publishedBuildEpoch = frameSlot.publishedBuildEpoch;
+	reuseInput.currentBuildEpoch = buildEpoch;
+	reuseInput.publishedRecordingFence = frameSlot.publishedRecordingFence;
+	reuseInput.currentRecordingFence = recordingFence;
+	reuseInput.publishedFenceComplete =
+		frameSlot.publishedRecordingFence != 0 &&
+		IsCommandFenceValueComplete(frameSlot.publishedRecordingFence);
+	reuseInput.publishedBlasGeneration = frameSlot.publishedBlasGeneration;
+	reuseInput.currentBlasGeneration = mWorldBlasContentGeneration;
+	reuseInput.instanceBytesEqual = instanceBytesEqual;
+	const NRIWorldTlasExactReuseDecision reuseDecision = EvaluateNRIWorldTlasExactReuse(reuseInput);
+	mLastPerfShellTraceStats.worldTlasBlasContentGeneration = mWorldBlasContentGeneration;
+
+	if (reuseDecision.reuse)
+	{
+		mLastPerfShellTraceStats.worldTlasBuildCalls++;
+		mLastPerfShellTraceStats.worldTlasExactReuseCalls++;
+		mLastPerfShellTraceStats.worldTlasInstanceCount = (uint32_t)instances.size();
+		mLastWorldTlasInstancePayloadHash = frameSlot.publishedInstancePayloadHash;
+		mLastWorldTlasSceneInstancePayloadHash = 0;
+		mLastWorldTlasInstanceFrameIndex = mFrameIndex;
+		mLastWorldTlasInstanceCount = (uint32_t)instances.size();
+		mActiveTlasInstanceCount = (uint32_t)instances.size();
+		frameSlot.publishedRecordingFence = recordingFence;
+		if ((sceneBufferMask & SceneDataBufferMask_Static) != 0 &&
+			(sceneBufferMask & SceneDataBufferMask_Dynamic) == 0)
+		{
+			mStaticMapScene.tlasInstanceCount = (uint32_t)instances.size();
+			mStaticMapScene.accelerationResident = true;
+			mBuiltStaticMapSceneASLastFrame = true;
+		}
+		if (ShouldCollectAccelerationPerfTiming())
+		{
+			mLastPerfShellTraceStats.worldTlasMs += DurationMs(decisionStart, std::chrono::steady_clock::now());
+		}
+		return true;
+	}
+
+	if (ShouldCollectAccelerationPerfTiming())
+	{
+		mLastPerfShellTraceStats.worldTlasMs += DurationMs(decisionStart, std::chrono::steady_clock::now());
+	}
+	mLastPerfShellTraceStats.worldTlasFullBuildCalls++;
+	mLastPerfShellTraceStats.worldTlasFullBuildReasonMask |= reuseDecision.rejectReasonMask;
+	const bool priorPublicationFenceUnsafe =
+		frameSlot.publicationValid &&
+		(reuseDecision.sameRecordingFence || !reuseInput.publishedFenceComplete);
+	if (priorPublicationFenceUnsafe)
+	{
+		RetireResidentBufferResource(frameSlot.instanceBuffer);
+		RetireResidentBufferResource(frameSlot.scratchBuffer);
+		if (reuseDecision.sameRecordingFence)
+		{
+			mLastPerfShellTraceStats.worldTlasSameCommandResourceRotations++;
+		}
+	}
+	frameSlot.InvalidatePublication();
+	if (!NRIAccelerationStructureManager::BuildTopLevel(*this, instances, sceneBufferMask))
+	{
+		return false;
+	}
+
+	frameSlot.Publish(
+		instances,
+		mapEpoch,
+		buildEpoch,
+		recordingFence,
+		mWorldBlasContentGeneration,
+		mLastWorldTlasInstancePayloadHash);
+	return true;
 }
 
 bool NRIRenderer::BuildTopLevelAccelerationStructure(
@@ -1041,6 +1146,7 @@ void NRIRenderer::DestroyWorldTlasFrameSlots()
 void NRIRenderer::DestroyAccelerationStructures()
 {
 	mStaticMapScene.accelerationResident = false;
+	DestroyWorldTlasFrameSlots();
 	for (auto& chunk : mStaticMapScene.chunks)
 	{
 		DestroyAccelerationStructureResource(chunk.accelerationStructure);
@@ -1050,7 +1156,6 @@ void NRIRenderer::DestroyAccelerationStructures()
 	}
 	DestroyDynamicBottomLevelAccelerationStructures();
 	mPersistentVoxels.Reset("destroy-acceleration-structures", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildNRIPersistentVoxelResetServices(*this));
-	DestroyWorldTlasFrameSlots();
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 	mStaticAccelerationBuildSerial = 0;
 	mActiveTlasInstanceCount = 0;

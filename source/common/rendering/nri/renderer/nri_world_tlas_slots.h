@@ -10,6 +10,24 @@ struct NRIWorldTlasFrameSlot
 	NRIAccelerationStructureResource accelerationStructure;
 	NRIBufferResource instanceBuffer;
 	NRIBufferResource scratchBuffer;
+	std::vector<nri::TopLevelInstance> publishedInstances;
+	uint64_t publishedMapEpoch = 0;
+	uint64_t publishedBuildEpoch = 0;
+	uint64_t publishedRecordingFence = 0;
+	uint64_t publishedBlasGeneration = 0;
+	uint64_t publishedInstancePayloadHash = 0;
+	uint32_t publishedInstanceCapacity = 0;
+	bool publicationValid = false;
+
+	bool PublishedInstanceBytesEqual(const std::vector<nri::TopLevelInstance>& instances) const;
+	void Publish(
+		const std::vector<nri::TopLevelInstance>& instances,
+		uint64_t mapEpoch,
+		uint64_t buildEpoch,
+		uint64_t recordingFence,
+		uint64_t blasGeneration,
+		uint64_t instancePayloadHash);
+	void InvalidatePublication();
 };
 
 struct NRIWorldTlasSlotLifecycleServices

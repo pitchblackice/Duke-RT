@@ -2371,6 +2371,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	{
 		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
 		renderer->mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*renderer->mFrameBuffer->mCommandBuffer, &build, 1);
+		renderer->NoteWorldBlasContentChanged();
 	};
 	services.cmdScratchReuseBarrier = [](void* user, NRIBufferResource& scratchBuffer)
 	{
