@@ -41,6 +41,7 @@ namespace
 	constexpr uint32_t kSmokeFlagEmissiveQuarterKey = 0x2000000u;
 	constexpr uint32_t kSmokeFlagGridLightingFieldPing = 0x4000000u;
 	constexpr uint32_t kSmokeFlagGridLightingDebugShift = 27u;
+	constexpr uint32_t kSmokeFlagGridLightingLocalProposals = 0x80000000u;
 	const char* const kSmokePipelineNames[] = { "SmokeClear", "SmokeSimulate", "SmokeSpawn", "SmokeBin", "SmokeLightDirectionalCarriers", "SmokeEvaluateMedium", "SmokeEvaluateGrid", "SmokeLightPoint", "SmokeLightDirectional", "SmokeLightDirectTemporal", "SmokeLightDirectSpatial", "SmokeLightEmissive", "SmokeLightEmissiveTemporal", "SmokeLightEmissiveSpatial", "SmokeLightIndirectReference", "SmokeLightIndirectTemporal", "SmokeLightIndirectSpatial", "SmokeIntegrate", "SmokeResolveVolume", "SmokeTemporalVolume", "SmokeComposite" };
 	static_assert(std::size(kSmokePipelineNames) == 21u);
 
@@ -1028,6 +1029,8 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		constants.flags |= kSmokeFlagGridLightingFieldPing;
 	if (worldEmissiveReady)
 		constants.flags |= (mSettings.emissiveWorldDebug & 7u) << kSmokeFlagGridLightingDebugShift;
+	if (worldEmissiveReady && mSettings.emissiveLocalProposals)
+		constants.flags |= kSmokeFlagGridLightingLocalProposals;
 	constants.flags |= (effectiveIndirectCacheMode & 3u) << 2u;
 	constants.flags |= (std::min(mSettings.quality, 2u) & 3u) << 5u;
 	if (indirectHistoryCompatible)
@@ -1565,10 +1568,11 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.representationFallback, mMayHaveParticleSmoke ? "yes" : "no");
 	mGrid.PrintStatus();
 	const NRISmokeGridLightingStatusSnapshot& world = mGridLighting.GetStatusSnapshot();
-	Printf("NRI PT smoke grid emissive: requested_backend=%u effective_backend=%u authority=%s ready=%s cells=%u ping=%u field_mib=%.2f work_mib=%.2f links_mib=%.2f filter=%s filter_mib=%.2f total_mib=%.2f proposal=%s field_readback=0\n",
+	Printf("NRI PT smoke grid emissive: requested_backend=%u effective_backend=%u authority=%s ready=%s cells=%u ping=%u field_mib=%.2f work_mib=%.2f links_mib=%.2f proposal_mib=%.3f filter=%s filter_mib=%.2f total_mib=%.2f proposal=%s field_readback=0\n",
 		world.requestedBackend, world.effectiveBackend, world.authority, world.resourcesReady ? "yes" : "no",
 		world.cellCapacity, world.fieldPing, (double)world.fieldBytes / (1024.0 * 1024.0),
 		(double)world.workBytes / (1024.0 * 1024.0), (double)world.linkBytes / (1024.0 * 1024.0),
+		(double)world.proposalBytes / (1024.0 * 1024.0),
 		world.filterDecision, (double)world.filterBytes / (1024.0 * 1024.0),
 		(double)world.totalBytes / (1024.0 * 1024.0), world.proposalDecision);
 	const char* placement = mStatus.routePlacement == (uint32_t)NRISmokeRoutePlacement::DlrrPostUpscale ? "dlrr_post_upscale" :

@@ -220,6 +220,7 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.emissiveReference = (bool)nri_ptsmokeemissivereference;
 	settings.emissiveBackend = (uint32_t)std::clamp((int)nri_ptsmokeemissivebackend, 0, 3);
 	settings.emissiveWorldFilter = (bool)nri_ptsmokeemissiveworldfilter;
+	settings.emissiveLocalProposals = (bool)nri_ptsmokeemissivelocal;
 	settings.emissiveWorldDebug = (uint32_t)std::clamp((int)nri_ptsmokeemissiveworlddebug, 0, 7);
 	settings.emissiveLegacyGatherDisabled = (bool)nri_ptsmokeemissivelegacygatherdisable;
 	settings.emissiveQuarterKey = (bool)nri_ptsmokeemissivequarterkey;

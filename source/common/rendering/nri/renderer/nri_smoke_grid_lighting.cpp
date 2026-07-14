@@ -8,7 +8,7 @@ namespace
 {
 	constexpr uint32_t kThreads = 64u;
 	const char* const kPipelineNames[] = {
-		"SmokeGridLightPrepare", "SmokeGridLightBuildActive", "SmokeGridLightSeed",
+		"SmokeGridLightPrepare", "SmokeGridLightBuildActive", "SmokeGridLightBuildProposals", "SmokeGridLightSeed",
 		"SmokeGridLightTemporal", "SmokeGridLightBuildLinks", "SmokeGridLightFilter"
 	};
 	static_assert(std::size(kPipelineNames) == (size_t)NRISmokeGridLightingPass::Count);
@@ -111,16 +111,18 @@ void NRISmokeGridLighting::DestroyResources(const NRISmokeGridServices& services
 	DestroyBuffer(services, mControl);
 	DestroyBuffer(services, mLinks);
 	DestroyBuffer(services, mFiltered);
+	DestroyBuffer(services, mProposals);
 	mResourceCellCapacity = 0u;
+	mResourceBrickCapacity = 0u;
 	mStatus.resourcesReady = false;
 	mResourcesInitialized = false;
-	mStatus.fieldBytes = mStatus.workBytes = mStatus.linkBytes = mStatus.filterBytes = mStatus.totalBytes = 0u;
+	mStatus.fieldBytes = mStatus.workBytes = mStatus.linkBytes = mStatus.proposalBytes = mStatus.filterBytes = mStatus.totalBytes = 0u;
 }
 
 bool NRISmokeGridLighting::EnsureResources(const NRISmokeGridServices& services, uint32_t cellCapacity, bool filterRequested)
 {
 	const bool ready = mCurrent.buffer != nullptr && mHistory.buffer != nullptr && mActive.buffer != nullptr &&
-		mControl.buffer != nullptr && mLinks.buffer != nullptr && mResourceCellCapacity == cellCapacity &&
+		mControl.buffer != nullptr && mLinks.buffer != nullptr && mProposals.buffer != nullptr && mResourceCellCapacity == cellCapacity &&
 		((mFiltered.buffer != nullptr) == filterRequested);
 	if (ready)
 		return true;
@@ -128,11 +130,13 @@ bool NRISmokeGridLighting::EnsureResources(const NRISmokeGridServices& services,
 	DestroyResources(services);
 	const nri::BufferUsageBits storage = nri::BufferUsageBits::SHADER_RESOURCE_STORAGE;
 	const uint64_t cells = std::max(cellCapacity, 1u);
+	const uint64_t bricks = std::max<uint64_t>((cells + NRI_SMOKE_GRID_CELLS_PER_BRICK - 1u) / NRI_SMOKE_GRID_CELLS_PER_BRICK, 1u);
 	if (!CreateBuffer(services, mCurrent, cells * sizeof(NRISmokeGridLightRecordGpu), sizeof(NRISmokeGridLightRecordGpu), storage) ||
 		!CreateBuffer(services, mHistory, cells * sizeof(NRISmokeGridLightRecordGpu), sizeof(NRISmokeGridLightRecordGpu), storage) ||
 		!CreateBuffer(services, mActive, cells * sizeof(uint32_t), sizeof(uint32_t), storage) ||
 		!CreateBuffer(services, mControl, sizeof(NRISmokeGridLightControlGpu), sizeof(NRISmokeGridLightControlGpu), storage) ||
 		!CreateBuffer(services, mLinks, cells * sizeof(uint32_t) * 4u, sizeof(uint32_t) * 4u, storage) ||
+		!CreateBuffer(services, mProposals, bricks * sizeof(NRISmokeGridLightProposalGpu), sizeof(NRISmokeGridLightProposalGpu), storage) ||
 		(filterRequested && !CreateBuffer(services, mFiltered, cells * sizeof(NRISmokeGridLightRecordGpu), sizeof(NRISmokeGridLightRecordGpu), storage)))
 	{
 		DestroyResources(services);
@@ -142,13 +146,15 @@ bool NRISmokeGridLighting::EnsureResources(const NRISmokeGridServices& services,
 	// The optional descriptor remains valid while filtering is disabled without
 	// allocating a third field: the accepted current field is a safe alias.
 	mResourceCellCapacity = cellCapacity;
+	mResourceBrickCapacity = (uint32_t)bricks;
 	mStatus.cellCapacity = cellCapacity;
 	mStatus.filterAllocated = mFiltered.buffer != nullptr;
 	mStatus.fieldBytes = mCurrent.memorySize + mHistory.memorySize;
 	mStatus.workBytes = mActive.memorySize + mControl.memorySize;
 	mStatus.linkBytes = mLinks.memorySize;
+	mStatus.proposalBytes = mProposals.memorySize;
 	mStatus.filterBytes = mFiltered.memorySize;
-	mStatus.totalBytes = mStatus.fieldBytes + mStatus.workBytes + mStatus.linkBytes + mStatus.filterBytes;
+	mStatus.totalBytes = mStatus.fieldBytes + mStatus.workBytes + mStatus.linkBytes + mStatus.proposalBytes + mStatus.filterBytes;
 	mStatus.resourcesReady = true;
 	mStatus.failureReason = "none";
 	mNeedsClear = true;
@@ -162,6 +168,7 @@ bool NRISmokeGridLighting::PrepareFrame(const NRISmokeGridServices& services, co
 	mStatus.requestedBackend = settings.emissiveBackend;
 	mStatus.filterRequested = settings.emissiveWorldFilter;
 	mStatus.filterDecision = settings.emissiveWorldFilter ? "requested" : "disabled/variance-gate-not-accepted";
+	mStatus.proposalDecision = settings.emissiveLocalProposals ? "brick-top16/uniform75+global25" : "global-cdf/manual-disable";
 	if (!mStatus.initialized)
 	{
 		mStatus.failureReason = "pipelines-unavailable";
@@ -187,9 +194,9 @@ bool NRISmokeGridLighting::PrepareFrame(const NRISmokeGridServices& services, co
 
 void NRISmokeGridLighting::Barrier(const NRISmokeGridServices& services)
 {
-	NRIBufferResource* resources[] = { &mCurrent, &mHistory, &mActive, &mControl, &mLinks, &mFiltered };
-	const uint32_t resourceCount = mFiltered.buffer != nullptr ? 6u : 5u;
-	nri::BufferBarrierDesc barriers[6] = {};
+	NRIBufferResource* resources[] = { &mCurrent, &mHistory, &mActive, &mControl, &mLinks, &mProposals, &mFiltered };
+	const uint32_t resourceCount = mFiltered.buffer != nullptr ? 7u : 6u;
+	nri::BufferBarrierDesc barriers[7] = {};
 	for (uint32_t i = 0u; i < resourceCount; ++i)
 	{
 		barriers[i].buffer = resources[i]->buffer;
@@ -223,9 +230,9 @@ bool NRISmokeGridLighting::Record(const NRISmokeGridServices& services, const NR
 		return true;
 	if (!mResourcesInitialized)
 	{
-		NRIBufferResource* resources[] = { &mCurrent, &mHistory, &mActive, &mControl, &mLinks, &mFiltered };
-		const uint32_t resourceCount = mFiltered.buffer != nullptr ? 6u : 5u;
-		nri::BufferBarrierDesc barriers[6] = {};
+		NRIBufferResource* resources[] = { &mCurrent, &mHistory, &mActive, &mControl, &mLinks, &mProposals, &mFiltered };
+		const uint32_t resourceCount = mFiltered.buffer != nullptr ? 7u : 6u;
+		nri::BufferBarrierDesc barriers[7] = {};
 		for (uint32_t i = 0u; i < resourceCount; ++i)
 		{
 			barriers[i].buffer = resources[i]->buffer;
@@ -245,6 +252,11 @@ bool NRISmokeGridLighting::Record(const NRISmokeGridServices& services, const NR
 	Barrier(services);
 	Dispatch(services, NRISmokeGridLightingPass::BuildActive, constants, Groups(mResourceCellCapacity));
 	Barrier(services);
+	if (settings.emissiveLocalProposals)
+	{
+		Dispatch(services, NRISmokeGridLightingPass::BuildProposals, constants, Groups(mResourceBrickCapacity));
+		Barrier(services);
+	}
 	Dispatch(services, NRISmokeGridLightingPass::Seed, constants, Groups(mResourceCellCapacity));
 	Barrier(services);
 	if (settings.emissiveReuseMode >= 1u)
@@ -272,7 +284,8 @@ bool NRISmokeGridLighting::GetStorageDescriptors(std::array<const nri::Descripto
 	if (!mStatus.resourcesReady)
 		return false;
 	descriptors = { mCurrent.storageView, mHistory.storageView, mActive.storageView, mControl.storageView,
-		mLinks.storageView, mFiltered.storageView != nullptr ? mFiltered.storageView : mCurrent.storageView };
+		mLinks.storageView, mFiltered.storageView != nullptr ? mFiltered.storageView : mCurrent.storageView,
+		mProposals.storageView };
 	return true;
 }
 

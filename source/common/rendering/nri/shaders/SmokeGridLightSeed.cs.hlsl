@@ -13,9 +13,32 @@ uint SmokeGridLightSeedForCell(int3 cell, uint sampleIndex)
 {
 	uint seed = SmokeHash(asuint(cell.x) ^ SmokeHash(asuint(cell.y)) ^ SmokeHash(asuint(cell.z)) ^
 		SmokeHash(gSmokeConstants.SimulationEpoch) ^ SmokeHash(sampleIndex + 0x9e3779b9u));
-	if (gSmokeConstants.LightMode >= 3u)
+	// Mode 2 is deterministic but progressive; mode 3 adds a second scramble.
+	if (gSmokeConstants.LightMode >= 2u)
 		seed ^= SmokeHash(gSmokeConstants.FrameIndex);
+	if (gSmokeConstants.LightMode >= 3u)
+		seed ^= SmokeHash(gSmokeConstants.FrameIndex + 0x85ebca6bu);
 	return SmokeHash(seed);
+}
+
+bool SmokeGridLightProposalValid(SmokeGridLightProposal proposal, SmokeGridBrick brick)
+{
+	return proposal.Count > 0u && proposal.Count <= NRI_SMOKE_GRID_LIGHT_PROPOSAL_CAPACITY &&
+		proposal.BrickGeneration == brick.Generation &&
+		proposal.SimulationEpoch == gSmokeConstants.SimulationEpoch &&
+		proposal.FrameStamp == gSmokeConstants.FrameIndex;
+}
+
+float SmokeGridLightLocalPdf(SmokeGridLightProposal proposal, uint candidateIndex)
+{
+	const uint count = min(proposal.Count, NRI_SMOKE_GRID_LIGHT_PROPOSAL_CAPACITY);
+	[unroll]
+	for (uint slot = 0u; slot < NRI_SMOKE_GRID_LIGHT_PROPOSAL_CAPACITY; ++slot)
+	{
+		if (slot < count && proposal.CandidateIndices[slot] == candidateIndex)
+			return rcp((float)count);
+	}
+	return 0.0;
 }
 
 [numthreads(64, 1, 1)]
@@ -35,6 +58,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const int3 cell = SmokeGridCellCoordinate(brick.Coordinate, local);
 	const float3 receiverPosition = SmokeGridLightCellCenter(cell, cellSize);
 	const uint sampleCount = (gSmokeConstants.Flags & NRI_SMOKE_EMISSIVE_REFERENCE) != 0u ? 32u : 1u;
+	const bool localRequested = (gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_LOCAL_PROPOSALS) != 0u;
+	const SmokeGridLightProposal proposal = gSmokeGridLightProposals[brickIndex];
+	const bool localReady = localRequested && SmokeGridLightProposalValid(proposal, brick);
+	const float localMix = localReady ? NRI_SMOKE_GRID_LIGHT_LOCAL_MIX : 0.0;
+	if (localRequested && !localReady)
+		InterlockedAdd(gSmokeGridLightControl[0].ProposalFallbacks, 1u);
 	float3 mean[6];
 	float3 second[6];
 	[unroll] for (uint lobe = 0u; lobe < 6u; ++lobe) { mean[lobe] = 0.0; second[lobe] = 0.0; }
@@ -44,7 +73,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
 	{
 		uint randomState = SmokeGridLightSeedForCell(cell, sampleIndex);
-		const uint candidateIndex = SmokeSampleEmissivePrimitive(randomState);
+		uint candidateIndex = 0xffffffffu;
+		if (localReady && SmokeRandom01(randomState) < localMix)
+		{
+			const uint localIndex = min((uint)(SmokeRandom01(randomState) * proposal.Count), proposal.Count - 1u);
+			candidateIndex = proposal.CandidateIndices[localIndex];
+			InterlockedAdd(gSmokeGridLightControl[0].ProposalLocalSamples, 1u);
+		}
+		else
+		{
+			candidateIndex = SmokeSampleEmissivePrimitive(randomState);
+			InterlockedAdd(gSmokeGridLightControl[0].ProposalGlobalSamples, 1u);
+		}
 		InterlockedAdd(gSmokeGridLightControl[0].Samples, 1u);
 		if (candidateIndex == 0xffffffffu)
 		{
@@ -52,7 +92,21 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			physicalZero++;
 			continue;
 		}
+		uint candidateCapacity, candidateStride;
+		gSmokeEmissivePrimitives.GetDimensions(candidateCapacity, candidateStride);
+		if (candidateIndex >= candidateCapacity)
+		{
+			InterlockedAdd(gSmokeGridLightControl[0].StructuralErrors, 1u);
+			continue;
+		}
 		const EmissivePrimitiveData candidate = gSmokeEmissivePrimitives[candidateIndex];
+		const float localPdf = localReady ? SmokeGridLightLocalPdf(proposal, candidateIndex) : 0.0;
+		const float proposalPdf = (1.0 - localMix) * candidate.selectionPdf + localMix * localPdf;
+		if (!isfinite(proposalPdf) || proposalPdf <= 0.0)
+		{
+			InterlockedAdd(gSmokeGridLightControl[0].StructuralErrors, 1u);
+			continue;
+		}
 		SmokeEmissiveReservoirRecord record = SmokeEmptyEmissiveReservoir();
 		record.CandidateIndex = candidateIndex;
 		record.SampleSeed = randomState;
@@ -77,7 +131,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			continue;
 		}
 		visible++;
-		const float3 estimator = incident / max(candidate.selectionPdf, 1e-6);
+		const float3 estimator = incident / proposalPdf;
 		float weights[6];
 		float weightSum = 0.0;
 		[unroll]

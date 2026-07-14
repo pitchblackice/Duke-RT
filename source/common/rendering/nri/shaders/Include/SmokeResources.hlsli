@@ -272,6 +272,7 @@ RWStructuredBuffer<uint> gSmokeGridLightActive : register(u32, space1);
 RWStructuredBuffer<SmokeGridLightControl> gSmokeGridLightControl : register(u33, space1);
 RWStructuredBuffer<uint4> gSmokeGridLightLinks : register(u34, space1);
 RWStructuredBuffer<SmokeGridLightRecord> gSmokeGridLightFiltered : register(u35, space1);
+RWStructuredBuffer<SmokeGridLightProposal> gSmokeGridLightProposals : register(u36, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);

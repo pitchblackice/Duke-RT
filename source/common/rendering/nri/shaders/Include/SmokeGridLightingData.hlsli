@@ -4,6 +4,8 @@
 #define NRI_SMOKE_GRID_LIGHT_LOBE_COUNT 6u
 #define NRI_SMOKE_GRID_LIGHT_RECORD_WORDS 24u
 #define NRI_SMOKE_GRID_LIGHT_MAX_HISTORY 64u
+#define NRI_SMOKE_GRID_LIGHT_PROPOSAL_CAPACITY 16u
+#define NRI_SMOKE_GRID_LIGHT_LOCAL_MIX 0.75
 
 #define NRI_SMOKE_GRID_LIGHT_EVIDENCE_SUPPORT 0x1u
 #define NRI_SMOKE_GRID_LIGHT_EVIDENCE_PHYSICAL_ZERO 0x2u
@@ -41,7 +43,23 @@ struct SmokeGridLightControl
 	uint SimulationEpoch;
 	uint FieldPing;
 	uint Flags;
-	uint Padding[8];
+	uint ProposalListsBuilt;
+	uint ProposalCandidatesTested;
+	uint ProposalCandidatesAccepted;
+	uint ProposalLocalSamples;
+	uint ProposalGlobalSamples;
+	uint ProposalFallbacks;
+	uint ProposalTruncations;
+	uint ProposalMaximumCount;
+};
+
+struct SmokeGridLightProposal
+{
+	uint CandidateIndices[NRI_SMOKE_GRID_LIGHT_PROPOSAL_CAPACITY];
+	uint Count;
+	uint BrickGeneration;
+	uint SimulationEpoch;
+	uint FrameStamp;
 };
 
 uint SmokeGridLightPackHalf2(float2 value)

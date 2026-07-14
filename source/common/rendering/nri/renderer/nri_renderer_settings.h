@@ -102,6 +102,7 @@ struct NRISmokeSettings
 	bool emissiveReference = false;
 	uint32_t emissiveBackend = 0;
 	bool emissiveWorldFilter = false;
+	bool emissiveLocalProposals = true;
 	uint32_t emissiveWorldDebug = 0;
 	bool emissiveLegacyGatherDisabled = false;
 	bool emissiveQuarterKey = false;

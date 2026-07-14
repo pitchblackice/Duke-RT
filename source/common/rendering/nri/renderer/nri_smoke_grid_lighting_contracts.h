@@ -6,11 +6,13 @@
 constexpr uint32_t NRI_SMOKE_GRID_LIGHT_LOBE_COUNT = 6u;
 constexpr uint32_t NRI_SMOKE_GRID_LIGHT_RECORD_WORDS = 24u;
 constexpr uint32_t NRI_SMOKE_GRID_LIGHT_MAX_HISTORY = 64u;
+constexpr uint32_t NRI_SMOKE_GRID_LIGHT_PROPOSAL_CAPACITY = 16u;
 
 enum class NRISmokeGridLightingPass : uint32_t
 {
 	Prepare = 0,
 	BuildActive,
+	BuildProposals,
 	Seed,
 	Temporal,
 	BuildLinks,
@@ -59,7 +61,23 @@ struct NRISmokeGridLightControlGpu
 	uint32_t simulationEpoch = 0;
 	uint32_t fieldPing = 0;
 	uint32_t flags = 0;
-	uint32_t padding[8] = {};
+	uint32_t proposalListsBuilt = 0;
+	uint32_t proposalCandidatesTested = 0;
+	uint32_t proposalCandidatesAccepted = 0;
+	uint32_t proposalLocalSamples = 0;
+	uint32_t proposalGlobalSamples = 0;
+	uint32_t proposalFallbacks = 0;
+	uint32_t proposalTruncations = 0;
+	uint32_t proposalMaximumCount = 0;
+};
+
+struct NRISmokeGridLightProposalGpu
+{
+	uint32_t candidateIndices[NRI_SMOKE_GRID_LIGHT_PROPOSAL_CAPACITY] = {};
+	uint32_t count = 0;
+	uint32_t brickGeneration = 0;
+	uint32_t simulationEpoch = 0;
+	uint32_t frameStamp = 0;
 };
 
 struct NRISmokeGridLightingStatusSnapshot
@@ -78,6 +96,7 @@ struct NRISmokeGridLightingStatusSnapshot
 	uint64_t fieldBytes = 0;
 	uint64_t workBytes = 0;
 	uint64_t linkBytes = 0;
+	uint64_t proposalBytes = 0;
 	uint64_t filterBytes = 0;
 	uint64_t totalBytes = 0;
 	const char* authority = "disabled";
@@ -88,3 +107,4 @@ struct NRISmokeGridLightingStatusSnapshot
 
 static_assert(sizeof(NRISmokeGridLightRecordGpu) == 96);
 static_assert(sizeof(NRISmokeGridLightControlGpu) == 128);
+static_assert(sizeof(NRISmokeGridLightProposalGpu) == 80);

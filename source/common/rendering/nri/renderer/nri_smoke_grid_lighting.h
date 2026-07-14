@@ -30,7 +30,7 @@ struct NRISmokeGridLightingDirectSeedSnapshot
 class NRISmokeGridLighting
 {
 public:
-	static constexpr uint32_t StorageDescriptorCount = 6u;
+	static constexpr uint32_t StorageDescriptorCount = 7u;
 
 	bool Initialize(const NRISmokeGridServices& services, nri::PipelineLayout* sharedLayout);
 	bool PrepareFrame(const NRISmokeGridServices& services, const NRISmokeSettings& settings,
@@ -67,7 +67,9 @@ private:
 	NRIBufferResource mControl;
 	NRIBufferResource mLinks;
 	NRIBufferResource mFiltered;
+	NRIBufferResource mProposals;
 	uint32_t mResourceCellCapacity = 0;
+	uint32_t mResourceBrickCapacity = 0;
 	uint32_t mFieldPing = 0;
 	uint32_t mLastRecordedFrame = UINT32_MAX;
 	uint32_t mSimulationEpoch = 0;
