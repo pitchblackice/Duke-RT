@@ -90,3 +90,33 @@ struct NRIWorldTlasExactReuseDecision
 };
 
 NRIWorldTlasExactReuseDecision EvaluateNRIWorldTlasExactReuse(const NRIWorldTlasExactReuseInput& input);
+
+enum NRIWorldTlasUpdateReason : uint32_t
+{
+	NRIWorldTlasUpdateReason_None = 0,
+	NRIWorldTlasUpdateReason_Transform = 1u << 0,
+	NRIWorldTlasUpdateReason_BlasGenerationOverride = 1u << 1,
+};
+
+enum NRIWorldTlasUpdateRejectReason : uint32_t
+{
+	NRIWorldTlasUpdateRejectReason_None = 0,
+	NRIWorldTlasUpdateRejectReason_Disabled = 1u << 0,
+	NRIWorldTlasUpdateRejectReason_Gate = 1u << 1,
+	NRIWorldTlasUpdateRejectReason_Fence = 1u << 2,
+	NRIWorldTlasUpdateRejectReason_UnsupportedChange = 1u << 3,
+	NRIWorldTlasUpdateRejectReason_Runtime = 1u << 4,
+};
+
+struct NRIWorldTlasUpdateDecision
+{
+	bool update = false;
+	uint32_t reasonMask = NRIWorldTlasUpdateReason_None;
+	uint32_t rejectReasonMask = NRIWorldTlasUpdateRejectReason_None;
+	uint32_t gateRejectReasonMask = NRIWorldTlasExactReuseRejectReason_None;
+};
+
+NRIWorldTlasUpdateDecision EvaluateNRIWorldTlasUpdate(
+	const NRIWorldTlasDecision& instanceDecision,
+	const NRIWorldTlasExactReuseInput& state,
+	bool updateEnabled);

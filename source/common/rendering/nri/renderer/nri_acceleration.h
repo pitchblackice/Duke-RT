@@ -7,6 +7,8 @@
 #include <vector>
 
 class NRIRenderer;
+struct NRIWorldTlasFrameSlot;
+struct NRIWorldTlasDirtyInstanceRange;
 
 class NRIAccelerationStructureManager
 {
@@ -46,6 +48,14 @@ public:
 		const NRIBufferResource* staticIndexBuffer,
 		uint32_t* outTlasInstanceCount,
 		bool updateLiveState,
-		bool tlasInstanceWritesQuiesced);
+		bool tlasInstanceWritesQuiesced,
+		bool allowUpdate);
+	static bool UpdateTopLevel(
+		NRIRenderer& renderer,
+		const std::vector<nri::TopLevelInstance>& instances,
+		uint32_t sceneBufferMask,
+		NRIWorldTlasFrameSlot& frameSlot,
+		const std::vector<NRIWorldTlasDirtyInstanceRange>& dirtyRanges,
+		bool uploadDirtyRanges);
 	static bool EnsureTopLevelCapacity(NRIRenderer& renderer, uint32_t instanceCount);
 };

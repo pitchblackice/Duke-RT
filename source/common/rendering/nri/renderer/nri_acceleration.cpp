@@ -594,6 +594,7 @@ bool NRIAccelerationStructureManager::BuildTopLevel(NRIRenderer& renderer, const
 		&renderer.mStaticIndexBuffer,
 		&renderer.mActiveTlasInstanceCount,
 		true,
+		true,
 		true);
 }
 
@@ -608,7 +609,8 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 	const NRIBufferResource* staticIndexBuffer,
 	uint32_t* outTlasInstanceCount,
 	bool updateLiveState,
-	bool tlasInstanceWritesQuiesced)
+	bool tlasInstanceWritesQuiesced,
+	bool allowUpdate)
 {
 	Clocker clock(NriPTAcceleration);
 	ScopedPtPerfTimer perfTimer(renderer.mLastPerfShellTraceStats.worldTlasMs);
@@ -647,7 +649,11 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 
 	nri::AccelerationStructureDesc tlasDesc = {};
 	tlasDesc.type = nri::AccelerationStructureType::TOP_LEVEL;
-	tlasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
+	tlasDesc.flags = allowUpdate ?
+		NRIResourceFlags(
+			nri::AccelerationStructureBits::PREFER_FAST_TRACE,
+			nri::AccelerationStructureBits::ALLOW_UPDATE) :
+		nri::AccelerationStructureBits::PREFER_FAST_TRACE;
 	tlasDesc.geometryOrInstanceNum = (uint32_t)instances.size();
 	{
 		ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.worldTlasCreateMs);
@@ -669,8 +675,17 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 
 	{
 		ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.worldTlasScratchMs);
-		renderer.mLastPerfShellTraceStats.worldTlasScratchQueries++;
-		const uint64_t requiredScratchSize = renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*topLevelAS.accelerationStructure);
+		renderer.mLastPerfShellTraceStats.worldTlasScratchQueries += allowUpdate ? 2u : 1u;
+		const uint64_t buildScratchSize = renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*topLevelAS.accelerationStructure);
+		const uint64_t updateScratchSize = allowUpdate ?
+			renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureUpdateScratchBufferSize(*topLevelAS.accelerationStructure) :
+			0;
+		const uint64_t requiredScratchSize = std::max(buildScratchSize, updateScratchSize);
+		topLevelAS.buildScratchSize = buildScratchSize;
+		topLevelAS.updateScratchSize = updateScratchSize;
+		topLevelAS.buildFlags = tlasDesc.flags;
+		renderer.mLastPerfShellTraceStats.worldTlasBuildScratchRequestedBytes = buildScratchSize;
+		renderer.mLastPerfShellTraceStats.worldTlasUpdateScratchRequestedBytes = updateScratchSize;
 		renderer.mLastPerfShellTraceStats.worldTlasScratchRequestedBytes = requiredScratchSize;
 		if (topLevelScratchBuffer.buffer == nullptr || topLevelScratchBuffer.size < requiredScratchSize)
 		{
@@ -773,7 +788,6 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 		renderer.mLastPerfShellTraceStats.worldTlasBarrierCount = barrierDesc.bufferNum;
 		renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, barrierDesc);
 	}
-
 	if (outTlasInstanceCount != nullptr)
 	{
 		*outTlasInstanceCount = (uint32_t)instances.size();
@@ -789,6 +803,148 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 			renderer.mStaticMapScene.accelerationResident = true;
 			renderer.mBuiltStaticMapSceneASLastFrame = true;
 		}
+	}
+	return true;
+}
+
+bool NRIAccelerationStructureManager::UpdateTopLevel(
+	NRIRenderer& renderer,
+	const std::vector<nri::TopLevelInstance>& instances,
+	uint32_t sceneBufferMask,
+	NRIWorldTlasFrameSlot& frameSlot,
+	const std::vector<NRIWorldTlasDirtyInstanceRange>& dirtyRanges,
+	bool uploadDirtyRanges)
+{
+	Clocker clock(NriPTAcceleration);
+	ScopedPtPerfTimer perfTimer(renderer.mLastPerfShellTraceStats.worldTlasMs);
+	ScopedPtPerfTimer updateTimer(renderer.mLastPerfShellTraceStats.worldTlasUpdateMs);
+	NRIAccelerationStructureResource& topLevelAS = frameSlot.accelerationStructure;
+	NRIBufferResource& tlasInstanceBuffer = frameSlot.instanceBuffer;
+	NRIBufferResource& topLevelScratchBuffer = frameSlot.scratchBuffer;
+	if (instances.empty() ||
+		topLevelAS.accelerationStructure == nullptr ||
+		topLevelAS.descriptor == nullptr ||
+		tlasInstanceBuffer.buffer == nullptr ||
+		topLevelScratchBuffer.buffer == nullptr ||
+		((uint32_t)topLevelAS.buildFlags & (uint32_t)nri::AccelerationStructureBits::ALLOW_UPDATE) == 0)
+	{
+		return false;
+	}
+
+	uint64_t dirtyBytes = 0;
+	uint32_t dirtyInstanceCount = 0;
+	for (const NRIWorldTlasDirtyInstanceRange& range : dirtyRanges)
+	{
+		if (range.instanceCount == 0 ||
+			range.firstInstance >= instances.size() ||
+			range.instanceCount > instances.size() - range.firstInstance)
+		{
+			return false;
+		}
+		dirtyInstanceCount += range.instanceCount;
+		dirtyBytes += (uint64_t)range.instanceCount * sizeof(nri::TopLevelInstance);
+	}
+	if (uploadDirtyRanges && dirtyRanges.empty())
+	{
+		return false;
+	}
+
+	uint64_t updateScratchSize = topLevelAS.updateScratchSize;
+	if (updateScratchSize == 0)
+	{
+		renderer.mLastPerfShellTraceStats.worldTlasScratchQueries++;
+		updateScratchSize = renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureUpdateScratchBufferSize(*topLevelAS.accelerationStructure);
+		topLevelAS.updateScratchSize = updateScratchSize;
+	}
+	const uint64_t requiredScratchSize = std::max(topLevelAS.buildScratchSize, updateScratchSize);
+	renderer.mLastPerfShellTraceStats.worldTlasUpdateScratchRequestedBytes = updateScratchSize;
+	renderer.mLastPerfShellTraceStats.worldTlasScratchRequestedBytes = requiredScratchSize;
+	if (topLevelScratchBuffer.size < requiredScratchSize)
+	{
+		return false;
+	}
+
+	if (uploadDirtyRanges)
+	{
+		ScopedPtPerfTimer uploadTimer(renderer.mLastPerfShellTraceStats.worldTlasInstanceUploadMs);
+		for (const NRIWorldTlasDirtyInstanceRange& range : dirtyRanges)
+		{
+			const uint64_t byteOffset = (uint64_t)range.firstInstance * sizeof(nri::TopLevelInstance);
+			const uint64_t byteCount = (uint64_t)range.instanceCount * sizeof(nri::TopLevelInstance);
+			if (!renderer.UpdateStructuredBufferRange(
+				tlasInstanceBuffer,
+				byteOffset,
+				instances.data() + range.firstInstance,
+				byteCount,
+				NRIResourceAccelerationStructureBuildInputAccess()))
+			{
+				return false;
+			}
+		}
+	}
+
+	nri::BufferBarrierDesc beforeUpdateBarrier = {};
+	beforeUpdateBarrier.buffer = renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*topLevelAS.accelerationStructure);
+	beforeUpdateBarrier.before = NRIResourceComputeAccelerationStructureReadAccess();
+	beforeUpdateBarrier.after = NRIResourceAccelerationStructureReadWriteAccess();
+	nri::BarrierDesc beforeUpdateBarrierDesc = {};
+	beforeUpdateBarrierDesc.buffers = &beforeUpdateBarrier;
+	beforeUpdateBarrierDesc.bufferNum = 1;
+	{
+		ScopedPtPerfTimer barrierTimer(renderer.mLastPerfShellTraceStats.worldTlasBarrierMs);
+		renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, beforeUpdateBarrierDesc);
+	}
+
+	nri::BuildTopLevelAccelerationStructureDesc tlasUpdate = {};
+	tlasUpdate.dst = topLevelAS.accelerationStructure;
+	tlasUpdate.src = topLevelAS.accelerationStructure;
+	tlasUpdate.instanceNum = (uint32_t)instances.size();
+	tlasUpdate.instanceBuffer = tlasInstanceBuffer.buffer;
+	tlasUpdate.instanceOffset = 0;
+	tlasUpdate.scratchBuffer = topLevelScratchBuffer.buffer;
+	tlasUpdate.scratchOffset = 0;
+	{
+		ScopedPtPerfTimer buildTimer(renderer.mLastPerfShellTraceStats.worldTlasBuildMs);
+		renderer.mFrameBuffer->mCore.CmdBeginAnnotation(*renderer.mFrameBuffer->mCommandBuffer, "Raze.WorldTLAS.Update", nri::BGRA_UNUSED);
+		renderer.mFrameBuffer->mRayTracing.CmdBuildTopLevelAccelerationStructures(*renderer.mFrameBuffer->mCommandBuffer, &tlasUpdate, 1);
+		renderer.mFrameBuffer->mCore.CmdEndAnnotation(*renderer.mFrameBuffer->mCommandBuffer);
+	}
+
+	std::vector<nri::BufferBarrierDesc> barriers;
+	barriers.reserve(1);
+	nri::BufferBarrierDesc tlasBarrier = {};
+	tlasBarrier.buffer = renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*topLevelAS.accelerationStructure);
+	tlasBarrier.before = NRIResourceAccelerationStructureWriteAccess();
+	tlasBarrier.after = NRIResourceComputeAccelerationStructureReadAccess();
+	barriers.push_back(tlasBarrier);
+
+	nri::BarrierDesc barrierDesc = {};
+	barrierDesc.buffers = barriers.data();
+	barrierDesc.bufferNum = (uint32_t)barriers.size();
+	{
+		ScopedPtPerfTimer barrierTimer(renderer.mLastPerfShellTraceStats.worldTlasBarrierMs);
+		renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, barrierDesc);
+	}
+	renderer.mLastPerfShellTraceStats.worldTlasBuildCalls++;
+	renderer.mLastPerfShellTraceStats.worldTlasUpdateCalls++;
+	renderer.mLastPerfShellTraceStats.worldTlasInstanceCount = (uint32_t)instances.size();
+	renderer.mLastPerfShellTraceStats.worldTlasUpdateDirtyRangeCount += uploadDirtyRanges ? (uint32_t)dirtyRanges.size() : 0;
+	renderer.mLastPerfShellTraceStats.worldTlasUpdateDirtyInstanceCount += uploadDirtyRanges ? dirtyInstanceCount : 0;
+	renderer.mLastPerfShellTraceStats.worldTlasUpdateDirtyBytes += uploadDirtyRanges ? dirtyBytes : 0;
+	renderer.mLastPerfShellTraceStats.worldTlasBarrierCount = 1u + barrierDesc.bufferNum;
+	renderer.mLastWorldTlasInstancePayloadHash = uploadDirtyRanges ?
+		BuildTlasInstancePayloadHash(instances) :
+		frameSlot.publishedInstancePayloadHash;
+	renderer.mLastWorldTlasSceneInstancePayloadHash = 0;
+	renderer.mLastWorldTlasInstanceFrameIndex = renderer.mFrameIndex;
+	renderer.mLastWorldTlasInstanceCount = (uint32_t)instances.size();
+	renderer.mActiveTlasInstanceCount = (uint32_t)instances.size();
+	if ((sceneBufferMask & NRIRenderer::SceneDataBufferMask_Static) != 0 &&
+		(sceneBufferMask & NRIRenderer::SceneDataBufferMask_Dynamic) == 0)
+	{
+		renderer.mStaticMapScene.tlasInstanceCount = (uint32_t)instances.size();
+		renderer.mStaticMapScene.accelerationResident = true;
+		renderer.mBuiltStaticMapSceneASLastFrame = true;
 	}
 	return true;
 }
@@ -847,7 +1003,9 @@ bool NRIAccelerationStructureManager::EnsureTopLevelCapacity(NRIRenderer& render
 
 	nri::AccelerationStructureDesc tlasDesc = {};
 	tlasDesc.type = nri::AccelerationStructureType::TOP_LEVEL;
-	tlasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
+	tlasDesc.flags = NRIResourceFlags(
+		nri::AccelerationStructureBits::PREFER_FAST_TRACE,
+		nri::AccelerationStructureBits::ALLOW_UPDATE);
 	tlasDesc.geometryOrInstanceNum = instanceCount;
 
 	NRIAccelerationStructureResource probe = {};
@@ -860,9 +1018,16 @@ bool NRIAccelerationStructureManager::EnsureTopLevelCapacity(NRIRenderer& render
 	{
 		return false;
 	}
-	const uint64_t requiredScratchSize =
+	const uint64_t buildScratchSize =
 		renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*probe.accelerationStructure);
+	const uint64_t updateScratchSize =
+		renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureUpdateScratchBufferSize(*probe.accelerationStructure);
+	const uint64_t requiredScratchSize = std::max(buildScratchSize, updateScratchSize);
 	renderer.DestroyAccelerationStructureResource(probe);
+	renderer.mLastPerfShellTraceStats.worldTlasPreGrowBuildScratchRequestedBytes =
+		std::max(renderer.mLastPerfShellTraceStats.worldTlasPreGrowBuildScratchRequestedBytes, buildScratchSize);
+	renderer.mLastPerfShellTraceStats.worldTlasPreGrowUpdateScratchRequestedBytes =
+		std::max(renderer.mLastPerfShellTraceStats.worldTlasPreGrowUpdateScratchRequestedBytes, updateScratchSize);
 	renderer.mLastPerfShellTraceStats.worldTlasPreGrowScratchRequestedBytes =
 		std::max(renderer.mLastPerfShellTraceStats.worldTlasPreGrowScratchRequestedBytes, requiredScratchSize);
 
@@ -1041,12 +1206,56 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopL
 		return true;
 	}
 
+	const NRIWorldTlasDecision instanceDecision = ClassifyNRIWorldTlasInstances(
+		frameSlot.publishedInstances,
+		instances,
+		frameSlot.publicationValid,
+		frameSlot.publishedInstanceCapacity);
+	const bool updateEnabled =
+		((uint32_t)frameSlot.accelerationStructure.buildFlags &
+			(uint32_t)nri::AccelerationStructureBits::ALLOW_UPDATE) != 0;
+	NRIWorldTlasUpdateDecision updateDecision = EvaluateNRIWorldTlasUpdate(
+		instanceDecision,
+		reuseInput,
+		updateEnabled);
 	if (ShouldCollectAccelerationPerfTiming())
 	{
 		mLastPerfShellTraceStats.worldTlasMs += DurationMs(decisionStart, std::chrono::steady_clock::now());
 	}
+	if (updateDecision.update)
+	{
+		const bool uploadDirtyRanges =
+			(updateDecision.reasonMask & NRIWorldTlasUpdateReason_Transform) != 0;
+		if (NRIAccelerationStructureManager::UpdateTopLevel(
+			*this,
+			instances,
+			sceneBufferMask,
+			frameSlot,
+			instanceDecision.dirtyTransformRanges,
+			uploadDirtyRanges))
+		{
+			mLastPerfShellTraceStats.worldTlasUpdateReasonMask |= updateDecision.reasonMask;
+			if ((updateDecision.reasonMask & NRIWorldTlasUpdateReason_BlasGenerationOverride) != 0)
+			{
+				mLastPerfShellTraceStats.worldTlasBlasOverrideUpdateCalls++;
+			}
+			frameSlot.Publish(
+				instances,
+				mapEpoch,
+				buildEpoch,
+				recordingFence,
+				mWorldBlasContentGeneration,
+				mLastWorldTlasInstancePayloadHash);
+			return true;
+		}
+		updateDecision.rejectReasonMask |= NRIWorldTlasUpdateRejectReason_Runtime;
+	}
+
 	mLastPerfShellTraceStats.worldTlasFullBuildCalls++;
 	mLastPerfShellTraceStats.worldTlasFullBuildReasonMask |= reuseDecision.rejectReasonMask;
+	mLastPerfShellTraceStats.worldTlasFullBuildChangeReasonMask |= instanceDecision.reasonMask;
+	mLastPerfShellTraceStats.worldTlasFullBuildUpdateRejectReasonMask |= updateDecision.rejectReasonMask;
+	mLastPerfShellTraceStats.worldTlasFullBuildUpdateGateReasonMask |= updateDecision.gateRejectReasonMask;
 	const bool priorPublicationFenceUnsafe =
 		frameSlot.publicationValid &&
 		(reuseDecision.sameRecordingFence || !reuseInput.publishedFenceComplete);
@@ -1112,7 +1321,8 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 		staticIndexBuffer,
 		outTlasInstanceCount,
 		updateLiveState,
-		tlasInstanceWritesQuiesced);
+		tlasInstanceWritesQuiesced,
+		false);
 }
 
 bool NRIRenderer::EnsureTopLevelAccelerationStructureCapacity(uint32_t instanceCount)

@@ -164,3 +164,53 @@ NRIWorldTlasExactReuseDecision EvaluateNRIWorldTlasExactReuse(const NRIWorldTlas
 	decision.reuse = decision.rejectReasonMask == NRIWorldTlasExactReuseRejectReason_None;
 	return decision;
 }
+
+NRIWorldTlasUpdateDecision EvaluateNRIWorldTlasUpdate(
+	const NRIWorldTlasDecision& instanceDecision,
+	const NRIWorldTlasExactReuseInput& state,
+	bool updateEnabled)
+{
+	NRIWorldTlasUpdateDecision decision = {};
+	if (!updateEnabled)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasUpdateRejectReason_Disabled;
+	}
+
+	const NRIWorldTlasExactReuseDecision exactGate = EvaluateNRIWorldTlasExactReuse(state);
+	decision.gateRejectReasonMask = exactGate.rejectReasonMask &
+		~(NRIWorldTlasExactReuseRejectReason_BlasGeneration |
+			NRIWorldTlasExactReuseRejectReason_InstanceBytes);
+	if (decision.gateRejectReasonMask != NRIWorldTlasExactReuseRejectReason_None)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasUpdateRejectReason_Gate;
+	}
+	if (exactGate.sameRecordingFence || !state.publishedFenceComplete)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasUpdateRejectReason_Fence;
+	}
+
+	const bool transformOnly =
+		instanceDecision.kind == NRIWorldTlasDecisionKind::Update &&
+		instanceDecision.reasonMask == NRIWorldTlasChangeReason_Transform;
+	const bool blasGenerationOverride =
+		instanceDecision.kind == NRIWorldTlasDecisionKind::ExactReuse &&
+		state.publishedBlasGeneration != 0 &&
+		state.currentBlasGeneration != 0 &&
+		state.instanceBytesEqual &&
+		state.publishedBlasGeneration != state.currentBlasGeneration;
+	if (transformOnly)
+	{
+		decision.reasonMask |= NRIWorldTlasUpdateReason_Transform;
+	}
+	if (blasGenerationOverride)
+	{
+		decision.reasonMask |= NRIWorldTlasUpdateReason_BlasGenerationOverride;
+	}
+	if (decision.reasonMask == NRIWorldTlasUpdateReason_None)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasUpdateRejectReason_UnsupportedChange;
+	}
+
+	decision.update = decision.rejectReasonMask == NRIWorldTlasUpdateRejectReason_None;
+	return decision;
+}
