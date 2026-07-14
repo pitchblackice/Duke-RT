@@ -26,6 +26,11 @@ struct NRILocalPlayerReflectionCaptureStats
 	uint32_t capturedOtherActorSurfaces = 0;
 	uint32_t capturedActorlessSurfaces = 0;
 	uint32_t filteredSurfaceCount = 0;
+	double drawInfoSetupMs = 0.0;
+	double processSpritesMs = 0.0;
+	double dispatchSpritesMs = 0.0;
+	double cacheCaptureMs = 0.0;
+	double drawInfoReleaseMs = 0.0;
 };
 
 struct NRILocalPlayerReflectionCaptureRequest

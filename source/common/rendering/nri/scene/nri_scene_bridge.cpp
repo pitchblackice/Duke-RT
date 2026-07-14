@@ -6414,6 +6414,57 @@ ActorSpriteSceneCaptureResult CaptureActorSpriteScene(
 	return result;
 }
 
+ActorSpriteSceneCaptureResult CaptureActorVoxelSprite(
+	HWDrawInfo& di,
+	HWSprite& sprite,
+	bool residentVoxelReady,
+	SceneView& outView)
+{
+	ActorSpriteSceneCaptureResult result = {};
+	outView = {};
+	outView.drawInfo = &di;
+	if (sprite.modelframe >= 0 || sprite.voxel == nullptr || sprite.voxel->model == nullptr)
+	{
+		return result;
+	}
+
+	result.currentVoxel = true;
+	const bool rootMeshCapture = BeginVoxelMeshCacheFrame();
+	VoxelCaptureBudget budget = MakeVoxelCaptureBudget();
+	std::vector<SurfaceRef> authoritativeSurfaces;
+	(void)CaptureVoxelMeshSprite(
+		nullptr,
+		sprite,
+		GLDL_MODELS,
+		budget,
+		authoritativeSurfaces,
+		outView.stats,
+		DynamicVoxelCaptureMode::Authoritative);
+	if (!residentVoxelReady && CaptureVoxelMeshSprite(
+		nullptr,
+		sprite,
+		GLDL_MODELS,
+		budget,
+		outView.opaqueSprites,
+		outView.stats,
+		DynamicVoxelCaptureMode::Transient))
+	{
+		outView.stats.voxelProxyDrawItems++;
+	}
+	EndVoxelMeshCacheFrame(rootMeshCapture);
+
+	outView.stats.modelDrawItems = 1;
+	outView.stats.spriteDrawItems = (uint32_t)outView.opaqueSprites.size();
+	outView.stats.totalDrawItems = outView.stats.spriteDrawItems;
+	for (const SurfaceRef& surface : outView.opaqueSprites)
+	{
+		outView.stats.triangleEstimate += CountFanTriangles(surface);
+		outView.stats.materialRefs++;
+	}
+	result.capturedFallbackScene = !outView.opaqueSprites.empty();
+	return result;
+}
+
 uint64_t GetPersistentVoxelCacheSerial()
 {
 	return gVoxelActorCacheSerial;

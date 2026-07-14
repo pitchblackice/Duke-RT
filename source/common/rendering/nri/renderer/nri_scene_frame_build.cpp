@@ -684,6 +684,14 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				localPlayerReflectionResult.currentVoxel ? 1u : 0u,
 				hasResidentLocalPlayerVoxel ? 1u : 0u,
 				hasLocalPlayerReflectionScene ? 1u : 0u);
+			Printf("PERF pt local player voxel author NRI: frame=%llu setup=%.3f animate=%.3f dispatch=%.3f cache=%.3f release=%.3f total=%.3f\n",
+				(unsigned long long)mFrameIndex,
+				localPlayerReflectionCaptureStats.drawInfoSetupMs,
+				localPlayerReflectionCaptureStats.processSpritesMs,
+				localPlayerReflectionCaptureStats.dispatchSpritesMs,
+				localPlayerReflectionCaptureStats.cacheCaptureMs,
+				localPlayerReflectionCaptureStats.drawInfoReleaseMs,
+				mLastPerfShellTraceStats.localPlayerReflectionCaptureMs);
 		}
 		if (hasDynamicScene)
 		{

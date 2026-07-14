@@ -415,6 +415,11 @@ ActorSpriteSceneCaptureResult CaptureActorSpriteScene(
 	int32_t actorIndex,
 	bool residentVoxelReady,
 	SceneView& outView);
+ActorSpriteSceneCaptureResult CaptureActorVoxelSprite(
+	HWDrawInfo& di,
+	HWSprite& sprite,
+	bool residentVoxelReady,
+	SceneView& outView);
 bool CaptureScene(HWDrawInfo& di, SceneView& outView);
 bool BuildPersistentVoxelCacheSceneView(SceneView& outView);
 bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>& outEntries);

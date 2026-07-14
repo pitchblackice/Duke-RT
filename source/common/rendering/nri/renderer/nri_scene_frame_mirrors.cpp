@@ -10,8 +10,11 @@
 #include "gamecontrol.h"
 #include "gamestruct.h"
 #include "hw_voxels.h"
+#include "models/modeldata.h"
 #include "printf.h"
+#include "texinfo.h"
 
+#include <chrono>
 #include <cstring>
 
 namespace
@@ -19,6 +22,11 @@ namespace
 	static uint32_t CountSceneViewSurfaces(const nri_scene::SceneView& sceneView)
 	{
 		return (uint32_t)(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
+	}
+
+	static double LocalPlayerCaptureDurationMs(std::chrono::steady_clock::time_point start)
+	{
+		return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 	}
 
 	static bool localPlayerReflectionCaptureStatsDiffer(const NRILocalPlayerReflectionCaptureStats& a, const NRILocalPlayerReflectionCaptureStats& b)
@@ -62,6 +70,61 @@ namespace
 			}
 		}
 		return count;
+	}
+
+	static bool PrepareLocalPlayerVoxelSprite(HWDrawInfo& di, DCoreActor* localPlayerActor, HWSprite& outSprite)
+	{
+		for (unsigned int i = 0; i < di.tsprites.Size(); ++i)
+		{
+			tspritetype* sprite = di.tsprites.get(i);
+			if (sprite == nullptr || sprite->ownerActor != localPlayerActor ||
+				sprite->scale.X == 0.0 || sprite->scale.Y == 0.0)
+			{
+				continue;
+			}
+
+			FTextureID textureId = sprite->spritetexture();
+			if (!textureId.isValid())
+			{
+				continue;
+			}
+			if ((sprite->cstat2 & CSTAT2_SPRITE_NOANIMATE) == 0)
+			{
+				tileUpdatePicnum(textureId, localPlayerActor->GetIndex() & 16383);
+			}
+			if ((sprite->cstat2 & CSTAT2_SPRITE_FULLBRIGHT) != 0)
+			{
+				sprite->shade = -127;
+			}
+			sprite->setspritetexture(textureId);
+
+			if ((localPlayerActor->sprext.renderflags & SPREXT_NOTMD) != 0 ||
+				(sprite->cstat2 & CSTAT2_SPRITE_NOMODEL) != 0)
+			{
+				return false;
+			}
+			const auto* modelFrame = modelManager.GetModel(textureId, sprite->pal);
+			if (hw_models && modelFrame != nullptr && modelFrame->modelid >= 0 && modelFrame->framenum >= 0)
+			{
+				return false;
+			}
+			if (!r_voxels)
+			{
+				return false;
+			}
+			const int voxelIndex = GetExtInfo(textureId).tiletovox;
+			if (voxelIndex < 0 || voxmodels[voxelIndex] == nullptr)
+			{
+				return false;
+			}
+			return outSprite.PrepareVoxel(
+				&di,
+				voxmodels[voxelIndex],
+				sprite,
+				sprite->sectp,
+				voxrotate[voxelIndex]);
+		}
+		return false;
 	}
 
 	static void AccumulateSceneViewActorSurfaceStats(
@@ -206,32 +269,48 @@ public:
 		const int32_t actorIndex = (int32_t)localPlayerActor->GetIndex();
 		captureStats.localPlayerActorIndex = actorIndex;
 		captureStats.viewpointMatchesLocalPlayer = di.Viewpoint.CameraActor == localPlayerActor;
+		auto stageStart = std::chrono::steady_clock::now();
 		HWDrawInfo* captureDi = HWDrawInfo::StartDrawInfo(&di, di.Viewpoint, &di.VPUniforms);
 		captureDi->visibility = di.visibility;
 		captureDi->rellight = di.rellight;
+		// CreateScene normally owns this reset. This focused path deliberately skips
+		// CreateScene, while HWDrawInfo pooling retains tsprite array contents.
+		captureDi->tsprites.clear();
+		captureStats.drawInfoSetupMs = LocalPlayerCaptureDurationMs(stageStart);
 
 		const ScopedLocalPlayerReflectionVisibilityCaptureOverride reflectionCaptureOverride(true);
 		renderAddTsprite(captureDi->tsprites, localPlayerActor);
+		stageStart = std::chrono::steady_clock::now();
 		gi->processSprites(
 			captureDi->tsprites,
 			DVector3(di.Viewpoint.Pos.X, -di.Viewpoint.Pos.Y, -di.Viewpoint.Pos.Z),
 			DAngle::fromBam(di.Viewpoint.RotAngle),
 			di.Viewpoint.TicFrac);
-		captureDi->DispatchSprites();
-		captureStats.rawFacingSprites = CountDrawListActorSprites(captureDi->drawlists[GLDL_TRANSLUCENT], actorIndex, false);
-		captureStats.rawVoxelSprites = CountDrawListActorSprites(captureDi->drawlists[GLDL_MODELS], actorIndex, true);
+		captureStats.processSpritesMs = LocalPlayerCaptureDurationMs(stageStart);
+		stageStart = std::chrono::steady_clock::now();
+		HWSprite localPlayerVoxelSprite = {};
+		const bool preparedVoxel = PrepareLocalPlayerVoxelSprite(*captureDi, localPlayerActor, localPlayerVoxelSprite);
+		if (!preparedVoxel)
+		{
+			captureDi->DispatchSprites();
+		}
+		captureStats.dispatchSpritesMs = LocalPlayerCaptureDurationMs(stageStart);
+		captureStats.rawFacingSprites = preparedVoxel ? 0u : CountDrawListActorSprites(captureDi->drawlists[GLDL_TRANSLUCENT], actorIndex, false);
+		captureStats.rawVoxelSprites = preparedVoxel ? 1u : CountDrawListActorSprites(captureDi->drawlists[GLDL_MODELS], actorIndex, true);
 
 		nri_scene::SceneView capturedView;
-		const nri_scene::ActorSpriteSceneCaptureResult sceneCapture = nri_scene::CaptureActorSpriteScene(
-			*captureDi,
-			actorIndex,
-			residentVoxelReady,
-			capturedView);
+		stageStart = std::chrono::steady_clock::now();
+		const nri_scene::ActorSpriteSceneCaptureResult sceneCapture = preparedVoxel ?
+			nri_scene::CaptureActorVoxelSprite(*captureDi, localPlayerVoxelSprite, residentVoxelReady, capturedView) :
+			nri_scene::CaptureActorSpriteScene(*captureDi, actorIndex, residentVoxelReady, capturedView);
+		captureStats.cacheCaptureMs = LocalPlayerCaptureDurationMs(stageStart);
 		if (outCurrentVoxel != nullptr)
 		{
 			*outCurrentVoxel = sceneCapture.currentVoxel;
 		}
+		stageStart = std::chrono::steady_clock::now();
 		captureDi->EndDrawInfo();
+		captureStats.drawInfoReleaseMs = LocalPlayerCaptureDurationMs(stageStart);
 		if (!sceneCapture.capturedFallbackScene || !AppendLocalPlayerReflectionSurfaces(capturedView, outView))
 		{
 			publishStats();
