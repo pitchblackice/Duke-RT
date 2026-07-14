@@ -3,6 +3,7 @@
 
 #include "nri_renderer.h"
 #include "nri_diagnostic_names.h"
+#include "nri_scene_frame_mirrors.h"
 #include "c_cvars.h"
 #include "printf.h"
 void NRIRenderer::PrintDynamicSceneStatus() const
@@ -11,8 +12,12 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 	const PersistentDynamicEmissiveCache& persistentCache = mSceneLights.GetPersistentDynamicEmissiveCache();
 	const SceneLightSystem::PersistentDynamicEmissiveHighWaterStats& persistentHighWater = mSceneLights.GetPersistentDynamicEmissiveHighWaterStats();
 	const ActorSpriteDebugStats& actorSpriteDebugStats = mSceneLights.GetActorSpriteDebugStats();
+	const bool residentLocalPlayerVoxel =
+		mPersistentVoxels.HasResidentIndirectOnlyActor(ResolveNRILocalPlayerActorIndex());
 	const char* const localPlayerReflectionPolicy =
-		mDynamicSceneLastFrame.localPlayerReflectionSurfaceCount > 0 ? "reflection_only" : "disabled";
+		residentLocalPlayerVoxel ? "resident_indirect_voxel" :
+		mDynamicSceneLastFrame.localPlayerReflectionSurfaceCount > 0 ? "reflection_only_fallback" :
+		"disabled";
 
 	Printf("NRI PT mirror policy: wall_mode=material_reflection mirror_overlay=removed local_player_reflection=%s\n",
 		localPlayerReflectionPolicy);

@@ -42,6 +42,7 @@ struct PersistentVoxelBatch
 		uint32_t visibilityChunkIndex = UINT32_MAX;
 		uint32_t worldTlasFrameIndex = UINT32_MAX;
 		bool capturedThisFrame = false;
+		bool indirectOnly = false;
 		bool inWorldTlasThisFrame = false;
 		bool active = true;
 		uint32_t primitiveOffset = 0;
@@ -1010,6 +1011,7 @@ public:
 	NRIPersistentVoxelOverlayStats BuildOverlayStats() const;
 	bool HasValidBatch() const;
 	bool HasRenderableOverlay() const;
+	bool HasResidentIndirectOnlyActor(int32_t actorIndex) const;
 	bool HasPreloadPending() const;
 	NRIPersistentVoxelPreloadStatus BuildPreloadStatusSnapshot() const;
 	uint32_t OverlayMaterialCount() const;

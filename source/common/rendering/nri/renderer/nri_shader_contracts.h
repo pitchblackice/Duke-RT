@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nri_exposure.h"
+#include "nri_tlas_masks.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -12,14 +13,6 @@ constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 constexpr uint32_t NRI_TRACE_SHADER_STATS_DESCRIPTOR_NUM = 1;
 constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
-
-constexpr uint32_t NRI_TLAS_MASK_MAIN = 0x01u;
-constexpr uint32_t NRI_TLAS_MASK_SHADOW = 0x02u;
-constexpr uint32_t NRI_TLAS_MASK_REFLECTION = 0x04u;
-constexpr uint32_t NRI_TLAS_MASK_GI = 0x08u;
-constexpr uint32_t NRI_TLAS_MASK_EMISSIVE = 0x10u;
-constexpr uint32_t NRI_TLAS_MASK_DEBUG = 0x20u;
-constexpr uint32_t NRI_TLAS_MASK_ALL_WORKLOADS = 0xFFu;
 
 constexpr uint32_t NRI_FLAG_RESET_HISTORY = 0x1u;
 constexpr uint32_t NRI_FLAG_USE_UPSCALED = 0x2u;

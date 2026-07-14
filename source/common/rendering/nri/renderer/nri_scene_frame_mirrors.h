@@ -32,11 +32,13 @@ struct NRILocalPlayerReflectionCaptureRequest
 {
 	HWDrawInfo* drawInfo = nullptr;
 	NRIMirrorRebuildSceneViewStatsFn rebuildSceneViewStats = nullptr;
+	bool residentVoxelReady = false;
 };
 
 struct NRILocalPlayerReflectionCaptureResult
 {
 	bool captured = false;
+	bool currentVoxel = false;
 	NRILocalPlayerReflectionCaptureStats stats = {};
 };
 
@@ -49,6 +51,7 @@ struct NRILocalPlayerReflectionUploadStamp
 	uint64_t materialPayloadStamp = 0;
 };
 
+int32_t ResolveNRILocalPlayerActorIndex();
 NRILocalPlayerReflectionCaptureResult CaptureNRILocalPlayerReflectionDynamicScene(const NRILocalPlayerReflectionCaptureRequest& request, nri_scene::SceneView& outView);
 NRILocalPlayerReflectionUploadStamp BuildNRILocalPlayerReflectionUploadProducerStamp(
 	const nri_scene::GeometryData& geometry,

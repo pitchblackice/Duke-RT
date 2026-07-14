@@ -295,6 +295,7 @@ struct PersistentVoxelCacheEntryView
 	uint64_t lastSeenFrame = 0;
 	uint64_t retainedFrameAge = 0;
 	bool capturedThisFrame = false;
+	bool indirectOnly = false;
 	float instanceTransform[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 	float currentTranslation[3] = {};
 	float bakedTranslation[3] = {};
@@ -396,6 +397,12 @@ enum class DynamicVoxelCaptureMode : uint8_t
 	Transient,
 };
 
+struct ActorSpriteSceneCaptureResult
+{
+	bool capturedFallbackScene = false;
+	bool currentVoxel = false;
+};
+
 SceneDebugStats CollectDebugStats(HWDrawInfo& di);
 MaterialRef MakeMaterialRef(FGameTexture* texture, int palette, int shade, float alpha, uint32_t extraFlags);
 void UpdateSceneSky(SceneView& outView, FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType);
@@ -403,7 +410,11 @@ void ResetSkyPerfStats();
 SkyPerfStats ConsumeSkyPerfStats();
 DynamicCapturePerfStats ConsumeDynamicCapturePerfStats();
 bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView, DynamicVoxelCaptureMode voxelCaptureMode = DynamicVoxelCaptureMode::Authoritative);
-bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outView);
+ActorSpriteSceneCaptureResult CaptureActorSpriteScene(
+	HWDrawInfo& di,
+	int32_t actorIndex,
+	bool residentVoxelReady,
+	SceneView& outView);
 bool CaptureScene(HWDrawInfo& di, SceneView& outView);
 bool BuildPersistentVoxelCacheSceneView(SceneView& outView);
 bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>& outEntries);

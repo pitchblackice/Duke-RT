@@ -658,18 +658,33 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				mLastPerfShellTraceStats.dynamicCaptureStatsMs += captureStats.statsMs;
 				return captured;
 			}();
-		const bool shouldCaptureReflectionPlayer = !deferOverlayThisFrame;
-		const bool hasLocalPlayerReflectionScene = shouldCaptureReflectionPlayer && [&]()
+		const int32_t localPlayerActorIndex = ResolveNRILocalPlayerActorIndex();
+		const bool residentLocalPlayerVoxelReady =
+			mPersistentVoxels.HasResidentIndirectOnlyActor(localPlayerActorIndex);
+		NRILocalPlayerReflectionCaptureResult localPlayerReflectionResult = {};
+		const bool hasLocalPlayerReflectionScene = !deferOverlayThisFrame && [&]()
 		{
 			ScopedPtPerfTimer localPlayerReflectionTimer(mLastPerfShellTraceStats.localPlayerReflectionCaptureMs);
 			NRILocalPlayerReflectionCaptureRequest request = {};
 			request.drawInfo = &di;
 			request.rebuildSceneViewStats = RebuildSceneViewStats;
-			const NRILocalPlayerReflectionCaptureResult result =
+			request.residentVoxelReady = residentLocalPlayerVoxelReady;
+			localPlayerReflectionResult =
 				CaptureNRILocalPlayerReflectionDynamicScene(request, localPlayerReflectionSceneView);
-			localPlayerReflectionCaptureStats = result.stats;
-			return result.captured;
+			localPlayerReflectionCaptureStats = localPlayerReflectionResult.stats;
+			return localPlayerReflectionResult.captured;
 		}();
+		const bool hasResidentLocalPlayerVoxel =
+			localPlayerReflectionResult.currentVoxel && residentLocalPlayerVoxelReady;
+		if ((int)perf_looptraceframes > 0 || (int)nri_pttraceframes > 0)
+		{
+			Printf("PERF pt local player voxel route NRI: frame=%llu actor=%d current_voxel=%u resident=%u second_scene=%u\n",
+				(unsigned long long)mFrameIndex,
+				localPlayerActorIndex,
+				localPlayerReflectionResult.currentVoxel ? 1u : 0u,
+				hasResidentLocalPlayerVoxel ? 1u : 0u,
+				hasLocalPlayerReflectionScene ? 1u : 0u);
+		}
 		if (hasDynamicScene)
 		{
 			{

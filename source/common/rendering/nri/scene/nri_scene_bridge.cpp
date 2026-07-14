@@ -31,6 +31,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -208,6 +209,7 @@ namespace
 		bool startupPending = false;
 		bool sharedVariantSurface = false;
 		bool hasLastActorScenePosition = false;
+		bool indirectOnly = false;
 		SurfaceRef lightSurface;
 		SurfaceRef desiredMaterialSurface;
 		bool hasDesiredMaterialSurface = false;
@@ -435,6 +437,7 @@ namespace
 		float currentTransform[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 		float actorScenePosition[3] = {};
 		bool hasActorScenePosition = false;
+		bool indirectOnly = false;
 		VoxelActorCacheEntry* entry = nullptr;
 	};
 
@@ -2088,6 +2091,7 @@ namespace
 		}
 
 		lookup.actorIndex = actorIndex;
+		lookup.indirectOnly = IsLocalPlayerActor(sprite.Sprite->ownerActor);
 		lookup.actorPtr = (uintptr_t)sprite.Sprite->ownerActor;
 		lookup.voxelPtr = (uintptr_t)sprite.voxel;
 		lookup.voxelModelPtr = (uintptr_t)sprite.voxel->model;
@@ -2524,6 +2528,7 @@ namespace
 		entry.resolvedVoxelIndex = lookup.resolvedVoxelIndex;
 		entry.instanceKeyHash = lookup.instanceKeyHash;
 		entry.meshBakeSpace = lookup.meshBakeSpace;
+		entry.indirectOnly = lookup.indirectOnly;
 	}
 
 	void UpdateVoxelActorCacheEntryScenePosition(VoxelActorCacheEntry& entry, const VoxelActorCacheLookup& lookup)
@@ -3116,8 +3121,7 @@ namespace
 	{
 		if (actor == nullptr ||
 			!actor->exists() ||
-			(actor->ObjectFlags & OF_EuthanizeMe) != 0 ||
-			IsLocalPlayerActor(actor))
+			(actor->ObjectFlags & OF_EuthanizeMe) != 0)
 		{
 			return false;
 		}
@@ -5268,6 +5272,10 @@ namespace
 
 		FGameTexture* emissiveSourceTexture = GetVoxelReplacementEmissiveSourceTexture(sprite);
 		const MaterialRef voxelMaterial = MakeVoxelPaletteMaterialRef(voxelTexture, emissiveSourceTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite);
+		const bool authoringIndirectOnlyActor =
+			captureMode == DynamicVoxelCaptureMode::Authoritative &&
+			sprite.Sprite != nullptr &&
+			IsLocalPlayerActor(sprite.Sprite->ownerActor);
 		const bool forceTransientVoxel = ShouldUseTransientVoxelActorCapture(sprite);
 		if (forceTransientVoxel)
 		{
@@ -5417,7 +5425,7 @@ namespace
 				return deferDesiredVariant(VoxelActorPendingReason::MeshDeferred);
 			}
 
-			if (!forceTransientVoxel)
+			if (!forceTransientVoxel && !authoringIndirectOnlyActor)
 			{
 				CaptureVoxelProxySprite(sprite, drawListType, voxelTexture, outSprites);
 			}
@@ -5473,7 +5481,7 @@ namespace
 				return deferDesiredVariant(VoxelActorPendingReason::TriangleBudget);
 			}
 
-			if (!forceTransientVoxel)
+			if (!forceTransientVoxel && !authoringIndirectOnlyActor)
 			{
 				CaptureVoxelProxySprite(sprite, drawListType, voxelTexture, outSprites);
 			}
@@ -5533,7 +5541,10 @@ namespace
 					cacheLookup.identityKey == 0 ? DynamicVoxelEscapeReason::NotCacheable :
 					GetDynamicVoxelEscapeReasonForPending(pendingReason);
 				RecordDynamicVoxelEscape(stats, sprite, cacheLookup, exactSurface, escapeReason);
-				outSprites.push_back(std::move(exactSurface));
+				if (!authoringIndirectOnlyActor)
+				{
+					outSprites.push_back(std::move(exactSurface));
+				}
 			}
 			return true;
 		}
@@ -5544,7 +5555,10 @@ namespace
 			cacheLookup.identityKey == 0 ? DynamicVoxelEscapeReason::NotCacheable :
 			DynamicVoxelEscapeReason::Unknown;
 		RecordDynamicVoxelEscape(stats, sprite, cacheLookup, exactSurface, escapeReason);
-		outSprites.push_back(std::move(exactSurface));
+		if (!authoringIndirectOnlyActor)
+		{
+			outSprites.push_back(std::move(exactSurface));
+		}
 		return true;
 	}
 
@@ -5633,9 +5647,17 @@ namespace
 		finish();
 	}
 
-	void CaptureActorModelSprites(HWDrawList& list, uint32_t drawListType, int32_t actorIndex, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
+	bool CaptureActorModelSprites(
+		HWDrawList& list,
+		uint32_t drawListType,
+		int32_t actorIndex,
+		bool captureTransient,
+		std::vector<SurfaceRef>& outSprites,
+		SceneDebugStats& stats)
 	{
 		const bool rootMeshCapture = BeginVoxelMeshCacheFrame();
+		bool currentVoxel = false;
+		std::vector<SurfaceRef> authoritativeSurfaces;
 		VoxelCaptureBudget budget = MakeVoxelCaptureBudget();
 		for (auto* sprite : list.sprites)
 		{
@@ -5657,12 +5679,36 @@ namespace
 				continue;
 			}
 
-			if (CaptureVoxelMeshSprite(nullptr, *sprite, drawListType, budget, outSprites, stats, DynamicVoxelCaptureMode::Transient))
+			currentVoxel = true;
+			authoritativeSurfaces.clear();
+			(void)CaptureVoxelMeshSprite(nullptr, *sprite, drawListType, budget, authoritativeSurfaces, stats, DynamicVoxelCaptureMode::Authoritative);
+			if (captureTransient && CaptureVoxelMeshSprite(nullptr, *sprite, drawListType, budget, outSprites, stats, DynamicVoxelCaptureMode::Transient))
 			{
 				stats.voxelProxyDrawItems++;
 			}
 		}
 		EndVoxelMeshCacheFrame(rootMeshCapture);
+		return currentVoxel;
+	}
+
+	void DiscardIndirectOnlyVoxelActorCacheEntry(int32_t actorIndex)
+	{
+		if (actorIndex < 0)
+		{
+			return;
+		}
+
+		for (auto it = gVoxelActorCache.begin(); it != gVoxelActorCache.end();)
+		{
+			if (it->second.actorIndex != actorIndex || !it->second.indirectOnly)
+			{
+				++it;
+				continue;
+			}
+			EmitVoxelActorStateTrace(nullptr, nullptr, &it->second, "remove-indirect-representation-change", VoxelActorPendingReason::ActorNotLive);
+			it = gVoxelActorCache.erase(it);
+			++gVoxelActorCacheSerial;
+		}
 	}
 }
 
@@ -6322,12 +6368,35 @@ bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView, DynamicVoxelCapture
 	return !outView.opaqueWalls.empty() || !outView.opaqueFlats.empty() || !outView.opaqueSprites.empty();
 }
 
-bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outView)
+ActorSpriteSceneCaptureResult CaptureActorSpriteScene(
+	HWDrawInfo& di,
+	int32_t actorIndex,
+	bool residentVoxelReady,
+	SceneView& outView)
 {
+	ActorSpriteSceneCaptureResult result = {};
 	outView = {};
 	outView.drawInfo = &di;
-	CaptureActorFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, actorIndex, outView.opaqueSprites);
-	CaptureActorModelSprites(di.drawlists[GLDL_MODELS], GLDL_MODELS, actorIndex, outView.opaqueSprites, outView.stats);
+	std::vector<SurfaceRef> modelSprites;
+	result.currentVoxel = CaptureActorModelSprites(
+		di.drawlists[GLDL_MODELS],
+		GLDL_MODELS,
+		actorIndex,
+		!residentVoxelReady,
+		modelSprites,
+		outView.stats);
+	if (!result.currentVoxel)
+	{
+		DiscardIndirectOnlyVoxelActorCacheEntry(actorIndex);
+	}
+	if (!result.currentVoxel || !residentVoxelReady)
+	{
+		CaptureActorFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, actorIndex, outView.opaqueSprites);
+		outView.opaqueSprites.insert(
+			outView.opaqueSprites.end(),
+			std::make_move_iterator(modelSprites.begin()),
+			std::make_move_iterator(modelSprites.end()));
+	}
 
 	outView.stats.spriteDrawItems = (uint32_t)outView.opaqueSprites.size();
 	outView.stats.totalDrawItems = outView.stats.spriteDrawItems;
@@ -6341,7 +6410,8 @@ bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outV
 		}
 	}
 
-	return !outView.opaqueSprites.empty();
+	result.capturedFallbackScene = !outView.opaqueSprites.empty();
+	return result;
 }
 
 uint64_t GetPersistentVoxelCacheSerial()
@@ -6558,6 +6628,7 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.primitiveCount = desiredDirectPending ? entry.second->desiredPrimitiveCount : entry.second->primitiveCount;
 		view.lastSeenFrame = entry.second->lastSeenFrame;
 		view.capturedThisFrame = entry.second->lastSeenFrame == gVoxelActorCacheFrame;
+		view.indirectOnly = entry.second->indirectOnly;
 		view.retainedFrameAge = entry.second->lastSeenFrame != 0 && gVoxelActorCacheFrame >= entry.second->lastSeenFrame ?
 			gVoxelActorCacheFrame - entry.second->lastSeenFrame :
 			0;

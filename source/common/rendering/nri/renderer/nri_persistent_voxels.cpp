@@ -1,4 +1,5 @@
 #include "nri_persistent_voxels.h"
+#include "nri_scene_instance_visibility.h"
 
 #include "../scene/nri_hash.h"
 #include "nri_cvars.h"
@@ -889,6 +890,29 @@ bool NRIPersistentVoxelResidency::HasRenderableOverlay() const
 		batch.activeActorCount > 0 &&
 		batch.primitiveCount > 0 &&
 		!batch.materialBridge.materials.empty();
+}
+
+bool NRIPersistentVoxelResidency::HasResidentIndirectOnlyActor(int32_t actorIndex) const
+{
+	if (actorIndex < 0 || !batch.valid)
+	{
+		return false;
+	}
+
+	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	{
+		if (!actor.active || !actor.indirectOnly || actor.actorIndex != actorIndex)
+		{
+			continue;
+		}
+		const auto mesh = meshVariantResources.find(actor.meshResourceKey);
+		if (mesh != meshVariantResources.end() &&
+			mesh->second.accelerationStructure.accelerationStructure != nullptr)
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 bool NRIPersistentVoxelResidency::HasPreloadPending() const
@@ -2285,7 +2309,9 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 				persistentVoxelInstance.transform[row][column] = actor.instanceTransform[row * 4u + column];
 			}
 		}
-		persistentVoxelInstance.mask = NRI_TLAS_MASK_ALL_WORKLOADS;
+		const NRISceneInstanceVisibility instanceVisibility =
+			ResolveNRIPersistentVoxelInstanceVisibility(actor.indirectOnly);
+		persistentVoxelInstance.mask = instanceVisibility.tlasMask;
 		persistentVoxelInstance.shaderBindingTableLocalOffset = 0;
 		persistentVoxelInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 		const NRIAccelerationStructureResource* selectedAccelerationStructure = &meshResourceIt->second.accelerationStructure;
@@ -2335,12 +2361,28 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 		sceneInstance.materialBase = actor.materialOffset;
 		sceneInstance.materialCount = actor.materialCount;
 		sceneInstance.visibilityChunk = actor.visibilityChunkIndex;
+		sceneInstance.metadata2 = instanceVisibility.metadataFlags;
 		for (uint32_t i = 0; i < 12; ++i)
 		{
 			sceneInstance.currentTransform[i] = actor.instanceTransform[i];
 			sceneInstance.previousTransform[i] = actor.previousInstanceTransform[i];
 		}
 		persistentVoxelInstance.instanceId = raySceneBuilder.AddLegacyInstance(persistentVoxelInstance, sceneInstance);
+		if (actor.indirectOnly && ((int)perf_looptraceframes > 0 || (int)nri_pttraceframes > 0 || voxelStatsEnabled))
+		{
+			Printf("PERF pt local player voxel instance NRI: frame=%u actor=%d actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx material_key=0x%llx instance_id=%u mask=0x%x metadata=0x%x captured=%u retained_age=%llu blas=1\n",
+				frameIndex,
+				actor.actorIndex,
+				(unsigned long long)actor.identityKey,
+				(unsigned long long)actor.meshResourceKey,
+				(unsigned long long)actor.meshKeyHash,
+				(unsigned long long)actor.materialKeyHash,
+				persistentVoxelInstance.instanceId,
+				(uint32_t)persistentVoxelInstance.mask,
+				sceneInstance.metadata2,
+				actor.capturedThisFrame ? 1u : 0u,
+				(unsigned long long)actor.retainedFrameAge);
+		}
 		actor.inWorldTlasThisFrame = true;
 		actor.worldTlasFrameIndex = frameIndex;
 		if (meshResourceFirstPublish)
@@ -6036,6 +6078,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			PersistentVoxelBatch::ActorEntry actor = existingActor != nullptr ? *existingActor : PersistentVoxelBatch::ActorEntry{};
 			actor.identityKey = cacheEntry.identityKey;
 			actor.actorIndex = cacheEntry.actorIndex;
+			actor.indirectOnly = cacheEntry.indirectOnly;
 			actor.signature = cacheEntry.signature;
 			actor.geometrySignature = ResolvePersistentVoxelCacheEntryGeometrySignature(cacheEntry);
 			actor.surfaceSignature = cacheEntry.surfaceSignature;
@@ -6490,6 +6533,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 		PersistentVoxelBatch::ActorEntry actor = existingActor != nullptr ? *existingActor : PersistentVoxelBatch::ActorEntry{};
 		actor.identityKey = cacheEntry.identityKey;
 		actor.actorIndex = cacheEntry.actorIndex;
+		actor.indirectOnly = cacheEntry.indirectOnly;
 		actor.signature = cacheEntry.signature;
 		actor.geometrySignature = ResolvePersistentVoxelCacheEntryGeometrySignature(cacheEntry);
 		actor.surfaceSignature = cacheEntry.surfaceSignature;
@@ -6814,13 +6858,14 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				actor.materialSignature != cacheEntry.materialSignature ||
 				actor.meshKeyHash != cacheEntry.meshKeyHash ||
 				actor.materialKeyHash != cacheEntry.materialKeyHash ||
+				actor.indirectOnly != cacheEntry.indirectOnly ||
 				actorInstanceTransformNeedsUpdate ||
 				actorVisibilityChunkNeedsUpdate;
 			if (actorNeedsUpdate)
 			{
 				const bool transformOnlyUpdate =
 					!actorGeometryNeedsUpdate &&
-					(actorInstanceTransformNeedsUpdate || actorVisibilityChunkNeedsUpdate) &&
+					(actorInstanceTransformNeedsUpdate || actorVisibilityChunkNeedsUpdate || actor.indirectOnly != cacheEntry.indirectOnly) &&
 					actor.signature == cacheEntry.signature &&
 					actor.geometrySignature == expectedGeometrySignature &&
 					actor.materialSignature == cacheEntry.materialSignature &&
@@ -6835,6 +6880,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 					actor.sourcePicnum = cacheEntry.sourcePicnum;
 					actor.resolvedVoxelIndex = cacheEntry.resolvedVoxelIndex;
 					actor.capturedThisFrame = cacheEntry.capturedThisFrame;
+					actor.indirectOnly = cacheEntry.indirectOnly;
 					actor.instanceTransform = expectedInstanceTransform;
 					actor.visibilityChunkIndex = expectedVisibilityChunkIndex;
 					actor.active = true;
@@ -6951,6 +6997,7 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			actor.sourcePicnum = cacheEntry.sourcePicnum;
 			actor.resolvedVoxelIndex = cacheEntry.resolvedVoxelIndex;
 			actor.capturedThisFrame = cacheEntry.capturedThisFrame;
+			actor.indirectOnly = cacheEntry.indirectOnly;
 			actor.visibilityChunkIndex = ResolvePersistentVoxelActorVisibilityChunk(cacheEntry);
 			auto instanceIt = instances.find(cacheEntry.identityKey);
 			if (instanceIt != instances.end())

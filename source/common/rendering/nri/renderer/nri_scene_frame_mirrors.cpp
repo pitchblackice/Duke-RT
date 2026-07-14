@@ -167,10 +167,16 @@ public:
 	static bool CaptureLocalPlayerReflectionDynamicScene(
 		HWDrawInfo& di,
 		nri_scene::SceneView& outView,
+		bool residentVoxelReady,
 		NRIMirrorRebuildSceneViewStatsFn rebuildSceneViewStats,
+		bool* outCurrentVoxel,
 		NRILocalPlayerReflectionCaptureStats* outStats = nullptr)
 	{
 		outView = {};
+		if (outCurrentVoxel != nullptr)
+		{
+			*outCurrentVoxel = false;
+		}
 		NRILocalPlayerReflectionCaptureStats captureStats = {};
 		captureStats.viewpointActorIndex = di.Viewpoint.CameraActor != nullptr ? (int32_t)di.Viewpoint.CameraActor->GetIndex() : -1;
 		const auto publishStats = [&]()
@@ -205,14 +211,28 @@ public:
 		captureDi->rellight = di.rellight;
 
 		const ScopedLocalPlayerReflectionVisibilityCaptureOverride reflectionCaptureOverride(true);
-		captureDi->CreateScene(false);
+		renderAddTsprite(captureDi->tsprites, localPlayerActor);
+		gi->processSprites(
+			captureDi->tsprites,
+			DVector3(di.Viewpoint.Pos.X, -di.Viewpoint.Pos.Y, -di.Viewpoint.Pos.Z),
+			DAngle::fromBam(di.Viewpoint.RotAngle),
+			di.Viewpoint.TicFrac);
+		captureDi->DispatchSprites();
 		captureStats.rawFacingSprites = CountDrawListActorSprites(captureDi->drawlists[GLDL_TRANSLUCENT], actorIndex, false);
 		captureStats.rawVoxelSprites = CountDrawListActorSprites(captureDi->drawlists[GLDL_MODELS], actorIndex, true);
 
 		nri_scene::SceneView capturedView;
-		const bool hasCapture = nri_scene::CaptureActorSpriteScene(*captureDi, actorIndex, capturedView);
+		const nri_scene::ActorSpriteSceneCaptureResult sceneCapture = nri_scene::CaptureActorSpriteScene(
+			*captureDi,
+			actorIndex,
+			residentVoxelReady,
+			capturedView);
+		if (outCurrentVoxel != nullptr)
+		{
+			*outCurrentVoxel = sceneCapture.currentVoxel;
+		}
 		captureDi->EndDrawInfo();
-		if (!hasCapture || !AppendLocalPlayerReflectionSurfaces(capturedView, outView))
+		if (!sceneCapture.capturedFallbackScene || !AppendLocalPlayerReflectionSurfaces(capturedView, outView))
 		{
 			publishStats();
 			outView = {};
@@ -282,6 +302,17 @@ public:
 	}
 }
 
+int32_t ResolveNRILocalPlayerActorIndex()
+{
+	if (gi == nullptr || myconnectindex < 0 || myconnectindex >= MAXPLAYERS)
+	{
+		return -1;
+	}
+	DCorePlayer* localPlayer = PlayerArray[myconnectindex];
+	DCoreActor* localPlayerActor = localPlayer != nullptr ? localPlayer->GetActor() : nullptr;
+	return localPlayerActor != nullptr ? (int32_t)localPlayerActor->GetIndex() : -1;
+}
+
 NRILocalPlayerReflectionCaptureResult CaptureNRILocalPlayerReflectionDynamicScene(const NRILocalPlayerReflectionCaptureRequest& request, nri_scene::SceneView& outView)
 {
 	NRILocalPlayerReflectionCaptureResult result = {};
@@ -293,7 +324,9 @@ NRILocalPlayerReflectionCaptureResult CaptureNRILocalPlayerReflectionDynamicScen
 	result.captured = CaptureLocalPlayerReflectionDynamicScene(
 		*request.drawInfo,
 		outView,
+		request.residentVoxelReady,
 		request.rebuildSceneViewStats,
+		&result.currentVoxel,
 		&result.stats);
 	return result;
 }
