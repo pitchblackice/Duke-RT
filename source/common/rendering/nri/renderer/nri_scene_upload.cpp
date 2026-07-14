@@ -3340,13 +3340,16 @@ bool NRIRenderer::PreGrowLevelSceneResourcesForLoading()
 
 	if ((int)nri_ptloadingtrace >= 1)
 	{
-		Printf("NRI PT loading gate: event=pre_grow result=%s instances=%u static_instances=%u persistent_instances=%u tlas_instance_grows=%u tlas_scratch_grows=%u scene_resource_grows=%u tlas_instance_requested=%llu tlas_instance_allocated=%llu tlas_scratch_requested=%llu tlas_scratch_allocated=%llu scene_requested=%llu scene_allocated=%llu wait_ms=%.3f\n",
+		Printf("NRI PT loading gate: event=pre_grow result=%s instances=%u static_instances=%u persistent_instances=%u tlas_instance_grows=%u tlas_scratch_grows=%u tlas_deferred_as=%u tlas_deferred_instance=%u tlas_deferred_scratch=%u scene_resource_grows=%u tlas_instance_requested=%llu tlas_instance_allocated=%llu tlas_scratch_requested=%llu tlas_scratch_allocated=%llu scene_requested=%llu scene_allocated=%llu wait_ms=%.3f\n",
 			ready ? "ready" : "failed",
 			estimatedInstanceCount,
 			(uint32_t)instances.size(),
 			estimatedPersistentVoxelInstances,
 			mLastPerfShellTraceStats.worldTlasPreGrowInstanceGrowCount,
 			mLastPerfShellTraceStats.worldTlasPreGrowScratchGrowCount,
+			mLastPerfShellTraceStats.worldTlasPreGrowDeferredAsSlots,
+			mLastPerfShellTraceStats.worldTlasPreGrowDeferredInstanceSlots,
+			mLastPerfShellTraceStats.worldTlasPreGrowDeferredScratchSlots,
 			mLastPerfShellTraceStats.sceneDataPreGrowResourceGrowEvents,
 			(unsigned long long)mLastPerfShellTraceStats.worldTlasPreGrowInstanceRequestedBytes,
 			(unsigned long long)mLastPerfShellTraceStats.worldTlasPreGrowInstanceAllocatedBytes,

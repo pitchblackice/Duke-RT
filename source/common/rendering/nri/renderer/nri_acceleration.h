@@ -36,7 +36,11 @@ public:
 		NRIBufferResource* buildScratchBuffer = nullptr,
 		nri::AccelerationStructureBits buildFlags = nri::AccelerationStructureBits::PREFER_FAST_BUILD);
 	static bool BuildEmissiveTopLevel(NRIRenderer& renderer);
-	static bool BuildTopLevel(NRIRenderer& renderer, const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask);
+	static bool BuildTopLevel(
+		NRIRenderer& renderer,
+		const std::vector<nri::TopLevelInstance>& instances,
+		uint32_t sceneBufferMask,
+		bool reuseDestination);
 	static bool BuildTopLevel(
 		NRIRenderer& renderer,
 		const std::vector<nri::TopLevelInstance>& instances,
@@ -49,7 +53,8 @@ public:
 		uint32_t* outTlasInstanceCount,
 		bool updateLiveState,
 		bool tlasInstanceWritesQuiesced,
-		bool allowUpdate);
+		bool allowUpdate,
+		bool reuseDestination);
 	static bool UpdateTopLevel(
 		NRIRenderer& renderer,
 		const std::vector<nri::TopLevelInstance>& instances,

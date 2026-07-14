@@ -26,7 +26,7 @@ void NRIWorldTlasFrameSlot::Publish(
 	publishedRecordingFence = recordingFence;
 	publishedBlasGeneration = blasGeneration;
 	publishedInstancePayloadHash = instancePayloadHash;
-	publishedInstanceCapacity = (uint32_t)instances.size();
+	publishedBuildInstanceCount = (uint32_t)instances.size();
 	publicationValid = true;
 }
 
@@ -38,7 +38,7 @@ void NRIWorldTlasFrameSlot::InvalidatePublication()
 	publishedRecordingFence = 0;
 	publishedBlasGeneration = 0;
 	publishedInstancePayloadHash = 0;
-	publishedInstanceCapacity = 0;
+	publishedBuildInstanceCount = 0;
 	publicationValid = false;
 }
 

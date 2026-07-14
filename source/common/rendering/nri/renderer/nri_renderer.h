@@ -1340,6 +1340,12 @@ public:
 		uint32_t worldTlasFullBuildChangeReasonMask = 0;
 		uint32_t worldTlasFullBuildUpdateRejectReasonMask = 0;
 		uint32_t worldTlasFullBuildUpdateGateReasonMask = 0;
+		uint32_t worldTlasFullBuildDestinationReuseCalls = 0;
+		uint32_t worldTlasFullBuildDestinationCreateCalls = 0;
+		uint32_t worldTlasFullBuildGrowthCalls = 0;
+		uint32_t worldTlasFullBuildGrowthReasonMask = 0;
+		uint32_t worldTlasFullBuildReuseRejectReasonMask = 0;
+		uint32_t worldTlasFullBuildReuseRuntimeFallbacks = 0;
 		uint32_t worldTlasSameCommandResourceRotations = 0;
 		uint64_t worldTlasBlasContentGeneration = 0;
 		uint32_t worldTlasInstanceCount = 0;
@@ -1363,6 +1369,9 @@ public:
 		uint32_t worldTlasPreGrowInstanceCount = 0;
 		uint32_t worldTlasPreGrowInstanceGrowCount = 0;
 		uint32_t worldTlasPreGrowScratchGrowCount = 0;
+		uint32_t worldTlasPreGrowDeferredAsSlots = 0;
+		uint32_t worldTlasPreGrowDeferredInstanceSlots = 0;
+		uint32_t worldTlasPreGrowDeferredScratchSlots = 0;
 		uint64_t worldTlasPreGrowInstanceRequestedBytes = 0;
 		uint64_t worldTlasPreGrowInstanceAllocatedBytes = 0;
 		uint64_t worldTlasPreGrowScratchRequestedBytes = 0;
@@ -1372,6 +1381,7 @@ public:
 		uint64_t worldTlasScratchRequestedBytes = 0;
 		uint64_t worldTlasBuildScratchRequestedBytes = 0;
 		uint64_t worldTlasUpdateScratchRequestedBytes = 0;
+		uint64_t worldTlasScratchAllocatedBytes = 0;
 		uint64_t worldTlasMemoryBytes = 0;
 		uint32_t asWorldTlasObjects = 0;
 		uint32_t asWorldTlasEntries = 0;

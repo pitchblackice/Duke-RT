@@ -4165,7 +4165,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.dynamicOverlayBlasRoutedInstances,
 			shell.dynamicOverlayBlasMonolithicRefs);
 		Printf(
-			"PERF pt world tlas detail NRI: frame=%llu total=%.3f retire=%.3f instance_upload=%.3f create=%.3f memory=%.3f scratch=%.3f descriptor=%.3f build=%.3f update=%.3f barrier=%.3f calls=%u exact_reuses=%u updates=%u update_reason_mask=0x%08x update_dirty_ranges=%u update_dirty_instances=%u update_dirty_bytes=%llu blas_override_updates=%u full_builds=%u full_reason_mask=0x%08x full_change_mask=0x%08x full_update_reject_mask=0x%08x full_update_gate_mask=0x%08x same_command_rotations=%u blas_generation=%llu instances=%u creates=%u scratch_queries=%u scratch_grows=%u scratch_requested=%llu build_scratch_requested=%llu update_scratch_requested=%llu memory_bytes=%llu descriptor_creates=%u barriers=%u\n",
+			"PERF pt world tlas detail NRI: frame=%llu total=%.3f retire=%.3f instance_upload=%.3f create=%.3f memory=%.3f scratch=%.3f descriptor=%.3f build=%.3f update=%.3f barrier=%.3f calls=%u exact_reuses=%u updates=%u update_reason_mask=0x%08x update_dirty_ranges=%u update_dirty_instances=%u update_dirty_bytes=%llu blas_override_updates=%u full_builds=%u full_reason_mask=0x%08x full_change_mask=0x%08x full_update_reject_mask=0x%08x full_update_gate_mask=0x%08x full_destination_reuses=%u full_destination_creates=%u full_growths=%u full_growth_mask=0x%08x full_reuse_reject_mask=0x%08x full_reuse_runtime_fallbacks=%u same_command_rotations=%u blas_generation=%llu instances=%u creates=%u scratch_queries=%u scratch_grows=%u scratch_requested=%llu build_scratch_requested=%llu update_scratch_requested=%llu scratch_allocated=%llu memory_bytes=%llu descriptor_creates=%u barriers=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.worldTlasMs,
 			shell.worldTlasRetireMs,
@@ -4190,6 +4190,12 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.worldTlasFullBuildChangeReasonMask,
 			shell.worldTlasFullBuildUpdateRejectReasonMask,
 			shell.worldTlasFullBuildUpdateGateReasonMask,
+			shell.worldTlasFullBuildDestinationReuseCalls,
+			shell.worldTlasFullBuildDestinationCreateCalls,
+			shell.worldTlasFullBuildGrowthCalls,
+			shell.worldTlasFullBuildGrowthReasonMask,
+			shell.worldTlasFullBuildReuseRejectReasonMask,
+			shell.worldTlasFullBuildReuseRuntimeFallbacks,
 			shell.worldTlasSameCommandResourceRotations,
 			(unsigned long long)shell.worldTlasBlasContentGeneration,
 			shell.worldTlasInstanceCount,
@@ -4199,6 +4205,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.worldTlasScratchRequestedBytes,
 			(unsigned long long)shell.worldTlasBuildScratchRequestedBytes,
 			(unsigned long long)shell.worldTlasUpdateScratchRequestedBytes,
+			(unsigned long long)shell.worldTlasScratchAllocatedBytes,
 			(unsigned long long)shell.worldTlasMemoryBytes,
 			shell.worldTlasDescriptorCreateCalls,
 			shell.worldTlasBarrierCount);

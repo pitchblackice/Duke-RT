@@ -209,6 +209,8 @@ bool NRIRenderer::PumpPersistentVoxelBlasCompaction(uint64_t buildSerial)
 			destination.uncompactedMemorySize = source.memorySize;
 			destination.compacted = true;
 			destination.buildFlags = source.buildFlags;
+			destination.buildType = source.buildType;
+			destination.buildTypeValid = source.buildTypeValid;
 			destination.buildVertexBuffer = source.buildVertexBuffer;
 			destination.buildIndexBuffer = source.buildIndexBuffer;
 			destination.buildVertexOffset = source.buildVertexOffset;

@@ -37,7 +37,8 @@ public:
 		uint64_t size,
 		uint32_t stride,
 		nri::BufferUsageBits usage,
-		const char* waitReason);
+		const char* waitReason,
+		bool writesQuiesced = false);
 
 	static bool UpdateStructuredBufferRange(
 		NRIRenderer& renderer,

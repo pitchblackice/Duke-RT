@@ -422,6 +422,8 @@ void NRIRenderer::DestroyAccelerationStructureResource(NRIAccelerationStructureR
 	resource.buildIndexCount = 0;
 	resource.buildPrimitiveCount = 0;
 	resource.buildFlags = nri::AccelerationStructureBits::NONE;
+	resource.buildType = nri::AccelerationStructureType::TOP_LEVEL;
+	resource.buildTypeValid = false;
 	resource.uncompactedMemorySize = 0;
 	resource.compacted = false;
 	resource.memoryLocation = nri::MemoryLocation::DEVICE;

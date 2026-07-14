@@ -16,7 +16,7 @@ struct NRIWorldTlasFrameSlot
 	uint64_t publishedRecordingFence = 0;
 	uint64_t publishedBlasGeneration = 0;
 	uint64_t publishedInstancePayloadHash = 0;
-	uint32_t publishedInstanceCapacity = 0;
+	uint32_t publishedBuildInstanceCount = 0;
 	bool publicationValid = false;
 
 	bool PublishedInstanceBytesEqual(const std::vector<nri::TopLevelInstance>& instances) const;

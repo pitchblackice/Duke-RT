@@ -58,6 +58,7 @@ enum NRIWorldTlasExactReuseRejectReason : uint32_t
 	NRIWorldTlasExactReuseRejectReason_Fence = 1u << 7,
 	NRIWorldTlasExactReuseRejectReason_BlasGeneration = 1u << 8,
 	NRIWorldTlasExactReuseRejectReason_InstanceBytes = 1u << 9,
+	NRIWorldTlasExactReuseRejectReason_BuildInstanceCount = 1u << 10,
 };
 
 struct NRIWorldTlasExactReuseInput
@@ -66,7 +67,8 @@ struct NRIWorldTlasExactReuseInput
 	bool hasAccelerationStructure = false;
 	bool hasDescriptor = false;
 	bool hasInstanceBuffer = false;
-	uint32_t publishedInstanceCapacity = 0;
+	uint32_t allocatedInstanceCapacity = 0;
+	uint32_t publishedBuildInstanceCount = 0;
 	uint32_t requiredInstanceCount = 0;
 	uint64_t instanceBufferCapacityBytes = 0;
 	uint64_t requiredInstanceBytes = 0;
@@ -120,3 +122,72 @@ NRIWorldTlasUpdateDecision EvaluateNRIWorldTlasUpdate(
 	const NRIWorldTlasDecision& instanceDecision,
 	const NRIWorldTlasExactReuseInput& state,
 	bool updateEnabled);
+
+enum NRIWorldTlasFullBuildReuseRejectReason : uint32_t
+{
+	NRIWorldTlasFullBuildReuseRejectReason_None = 0,
+	NRIWorldTlasFullBuildReuseRejectReason_Unpublished = 1u << 0,
+	NRIWorldTlasFullBuildReuseRejectReason_AccelerationStructure = 1u << 1,
+	NRIWorldTlasFullBuildReuseRejectReason_Descriptor = 1u << 2,
+	NRIWorldTlasFullBuildReuseRejectReason_InstanceBuffer = 1u << 3,
+	NRIWorldTlasFullBuildReuseRejectReason_ScratchBuffer = 1u << 4,
+	NRIWorldTlasFullBuildReuseRejectReason_InstanceCapacity = 1u << 5,
+	NRIWorldTlasFullBuildReuseRejectReason_InstanceBufferCapacity = 1u << 6,
+	NRIWorldTlasFullBuildReuseRejectReason_ScratchCapacity = 1u << 7,
+	NRIWorldTlasFullBuildReuseRejectReason_Flags = 1u << 8,
+	NRIWorldTlasFullBuildReuseRejectReason_ResourceState = 1u << 9,
+	NRIWorldTlasFullBuildReuseRejectReason_Fence = 1u << 10,
+	NRIWorldTlasFullBuildReuseRejectReason_Epoch = 1u << 11,
+	NRIWorldTlasFullBuildReuseRejectReason_Compacted = 1u << 12,
+	NRIWorldTlasFullBuildReuseRejectReason_Type = 1u << 13,
+	NRIWorldTlasFullBuildReuseRejectReason_Runtime = 1u << 14,
+};
+
+enum NRIWorldTlasFullBuildGrowthReason : uint32_t
+{
+	NRIWorldTlasFullBuildGrowthReason_None = 0,
+	NRIWorldTlasFullBuildGrowthReason_AccelerationStructure = 1u << 0,
+	NRIWorldTlasFullBuildGrowthReason_InstanceBuffer = 1u << 1,
+	NRIWorldTlasFullBuildGrowthReason_ScratchBuffer = 1u << 2,
+};
+
+struct NRIWorldTlasFullBuildReuseInput
+{
+	bool publicationValid = false;
+	bool hasAccelerationStructure = false;
+	bool hasDescriptor = false;
+	bool hasInstanceBuffer = false;
+	bool hasScratchBuffer = false;
+	bool updateEnabled = false;
+	bool buildFlagsCompatible = false;
+	bool buildTypeCompatible = false;
+	bool compacted = false;
+	bool destinationInComputeReadState = false;
+	uint32_t allocatedInstanceCapacity = 0;
+	uint32_t publishedBuildInstanceCount = 0;
+	uint32_t requiredInstanceCount = 0;
+	uint64_t instanceBufferCapacityBytes = 0;
+	uint64_t requiredInstanceBytes = 0;
+	uint64_t scratchBufferCapacityBytes = 0;
+	uint64_t cachedBuildScratchBytes = 0;
+	uint64_t requiredScratchBytes = 0;
+	uint64_t publishedMapEpoch = 0;
+	uint64_t currentMapEpoch = 0;
+	uint64_t publishedBuildEpoch = 0;
+	uint64_t currentBuildEpoch = 0;
+	uint64_t publishedRecordingFence = 0;
+	uint64_t currentRecordingFence = 0;
+	bool publishedFenceComplete = false;
+};
+
+struct NRIWorldTlasFullBuildReuseDecision
+{
+	bool reuseDestination = false;
+	bool replacementRequired = true;
+	bool sameRecordingFence = false;
+	uint32_t rejectReasonMask = NRIWorldTlasFullBuildReuseRejectReason_None;
+	uint32_t growthReasonMask = NRIWorldTlasFullBuildGrowthReason_None;
+};
+
+NRIWorldTlasFullBuildReuseDecision EvaluateNRIWorldTlasFullBuildReuse(
+	const NRIWorldTlasFullBuildReuseInput& input);

@@ -133,10 +133,15 @@ NRIWorldTlasExactReuseDecision EvaluateNRIWorldTlasExactReuse(const NRIWorldTlas
 	{
 		decision.rejectReasonMask |= NRIWorldTlasExactReuseRejectReason_InstanceBuffer;
 	}
-	if (input.publishedInstanceCapacity < input.requiredInstanceCount ||
+	if (input.allocatedInstanceCapacity < input.requiredInstanceCount ||
 		input.instanceBufferCapacityBytes < input.requiredInstanceBytes)
 	{
 		decision.rejectReasonMask |= NRIWorldTlasExactReuseRejectReason_Capacity;
+	}
+	if (input.publishedBuildInstanceCount == 0 ||
+		input.publishedBuildInstanceCount != input.requiredInstanceCount)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasExactReuseRejectReason_BuildInstanceCount;
 	}
 	if (input.currentMapEpoch == 0 || input.publishedMapEpoch != input.currentMapEpoch)
 	{
@@ -212,5 +217,89 @@ NRIWorldTlasUpdateDecision EvaluateNRIWorldTlasUpdate(
 	}
 
 	decision.update = decision.rejectReasonMask == NRIWorldTlasUpdateRejectReason_None;
+	return decision;
+}
+
+NRIWorldTlasFullBuildReuseDecision EvaluateNRIWorldTlasFullBuildReuse(
+	const NRIWorldTlasFullBuildReuseInput& input)
+{
+	NRIWorldTlasFullBuildReuseDecision decision = {};
+	decision.sameRecordingFence =
+		input.publishedRecordingFence != 0 &&
+		input.publishedRecordingFence == input.currentRecordingFence;
+	if (!input.publicationValid || input.publishedBuildInstanceCount == 0)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasFullBuildReuseRejectReason_Unpublished;
+	}
+	if (!input.hasAccelerationStructure)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasFullBuildReuseRejectReason_AccelerationStructure;
+	}
+	if (!input.hasDescriptor)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasFullBuildReuseRejectReason_Descriptor;
+	}
+	if (!input.hasInstanceBuffer)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasFullBuildReuseRejectReason_InstanceBuffer;
+	}
+	if (!input.hasScratchBuffer)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasFullBuildReuseRejectReason_ScratchBuffer;
+	}
+	if (input.requiredInstanceCount == 0 || input.allocatedInstanceCapacity < input.requiredInstanceCount)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasFullBuildReuseRejectReason_InstanceCapacity;
+		if (input.requiredInstanceCount != 0 && input.allocatedInstanceCapacity < input.requiredInstanceCount)
+		{
+			decision.growthReasonMask |= NRIWorldTlasFullBuildGrowthReason_AccelerationStructure;
+		}
+	}
+	if (input.instanceBufferCapacityBytes < input.requiredInstanceBytes)
+	{
+		decision.growthReasonMask |= NRIWorldTlasFullBuildGrowthReason_InstanceBuffer;
+	}
+	if (input.scratchBufferCapacityBytes < input.requiredScratchBytes)
+	{
+		decision.growthReasonMask |= NRIWorldTlasFullBuildGrowthReason_ScratchBuffer;
+	}
+	if (input.cachedBuildScratchBytes == 0)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasFullBuildReuseRejectReason_ScratchCapacity;
+	}
+	if (!input.updateEnabled || !input.buildFlagsCompatible)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasFullBuildReuseRejectReason_Flags;
+	}
+	if (!input.buildTypeCompatible)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasFullBuildReuseRejectReason_Type;
+	}
+	if (input.compacted)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasFullBuildReuseRejectReason_Compacted;
+	}
+	if (!input.destinationInComputeReadState)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasFullBuildReuseRejectReason_ResourceState;
+	}
+	if (input.currentMapEpoch == 0 ||
+		input.publishedMapEpoch != input.currentMapEpoch ||
+		input.currentBuildEpoch == 0 ||
+		input.publishedBuildEpoch != input.currentBuildEpoch)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasFullBuildReuseRejectReason_Epoch;
+	}
+	if (input.publishedRecordingFence == 0 ||
+		input.currentRecordingFence == 0 ||
+		decision.sameRecordingFence ||
+		!input.publishedFenceComplete)
+	{
+		decision.rejectReasonMask |= NRIWorldTlasFullBuildReuseRejectReason_Fence;
+	}
+
+	decision.reuseDestination =
+		decision.rejectReasonMask == NRIWorldTlasFullBuildReuseRejectReason_None;
+	decision.replacementRequired = !decision.reuseDestination;
 	return decision;
 }
