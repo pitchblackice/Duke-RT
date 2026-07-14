@@ -214,6 +214,8 @@ struct NRISmokeDirectCacheGpu
 	float sigmaT = 0.0f;
 	float worldPosition[3] = {};
 	uint32_t metadata = 0;
+	float mediumTransmittance = 1.0f;
+	uint32_t mediumMetadata = 0;
 };
 
 struct NRISmokeEmissiveStorageGpu
@@ -226,7 +228,7 @@ static_assert(sizeof(NRISmokeStyleGpu) == 80);
 static_assert(sizeof(NRISmokeInjectionCommandGpu) == 64);
 static_assert(sizeof(NRISmokeControlGpu) == 476);
 static_assert(sizeof(NRISmokeIndirectCacheGpu) == 32);
-static_assert(sizeof(NRISmokeDirectCacheGpu) == 32);
+static_assert(sizeof(NRISmokeDirectCacheGpu) == 40);
 static_assert(sizeof(NRISmokeEmissiveStorageGpu) == 48);
 
 struct NRISmokeConstants

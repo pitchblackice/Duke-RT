@@ -84,10 +84,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		InterlockedAdd(gSmokeControl[0].DirectHistoryClamps, 1u);
 	SmokeDirectCacheRecord outputRecord = center;
 	outputRecord.Metadata = SmokeDirectPackMetadata(max(SmokeDirectRecordAge(center), 1u),
-		gSmokeConstants.FrameIndex, resolvedVisibility);
+		gSmokeConstants.FrameIndex, resolvedVisibility, SmokeDirectRecordCombinedVisibility(center));
 	gSmokeDirectHistory[froxelIndex] = outputRecord;
+	float lightingFactor = SmokeSelfShadowEnabled(gSmokeConstants.DebugMode) ?
+		SmokeDirectRecordCombinedVisibility(center) : resolvedVisibility;
+	const uint selfShadowDebug = SmokeSelfShadowDebug(gSmokeConstants.DebugMode);
+	if (selfShadowDebug == 1u) lightingFactor = resolvedVisibility;
+	else if (selfShadowDebug == 2u) lightingFactor = center.MediumTransmittance;
+	else if (selfShadowDebug == 3u) lightingFactor = SmokeDirectRecordCombinedVisibility(center);
 	gSmokeFroxelSource[froxelIndex].rgb += max(center.Radiance, 0.0) *
-		(resolvedVisibility * gSmokeConstants.RadianceScale);
+		(saturate(lightingFactor) * gSmokeConstants.RadianceScale);
 	if (diagnostics)
 	{
 		InterlockedAdd(gSmokeControl[0].DirectHistoryResolved, 1u);

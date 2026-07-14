@@ -2,6 +2,7 @@
 #include "Include/SmokeFroxel.hlsli"
 #include "Include/SmokeLighting.hlsli"
 #include "Include/SmokeDirectCache.hlsli"
+#include "Include/SmokeGridTransmittance.hlsli"
 
 [numthreads(64, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -45,6 +46,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const uint sampleCount = SmokeDirectReceiverSampleCount();
 		const uint directionalKey = SmokeDirectDirectionalKey();
 		float visibleSamples = 0.0;
+		float transmittanceSamples = 0.0;
+		float combinedSamples = 0.0;
 		[loop]
 		for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
 		{
@@ -76,8 +79,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				}
 			}
 			visibleSamples += visibility;
+			uint marchSteps;
+			bool marchTruncated;
+			const float mediumTransmittance = SmokeGridDirectionalTransmittance(receiverPosition,
+				lightDirection, marchSteps, marchTruncated);
+			transmittanceSamples += mediumTransmittance;
+			combinedSamples += visibility * mediumTransmittance;
 		}
 		const float directionalVisibility = visibleSamples / (float)sampleCount;
+		const float directionalTransmittance = transmittanceSamples / (float)sampleCount;
+		const float directionalCombined = combinedSamples / (float)sampleCount;
 		// Receiver/emitter samples reconstruct visibility only. Radiometry and
 		// phase stay on the current occupied froxel so camera rotation cannot
 		// resize the apparent carrier envelope or import an old view direction.
@@ -92,6 +103,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			record.Radiance = 0.0;
 			record.SigmaT = medium.a;
 			record.WorldPosition = SmokeFroxelCenter(froxelCoordinates, ray);
+			record.MediumTransmittance = 1.0;
+			record.MediumMetadata = SmokeDirectPackMediumMetadata(0u, gSmokeConstants.FrameIndex,
+				SmokeDirectSelfShadowBlock(record.WorldPosition));
 		}
 		const float oldLuminance = dot(max(record.Radiance, 0.0), float3(0.2126, 0.7152, 0.0722));
 		const float newLuminance = dot(directionalSource, float3(0.2126, 0.7152, 0.0722));
@@ -99,8 +113,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			? (SmokeDirectRecordVisibility(record) * oldLuminance + directionalVisibility * newLuminance) /
 				(oldLuminance + newLuminance)
 			: directionalVisibility;
+		const float combinedTransmittance = oldLuminance + newLuminance > 1e-6
+			? (record.MediumTransmittance * oldLuminance + directionalTransmittance * newLuminance) /
+				(oldLuminance + newLuminance)
+			: directionalTransmittance;
+		const float combinedProduct = oldLuminance + newLuminance > 1e-6
+			? (SmokeDirectRecordCombinedVisibility(record) * oldLuminance + directionalCombined * newLuminance) /
+				(oldLuminance + newLuminance)
+			: directionalCombined;
 		record.Radiance += directionalSource;
-		record.Metadata = SmokeDirectPackMetadata(1u, gSmokeConstants.FrameIndex, combinedVisibility);
+		record.Metadata = SmokeDirectPackMetadata(1u, gSmokeConstants.FrameIndex, combinedVisibility, combinedProduct);
+		record.MediumTransmittance = saturate(combinedTransmittance);
+		record.MediumMetadata = SmokeDirectPackMediumMetadata(0u, gSmokeConstants.FrameIndex,
+			SmokeDirectSelfShadowBlock(record.WorldPosition));
 		gSmokeDirectCurrent[froxelIndex] = record;
 		SmokeDirectAccumulateVisibilityDiagnostics(directionalVisibility, sampleCount, diagnostics);
 		return;

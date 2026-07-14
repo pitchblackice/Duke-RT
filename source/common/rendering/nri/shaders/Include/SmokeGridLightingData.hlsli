@@ -10,6 +10,9 @@
 #define NRI_SMOKE_GRID_SCATTER_PROBES_PER_BRICK 64u
 #define NRI_SMOKE_GRID_SCATTER_VALID 0x1u
 #define NRI_SMOKE_GRID_SCATTER_FACE_SHIFT 1u
+#define NRI_SMOKE_GRID_SCATTER_FACE_MASK 0x7eu
+#define NRI_SMOKE_GRID_SCATTER_EXPLICIT_ZERO 0x80u
+#define NRI_SMOKE_GRID_SCATTER_SPLIT_BLOCKED 0x100u
 
 #define NRI_SMOKE_GRID_LIGHT_EVIDENCE_SUPPORT 0x1u
 #define NRI_SMOKE_GRID_LIGHT_EVIDENCE_PHYSICAL_ZERO 0x2u
@@ -85,6 +88,21 @@ struct SmokeGridLightControl
 	uint ScatterEpoch;
 	uint ScatterFlags;
 	uint3 ScatterPadding;
+	uint SelfShadowSamples;
+	uint SelfShadowSteps;
+	uint SelfShadowTruncated;
+	uint SelfShadowTransmittanceZero;
+	uint SelfShadowTransmittancePartial;
+	uint SelfShadowTransmittanceOne;
+	uint SelfShadowNanRejects;
+	uint SelfShadowHistoryAccepted;
+	uint SelfShadowHistoryRestarted;
+	uint SelfShadowMaximumAge;
+	uint TopologyMissingTlas;
+	uint TopologyAsymmetric;
+	uint ExplicitZeroProbes;
+	uint SplitBlockedProbes;
+	uint2 SelfShadowPadding;
 };
 
 struct SmokeGridLightProposal
@@ -102,6 +120,10 @@ struct SmokeGridScatterMetadata
 	uint SimulationEpoch;
 	uint FrameStamp;
 	uint Flags;
+	uint HistoryBlock;
+	uint HistoryCount;
+	uint TransmittanceQ;
+	uint Reserved;
 };
 
 uint SmokeGridLightPackHalf2(float2 value)
@@ -160,6 +182,14 @@ float SmokeGridLightConfidence(SmokeGridLightRecord record) { return (float)((re
 uint SmokeGridLightEvidence(SmokeGridLightRecord record) { return (record.Words[20] >> 24u) & 0xffu; }
 uint SmokeGridLightLastUpdate(SmokeGridLightRecord record) { return record.Words[21] & 0xffffu; }
 uint SmokeGridLightAge(SmokeGridLightRecord record) { return record.Words[21] >> 16u; }
+uint SmokeGridLightSelfShadowBlock(SmokeGridLightRecord record) { return record.Words[22]; }
+float SmokeGridLightMeanTransmittance(SmokeGridLightRecord record) { return SmokeGridLightUnpackHalf2(record.Words[23]).x; }
+
+void SmokeGridLightSetSelfShadowEvidence(inout SmokeGridLightRecord record, uint block, float meanTransmittance)
+{
+	record.Words[22] = block;
+	record.Words[23] = SmokeGridLightPackHalf2(float2(saturate(meanTransmittance), 0.0));
+}
 
 void SmokeGridLightSetMetadata(inout SmokeGridLightRecord record, uint generation, uint epoch,
 	uint sampleCount, uint sequence, float confidence, uint evidence, uint frameIndex, uint age)

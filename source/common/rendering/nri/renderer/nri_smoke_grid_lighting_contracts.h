@@ -103,6 +103,21 @@ struct NRISmokeGridLightControlGpu
 	uint32_t scatterEpoch = 0;
 	uint32_t scatterFlags = 0;
 	uint32_t scatterPadding[3] = {};
+	uint32_t selfShadowSamples = 0;
+	uint32_t selfShadowSteps = 0;
+	uint32_t selfShadowTruncated = 0;
+	uint32_t selfShadowTransmittanceZero = 0;
+	uint32_t selfShadowTransmittancePartial = 0;
+	uint32_t selfShadowTransmittanceOne = 0;
+	uint32_t selfShadowNanRejects = 0;
+	uint32_t selfShadowHistoryAccepted = 0;
+	uint32_t selfShadowHistoryRestarted = 0;
+	uint32_t selfShadowMaximumAge = 0;
+	uint32_t topologyMissingTlas = 0;
+	uint32_t topologyAsymmetric = 0;
+	uint32_t explicitZeroProbes = 0;
+	uint32_t splitBlockedProbes = 0;
+	uint32_t selfShadowPadding[2] = {};
 };
 
 struct NRISmokeGridLightProposalGpu
@@ -120,6 +135,10 @@ struct NRISmokeGridScatterMetadataGpu
 	uint32_t simulationEpoch = 0;
 	uint32_t frameStamp = 0;
 	uint32_t flags = 0;
+	uint32_t historyBlock = 0;
+	uint32_t historyCount = 0;
+	uint32_t transmittanceQ = 0;
+	uint32_t reserved = 0;
 };
 
 struct NRISmokeGridLightingStatusSnapshot
@@ -132,6 +151,9 @@ struct NRISmokeGridLightingStatusSnapshot
 	bool multipleScatterRequested = false;
 	bool multipleScatterAllocated = false;
 	bool multipleScatterEffective = false;
+	bool selfShadowRequested = false;
+	bool selfShadowAllocated = false;
+	bool selfShadowEffective = false;
 	uint32_t requestedBackend = 0;
 	uint32_t effectiveBackend = 0;
 	uint32_t cellCapacity = 0;
@@ -150,6 +172,7 @@ struct NRISmokeGridLightingStatusSnapshot
 	uint64_t scatterMetadataBytes = 0;
 	uint64_t scatterActiveBytes = 0;
 	uint64_t scatterBytes = 0;
+	uint64_t selfShadowFieldBytes = 0;
 	uint64_t filterBytes = 0;
 	uint64_t totalBytes = 0;
 	const char* authority = "disabled";
@@ -157,9 +180,10 @@ struct NRISmokeGridLightingStatusSnapshot
 	const char* filterDecision = "not-requested";
 	const char* proposalDecision = "global-cdf/no-measured-starvation";
 	const char* scatterDecision = "disabled/phase12d-pending";
+	const char* selfShadowDecision = "disabled";
 };
 
 static_assert(sizeof(NRISmokeGridLightRecordGpu) == 96);
-static_assert(sizeof(NRISmokeGridLightControlGpu) == 256);
+static_assert(sizeof(NRISmokeGridLightControlGpu) == 320);
 static_assert(sizeof(NRISmokeGridLightProposalGpu) == 80);
-static_assert(sizeof(NRISmokeGridScatterMetadataGpu) == 16);
+static_assert(sizeof(NRISmokeGridScatterMetadataGpu) == 32);

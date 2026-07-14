@@ -50,4 +50,52 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gSmokeConstants.FrameIndex & 0xffu, (float)outputCount / 64.0, SmokeGridLightEvidence(current),
 		gSmokeConstants.FrameIndex, outputAge);
 	if (targetHistory) gSmokeGridLightHistory[cellIndex] = current; else gSmokeGridLightCurrent[cellIndex] = current;
+
+	if (!SmokeSelfShadowEnabled(gSmokeConstants.DebugMode))
+		return;
+	SmokeGridLightRecord shadowCurrent;
+	SmokeGridLightRecord shadowHistory;
+	if (targetHistory)
+	{
+		shadowCurrent = gSmokeGridLightSelfShadowHistory[cellIndex];
+		shadowHistory = gSmokeGridLightSelfShadowCurrent[cellIndex];
+	}
+	else
+	{
+		shadowCurrent = gSmokeGridLightSelfShadowCurrent[cellIndex];
+		shadowHistory = gSmokeGridLightSelfShadowHistory[cellIndex];
+	}
+	if (!SmokeGridLightRecordValid(shadowCurrent, brick.Generation, gSmokeConstants.SimulationEpoch))
+		return;
+	uint shadowAge = 0u;
+	const uint shadowBlock = SmokeGridLightSelfShadowBlock(shadowCurrent);
+	float resolvedTransmittance = SmokeGridLightMeanTransmittance(shadowCurrent);
+	const bool consecutive = SmokeGridLightLastUpdate(shadowHistory) == ((gSmokeConstants.FrameIndex - 1u) & 0xffffu);
+	const bool sameBlock = SmokeGridLightSelfShadowBlock(shadowHistory) == SmokeGridLightSelfShadowBlock(shadowCurrent);
+	if (SmokeGridLightRecordValid(shadowHistory, brick.Generation, gSmokeConstants.SimulationEpoch) &&
+		consecutive && sameBlock && SmokeGridLightAge(shadowHistory) < 7u)
+	{
+		shadowAge = SmokeGridLightAge(shadowHistory) + 1u;
+		const float alpha = rcp((float)(shadowAge + 1u));
+		[unroll]
+		for (uint lobe = 0u; lobe < 6u; ++lobe)
+		{
+			const float3 mean = lerp(SmokeGridLightMean(shadowHistory, lobe), SmokeGridLightMean(shadowCurrent, lobe), alpha);
+			const float3 second = max(lerp(SmokeGridLightSecondMoment(shadowHistory, lobe),
+				SmokeGridLightSecondMoment(shadowCurrent, lobe), alpha), mean * mean);
+			SmokeGridLightStoreLobe(shadowCurrent, lobe, mean, second);
+		}
+		resolvedTransmittance = lerp(SmokeGridLightMeanTransmittance(shadowHistory),
+			SmokeGridLightMeanTransmittance(shadowCurrent), alpha);
+		InterlockedAdd(gSmokeGridLightControl[0].SelfShadowHistoryAccepted, 1u);
+		InterlockedMax(gSmokeGridLightControl[0].SelfShadowMaximumAge, shadowAge);
+	}
+	else
+		InterlockedAdd(gSmokeGridLightControl[0].SelfShadowHistoryRestarted, 1u);
+	SmokeGridLightSetMetadata(shadowCurrent, brick.Generation, gSmokeConstants.SimulationEpoch, shadowAge + 1u,
+		gSmokeConstants.FrameIndex & 0xffu, (float)(shadowAge + 1u) / 8.0, SmokeGridLightEvidence(shadowCurrent),
+		gSmokeConstants.FrameIndex, shadowAge);
+	SmokeGridLightSetSelfShadowEvidence(shadowCurrent, shadowBlock, resolvedTransmittance);
+	if (targetHistory) gSmokeGridLightSelfShadowHistory[cellIndex] = shadowCurrent;
+	else gSmokeGridLightSelfShadowCurrent[cellIndex] = shadowCurrent;
 }

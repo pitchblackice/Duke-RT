@@ -25,14 +25,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		uint neighborIndex, neighborGeneration;
 		if (!SmokeGridLightCellAddress(neighborCell, neighborIndex, neighborGeneration))
 			continue;
-		bool open = true;
-		if (gSmokeConstants.LightMode >= 2u && SmokeShadowTracingReady())
+		// Transport topology is independent of the selected direct-light quality.
+		// Without a scene TLAS the current-frame link fails closed.
+		bool open = false;
+		if (SmokeShadowTracingReady())
 		{
 			const float3 direction = (float3)NRI_SMOKE_GRID_LIGHT_LOBE_AXES[face];
-			open = SmokeFilteredVisibilityEffective() ?
+			open = SmokeFilteredVisibilityResourcesReady() ?
 				SmokePointLightVisibleFiltered(receiver, direction, cellSize, false) :
 				SmokePointLightVisible(receiver, direction, cellSize, false);
 		}
+		else
+			InterlockedAdd(gSmokeGridLightControl[0].TopologyMissingTlas, 1u);
 		if (open)
 		{
 			openMask |= 1u << face;

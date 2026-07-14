@@ -53,6 +53,11 @@ bool SmokeFilteredVisibilityEffective()
 	return (gSmokeConstants.FilteredVisibilityEnabled & NRI_SMOKE_VISIBILITY_FILTERED_EFFECTIVE) != 0u;
 }
 
+bool SmokeFilteredVisibilityResourcesReady()
+{
+	return (gSmokeConstants.FilteredVisibilityEnabled & NRI_SMOKE_VISIBILITY_FILTERED_RESOURCES_READY) != 0u;
+}
+
 StructuredBuffer<RuntimePointLightData> gSmokeRuntimePointLights : register(t0, space4);
 StructuredBuffer<RuntimeLightTileHeaderData> gSmokeRuntimeLightTileHeaders : register(t1, space4);
 StructuredBuffer<uint> gSmokeRuntimeLightTileIndices : register(t2, space4);

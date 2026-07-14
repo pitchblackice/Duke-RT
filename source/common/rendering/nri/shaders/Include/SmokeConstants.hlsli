@@ -76,6 +76,8 @@ struct SmokeConstants
 
 uint SmokeDebugMode(uint packedDebugMode) { return packedDebugMode & 0xffu; }
 uint SmokeMultipleScatterDebug(uint packedDebugMode) { return (packedDebugMode >> 8u) & 3u; }
+bool SmokeSelfShadowEnabled(uint packedDebugMode) { return (packedDebugMode & (1u << 10u)) != 0u; }
+uint SmokeSelfShadowDebug(uint packedDebugMode) { return (packedDebugMode >> 11u) & 3u; }
 float SmokeMultipleScatterScale(uint packedDebugMode)
 {
     return (float)((packedDebugMode >> 16u) & 0xffffu) * (16.0 / 65535.0);

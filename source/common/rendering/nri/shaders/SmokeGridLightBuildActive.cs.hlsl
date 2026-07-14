@@ -13,6 +13,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		SmokeGridLightRecord empty = (SmokeGridLightRecord)0;
 		gSmokeGridLightCurrent[cellIndex] = empty;
 		gSmokeGridLightHistory[cellIndex] = empty;
+		if (SmokeSelfShadowEnabled(gSmokeConstants.DebugMode))
+		{
+			gSmokeGridLightSelfShadowCurrent[cellIndex] = empty;
+			gSmokeGridLightSelfShadowHistory[cellIndex] = empty;
+		}
 		gSmokeGridLightLinks[cellIndex] = 0u;
 	}
 	const uint brickIndex = cellIndex / NRI_SMOKE_GRID_CELLS_PER_BRICK;

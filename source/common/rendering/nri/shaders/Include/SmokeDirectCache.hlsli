@@ -8,7 +8,13 @@
 #define NRI_SMOKE_DIRECT_METADATA_AGE_MASK 0xffu
 #define NRI_SMOKE_DIRECT_METADATA_FRAME_SHIFT 8u
 #define NRI_SMOKE_DIRECT_METADATA_VISIBILITY_SHIFT 16u
+#define NRI_SMOKE_DIRECT_METADATA_COMBINED_SHIFT 24u
 #define NRI_SMOKE_DIRECT_METADATA_VALID 0x80000000u
+#define NRI_SMOKE_DIRECT_MEDIUM_AGE_MASK 7u
+#define NRI_SMOKE_DIRECT_MEDIUM_SELF_SHADOW 0x80u
+#define NRI_SMOKE_DIRECT_MEDIUM_FRAME_SHIFT 8u
+#define NRI_SMOKE_DIRECT_MEDIUM_BLOCK_SHIFT 16u
+#define NRI_SMOKE_DIRECT_MEDIUM_VALID 0x80000000u
 
 bool SmokeDirectGridEnabled()
 {
@@ -114,20 +120,36 @@ uint SmokeDirectDirectionalKey()
 	return SmokeHash(key);
 }
 
-uint SmokeDirectPackMetadata(uint age, uint frameIndex, float visibility)
+uint SmokeDirectPackMetadata(uint age, uint frameIndex, float visibility, float combinedVisibility)
 {
 	const uint packedVisibility = (uint)round(saturate(visibility) * 255.0);
+	const uint packedCombined = (uint)round(saturate(combinedVisibility) * 127.0);
 	return min(age, 255u) |
 		((frameIndex & 0xffu) << NRI_SMOKE_DIRECT_METADATA_FRAME_SHIFT) |
 		(packedVisibility << NRI_SMOKE_DIRECT_METADATA_VISIBILITY_SHIFT) |
+		(packedCombined << NRI_SMOKE_DIRECT_METADATA_COMBINED_SHIFT) |
 		NRI_SMOKE_DIRECT_METADATA_VALID;
+}
+
+uint SmokeDirectSelfShadowBlock(float3 worldPosition)
+{
+	const uint offset = SmokeDirectWorldKey(worldPosition) & 7u;
+	return (gSmokeConstants.FrameIndex + offset) >> 3u;
+}
+
+uint SmokeDirectPackMediumMetadata(uint age, uint frameIndex, uint block)
+{
+	return min(age, 7u) | ((frameIndex & 0xffu) << NRI_SMOKE_DIRECT_MEDIUM_FRAME_SHIFT) |
+		((block & 0x7fffu) << NRI_SMOKE_DIRECT_MEDIUM_BLOCK_SHIFT) |
+		(SmokeSelfShadowEnabled(gSmokeConstants.DebugMode) ? NRI_SMOKE_DIRECT_MEDIUM_SELF_SHADOW : 0u) |
+		NRI_SMOKE_DIRECT_MEDIUM_VALID;
 }
 
 bool SmokeDirectRecordValid(SmokeDirectCacheRecord record)
 {
 	return (record.Metadata & NRI_SMOKE_DIRECT_METADATA_VALID) != 0u &&
 		all(isfinite(record.Radiance)) && isfinite(record.SigmaT) &&
-		all(isfinite(record.WorldPosition));
+		all(isfinite(record.WorldPosition)) && isfinite(record.MediumTransmittance);
 }
 
 uint SmokeDirectRecordAge(SmokeDirectCacheRecord record)
@@ -144,6 +166,22 @@ float SmokeDirectRecordVisibility(SmokeDirectCacheRecord record)
 {
 	return (float)((record.Metadata >> NRI_SMOKE_DIRECT_METADATA_VISIBILITY_SHIFT) & 0xffu) / 255.0;
 }
+
+float SmokeDirectRecordCombinedVisibility(SmokeDirectCacheRecord record)
+{
+	return (float)((record.Metadata >> NRI_SMOKE_DIRECT_METADATA_COMBINED_SHIFT) & 0x7fu) / 127.0;
+}
+
+bool SmokeDirectMediumValid(SmokeDirectCacheRecord record)
+{
+	return (record.MediumMetadata & NRI_SMOKE_DIRECT_MEDIUM_VALID) != 0u &&
+		isfinite(record.MediumTransmittance) && record.MediumTransmittance >= 0.0 && record.MediumTransmittance <= 1.0;
+}
+
+uint SmokeDirectMediumAge(SmokeDirectCacheRecord record) { return record.MediumMetadata & NRI_SMOKE_DIRECT_MEDIUM_AGE_MASK; }
+bool SmokeDirectMediumSelfShadow(SmokeDirectCacheRecord record) { return (record.MediumMetadata & NRI_SMOKE_DIRECT_MEDIUM_SELF_SHADOW) != 0u; }
+uint SmokeDirectMediumFrame(SmokeDirectCacheRecord record) { return (record.MediumMetadata >> NRI_SMOKE_DIRECT_MEDIUM_FRAME_SHIFT) & 0xffu; }
+uint SmokeDirectMediumBlock(SmokeDirectCacheRecord record) { return (record.MediumMetadata >> NRI_SMOKE_DIRECT_MEDIUM_BLOCK_SHIFT) & 0x7fffu; }
 
 bool SmokeDirectRecordsCompatible(SmokeDirectCacheRecord a, SmokeDirectCacheRecord b, uint3 froxel)
 {

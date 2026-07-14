@@ -118,24 +118,31 @@ void NRISmokeGridLighting::DestroyResources(const NRISmokeGridServices& services
 	DestroyBuffer(services, mScatterBounceB);
 	DestroyBuffer(services, mScatterMetadata);
 	DestroyBuffer(services, mScatterActive);
+	DestroyBuffer(services, mSelfShadowCurrent);
+	DestroyBuffer(services, mSelfShadowHistory);
 	mResourceCellCapacity = 0u;
 	mResourceBrickCapacity = 0u;
 	mResourceScatterProbeCapacity = 0u;
 	mResourceScatterRequested = false;
+	mResourceSelfShadowRequested = false;
 	mStatus.resourcesReady = false;
 	mResourcesInitialized = false;
 	mStatus.fieldBytes = mStatus.workBytes = mStatus.linkBytes = mStatus.proposalBytes = mStatus.filterBytes = mStatus.totalBytes = 0u;
 	mStatus.scatterSeedBytes = mStatus.scatterBounceBytes = mStatus.scatterMetadataBytes = mStatus.scatterActiveBytes = mStatus.scatterBytes = 0u;
 	mStatus.multipleScatterAllocated = false;
 	mStatus.multipleScatterEffective = false;
+	mStatus.selfShadowAllocated = false;
+	mStatus.selfShadowEffective = false;
+	mStatus.selfShadowFieldBytes = 0u;
 }
 
 bool NRISmokeGridLighting::EnsureResources(const NRISmokeGridServices& services, uint32_t cellCapacity,
-	bool filterRequested, bool multipleScatterRequested)
+	bool filterRequested, bool multipleScatterRequested, bool selfShadowRequested)
 {
 	const bool ready = mCurrent.buffer != nullptr && mHistory.buffer != nullptr && mActive.buffer != nullptr &&
 		mControl.buffer != nullptr && mLinks.buffer != nullptr && mProposals.buffer != nullptr && mResourceCellCapacity == cellCapacity &&
-		((mFiltered.buffer != nullptr) == filterRequested) && mResourceScatterRequested == multipleScatterRequested;
+		((mFiltered.buffer != nullptr) == filterRequested) && mResourceScatterRequested == multipleScatterRequested &&
+		mResourceSelfShadowRequested == selfShadowRequested;
 	if (ready)
 		return true;
 	services.WaitForCommands("smoke-grid-lighting-resize");
@@ -150,7 +157,10 @@ bool NRISmokeGridLighting::EnsureResources(const NRISmokeGridServices& services,
 		!CreateBuffer(services, mControl, sizeof(NRISmokeGridLightControlGpu), sizeof(NRISmokeGridLightControlGpu), storage) ||
 		!CreateBuffer(services, mLinks, cells * sizeof(uint32_t) * 4u, sizeof(uint32_t) * 4u, storage) ||
 		!CreateBuffer(services, mProposals, bricks * sizeof(NRISmokeGridLightProposalGpu), sizeof(NRISmokeGridLightProposalGpu), storage) ||
-		(filterRequested && !CreateBuffer(services, mFiltered, cells * sizeof(NRISmokeGridLightRecordGpu), sizeof(NRISmokeGridLightRecordGpu), storage)))
+		(filterRequested && !CreateBuffer(services, mFiltered, cells * sizeof(NRISmokeGridLightRecordGpu), sizeof(NRISmokeGridLightRecordGpu), storage)) ||
+		(selfShadowRequested &&
+			(!CreateBuffer(services, mSelfShadowCurrent, cells * sizeof(NRISmokeGridLightRecordGpu), sizeof(NRISmokeGridLightRecordGpu), storage) ||
+			 !CreateBuffer(services, mSelfShadowHistory, cells * sizeof(NRISmokeGridLightRecordGpu), sizeof(NRISmokeGridLightRecordGpu), storage))))
 	{
 		DestroyResources(services);
 		mStatus.failureReason = "allocation-failed";
@@ -179,6 +189,7 @@ bool NRISmokeGridLighting::EnsureResources(const NRISmokeGridServices& services,
 	mResourceBrickCapacity = (uint32_t)bricks;
 	mResourceScatterProbeCapacity = (uint32_t)scatterProbes;
 	mResourceScatterRequested = multipleScatterRequested;
+	mResourceSelfShadowRequested = selfShadowRequested;
 	mStatus.cellCapacity = cellCapacity;
 	mStatus.filterAllocated = mFiltered.buffer != nullptr;
 	mStatus.fieldBytes = mCurrent.memorySize + mHistory.memorySize;
@@ -190,10 +201,12 @@ bool NRISmokeGridLighting::EnsureResources(const NRISmokeGridServices& services,
 	mStatus.scatterMetadataBytes = mScatterMetadata.memorySize;
 	mStatus.scatterActiveBytes = mScatterActive.memorySize;
 	mStatus.scatterBytes = mStatus.scatterSeedBytes + mStatus.scatterBounceBytes + mStatus.scatterMetadataBytes + mStatus.scatterActiveBytes;
+	mStatus.selfShadowFieldBytes = mSelfShadowCurrent.memorySize + mSelfShadowHistory.memorySize;
 	mStatus.filterBytes = mFiltered.memorySize;
 	mStatus.totalBytes = mStatus.fieldBytes + mStatus.workBytes + mStatus.linkBytes + mStatus.proposalBytes +
-		mStatus.scatterBytes + mStatus.filterBytes;
+		mStatus.scatterBytes + mStatus.filterBytes + mStatus.selfShadowFieldBytes;
 	mStatus.multipleScatterAllocated = scatterAllocated;
+	mStatus.selfShadowAllocated = selfShadowRequested && mSelfShadowCurrent.buffer != nullptr && mSelfShadowHistory.buffer != nullptr;
 	mStatus.scatterProbeCapacity = scatterAllocated ? mResourceScatterProbeCapacity : 0u;
 	mStatus.resourcesReady = true;
 	mStatus.failureReason = "none";
@@ -204,19 +217,22 @@ bool NRISmokeGridLighting::EnsureResources(const NRISmokeGridServices& services,
 bool NRISmokeGridLighting::PrepareFrame(const NRISmokeGridServices& services, const NRISmokeSettings& settings,
 	uint32_t cellCapacity, uint32_t frameIndex, uint32_t simulationEpoch)
 {
-	mStatus.requested = settings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy || settings.multipleScatter;
+	mStatus.requested = settings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy ||
+		settings.multipleScatter || settings.selfShadow;
 	mStatus.requestedBackend = settings.emissiveBackend;
 	mStatus.filterRequested = settings.emissiveWorldFilter;
 	mStatus.filterDecision = settings.emissiveWorldFilter ? "requested" : "disabled/variance-gate-not-accepted";
 	mStatus.proposalDecision = settings.emissiveLocalProposals ? "brick-top16/uniform75+global25" : "global-cdf/manual-disable";
 	mStatus.multipleScatterRequested = settings.multipleScatter;
-	mStatus.scatterDecision = !settings.multipleScatter ? "disabled/phase12d-pending" : "gpu-probe4x4x4/experimental";
+	mStatus.scatterDecision = !settings.multipleScatter ? "disabled" : "gpu-probe4x4x4/boundary-aware";
+	mStatus.selfShadowRequested = settings.selfShadow;
+	mStatus.selfShadowDecision = settings.selfShadow ? "gpu-w8/experimental" : "disabled";
 	if (!mStatus.initialized)
 	{
 		mStatus.failureReason = "pipelines-unavailable";
 		return false;
 	}
-	if (!mStatus.requested && !settings.multipleScatter)
+	if (!mStatus.requested)
 	{
 		mStatus.effectiveBackend = (uint32_t)NRISmokeEmissiveBackend::Legacy;
 		mStatus.authority = "legacy";
@@ -224,11 +240,14 @@ bool NRISmokeGridLighting::PrepareFrame(const NRISmokeGridServices& services, co
 	}
 	if (simulationEpoch != mSimulationEpoch)
 		Reset(simulationEpoch, "simulation-epoch");
-	if (!EnsureResources(services, cellCapacity, settings.emissiveWorldFilter, settings.multipleScatter))
+	if (!EnsureResources(services, cellCapacity, settings.emissiveWorldFilter, settings.multipleScatter, settings.selfShadow))
 		return false;
 	mStatus.multipleScatterEffective = settings.multipleScatter && mStatus.multipleScatterAllocated;
 	if (settings.multipleScatter && !mStatus.multipleScatterAllocated)
 		mStatus.scatterDecision = "allocation-failed/direct-only";
+	mStatus.selfShadowEffective = settings.selfShadow && mStatus.selfShadowAllocated;
+	if (settings.selfShadow && !mStatus.selfShadowAllocated)
+		mStatus.selfShadowDecision = "allocation-failed/unshadowed";
 	mStatus.effectiveBackend = settings.emissiveBackend == (uint32_t)NRISmokeEmissiveBackend::Legacy ?
 		(uint32_t)NRISmokeEmissiveBackend::Legacy :
 		(settings.emissiveBackend == (uint32_t)NRISmokeEmissiveBackend::Compare ?
@@ -243,8 +262,9 @@ bool NRISmokeGridLighting::PrepareFrame(const NRISmokeGridServices& services, co
 void NRISmokeGridLighting::Barrier(const NRISmokeGridServices& services)
 {
 	NRIBufferResource* resources[] = { &mCurrent, &mHistory, &mActive, &mControl, &mLinks, &mProposals, &mFiltered,
-		&mScatterSeed, &mScatterBounceA, &mScatterBounceB, &mScatterMetadata, &mScatterActive };
-	nri::BufferBarrierDesc barriers[12] = {};
+		&mScatterSeed, &mScatterBounceA, &mScatterBounceB, &mScatterMetadata, &mScatterActive,
+		&mSelfShadowCurrent, &mSelfShadowHistory };
+	nri::BufferBarrierDesc barriers[14] = {};
 	uint32_t resourceCount = 0u;
 	for (NRIBufferResource* resource : resources)
 	{
@@ -283,8 +303,9 @@ bool NRISmokeGridLighting::Record(const NRISmokeGridServices& services, const NR
 	if (!mResourcesInitialized)
 	{
 		NRIBufferResource* resources[] = { &mCurrent, &mHistory, &mActive, &mControl, &mLinks, &mProposals, &mFiltered,
-			&mScatterSeed, &mScatterBounceA, &mScatterBounceB, &mScatterMetadata, &mScatterActive };
-		nri::BufferBarrierDesc barriers[12] = {};
+			&mScatterSeed, &mScatterBounceA, &mScatterBounceB, &mScatterMetadata, &mScatterActive,
+			&mSelfShadowCurrent, &mSelfShadowHistory };
+		nri::BufferBarrierDesc barriers[14] = {};
 		uint32_t resourceCount = 0u;
 		for (NRIBufferResource* resource : resources)
 		{
@@ -308,6 +329,8 @@ bool NRISmokeGridLighting::Record(const NRISmokeGridServices& services, const NR
 	Barrier(services);
 	Dispatch(services, NRISmokeGridLightingPass::BuildActive, constants, Groups(mResourceCellCapacity));
 	Barrier(services);
+	Dispatch(services, NRISmokeGridLightingPass::BuildLinks, constants, Groups(mResourceCellCapacity));
+	Barrier(services);
 	const bool directEnabled = settings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy && emissiveResourcesReady;
 	if (directEnabled && settings.emissiveLocalProposals)
 	{
@@ -324,8 +347,6 @@ bool NRISmokeGridLighting::Record(const NRISmokeGridServices& services, const NR
 			Barrier(services);
 		}
 	}
-	Dispatch(services, NRISmokeGridLightingPass::BuildLinks, constants, Groups(mResourceCellCapacity));
-	Barrier(services);
 	if (directEnabled && settings.emissiveWorldFilter && mFiltered.buffer != nullptr)
 	{
 		Dispatch(services, NRISmokeGridLightingPass::Filter, constants, Groups(mResourceCellCapacity));
@@ -371,7 +392,9 @@ bool NRISmokeGridLighting::GetStorageDescriptors(std::array<const nri::Descripto
 		mScatterBounceA.storageView != nullptr ? mScatterBounceA.storageView : mLinks.storageView,
 		mScatterBounceB.storageView != nullptr ? mScatterBounceB.storageView : mLinks.storageView,
 		mScatterMetadata.storageView != nullptr ? mScatterMetadata.storageView : mLinks.storageView,
-		mScatterActive.storageView != nullptr ? mScatterActive.storageView : mActive.storageView };
+		mScatterActive.storageView != nullptr ? mScatterActive.storageView : mActive.storageView,
+		mSelfShadowCurrent.storageView != nullptr ? mSelfShadowCurrent.storageView : mCurrent.storageView,
+		mSelfShadowHistory.storageView != nullptr ? mSelfShadowHistory.storageView : mHistory.storageView };
 	return true;
 }
 

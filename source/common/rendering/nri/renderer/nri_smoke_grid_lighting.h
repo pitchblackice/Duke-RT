@@ -30,7 +30,7 @@ struct NRISmokeGridLightingDirectSeedSnapshot
 class NRISmokeGridLighting
 {
 public:
-	static constexpr uint32_t StorageDescriptorCount = 12u;
+	static constexpr uint32_t StorageDescriptorCount = 14u;
 
 	bool Initialize(const NRISmokeGridServices& services, nri::PipelineLayout* sharedLayout);
 	bool PrepareFrame(const NRISmokeGridServices& services, const NRISmokeSettings& settings,
@@ -50,7 +50,7 @@ public:
 
 private:
 	bool EnsureResources(const NRISmokeGridServices& services, uint32_t cellCapacity, bool filterRequested,
-		bool multipleScatterRequested);
+		bool multipleScatterRequested, bool selfShadowRequested);
 	bool CreateBuffer(const NRISmokeGridServices& services, NRIBufferResource& out, uint64_t size,
 		uint32_t stride, nri::BufferUsageBits usage);
 	void DestroyBuffer(const NRISmokeGridServices& services, NRIBufferResource& resource);
@@ -74,10 +74,13 @@ private:
 	NRIBufferResource mScatterBounceB;
 	NRIBufferResource mScatterMetadata;
 	NRIBufferResource mScatterActive;
+	NRIBufferResource mSelfShadowCurrent;
+	NRIBufferResource mSelfShadowHistory;
 	uint32_t mResourceCellCapacity = 0;
 	uint32_t mResourceBrickCapacity = 0;
 	uint32_t mResourceScatterProbeCapacity = 0;
 	bool mResourceScatterRequested = false;
+	bool mResourceSelfShadowRequested = false;
 	uint32_t mFieldPing = 0;
 	uint32_t mLastRecordedFrame = UINT32_MAX;
 	uint32_t mSimulationEpoch = 0;

@@ -569,7 +569,7 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 	mStatus.representationEffective = mStatus.gridReady ? mSettings.representation : 0u;
 	mStatus.representationFallback = mSettings.representation != 0u && !mStatus.gridReady ? "grid-unavailable" : "none";
 	if (mStatus.gridReady &&
-		(mSettings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy || mSettings.multipleScatter))
+		(mSettings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy || mSettings.multipleScatter || mSettings.selfShadow))
 	{
 		const NRISmokeGridStatusSnapshot& gridStatus = mGrid.GetStatusSnapshot();
 		if (!mGridLighting.PrepareFrame(BuildGridServices(renderer), mSettings, gridStatus.cellCapacity,
@@ -942,8 +942,13 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	std::copy(renderer.mCurrentJitter, renderer.mCurrentJitter + 2, constants.currentJitter);
 	const float scatterScale = mSettings.multipleScatter ? mSettings.multipleScatterScale : 0.0f;
 	const uint32_t packedScatterScale = (uint32_t)std::lround((double)std::clamp(scatterScale, 0.0f, 16.0f) * (65535.0 / 16.0));
+	const bool selfShadowEffective = mSettings.selfShadow &&
+		(mSettings.emissiveBackend == (uint32_t)NRISmokeEmissiveBackend::Legacy ||
+		 mGridLighting.GetStatusSnapshot().selfShadowEffective);
 	constants.debugMode = (mSettings.debugMode & 0xffu) |
 		((mSettings.multipleScatter ? mSettings.multipleScatterDebug : 0u) << 8u) |
+		((selfShadowEffective ? 1u : 0u) << 10u) |
+		((selfShadowEffective ? mSettings.selfShadowDebug : 0u) << 11u) |
 		(packedScatterScale << 16u);
 	const bool pointLightsReady = mSettings.pointLights && lightBuffersReady && renderer.mBoundRuntimeLightCount > 0;
 	const bool directionalLightReady = mSettings.directionalLight && renderer.mDirectionalLightState.enabled;
@@ -1591,6 +1596,10 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		(double)world.scatterMetadataBytes / (1024.0 * 1024.0),
 		(double)world.scatterActiveBytes / (1024.0 * 1024.0),
 		(double)world.scatterBytes / (1024.0 * 1024.0), world.scatterDecision);
+	Printf("NRI PT smoke self shadow: requested=%s allocated=%s effective=%s debug=%u world_field_mib=%.3f decision=%s field_readback=0\n",
+		world.selfShadowRequested ? "yes" : "no", world.selfShadowAllocated ? "yes" : "no",
+		world.selfShadowEffective ? "yes" : "no", mSettings.selfShadowDebug,
+		(double)world.selfShadowFieldBytes / (1024.0 * 1024.0), world.selfShadowDecision);
 	const char* placement = mStatus.routePlacement == (uint32_t)NRISmokeRoutePlacement::DlrrPostUpscale ? "dlrr_post_upscale" :
 		(mStatus.routePlacement == (uint32_t)NRISmokeRoutePlacement::DlrrPreUpscaleMainInput ? "dlrr_pre_upscale_main" : "standard_pre_upscale");
 	const char* inputName = mStatus.inputSlot < (uint32_t)NRIRenderer::FrameTextureSlot::Count ? renderer.GetFrameTextureSlotName((NRIRenderer::FrameTextureSlot)mStatus.inputSlot) : "none";

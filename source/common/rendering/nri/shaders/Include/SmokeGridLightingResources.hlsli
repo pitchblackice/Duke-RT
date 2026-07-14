@@ -85,6 +85,12 @@ void SmokeGridLightWorldCoordinates(float3 worldPosition, float cellSize, out in
 
 SmokeGridLightRecord SmokeGridLightLoadShadingRecord(uint cellIndex)
 {
+	if (SmokeSelfShadowEnabled(gSmokeConstants.DebugMode))
+	{
+		if ((gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_FIELD_PING) != 0u)
+			return gSmokeGridLightSelfShadowHistory[cellIndex];
+		return gSmokeGridLightSelfShadowCurrent[cellIndex];
+	}
 	if ((gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_FILTER_ENABLED) != 0u)
 		return gSmokeGridLightFiltered[cellIndex];
 	if ((gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_FIELD_PING) != 0u)
@@ -92,13 +98,11 @@ SmokeGridLightRecord SmokeGridLightLoadShadingRecord(uint cellIndex)
 	return gSmokeGridLightCurrent[cellIndex];
 }
 
+bool SmokeGridLightDirectedFaceOpen(int3 cell, uint face);
+
 bool SmokeGridLightFaceOpen(int3 cell, uint axis)
 {
-	uint cellIndex, generation;
-	if (!SmokeGridLightCellAddress(cell, cellIndex, generation))
-		return false;
-	const uint4 link = gSmokeGridLightLinks[cellIndex];
-	return link.y == generation && link.z == gSmokeConstants.SimulationEpoch && (link.x & (1u << (axis * 2u))) != 0u;
+	return SmokeGridLightDirectedFaceOpen(cell, axis * 2u);
 }
 
 bool SmokeGridLightPathOpen(int3 start, uint3 order, uint axisCount, uint3 targetOffset)
@@ -218,8 +222,11 @@ bool SmokeGridLightDirectedFaceOpen(int3 cell, uint face)
 		return false;
 	const uint4 neighborLink = gSmokeGridLightLinks[neighborIndex];
 	const uint oppositeFace = face ^ 1u;
-	return neighborLink.y == neighborGeneration && neighborLink.z == gSmokeConstants.SimulationEpoch &&
+	const bool reciprocal = neighborLink.y == neighborGeneration && neighborLink.z == gSmokeConstants.SimulationEpoch &&
 		neighborLink.w == gSmokeConstants.FrameIndex && (neighborLink.x & (1u << oppositeFace)) != 0u;
+	if (!reciprocal)
+		InterlockedAdd(gSmokeGridLightControl[0].TopologyAsymmetric, 1u);
+	return reciprocal;
 }
 
 uint3 SmokeGridScatterLocalProbe(uint localIndex)

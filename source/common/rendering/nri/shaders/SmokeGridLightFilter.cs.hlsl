@@ -33,7 +33,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		[unroll]
 		for (uint face = 0u; face < 6u; ++face)
 		{
-			if ((gSmokeGridLightLinks[cellIndex].x & (1u << face)) == 0u)
+			if (!SmokeGridLightDirectedFaceOpen(cell, face))
 				continue;
 			uint neighborIndex, neighborGeneration;
 			if (!SmokeGridLightCellAddress(cell + NRI_SMOKE_GRID_LIGHT_LOBE_AXES[face], neighborIndex, neighborGeneration))

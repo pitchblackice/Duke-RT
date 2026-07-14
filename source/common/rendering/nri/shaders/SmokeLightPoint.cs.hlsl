@@ -2,6 +2,7 @@
 #include "Include/SmokeFroxel.hlsli"
 #include "Include/SmokeLighting.hlsli"
 #include "Include/SmokeDirectCache.hlsli"
+#include "Include/SmokeGridTransmittance.hlsli"
 
 [numthreads(64, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -41,6 +42,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	// Explicit point, directional, and emissive families add real in-scattering.
 	float3 scattering = 0.0;
 	float visibleWeight = 0.0;
+	float mediumWeight = 0.0;
+	float combinedWeight = 0.0;
 	float unshadowedWeight = 0.0;
 	uint receiverSamples = 0u;
 	if (medium.a > 0.0 && any(medium.rgb > 0.0) &&
@@ -119,6 +122,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			if (gridDirect)
 				receiverSamples += sampleCount;
 			float visibleSamples = 0.0;
+			float transmittanceSamples = 0.0;
+			float combinedSamples = 0.0;
 			float3 particleContribution = 0.0;
 			[loop]
 			for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
@@ -168,7 +173,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					}
 				}
 				if (gridDirect)
+				{
+					uint marchSteps;
+					bool marchTruncated;
+					const float mediumTransmittance = SmokeGridMediumTransmittance(receiverPosition,
+						lightDirection, sampledDistance, marchSteps, marchTruncated);
 					visibleSamples += visibility;
+					transmittanceSamples += mediumTransmittance;
+					combinedSamples += visibility * mediumTransmittance;
+				}
 				else
 				{
 					const float phase = SmokeHenyeyGreenstein(dot(lightDirection, viewRay), anisotropy);
@@ -184,6 +197,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				continue;
 			}
 			const float fractionalVisibility = visibleSamples / (float)sampleCount;
+			const float fractionalTransmittance = transmittanceSamples / (float)sampleCount;
+			const float fractionalCombined = combinedSamples / (float)sampleCount;
 			const float phase = SmokeHenyeyGreenstein(dot(centerDirection, viewRay), anisotropy);
 			const float3 unclampedLightRadiance = max(light.color, 0.0) * attenuation;
 			if (lightingDiagnostics && any(unclampedLightRadiance > 32.0))
@@ -194,16 +209,23 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const float sampleWeight = dot(max(unshadowedScattering, 0.0), float3(0.2126, 0.7152, 0.0722));
 			unshadowedWeight += sampleWeight;
 			visibleWeight += sampleWeight * fractionalVisibility;
+			mediumWeight += sampleWeight * fractionalTransmittance;
+			combinedWeight += sampleWeight * fractionalCombined;
 		}
 	}
 	if (gridDirect)
 	{
 		const float visibility = unshadowedWeight > 1e-6 ? visibleWeight / unshadowedWeight : 0.0;
+		const float mediumTransmittance = unshadowedWeight > 1e-6 ? mediumWeight / unshadowedWeight : 1.0;
+		const float combinedVisibility = unshadowedWeight > 1e-6 ? combinedWeight / unshadowedWeight : 0.0;
 		SmokeDirectCacheRecord record;
 		record.Radiance = max(scattering, 0.0);
 		record.SigmaT = medium.a;
 		record.WorldPosition = froxelPosition;
-		record.Metadata = SmokeDirectPackMetadata(1u, gSmokeConstants.FrameIndex, visibility);
+		record.Metadata = SmokeDirectPackMetadata(1u, gSmokeConstants.FrameIndex, visibility, combinedVisibility);
+		record.MediumTransmittance = saturate(mediumTransmittance);
+		record.MediumMetadata = SmokeDirectPackMediumMetadata(0u, gSmokeConstants.FrameIndex,
+			SmokeDirectSelfShadowBlock(froxelPosition));
 		gSmokeDirectCurrent[froxelIndex] = record;
 		if (receiverSamples > 0u)
 			SmokeDirectAccumulateVisibilityDiagnostics(visibility, receiverSamples, lightingDiagnostics);

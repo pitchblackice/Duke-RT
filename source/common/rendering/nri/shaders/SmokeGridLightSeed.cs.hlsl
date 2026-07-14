@@ -1,12 +1,21 @@
 #include "Include/SmokeEmissiveReservoir.hlsli"
 #include "Include/SmokeGridLightingResources.hlsli"
+#include "Include/SmokeGridTransmittance.hlsli"
 
-void SmokeGridLightWriteTarget(uint cellIndex, SmokeGridLightRecord record)
+void SmokeGridLightWriteTarget(uint cellIndex, SmokeGridLightRecord record, SmokeGridLightRecord selfShadowRecord)
 {
 	if ((gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_FIELD_PING) != 0u)
+	{
 		gSmokeGridLightHistory[cellIndex] = record;
+		if (SmokeSelfShadowEnabled(gSmokeConstants.DebugMode))
+			gSmokeGridLightSelfShadowHistory[cellIndex] = selfShadowRecord;
+	}
 	else
+	{
 		gSmokeGridLightCurrent[cellIndex] = record;
+		if (SmokeSelfShadowEnabled(gSmokeConstants.DebugMode))
+			gSmokeGridLightSelfShadowCurrent[cellIndex] = selfShadowRecord;
+	}
 }
 
 uint SmokeGridLightSeedForCell(int3 cell, uint sampleIndex)
@@ -66,9 +75,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		InterlockedAdd(gSmokeGridLightControl[0].ProposalFallbacks, 1u);
 	float3 mean[6];
 	float3 second[6];
-	[unroll] for (uint lobe = 0u; lobe < 6u; ++lobe) { mean[lobe] = 0.0; second[lobe] = 0.0; }
+	float3 selfShadowMean[6];
+	float3 selfShadowSecond[6];
+	[unroll] for (uint lobe = 0u; lobe < 6u; ++lobe)
+	{
+		mean[lobe] = 0.0;
+		second[lobe] = 0.0;
+		selfShadowMean[lobe] = 0.0;
+		selfShadowSecond[lobe] = 0.0;
+	}
 	uint physicalZero = 0u;
 	uint visible = 0u;
+	float transmittanceSum = 0.0;
+	uint transmittanceCount = 0u;
 	[loop]
 	for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
 	{
@@ -125,6 +144,27 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			isVisible = SmokeFilteredVisibilityEffective() ?
 				SmokePointLightVisibleFiltered(receiverPosition, lightDirection, lightDistance, false) :
 				SmokePointLightVisible(receiverPosition, lightDirection, lightDistance, false);
+		float mediumTransmittance = 1.0;
+		if (SmokeSelfShadowEnabled(gSmokeConstants.DebugMode))
+		{
+			uint marchSteps;
+			bool truncated;
+			mediumTransmittance = SmokeGridMediumTransmittance(receiverPosition, lightDirection, lightDistance,
+				marchSteps, truncated);
+			InterlockedAdd(gSmokeGridLightControl[0].SelfShadowSamples, 1u);
+			InterlockedAdd(gSmokeGridLightControl[0].SelfShadowSteps, marchSteps);
+			if (truncated) InterlockedAdd(gSmokeGridLightControl[0].SelfShadowTruncated, 1u);
+			if (!isfinite(mediumTransmittance))
+			{
+				mediumTransmittance = 0.0;
+				InterlockedAdd(gSmokeGridLightControl[0].SelfShadowNanRejects, 1u);
+			}
+			else if (mediumTransmittance <= 1e-5) InterlockedAdd(gSmokeGridLightControl[0].SelfShadowTransmittanceZero, 1u);
+			else if (mediumTransmittance >= 1.0 - 1e-5) InterlockedAdd(gSmokeGridLightControl[0].SelfShadowTransmittanceOne, 1u);
+			else InterlockedAdd(gSmokeGridLightControl[0].SelfShadowTransmittancePartial, 1u);
+			transmittanceSum += saturate(mediumTransmittance);
+			transmittanceCount++;
+		}
 		if (!isVisible)
 		{
 			physicalZero++;
@@ -146,22 +186,33 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const float3 contribution = estimator * (weights[lobe] / max(weightSum, 1e-6));
 			mean[lobe] += contribution / (float)sampleCount;
 			second[lobe] += contribution * contribution / (float)sampleCount;
+			const float3 selfShadowContribution = contribution * mediumTransmittance;
+			selfShadowMean[lobe] += selfShadowContribution / (float)sampleCount;
+			selfShadowSecond[lobe] += selfShadowContribution * selfShadowContribution / (float)sampleCount;
 		}
 	}
 	SmokeGridLightRecord output = (SmokeGridLightRecord)0;
+	SmokeGridLightRecord selfShadowOutput = (SmokeGridLightRecord)0;
 	bool finite = true;
 	[unroll]
 	for (uint lobe = 0u; lobe < 6u; ++lobe)
 	{
 		finite = finite && all(isfinite(mean[lobe])) && all(isfinite(second[lobe])) &&
-			all(mean[lobe] <= 65504.0) && all(second[lobe] <= 65504.0);
-		SmokeGridLightStoreLobe(output, lobe, finite ? mean[lobe] : 0.0, finite ? second[lobe] : 0.0);
+			all(mean[lobe] <= 65504.0) && all(second[lobe] <= 65504.0) &&
+			all(isfinite(selfShadowMean[lobe])) && all(isfinite(selfShadowSecond[lobe])) &&
+			all(selfShadowMean[lobe] <= 65504.0) && all(selfShadowSecond[lobe] <= 65504.0);
 	}
 	if (!finite)
 	{
 		InterlockedAdd(gSmokeGridLightControl[0].OverflowRejects, 1u);
-		SmokeGridLightWriteTarget(cellIndex, output);
+		SmokeGridLightWriteTarget(cellIndex, output, selfShadowOutput);
 		return;
+	}
+	[unroll]
+	for (uint lobe = 0u; lobe < 6u; ++lobe)
+	{
+		SmokeGridLightStoreLobe(output, lobe, mean[lobe], second[lobe]);
+		SmokeGridLightStoreLobe(selfShadowOutput, lobe, selfShadowMean[lobe], selfShadowSecond[lobe]);
 	}
 	uint evidence = NRI_SMOKE_GRID_LIGHT_EVIDENCE_SUPPORT | NRI_SMOKE_GRID_LIGHT_EVIDENCE_VALID;
 	if (physicalZero > 0u) evidence |= NRI_SMOKE_GRID_LIGHT_EVIDENCE_PHYSICAL_ZERO;
@@ -169,7 +220,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	SmokeGridLightSetMetadata(output, brick.Generation, gSmokeConstants.SimulationEpoch,
 		sampleCount, gSmokeConstants.FrameIndex & 0xffu, (float)sampleCount / 64.0, evidence,
 		gSmokeConstants.FrameIndex, 0u);
-	SmokeGridLightWriteTarget(cellIndex, output);
+	SmokeGridLightSetMetadata(selfShadowOutput, brick.Generation, gSmokeConstants.SimulationEpoch,
+		sampleCount, gSmokeConstants.FrameIndex & 0xffu, (float)sampleCount / 8.0, evidence,
+		gSmokeConstants.FrameIndex, 0u);
+	const uint blockOffset = SmokeHash(asuint(cell.x) ^ SmokeHash(asuint(cell.y)) ^ SmokeHash(asuint(cell.z))) & 7u;
+	SmokeGridLightSetSelfShadowEvidence(selfShadowOutput, (gSmokeConstants.FrameIndex + blockOffset) >> 3u,
+		transmittanceCount > 0u ? transmittanceSum / (float)transmittanceCount : 1.0);
+	SmokeGridLightWriteTarget(cellIndex, output, selfShadowOutput);
 	InterlockedAdd(gSmokeGridLightControl[0].ScheduledCount, 1u);
 	if (physicalZero > 0u) InterlockedAdd(gSmokeGridLightControl[0].PhysicalZero, physicalZero);
 	if (visible > 0u) InterlockedAdd(gSmokeGridLightControl[0].Visible, visible);

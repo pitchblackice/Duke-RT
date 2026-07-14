@@ -68,6 +68,8 @@ struct SmokeDirectCacheRecord
 	float SigmaT;
 	float3 WorldPosition;
 	uint Metadata;
+	float MediumTransmittance;
+	uint MediumMetadata;
 };
 
 struct SmokeEmissiveReservoirRecord
@@ -278,6 +280,8 @@ RWStructuredBuffer<float4> gSmokeGridScatterBounceA : register(u38, space1);
 RWStructuredBuffer<float4> gSmokeGridScatterBounceB : register(u39, space1);
 RWStructuredBuffer<SmokeGridScatterMetadata> gSmokeGridScatterMetadata : register(u40, space1);
 RWStructuredBuffer<uint> gSmokeGridScatterActive : register(u41, space1);
+RWStructuredBuffer<SmokeGridLightRecord> gSmokeGridLightSelfShadowCurrent : register(u42, space1);
+RWStructuredBuffer<SmokeGridLightRecord> gSmokeGridLightSelfShadowHistory : register(u43, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);

@@ -47,6 +47,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	// Fractional penumbra samples can still fluctuate within the bounded gate.
 	const float currentVisibility = SmokeDirectRecordVisibility(current);
 	const float historyVisibility = SmokeDirectRecordVisibility(history);
+	const float currentCombined = SmokeDirectRecordCombinedVisibility(current);
 	const float currentLuminance = dot(max(current.Radiance, 0.0), float3(0.2126, 0.7152, 0.0722));
 	const float historyLuminance = dot(max(history.Radiance, 0.0), float3(0.2126, 0.7152, 0.0722));
 	const float signalTolerance = max(max(currentLuminance, historyLuminance) * 0.75, 0.02);
@@ -60,6 +61,26 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint age = min(SmokeDirectRecordAge(history) + 1u, 255u);
 	const float historyWeight = min((float)(age - 1u) / (float)age, 0.875);
 	const float visibility = lerp(currentVisibility, historyVisibility, historyWeight);
+	float resolvedCombined = currentCombined;
+	float resolvedTransmittance = current.MediumTransmittance;
+	uint mediumAge = 0u;
+	uint mediumBlock = SmokeDirectMediumBlock(current);
+	if (SmokeSelfShadowEnabled(gSmokeConstants.DebugMode) && SmokeDirectMediumValid(current) &&
+		SmokeDirectMediumValid(history) && SmokeDirectMediumSelfShadow(history) &&
+		SmokeDirectMediumFrame(history) == ((gSmokeConstants.FrameIndex - 1u) & 0xffu) &&
+		SmokeDirectMediumBlock(history) == mediumBlock && SmokeDirectMediumAge(history) < 7u)
+	{
+		mediumAge = SmokeDirectMediumAge(history) + 1u;
+		const float mediumAlpha = rcp((float)(mediumAge + 1u));
+		resolvedTransmittance = lerp(history.MediumTransmittance, current.MediumTransmittance, mediumAlpha);
+		resolvedCombined = lerp(SmokeDirectRecordCombinedVisibility(history), currentCombined, mediumAlpha);
+	}
+	else if (!SmokeSelfShadowEnabled(gSmokeConstants.DebugMode))
+	{
+		resolvedTransmittance = 1.0;
+		resolvedCombined = visibility;
+		mediumBlock = 0u;
+	}
 	if (!all(isfinite(current.Radiance)) || !isfinite(visibility))
 	{
 		if (diagnostics) InterlockedAdd(gSmokeControl[0].DirectNanRejects, 1u);
@@ -68,7 +89,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	// Radiance contains current-view attenuation and HG phase. Reuse only the
 	// view-independent fractional visibility; blending prior-camera radiance
 	// makes a stationary plume contract or expand during camera rotation.
-	current.Metadata = SmokeDirectPackMetadata(age, gSmokeConstants.FrameIndex, visibility);
+	current.Metadata = SmokeDirectPackMetadata(age, gSmokeConstants.FrameIndex, visibility, resolvedCombined);
+	current.MediumTransmittance = saturate(resolvedTransmittance);
+	current.MediumMetadata = SmokeDirectPackMediumMetadata(mediumAge, gSmokeConstants.FrameIndex, mediumBlock);
 	gSmokeDirectCurrent[froxelIndex] = current;
 	if (diagnostics)
 	{

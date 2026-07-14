@@ -235,6 +235,8 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.multipleScatterScale = std::clamp((float)nri_ptsmokemultiplescatterscale, 0.0f, 16.0f);
 	settings.multipleScatterIterations = (uint32_t)std::clamp((int)nri_ptsmokemultiplescatteriterations, 0, 4);
 	settings.multipleScatterDebug = (uint32_t)std::clamp((int)nri_ptsmokemultiplescatterdebug, 0, 3);
+	settings.selfShadow = (bool)nri_ptsmokeselfshadow;
+	settings.selfShadowDebug = (uint32_t)std::clamp((int)nri_ptsmokeselfshadowdebug, 0, 3);
 	settings.lightMode = (uint32_t)std::clamp((int)nri_ptsmokelightmode, 0, 3);
 	settings.lightSamples = (uint32_t)std::clamp((int)nri_ptsmokelightsamples, 1, 4);
 	settings.maxLightCandidates = (uint32_t)std::clamp((int)nri_ptsmokemaxlightcandidates, 1, 32);
