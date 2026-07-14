@@ -149,6 +149,11 @@ struct StaticMapSceneCache
 		nri::AccelerationStructure* residentBlasScratchSizeCacheKey = nullptr;
 		uint64_t residentBlasBuildScratchSize = 0;
 		uint64_t residentBlasUpdateScratchSize = 0;
+		nri::Buffer* residentBlasVertexBuffer = nullptr;
+		nri::Buffer* residentBlasIndexBuffer = nullptr;
+		uint32_t residentBlasVertexNum = 0;
+		uint64_t residentBlasIndexOffset = 0;
+		uint32_t residentBlasIndexNum = 0;
 		bool hasAnimatedTextureCandidates = false;
 		bool animatedRefreshSuppressed = false;
 		nri_scene::MaterialBridgeData materialBridge;

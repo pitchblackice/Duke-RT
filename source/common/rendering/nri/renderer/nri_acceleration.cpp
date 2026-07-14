@@ -1520,6 +1520,11 @@ void NRIRenderer::DestroyAccelerationStructures()
 		chunk.residentBlasScratchSizeCacheKey = nullptr;
 		chunk.residentBlasBuildScratchSize = 0;
 		chunk.residentBlasUpdateScratchSize = 0;
+		chunk.residentBlasVertexBuffer = nullptr;
+		chunk.residentBlasIndexBuffer = nullptr;
+		chunk.residentBlasVertexNum = 0;
+		chunk.residentBlasIndexOffset = 0;
+		chunk.residentBlasIndexNum = 0;
 	}
 	DestroyDynamicBottomLevelAccelerationStructures();
 	mPersistentVoxels.Reset("destroy-acceleration-structures", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildNRIPersistentVoxelResetServices(*this));

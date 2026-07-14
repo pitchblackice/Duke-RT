@@ -659,10 +659,18 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 			auto& chunk = mStaticMapScene.chunks[chunkListIndex];
 			const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
 			const bool hadAccelerationStructure = chunk.accelerationStructure.accelerationStructure != nullptr;
+			const uint64_t expectedIndexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
+			const bool geometryDescMatches =
+				chunk.residentBlasVertexBuffer == mStaticVertexBuffer.buffer &&
+				chunk.residentBlasIndexBuffer == mStaticIndexBuffer.buffer &&
+				chunk.residentBlasVertexNum == mStaticMapChunkAtlas.vertexCount &&
+				chunk.residentBlasIndexOffset == expectedIndexOffset &&
+				chunk.residentBlasIndexNum == atlasChunk.indexCount;
 
 			const bool canUpdateResidentBlas =
 				chunk.blasUpdateEligible &&
-				hadAccelerationStructure;
+				hadAccelerationStructure &&
+				geometryDescMatches;
 			chunk.blasUpdateEligible = canUpdateResidentBlas;
 			auto* accelerationStructure = chunk.accelerationStructure.accelerationStructure;
 			if (chunk.residentBlasScratchSizeCacheKey != accelerationStructure)
@@ -749,6 +757,11 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 					chunk.residentBlasScratchSizeCacheKey = nullptr;
 					chunk.residentBlasBuildScratchSize = 0;
 					chunk.residentBlasUpdateScratchSize = 0;
+					chunk.residentBlasVertexBuffer = nullptr;
+					chunk.residentBlasIndexBuffer = nullptr;
+					chunk.residentBlasVertexNum = 0;
+					chunk.residentBlasIndexOffset = 0;
+					chunk.residentBlasIndexNum = 0;
 
 					nri::BottomLevelGeometryDesc geometryDesc = {};
 					geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
@@ -788,6 +801,11 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 					chunk.residentBlasScratchSizeCacheKey = chunk.accelerationStructure.accelerationStructure;
 					chunk.residentBlasBuildScratchSize = scratchSize;
 					chunk.residentBlasUpdateScratchSize = 0;
+					chunk.residentBlasVertexBuffer = mStaticVertexBuffer.buffer;
+					chunk.residentBlasIndexBuffer = mStaticIndexBuffer.buffer;
+					chunk.residentBlasVertexNum = mStaticMapChunkAtlas.vertexCount;
+					chunk.residentBlasIndexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
+					chunk.residentBlasIndexNum = atlasChunk.indexCount;
 					maxScratchSize = std::max(maxScratchSize, scratchSize);
 				}
 			}
@@ -815,6 +833,29 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 	blasBarriers.clear();
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBuildMs);
+		std::vector<nri::BufferBarrierDesc> beforeUpdateBarriers;
+		beforeUpdateBarriers.reserve(activeChunkListIndices.size());
+		for (uint32_t chunkListIndex : activeChunkListIndices)
+		{
+			const auto& chunk = mStaticMapScene.chunks[chunkListIndex];
+			if (!chunk.blasUpdateEligible)
+			{
+				continue;
+			}
+			nri::BufferBarrierDesc barrier = {};
+			barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*chunk.accelerationStructure.accelerationStructure);
+			barrier.before = NRIResourceAccelerationStructureReadAccess();
+			barrier.after = NRIResourceAccelerationStructureReadWriteAccess();
+			beforeUpdateBarriers.push_back(barrier);
+		}
+		if (!beforeUpdateBarriers.empty())
+		{
+			ScopedPtPerfTimer barrierPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBarrierMs);
+			nri::BarrierDesc barrierDesc = {};
+			barrierDesc.buffers = beforeUpdateBarriers.data();
+			barrierDesc.bufferNum = (uint32_t)beforeUpdateBarriers.size();
+			mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
+		}
 		blasBarriers.reserve(activeChunkListIndices.size());
 		for (size_t i = 0; i < activeChunkListIndices.size(); ++i)
 		{

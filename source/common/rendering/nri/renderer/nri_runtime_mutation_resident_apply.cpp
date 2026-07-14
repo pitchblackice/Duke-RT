@@ -493,6 +493,11 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			mutableChunk.residentBlasScratchSizeCacheKey = nullptr;
 			mutableChunk.residentBlasBuildScratchSize = 0;
 			mutableChunk.residentBlasUpdateScratchSize = 0;
+			mutableChunk.residentBlasVertexBuffer = nullptr;
+			mutableChunk.residentBlasIndexBuffer = nullptr;
+			mutableChunk.residentBlasVertexNum = 0;
+			mutableChunk.residentBlasIndexOffset = 0;
+			mutableChunk.residentBlasIndexNum = 0;
 			mutableChunk.vertexCount = 0;
 			mutableChunk.indexCount = 0;
 			mutableChunk.primitiveCount = 0;

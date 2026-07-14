@@ -1304,6 +1304,11 @@ bool nri_static_scene::BuildStaticMapAccelerationStructures(
 			chunk.residentBlasScratchSizeCacheKey = nullptr;
 			chunk.residentBlasBuildScratchSize = 0;
 			chunk.residentBlasUpdateScratchSize = 0;
+			chunk.residentBlasVertexBuffer = nullptr;
+			chunk.residentBlasIndexBuffer = nullptr;
+			chunk.residentBlasVertexNum = 0;
+			chunk.residentBlasIndexOffset = 0;
+			chunk.residentBlasIndexNum = 0;
 		}
 	}
 
@@ -1332,6 +1337,11 @@ bool nri_static_scene::BuildStaticMapAccelerationStructures(
 		chunk.residentBlasScratchSizeCacheKey = chunk.accelerationStructure.accelerationStructure;
 		chunk.residentBlasBuildScratchSize = scratchSize;
 		chunk.residentBlasUpdateScratchSize = 0;
+		chunk.residentBlasVertexBuffer = staticResources.vertexBuffer.buffer;
+		chunk.residentBlasIndexBuffer = staticResources.indexBuffer.buffer;
+		chunk.residentBlasVertexNum = buildInput.vertexCount;
+		chunk.residentBlasIndexOffset = buildInput.indexOffsetBytes;
+		chunk.residentBlasIndexNum = buildInput.indexCount;
 		maxScratchSize = std::max(maxScratchSize, scratchSize);
 	}
 
@@ -1489,6 +1499,11 @@ bool nri_static_scene::BuildLiveStaticMapAccelerationStructures(
 			chunk.residentBlasScratchSizeCacheKey = nullptr;
 			chunk.residentBlasBuildScratchSize = 0;
 			chunk.residentBlasUpdateScratchSize = 0;
+			chunk.residentBlasVertexBuffer = nullptr;
+			chunk.residentBlasIndexBuffer = nullptr;
+			chunk.residentBlasVertexNum = 0;
+			chunk.residentBlasIndexOffset = 0;
+			chunk.residentBlasIndexNum = 0;
 		}
 	}
 
@@ -1517,6 +1532,11 @@ bool nri_static_scene::BuildLiveStaticMapAccelerationStructures(
 		chunk.residentBlasScratchSizeCacheKey = chunk.accelerationStructure.accelerationStructure;
 		chunk.residentBlasBuildScratchSize = scratchSize;
 		chunk.residentBlasUpdateScratchSize = 0;
+		chunk.residentBlasVertexBuffer = input.staticVertexBuffer->buffer;
+		chunk.residentBlasIndexBuffer = input.staticIndexBuffer->buffer;
+		chunk.residentBlasVertexNum = buildInput.vertexCount;
+		chunk.residentBlasIndexOffset = buildInput.indexOffsetBytes;
+		chunk.residentBlasIndexNum = buildInput.indexCount;
 		maxScratchSize = std::max(maxScratchSize, scratchSize);
 	}
 
