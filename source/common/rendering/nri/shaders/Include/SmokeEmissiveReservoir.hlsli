@@ -275,10 +275,11 @@ float SmokeEmissiveLuminance(float3 value)
 	return dot(max(value, 0.0), float3(0.2126, 0.7152, 0.0722));
 }
 
-bool SmokeEvaluateEmissiveIncident(
+bool SmokeEvaluateEmissiveIncidentWithSolidAngleDenominator(
 	SmokeEmissiveReservoirRecord record,
 	float3 receiverPosition,
 	bool diagnostics,
+	float solidAngleDenominator,
 	out float3 incidentRadiance,
 	out float3 lightDirection,
 	out float distanceToLight)
@@ -332,12 +333,40 @@ bool SmokeEvaluateEmissiveIncident(
 	const float projectedArea = max(effectiveArea * emitterCosine, 0.001);
 	const float falloffScale = max(material.emissiveMaskScale, 0.25);
 	const float attenuatedDistanceSquared = pow(max(distanceSquared, 0.01), falloffScale);
-	const float solidAngle = min(projectedArea / max(12.56637061436 * attenuatedDistanceSquared, 0.01), 1.0);
+	const float solidAngle = min(projectedArea / max(solidAngleDenominator * attenuatedDistanceSquared, 0.01), 1.0);
 	if (diagnostics && any(lightRadiance > 32.0))
 		InterlockedAdd(gSmokeControl[0].EmissiveRadianceClamps, 1u);
 	lightRadiance = min(lightRadiance, 32.0);
 	incidentRadiance = lightRadiance * solidAngle;
 	return all(isfinite(incidentRadiance)) && SmokeEmissiveLuminance(incidentRadiance) > 1e-8;
+}
+
+bool SmokeEvaluateEmissiveIncident(
+	SmokeEmissiveReservoirRecord record,
+	float3 receiverPosition,
+	bool diagnostics,
+	out float3 incidentRadiance,
+	out float3 lightDirection,
+	out float distanceToLight)
+{
+	// Preserve the established legacy smoke-emissive convention exactly.
+	return SmokeEvaluateEmissiveIncidentWithSolidAngleDenominator(record, receiverPosition, diagnostics,
+		12.56637061436, incidentRadiance, lightDirection, distanceToLight);
+}
+
+bool SmokeEvaluateWorldEmissiveIncident(
+	SmokeEmissiveReservoirRecord record,
+	float3 receiverPosition,
+	bool diagnostics,
+	out float3 incidentRadiance,
+	out float3 lightDirection,
+	out float distanceToLight)
+{
+	// The world field stores incident radiance before HG phase projection. Its
+	// area-over-distance term is already a solid-angle estimate, so applying
+	// 4*pi here and HG's normalization later would attenuate it twice.
+	return SmokeEvaluateEmissiveIncidentWithSolidAngleDenominator(record, receiverPosition, diagnostics,
+		1.0, incidentRadiance, lightDirection, distanceToLight);
 }
 
 bool SmokeEvaluateEmissiveCandidate(

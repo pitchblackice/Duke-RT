@@ -61,7 +61,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		record.Generation = gSmokeConstants.CommandCount;
 		float3 incident, lightDirection;
 		float lightDistance;
-		if (!SmokeEvaluateEmissiveIncident(record, receiverPosition, false, incident, lightDirection, lightDistance))
+		if (!SmokeEvaluateWorldEmissiveIncident(record, receiverPosition, false, incident, lightDirection, lightDistance))
 		{
 			physicalZero++;
 			continue;
