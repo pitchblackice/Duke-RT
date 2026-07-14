@@ -568,7 +568,8 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 	mStatus.gridReady = mSettings.representation != 0u && gridReady && mGrid.GetStatusSnapshot().resourcesReady;
 	mStatus.representationEffective = mStatus.gridReady ? mSettings.representation : 0u;
 	mStatus.representationFallback = mSettings.representation != 0u && !mStatus.gridReady ? "grid-unavailable" : "none";
-	if (mStatus.gridReady && mSettings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy)
+	if (mStatus.gridReady &&
+		(mSettings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy || mSettings.multipleScatter))
 	{
 		const NRISmokeGridStatusSnapshot& gridStatus = mGrid.GetStatusSnapshot();
 		if (!mGridLighting.PrepareFrame(BuildGridServices(renderer), mSettings, gridStatus.cellCapacity,
@@ -939,7 +940,11 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	constants.directionalDirectionZ = renderer.mDirectionalLightState.direction[2];
 	constants.directionalAngularSize = std::clamp(renderer.mDirectionalLightState.angularSize, 0.001f, 1.2f);
 	std::copy(renderer.mCurrentJitter, renderer.mCurrentJitter + 2, constants.currentJitter);
-	constants.debugMode = mSettings.debugMode;
+	const float scatterScale = mSettings.multipleScatter ? mSettings.multipleScatterScale : 0.0f;
+	const uint32_t packedScatterScale = (uint32_t)std::lround((double)std::clamp(scatterScale, 0.0f, 16.0f) * (65535.0 / 16.0));
+	constants.debugMode = (mSettings.debugMode & 0xffu) |
+		((mSettings.multipleScatter ? mSettings.multipleScatterDebug : 0u) << 8u) |
+		(packedScatterScale << 16u);
 	const bool pointLightsReady = mSettings.pointLights && lightBuffersReady && renderer.mBoundRuntimeLightCount > 0;
 	const bool directionalLightReady = mSettings.directionalLight && renderer.mDirectionalLightState.enabled;
 	const bool emissiveLightsReady = mSettings.emissiveLights && emissiveResourcesReady;
@@ -1153,7 +1158,9 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 4, slot.lightSet, nri::BindPoint::COMPUTE });
 	if (filteredResourcesReady || shadowReady || sectorLightResourcesReady || skyResourceReady || reprojectionResourcesReady)
 		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 5, slot.filteredSceneSet, nri::BindPoint::COMPUTE });
-	if (worldEmissiveReady)
+	const bool multipleScatterReady = gridRepresentationActive && mSettings.multipleScatter &&
+		mGridLighting.GetStatusSnapshot().multipleScatterEffective;
+	if (worldEmissiveReady || multipleScatterReady)
 		mGridLighting.Record(BuildGridServices(renderer), mSettings, constants, emissiveResourcesReady);
 	const uint64_t froxelCount = (uint64_t)mResourceFroxelWidth * mResourceFroxelHeight * mResourceFroxelDepth;
 	const uint64_t wideCellCount = (uint64_t)kWideCellCount * mResourceFroxelDepth;
@@ -1575,6 +1582,15 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		(double)world.proposalBytes / (1024.0 * 1024.0),
 		world.filterDecision, (double)world.filterBytes / (1024.0 * 1024.0),
 		(double)world.totalBytes / (1024.0 * 1024.0), world.proposalDecision);
+	Printf("NRI PT smoke multiple scattering: requested=%s allocated=%s effective=%s probes=%u iterations=%u final_ping=%u scale=%.3f seed_mib=%.3f bounce_mib=%.3f metadata_mib=%.3f active_mib=%.3f total_mib=%.3f decision=%s field_readback=0\n",
+		world.multipleScatterRequested ? "yes" : "no", world.multipleScatterAllocated ? "yes" : "no",
+		world.multipleScatterEffective ? "yes" : "no", world.scatterProbeCapacity, world.scatterIterations,
+		world.scatterFinalPing, mSettings.multipleScatterScale,
+		(double)world.scatterSeedBytes / (1024.0 * 1024.0),
+		(double)world.scatterBounceBytes / (1024.0 * 1024.0),
+		(double)world.scatterMetadataBytes / (1024.0 * 1024.0),
+		(double)world.scatterActiveBytes / (1024.0 * 1024.0),
+		(double)world.scatterBytes / (1024.0 * 1024.0), world.scatterDecision);
 	const char* placement = mStatus.routePlacement == (uint32_t)NRISmokeRoutePlacement::DlrrPostUpscale ? "dlrr_post_upscale" :
 		(mStatus.routePlacement == (uint32_t)NRISmokeRoutePlacement::DlrrPreUpscaleMainInput ? "dlrr_pre_upscale_main" : "standard_pre_upscale");
 	const char* inputName = mStatus.inputSlot < (uint32_t)NRIRenderer::FrameTextureSlot::Count ? renderer.GetFrameTextureSlotName((NRIRenderer::FrameTextureSlot)mStatus.inputSlot) : "none";

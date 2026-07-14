@@ -9,7 +9,8 @@ namespace
 	constexpr uint32_t kThreads = 64u;
 	const char* const kPipelineNames[] = {
 		"SmokeGridLightPrepare", "SmokeGridLightBuildActive", "SmokeGridLightBuildProposals", "SmokeGridLightSeed",
-		"SmokeGridLightTemporal", "SmokeGridLightBuildLinks", "SmokeGridLightFilter"
+		"SmokeGridLightTemporal", "SmokeGridLightBuildLinks", "SmokeGridLightFilter",
+		"SmokeGridLightSeedScattering", "SmokeGridLightPropagateScattering"
 	};
 	static_assert(std::size(kPipelineNames) == (size_t)NRISmokeGridLightingPass::Count);
 
@@ -112,18 +113,29 @@ void NRISmokeGridLighting::DestroyResources(const NRISmokeGridServices& services
 	DestroyBuffer(services, mLinks);
 	DestroyBuffer(services, mFiltered);
 	DestroyBuffer(services, mProposals);
+	DestroyBuffer(services, mScatterSeed);
+	DestroyBuffer(services, mScatterBounceA);
+	DestroyBuffer(services, mScatterBounceB);
+	DestroyBuffer(services, mScatterMetadata);
+	DestroyBuffer(services, mScatterActive);
 	mResourceCellCapacity = 0u;
 	mResourceBrickCapacity = 0u;
+	mResourceScatterProbeCapacity = 0u;
+	mResourceScatterRequested = false;
 	mStatus.resourcesReady = false;
 	mResourcesInitialized = false;
 	mStatus.fieldBytes = mStatus.workBytes = mStatus.linkBytes = mStatus.proposalBytes = mStatus.filterBytes = mStatus.totalBytes = 0u;
+	mStatus.scatterSeedBytes = mStatus.scatterBounceBytes = mStatus.scatterMetadataBytes = mStatus.scatterActiveBytes = mStatus.scatterBytes = 0u;
+	mStatus.multipleScatterAllocated = false;
+	mStatus.multipleScatterEffective = false;
 }
 
-bool NRISmokeGridLighting::EnsureResources(const NRISmokeGridServices& services, uint32_t cellCapacity, bool filterRequested)
+bool NRISmokeGridLighting::EnsureResources(const NRISmokeGridServices& services, uint32_t cellCapacity,
+	bool filterRequested, bool multipleScatterRequested)
 {
 	const bool ready = mCurrent.buffer != nullptr && mHistory.buffer != nullptr && mActive.buffer != nullptr &&
 		mControl.buffer != nullptr && mLinks.buffer != nullptr && mProposals.buffer != nullptr && mResourceCellCapacity == cellCapacity &&
-		((mFiltered.buffer != nullptr) == filterRequested);
+		((mFiltered.buffer != nullptr) == filterRequested) && mResourceScatterRequested == multipleScatterRequested;
 	if (ready)
 		return true;
 	services.WaitForCommands("smoke-grid-lighting-resize");
@@ -131,6 +143,7 @@ bool NRISmokeGridLighting::EnsureResources(const NRISmokeGridServices& services,
 	const nri::BufferUsageBits storage = nri::BufferUsageBits::SHADER_RESOURCE_STORAGE;
 	const uint64_t cells = std::max(cellCapacity, 1u);
 	const uint64_t bricks = std::max<uint64_t>((cells + NRI_SMOKE_GRID_CELLS_PER_BRICK - 1u) / NRI_SMOKE_GRID_CELLS_PER_BRICK, 1u);
+	const uint64_t scatterProbes = bricks * NRI_SMOKE_GRID_SCATTER_PROBES_PER_BRICK;
 	if (!CreateBuffer(services, mCurrent, cells * sizeof(NRISmokeGridLightRecordGpu), sizeof(NRISmokeGridLightRecordGpu), storage) ||
 		!CreateBuffer(services, mHistory, cells * sizeof(NRISmokeGridLightRecordGpu), sizeof(NRISmokeGridLightRecordGpu), storage) ||
 		!CreateBuffer(services, mActive, cells * sizeof(uint32_t), sizeof(uint32_t), storage) ||
@@ -143,18 +156,45 @@ bool NRISmokeGridLighting::EnsureResources(const NRISmokeGridServices& services,
 		mStatus.failureReason = "allocation-failed";
 		return false;
 	}
+	bool scatterAllocated = false;
+	if (multipleScatterRequested)
+	{
+		scatterAllocated = CreateBuffer(services, mScatterSeed, scatterProbes * sizeof(float) * 4u, sizeof(float) * 4u, storage) &&
+			CreateBuffer(services, mScatterBounceA, scatterProbes * sizeof(float) * 4u, sizeof(float) * 4u, storage) &&
+			CreateBuffer(services, mScatterBounceB, scatterProbes * sizeof(float) * 4u, sizeof(float) * 4u, storage) &&
+			CreateBuffer(services, mScatterMetadata, scatterProbes * sizeof(NRISmokeGridScatterMetadataGpu), sizeof(NRISmokeGridScatterMetadataGpu), storage) &&
+			CreateBuffer(services, mScatterActive, scatterProbes * sizeof(uint32_t), sizeof(uint32_t), storage);
+		if (!scatterAllocated)
+		{
+			DestroyBuffer(services, mScatterSeed);
+			DestroyBuffer(services, mScatterBounceA);
+			DestroyBuffer(services, mScatterBounceB);
+			DestroyBuffer(services, mScatterMetadata);
+			DestroyBuffer(services, mScatterActive);
+		}
+	}
 	// The optional descriptor remains valid while filtering is disabled without
 	// allocating a third field: the accepted current field is a safe alias.
 	mResourceCellCapacity = cellCapacity;
 	mResourceBrickCapacity = (uint32_t)bricks;
+	mResourceScatterProbeCapacity = (uint32_t)scatterProbes;
+	mResourceScatterRequested = multipleScatterRequested;
 	mStatus.cellCapacity = cellCapacity;
 	mStatus.filterAllocated = mFiltered.buffer != nullptr;
 	mStatus.fieldBytes = mCurrent.memorySize + mHistory.memorySize;
 	mStatus.workBytes = mActive.memorySize + mControl.memorySize;
 	mStatus.linkBytes = mLinks.memorySize;
 	mStatus.proposalBytes = mProposals.memorySize;
+	mStatus.scatterSeedBytes = mScatterSeed.memorySize;
+	mStatus.scatterBounceBytes = mScatterBounceA.memorySize + mScatterBounceB.memorySize;
+	mStatus.scatterMetadataBytes = mScatterMetadata.memorySize;
+	mStatus.scatterActiveBytes = mScatterActive.memorySize;
+	mStatus.scatterBytes = mStatus.scatterSeedBytes + mStatus.scatterBounceBytes + mStatus.scatterMetadataBytes + mStatus.scatterActiveBytes;
 	mStatus.filterBytes = mFiltered.memorySize;
-	mStatus.totalBytes = mStatus.fieldBytes + mStatus.workBytes + mStatus.linkBytes + mStatus.proposalBytes + mStatus.filterBytes;
+	mStatus.totalBytes = mStatus.fieldBytes + mStatus.workBytes + mStatus.linkBytes + mStatus.proposalBytes +
+		mStatus.scatterBytes + mStatus.filterBytes;
+	mStatus.multipleScatterAllocated = scatterAllocated;
+	mStatus.scatterProbeCapacity = scatterAllocated ? mResourceScatterProbeCapacity : 0u;
 	mStatus.resourcesReady = true;
 	mStatus.failureReason = "none";
 	mNeedsClear = true;
@@ -164,17 +204,19 @@ bool NRISmokeGridLighting::EnsureResources(const NRISmokeGridServices& services,
 bool NRISmokeGridLighting::PrepareFrame(const NRISmokeGridServices& services, const NRISmokeSettings& settings,
 	uint32_t cellCapacity, uint32_t frameIndex, uint32_t simulationEpoch)
 {
-	mStatus.requested = settings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy;
+	mStatus.requested = settings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy || settings.multipleScatter;
 	mStatus.requestedBackend = settings.emissiveBackend;
 	mStatus.filterRequested = settings.emissiveWorldFilter;
 	mStatus.filterDecision = settings.emissiveWorldFilter ? "requested" : "disabled/variance-gate-not-accepted";
 	mStatus.proposalDecision = settings.emissiveLocalProposals ? "brick-top16/uniform75+global25" : "global-cdf/manual-disable";
+	mStatus.multipleScatterRequested = settings.multipleScatter;
+	mStatus.scatterDecision = !settings.multipleScatter ? "disabled/phase12d-pending" : "gpu-probe4x4x4/experimental";
 	if (!mStatus.initialized)
 	{
 		mStatus.failureReason = "pipelines-unavailable";
 		return false;
 	}
-	if (!mStatus.requested)
+	if (!mStatus.requested && !settings.multipleScatter)
 	{
 		mStatus.effectiveBackend = (uint32_t)NRISmokeEmissiveBackend::Legacy;
 		mStatus.authority = "legacy";
@@ -182,11 +224,17 @@ bool NRISmokeGridLighting::PrepareFrame(const NRISmokeGridServices& services, co
 	}
 	if (simulationEpoch != mSimulationEpoch)
 		Reset(simulationEpoch, "simulation-epoch");
-	if (!EnsureResources(services, cellCapacity, settings.emissiveWorldFilter))
+	if (!EnsureResources(services, cellCapacity, settings.emissiveWorldFilter, settings.multipleScatter))
 		return false;
-	mStatus.effectiveBackend = settings.emissiveBackend == (uint32_t)NRISmokeEmissiveBackend::Compare ?
-		(uint32_t)NRISmokeEmissiveBackend::Compare : (uint32_t)NRISmokeEmissiveBackend::World;
-	mStatus.authority = mStatus.effectiveBackend == (uint32_t)NRISmokeEmissiveBackend::Compare ? "compare" : "world";
+	mStatus.multipleScatterEffective = settings.multipleScatter && mStatus.multipleScatterAllocated;
+	if (settings.multipleScatter && !mStatus.multipleScatterAllocated)
+		mStatus.scatterDecision = "allocation-failed/direct-only";
+	mStatus.effectiveBackend = settings.emissiveBackend == (uint32_t)NRISmokeEmissiveBackend::Legacy ?
+		(uint32_t)NRISmokeEmissiveBackend::Legacy :
+		(settings.emissiveBackend == (uint32_t)NRISmokeEmissiveBackend::Compare ?
+			(uint32_t)NRISmokeEmissiveBackend::Compare : (uint32_t)NRISmokeEmissiveBackend::World);
+	mStatus.authority = mStatus.effectiveBackend == (uint32_t)NRISmokeEmissiveBackend::Compare ? "compare" :
+		(mStatus.effectiveBackend == (uint32_t)NRISmokeEmissiveBackend::Legacy ? "legacy+scatter" : "world");
 	mStatus.simulationEpoch = simulationEpoch;
 	mStatus.lastUpdatedFrame = frameIndex;
 	return true;
@@ -194,14 +242,18 @@ bool NRISmokeGridLighting::PrepareFrame(const NRISmokeGridServices& services, co
 
 void NRISmokeGridLighting::Barrier(const NRISmokeGridServices& services)
 {
-	NRIBufferResource* resources[] = { &mCurrent, &mHistory, &mActive, &mControl, &mLinks, &mProposals, &mFiltered };
-	const uint32_t resourceCount = mFiltered.buffer != nullptr ? 7u : 6u;
-	nri::BufferBarrierDesc barriers[7] = {};
-	for (uint32_t i = 0u; i < resourceCount; ++i)
+	NRIBufferResource* resources[] = { &mCurrent, &mHistory, &mActive, &mControl, &mLinks, &mProposals, &mFiltered,
+		&mScatterSeed, &mScatterBounceA, &mScatterBounceB, &mScatterMetadata, &mScatterActive };
+	nri::BufferBarrierDesc barriers[12] = {};
+	uint32_t resourceCount = 0u;
+	for (NRIBufferResource* resource : resources)
 	{
-		barriers[i].buffer = resources[i]->buffer;
-		barriers[i].before = StorageAccess();
-		barriers[i].after = StorageAccess();
+		if (resource->buffer == nullptr)
+			continue;
+		barriers[resourceCount].buffer = resource->buffer;
+		barriers[resourceCount].before = StorageAccess();
+		barriers[resourceCount].after = StorageAccess();
+		resourceCount++;
 	}
 	nri::BarrierDesc desc = {};
 	desc.buffers = barriers;
@@ -210,11 +262,11 @@ void NRISmokeGridLighting::Barrier(const NRISmokeGridServices& services)
 }
 
 void NRISmokeGridLighting::Dispatch(const NRISmokeGridServices& services, NRISmokeGridLightingPass pass,
-	NRISmokeConstants& constants, uint32_t groups)
+	NRISmokeConstants& constants, uint32_t groups, uint32_t iteration)
 {
 	const uint32_t index = (uint32_t)pass;
 	services.core->CmdBeginAnnotation(*services.commandBuffer, kPipelineNames[index], nri::BGRA_UNUSED);
-	constants.pass = index;
+	constants.pass = index | (iteration << 16u);
 	services.core->CmdSetRootConstants(*services.commandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
 	services.core->CmdSetPipeline(*services.commandBuffer, *mPipelines[index]);
 	services.core->CmdDispatch(*services.commandBuffer, { groups, 1u, 1u });
@@ -224,19 +276,23 @@ void NRISmokeGridLighting::Dispatch(const NRISmokeGridServices& services, NRISmo
 bool NRISmokeGridLighting::Record(const NRISmokeGridServices& services, const NRISmokeSettings& settings,
 	NRISmokeConstants constants, bool emissiveResourcesReady)
 {
-	if (!mStatus.initialized || !mStatus.resourcesReady || !emissiveResourcesReady || !services.IsRecordingValid())
+	if (!mStatus.initialized || !mStatus.resourcesReady || !services.IsRecordingValid())
 		return false;
 	if (mLastRecordedFrame == constants.frameIndex)
 		return true;
 	if (!mResourcesInitialized)
 	{
-		NRIBufferResource* resources[] = { &mCurrent, &mHistory, &mActive, &mControl, &mLinks, &mProposals, &mFiltered };
-		const uint32_t resourceCount = mFiltered.buffer != nullptr ? 7u : 6u;
-		nri::BufferBarrierDesc barriers[7] = {};
-		for (uint32_t i = 0u; i < resourceCount; ++i)
+		NRIBufferResource* resources[] = { &mCurrent, &mHistory, &mActive, &mControl, &mLinks, &mProposals, &mFiltered,
+			&mScatterSeed, &mScatterBounceA, &mScatterBounceB, &mScatterMetadata, &mScatterActive };
+		nri::BufferBarrierDesc barriers[12] = {};
+		uint32_t resourceCount = 0u;
+		for (NRIBufferResource* resource : resources)
 		{
-			barriers[i].buffer = resources[i]->buffer;
-			barriers[i].after = StorageAccess();
+			if (resource->buffer == nullptr)
+				continue;
+			barriers[resourceCount].buffer = resource->buffer;
+			barriers[resourceCount].after = StorageAccess();
+			resourceCount++;
 		}
 		nri::BarrierDesc desc = {};
 		desc.buffers = barriers;
@@ -252,30 +308,55 @@ bool NRISmokeGridLighting::Record(const NRISmokeGridServices& services, const NR
 	Barrier(services);
 	Dispatch(services, NRISmokeGridLightingPass::BuildActive, constants, Groups(mResourceCellCapacity));
 	Barrier(services);
-	if (settings.emissiveLocalProposals)
+	const bool directEnabled = settings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy && emissiveResourcesReady;
+	if (directEnabled && settings.emissiveLocalProposals)
 	{
 		Dispatch(services, NRISmokeGridLightingPass::BuildProposals, constants, Groups(mResourceBrickCapacity));
 		Barrier(services);
 	}
-	Dispatch(services, NRISmokeGridLightingPass::Seed, constants, Groups(mResourceCellCapacity));
-	Barrier(services);
-	if (settings.emissiveReuseMode >= 1u)
+	if (directEnabled)
 	{
-		Dispatch(services, NRISmokeGridLightingPass::Temporal, constants, Groups(mResourceCellCapacity));
+		Dispatch(services, NRISmokeGridLightingPass::Seed, constants, Groups(mResourceCellCapacity));
 		Barrier(services);
+		if (settings.emissiveReuseMode >= 1u)
+		{
+			Dispatch(services, NRISmokeGridLightingPass::Temporal, constants, Groups(mResourceCellCapacity));
+			Barrier(services);
+		}
 	}
 	Dispatch(services, NRISmokeGridLightingPass::BuildLinks, constants, Groups(mResourceCellCapacity));
 	Barrier(services);
-	if (settings.emissiveWorldFilter && mFiltered.buffer != nullptr)
+	if (directEnabled && settings.emissiveWorldFilter && mFiltered.buffer != nullptr)
 	{
 		Dispatch(services, NRISmokeGridLightingPass::Filter, constants, Groups(mResourceCellCapacity));
 		Barrier(services);
+	}
+	if (settings.multipleScatter && mStatus.multipleScatterAllocated)
+	{
+		const uint32_t qualityIterations = 1u << std::min(settings.quality, 2u);
+		const uint32_t iterations = settings.multipleScatterIterations != 0u ? settings.multipleScatterIterations : qualityIterations;
+		Dispatch(services, NRISmokeGridLightingPass::SeedScattering, constants, Groups(mResourceScatterProbeCapacity));
+		Barrier(services);
+		for (uint32_t iteration = 0u; iteration < iterations; ++iteration)
+		{
+			Dispatch(services, NRISmokeGridLightingPass::PropagateScattering, constants,
+				Groups(mResourceScatterProbeCapacity), iteration);
+			Barrier(services);
+		}
+		mStatus.scatterIterations = iterations;
+		mStatus.scatterFinalPing = iterations & 1u;
+	}
+	else
+	{
+		mStatus.scatterIterations = 0u;
+		mStatus.scatterFinalPing = 0u;
 	}
 	mNeedsClear = false;
 	mLastRecordedFrame = constants.frameIndex;
 	mStatus.lastUpdatedFrame = constants.frameIndex;
 	mStatus.fieldPing = mFieldPing;
-	mFieldPing = 1u - mFieldPing;
+	if (directEnabled)
+		mFieldPing = 1u - mFieldPing;
 	return true;
 }
 
@@ -285,7 +366,12 @@ bool NRISmokeGridLighting::GetStorageDescriptors(std::array<const nri::Descripto
 		return false;
 	descriptors = { mCurrent.storageView, mHistory.storageView, mActive.storageView, mControl.storageView,
 		mLinks.storageView, mFiltered.storageView != nullptr ? mFiltered.storageView : mCurrent.storageView,
-		mProposals.storageView };
+		mProposals.storageView,
+		mScatterSeed.storageView != nullptr ? mScatterSeed.storageView : mLinks.storageView,
+		mScatterBounceA.storageView != nullptr ? mScatterBounceA.storageView : mLinks.storageView,
+		mScatterBounceB.storageView != nullptr ? mScatterBounceB.storageView : mLinks.storageView,
+		mScatterMetadata.storageView != nullptr ? mScatterMetadata.storageView : mLinks.storageView,
+		mScatterActive.storageView != nullptr ? mScatterActive.storageView : mActive.storageView };
 	return true;
 }
 

@@ -113,6 +113,10 @@ struct NRISmokeSettings
 	uint32_t dlrrMode = 1;
 	bool indirect = true;
 	uint32_t indirectCacheMode = 3;
+	bool multipleScatter = false;
+	float multipleScatterScale = 1.0f;
+	uint32_t multipleScatterIterations = 0;
+	uint32_t multipleScatterDebug = 0;
 	uint32_t lightMode = 1;
 	uint32_t lightSamples = 1;
 	uint32_t maxLightCandidates = 8;

@@ -30,7 +30,7 @@ struct NRISmokeGridLightingDirectSeedSnapshot
 class NRISmokeGridLighting
 {
 public:
-	static constexpr uint32_t StorageDescriptorCount = 7u;
+	static constexpr uint32_t StorageDescriptorCount = 12u;
 
 	bool Initialize(const NRISmokeGridServices& services, nri::PipelineLayout* sharedLayout);
 	bool PrepareFrame(const NRISmokeGridServices& services, const NRISmokeSettings& settings,
@@ -49,14 +49,15 @@ public:
 	uint32_t GetFieldPing() const { return mFieldPing; }
 
 private:
-	bool EnsureResources(const NRISmokeGridServices& services, uint32_t cellCapacity, bool filterRequested);
+	bool EnsureResources(const NRISmokeGridServices& services, uint32_t cellCapacity, bool filterRequested,
+		bool multipleScatterRequested);
 	bool CreateBuffer(const NRISmokeGridServices& services, NRIBufferResource& out, uint64_t size,
 		uint32_t stride, nri::BufferUsageBits usage);
 	void DestroyBuffer(const NRISmokeGridServices& services, NRIBufferResource& resource);
 	void DestroyResources(const NRISmokeGridServices& services);
 	void Barrier(const NRISmokeGridServices& services);
 	void Dispatch(const NRISmokeGridServices& services, NRISmokeGridLightingPass pass,
-		NRISmokeConstants& constants, uint32_t groups);
+		NRISmokeConstants& constants, uint32_t groups, uint32_t iteration = 0u);
 
 	NRISmokeGridLightingStatusSnapshot mStatus = {};
 	std::array<nri::Pipeline*, (size_t)NRISmokeGridLightingPass::Count> mPipelines = {};
@@ -68,8 +69,15 @@ private:
 	NRIBufferResource mLinks;
 	NRIBufferResource mFiltered;
 	NRIBufferResource mProposals;
+	NRIBufferResource mScatterSeed;
+	NRIBufferResource mScatterBounceA;
+	NRIBufferResource mScatterBounceB;
+	NRIBufferResource mScatterMetadata;
+	NRIBufferResource mScatterActive;
 	uint32_t mResourceCellCapacity = 0;
 	uint32_t mResourceBrickCapacity = 0;
+	uint32_t mResourceScatterProbeCapacity = 0;
+	bool mResourceScatterRequested = false;
 	uint32_t mFieldPing = 0;
 	uint32_t mLastRecordedFrame = UINT32_MAX;
 	uint32_t mSimulationEpoch = 0;

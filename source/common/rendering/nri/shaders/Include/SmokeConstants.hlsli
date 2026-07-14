@@ -74,4 +74,11 @@ struct SmokeConstants
     float2 CurrentJitter;
 };
 
+uint SmokeDebugMode(uint packedDebugMode) { return packedDebugMode & 0xffu; }
+uint SmokeMultipleScatterDebug(uint packedDebugMode) { return (packedDebugMode >> 8u) & 3u; }
+float SmokeMultipleScatterScale(uint packedDebugMode)
+{
+    return (float)((packedDebugMode >> 16u) & 0xffffu) * (16.0 / 65535.0);
+}
+
 #endif

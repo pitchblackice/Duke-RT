@@ -97,6 +97,7 @@ void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 sca
 	float4 integratedOptical = 0.0;
 	float3 integratedSource = 0.0;
 	float3 integratedWorldDebug = 0.0;
+	float3 integratedScatterDebug = 0.0;
 	const uint worldDebugMode = (gSmokeConstants.Flags >> NRI_SMOKE_GRID_LIGHT_DEBUG_SHIFT) & 7u;
 	[loop]
 	for (uint footprintY = 0u; footprintY < footprintSampleCount.y; ++footprintY)
@@ -135,10 +136,8 @@ void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 sca
 							lobeSum += lobes[lobe];
 							phaseApplied += lobes[lobe] * SmokeHenyeyGreenstein(dot((float3)NRI_SMOKE_GRID_LIGHT_LOBE_AXES[lobe], viewRay), anisotropy);
 						}
-						float3 incidentContribution = max(phaseApplied * gSmokeConstants.RadianceScale, 0.0);
-						const float luminance = dot(incidentContribution, float3(0.2126, 0.7152, 0.0722));
-						if (luminance > gSmokeConstants.DeltaTime)
-							incidentContribution *= gSmokeConstants.DeltaTime / luminance;
+						const float3 incidentContribution = SmokeGridClampControlledSource(
+							phaseApplied * gSmokeConstants.RadianceScale);
 						integratedSource += max(sampleOptical.rgb * gSmokeConstants.DensityScale, 0.0) * incidentContribution;
 						if (worldDebugMode == 1u) integratedWorldDebug += min(lobeSum * 0.05, 4.0);
 						else if (worldDebugMode == 2u) integratedWorldDebug += confidence.xxx;
@@ -154,13 +153,32 @@ void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 sca
 						}
 					}
 				}
+				if (any(sampleOptical.rgb > 0.0) &&
+					(SmokeMultipleScatterScale(gSmokeConstants.DebugMode) > 0.0 || SmokeMultipleScatterDebug(gSmokeConstants.DebugMode) != 0u))
+				{
+					float3 scatterSource;
+					float scatterConfidence;
+					const bool seedDebug = SmokeMultipleScatterDebug(gSmokeConstants.DebugMode) == 1u;
+					if (SmokeGridScatterSample(samplePosition, cellSize, seedDebug, scatterSource, scatterConfidence))
+					{
+						if (SmokeMultipleScatterDebug(gSmokeConstants.DebugMode) == 0u)
+							integratedSource += scatterSource * SmokeMultipleScatterScale(gSmokeConstants.DebugMode);
+						else if (SmokeMultipleScatterDebug(gSmokeConstants.DebugMode) <= 2u)
+							integratedScatterDebug += min(scatterSource, 4.0);
+						else
+							integratedScatterDebug += float3(0.0, scatterConfidence, 0.0);
+					}
+					else if (SmokeMultipleScatterDebug(gSmokeConstants.DebugMode) == 3u)
+						integratedScatterDebug += float3(1.0, 0.0, 0.0);
+				}
 			}
 		}
 	}
 	const float sampleWeight = rcp((float)(footprintSampleCount.x * footprintSampleCount.y * depthSampleCount));
 	scalar = integratedScalar * sampleWeight;
 	optical = integratedOptical * sampleWeight;
-	source = (worldDebugMode == 0u ? integratedSource : integratedWorldDebug) * sampleWeight;
+	source = (SmokeMultipleScatterDebug(gSmokeConstants.DebugMode) != 0u ? integratedScatterDebug :
+		(worldDebugMode == 0u ? integratedSource : integratedWorldDebug)) * sampleWeight;
 }
 
 [numthreads(4, 4, 4)]

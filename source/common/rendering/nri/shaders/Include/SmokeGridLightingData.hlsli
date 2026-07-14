@@ -6,6 +6,10 @@
 #define NRI_SMOKE_GRID_LIGHT_MAX_HISTORY 64u
 #define NRI_SMOKE_GRID_LIGHT_PROPOSAL_CAPACITY 16u
 #define NRI_SMOKE_GRID_LIGHT_LOCAL_MIX 0.75
+#define NRI_SMOKE_GRID_SCATTER_PROBE_AXIS 4u
+#define NRI_SMOKE_GRID_SCATTER_PROBES_PER_BRICK 64u
+#define NRI_SMOKE_GRID_SCATTER_VALID 0x1u
+#define NRI_SMOKE_GRID_SCATTER_FACE_SHIFT 1u
 
 #define NRI_SMOKE_GRID_LIGHT_EVIDENCE_SUPPORT 0x1u
 #define NRI_SMOKE_GRID_LIGHT_EVIDENCE_PHYSICAL_ZERO 0x2u
@@ -51,6 +55,36 @@ struct SmokeGridLightControl
 	uint ProposalFallbacks;
 	uint ProposalTruncations;
 	uint ProposalMaximumCount;
+	uint ScatterActiveCount;
+	uint ScatterSeededCount;
+	uint ScatterNonzeroSourceCount;
+	uint ScatterZeroSourceCount;
+	uint ScatterPointCells;
+	uint ScatterDirectionalCells;
+	uint ScatterEmissiveCells;
+	uint ScatterEnvironmentCells;
+	uint ScatterIterations;
+	uint ScatterFinalPing;
+	uint ScatterNeighborTests;
+	uint ScatterNeighborsAccepted;
+	uint ScatterNeighborsBlocked;
+	uint ScatterNeighborsStale;
+	uint ScatterInternalBlocked;
+	uint ScatterNanRejects;
+	uint ScatterActiveOverflow;
+	uint ScatterReconstructionAccepted;
+	uint ScatterReconstructionRejected;
+	uint ScatterSourceEnergyQ;
+	uint ScatterTransportedEnergyQ;
+	uint ScatterRemovedEnergyQ;
+	uint ScatterReceiverApplications;
+	uint ScatterExactZero;
+	uint ScatterProbeCapacity;
+	uint ScatterProbesPerBrick;
+	uint ScatterFrameStamp;
+	uint ScatterEpoch;
+	uint ScatterFlags;
+	uint3 ScatterPadding;
 };
 
 struct SmokeGridLightProposal
@@ -60,6 +94,14 @@ struct SmokeGridLightProposal
 	uint BrickGeneration;
 	uint SimulationEpoch;
 	uint FrameStamp;
+};
+
+struct SmokeGridScatterMetadata
+{
+	uint BrickGeneration;
+	uint SimulationEpoch;
+	uint FrameStamp;
+	uint Flags;
 };
 
 uint SmokeGridLightPackHalf2(float2 value)

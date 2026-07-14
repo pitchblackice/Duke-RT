@@ -7,6 +7,8 @@ constexpr uint32_t NRI_SMOKE_GRID_LIGHT_LOBE_COUNT = 6u;
 constexpr uint32_t NRI_SMOKE_GRID_LIGHT_RECORD_WORDS = 24u;
 constexpr uint32_t NRI_SMOKE_GRID_LIGHT_MAX_HISTORY = 64u;
 constexpr uint32_t NRI_SMOKE_GRID_LIGHT_PROPOSAL_CAPACITY = 16u;
+constexpr uint32_t NRI_SMOKE_GRID_SCATTER_PROBE_AXIS = 4u;
+constexpr uint32_t NRI_SMOKE_GRID_SCATTER_PROBES_PER_BRICK = 64u;
 
 enum class NRISmokeGridLightingPass : uint32_t
 {
@@ -17,6 +19,8 @@ enum class NRISmokeGridLightingPass : uint32_t
 	Temporal,
 	BuildLinks,
 	Filter,
+	SeedScattering,
+	PropagateScattering,
 	Count,
 };
 
@@ -69,6 +73,36 @@ struct NRISmokeGridLightControlGpu
 	uint32_t proposalFallbacks = 0;
 	uint32_t proposalTruncations = 0;
 	uint32_t proposalMaximumCount = 0;
+	uint32_t scatterActiveCount = 0;
+	uint32_t scatterSeededCount = 0;
+	uint32_t scatterNonzeroSourceCount = 0;
+	uint32_t scatterZeroSourceCount = 0;
+	uint32_t scatterPointCells = 0;
+	uint32_t scatterDirectionalCells = 0;
+	uint32_t scatterEmissiveCells = 0;
+	uint32_t scatterEnvironmentCells = 0;
+	uint32_t scatterIterations = 0;
+	uint32_t scatterFinalPing = 0;
+	uint32_t scatterNeighborTests = 0;
+	uint32_t scatterNeighborsAccepted = 0;
+	uint32_t scatterNeighborsBlocked = 0;
+	uint32_t scatterNeighborsStale = 0;
+	uint32_t scatterInternalBlocked = 0;
+	uint32_t scatterNanRejects = 0;
+	uint32_t scatterActiveOverflow = 0;
+	uint32_t scatterReconstructionAccepted = 0;
+	uint32_t scatterReconstructionRejected = 0;
+	uint32_t scatterSourceEnergyQ = 0;
+	uint32_t scatterTransportedEnergyQ = 0;
+	uint32_t scatterRemovedEnergyQ = 0;
+	uint32_t scatterReceiverApplications = 0;
+	uint32_t scatterExactZero = 0;
+	uint32_t scatterProbeCapacity = 0;
+	uint32_t scatterProbesPerBrick = 0;
+	uint32_t scatterFrameStamp = 0;
+	uint32_t scatterEpoch = 0;
+	uint32_t scatterFlags = 0;
+	uint32_t scatterPadding[3] = {};
 };
 
 struct NRISmokeGridLightProposalGpu
@@ -80,6 +114,14 @@ struct NRISmokeGridLightProposalGpu
 	uint32_t frameStamp = 0;
 };
 
+struct NRISmokeGridScatterMetadataGpu
+{
+	uint32_t brickGeneration = 0;
+	uint32_t simulationEpoch = 0;
+	uint32_t frameStamp = 0;
+	uint32_t flags = 0;
+};
+
 struct NRISmokeGridLightingStatusSnapshot
 {
 	bool requested = false;
@@ -87,24 +129,37 @@ struct NRISmokeGridLightingStatusSnapshot
 	bool resourcesReady = false;
 	bool filterRequested = false;
 	bool filterAllocated = false;
+	bool multipleScatterRequested = false;
+	bool multipleScatterAllocated = false;
+	bool multipleScatterEffective = false;
 	uint32_t requestedBackend = 0;
 	uint32_t effectiveBackend = 0;
 	uint32_t cellCapacity = 0;
 	uint32_t fieldPing = 0;
 	uint32_t simulationEpoch = 0;
+	uint32_t scatterProbeCapacity = 0;
+	uint32_t scatterIterations = 0;
+	uint32_t scatterFinalPing = 0;
 	uint32_t lastUpdatedFrame = UINT32_MAX;
 	uint64_t fieldBytes = 0;
 	uint64_t workBytes = 0;
 	uint64_t linkBytes = 0;
 	uint64_t proposalBytes = 0;
+	uint64_t scatterSeedBytes = 0;
+	uint64_t scatterBounceBytes = 0;
+	uint64_t scatterMetadataBytes = 0;
+	uint64_t scatterActiveBytes = 0;
+	uint64_t scatterBytes = 0;
 	uint64_t filterBytes = 0;
 	uint64_t totalBytes = 0;
 	const char* authority = "disabled";
 	const char* failureReason = "not-requested";
 	const char* filterDecision = "not-requested";
 	const char* proposalDecision = "global-cdf/no-measured-starvation";
+	const char* scatterDecision = "disabled/phase12d-pending";
 };
 
 static_assert(sizeof(NRISmokeGridLightRecordGpu) == 96);
-static_assert(sizeof(NRISmokeGridLightControlGpu) == 128);
+static_assert(sizeof(NRISmokeGridLightControlGpu) == 256);
 static_assert(sizeof(NRISmokeGridLightProposalGpu) == 80);
+static_assert(sizeof(NRISmokeGridScatterMetadataGpu) == 16);
