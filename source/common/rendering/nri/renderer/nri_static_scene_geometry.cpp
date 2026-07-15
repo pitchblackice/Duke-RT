@@ -621,6 +621,8 @@ bool RebuildResidentStaticCpuAtlasMirror(
 		const auto& atlasChunk = atlas.chunks[chunkListIndex];
 		if (!atlasChunk.valid)
 		{
+			chunkCache.AdvanceLightGeometryGeneration();
+			chunkCache.AdvanceLightMaterialGeneration();
 			chunkCache.active = false;
 			chunkCache.vertexCount = 0;
 			chunkCache.indexCount = 0;
@@ -654,6 +656,8 @@ bool RebuildResidentStaticCpuAtlasMirror(
 		}
 
 		chunkCache.active = true;
+		chunkCache.AdvanceLightGeometryGeneration();
+		chunkCache.AdvanceLightMaterialGeneration();
 		chunkCache.vertexOffset = atlasChunk.vertexOffset;
 		chunkCache.vertexCount = atlasChunk.vertexCount;
 		chunkCache.indexOffset = atlasChunk.indexOffset;

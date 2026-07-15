@@ -628,6 +628,8 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			mutableChunk.animatedGeometrySignature = 0;
 			mutableChunk.hasAnimatedTextureCandidates = false;
 			mutableChunk.animatedRefreshSuppressed = false;
+			mutableChunk.AdvanceLightGeometryGeneration();
+			mutableChunk.AdvanceLightMaterialGeneration();
 			if (chunkListIndex < mStaticMapScene.lightChunkViews.size())
 			{
 				mStaticMapScene.lightChunkViews[chunkListIndex] = {};
@@ -1213,6 +1215,11 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		}
 
 		auto& mutableChunk = mStaticMapScene.chunks[chunkListIndex];
+		if (!materialOnlyReplacement || mutableChunk.lightGeometryGeneration == 0)
+		{
+			mutableChunk.AdvanceLightGeometryGeneration();
+		}
+		mutableChunk.AdvanceLightMaterialGeneration();
 		mutableChunk.chunkIndex = mapChunk.chunkIndex;
 		mutableChunk.vertexOffset = nextAtlasChunk.vertexOffset;
 		mutableChunk.vertexCount = nextAtlasChunk.vertexCount;

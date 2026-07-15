@@ -134,6 +134,8 @@ struct StaticMapSceneCache
 		uint32_t primitiveCount = 0;
 		uint32_t materialOffset = 0;
 		uint32_t materialCount = 0;
+		uint64_t lightGeometryGeneration = 0;
+		uint64_t lightMaterialGeneration = 0;
 		uint64_t geometryTopologySignature = 0;
 		uint64_t primitiveLayoutSignature = 0;
 		uint64_t exactGeometrySignature = 0;
@@ -169,6 +171,22 @@ struct StaticMapSceneCache
 		nri_scene::MaterialBridgeData materialBridge;
 		std::vector<ResidentMaterialSliceCacheEntry> residentMaterialSliceCache;
 		NRIAccelerationStructureResource accelerationStructure;
+
+		void AdvanceLightGeometryGeneration()
+		{
+			if (++lightGeometryGeneration == 0)
+			{
+				lightGeometryGeneration = 1;
+			}
+		}
+
+		void AdvanceLightMaterialGeneration()
+		{
+			if (++lightMaterialGeneration == 0)
+			{
+				lightMaterialGeneration = 1;
+			}
+		}
 	};
 
 	bool valid = false;

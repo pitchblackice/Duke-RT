@@ -2895,6 +2895,7 @@ void SceneLightSystem::Reset()
 	mPersistentDynamicEmissiveCache = {};
 	mPersistentDynamicEmissiveHighWaterStats = {};
 	mActorSpriteDebugStats = {};
+	mStaticLightRecordCache.Reset();
 	mSurfaceRecords.clear();
 	mFrameAppendStats = {};
 	mFrameSerial = 0;
@@ -2909,6 +2910,7 @@ void SceneLightSystem::Reset()
 
 void SceneLightSystem::ResetLevelState()
 {
+	mStaticLightRecordCache.Reset();
 	mEmissiveSamplingDistribution.Reset();
 	mAnalyticLights.manualLights.clear();
 	mAnalyticLights.transientLights.clear();
@@ -3519,6 +3521,7 @@ bool SceneLightSystem::RebuildPersistentDynamicEmissiveCache(
 void SceneLightSystem::BeginFrame(uint64_t frameSerial)
 {
 	mFrameSerial = frameSerial;
+	mStaticLightRecordCache.BeginFrame();
 	mSurfaceRecords.clear();
 	mSurfaceRecordIndex.Clear();
 	mPublishedActorOverlayIndices.clear();
@@ -3574,25 +3577,119 @@ SceneLightSystem::FrameAssemblyTimingStats SceneLightSystem::AssembleFrameSurfac
 			for (size_t chunkListIndex = 0; chunkListIndex < chunkCount; ++chunkListIndex)
 			{
 				const auto& staticChunk = staticScene.chunks[chunkListIndex];
-				if (!staticChunk.active)
-				{
-					continue;
-				}
 				const uint32_t mapChunkIndex = staticChunk.chunkIndex;
 				const bool useRuntimeMutationReplacement =
+					staticChunk.active &&
 					services.isRuntimeMutationReplacementActive != nullptr &&
 					services.isRuntimeMutationReplacementActive(services.runtimeMutationUser, mapChunkIndex);
-				if (useRuntimeMutationReplacement)
+				const NRIStaticLightRecordCache::ProbeResult cacheProbe = mStaticLightRecordCache.Probe(
+					mapChunkIndex,
+					staticChunk.lightGeometryGeneration,
+					staticChunk.lightMaterialGeneration,
+					staticChunk.active,
+					useRuntimeMutationReplacement);
+				if (cacheProbe == NRIStaticLightRecordCache::ProbeResult::Excluded)
 				{
 					continue;
 				}
 
-				AppendSceneView(
-					staticScene.lightChunkViews[chunkListIndex],
-					staticScene.materialBridge,
-					SceneLightRecordSource::StaticMapScene,
-					staticChunk.materialOffset,
-					staticChunk.materialOffset);
+				const nri_scene::SceneView& chunkView = staticScene.lightChunkViews[chunkListIndex];
+				if (cacheProbe == NRIStaticLightRecordCache::ProbeResult::LegacyFallback)
+				{
+					AppendSceneView(
+						chunkView,
+						staticScene.materialBridge,
+						SceneLightRecordSource::StaticMapScene,
+						staticChunk.materialOffset,
+						staticChunk.materialOffset);
+					continue;
+				}
+
+				if (cacheProbe == NRIStaticLightRecordCache::ProbeResult::Rebuild)
+				{
+					std::vector<NRIStaticLightRecordCache::Skeleton> skeletons;
+					skeletons.reserve(
+						chunkView.opaqueWalls.size() +
+						chunkView.opaqueFlats.size() +
+						chunkView.opaqueSprites.size());
+					uint32_t localMaterialOrdinal = 0;
+					const auto appendSkeletons = [&](const auto& surfaces)
+					{
+						for (const nri_scene::SurfaceRef& surface : surfaces)
+						{
+							NRIStaticLightRecordCache::Skeleton skeleton = {};
+							skeleton.localMaterialOrdinal = localMaterialOrdinal++;
+							skeleton.provenance = surface.provenance;
+							ComputeSurfaceBounds(surface, skeleton.center, skeleton.boundsRadius);
+							skeleton.surfaceArea = ComputeSurfaceArea(surface);
+							skeleton.identityKey = ComputeSurfaceIdentityKey(
+								SceneLightRecordSource::StaticMapScene,
+								skeleton.provenance,
+								skeleton.center);
+							skeletons.push_back(skeleton);
+						}
+					};
+					appendSkeletons(chunkView.opaqueWalls);
+					appendSkeletons(chunkView.opaqueFlats);
+					appendSkeletons(chunkView.opaqueSprites);
+					mStaticLightRecordCache.Commit(
+						mapChunkIndex,
+						staticChunk.lightGeometryGeneration,
+						staticChunk.lightMaterialGeneration,
+						std::move(skeletons));
+				}
+				else if (cacheProbe == NRIStaticLightRecordCache::ProbeResult::MaterialRefreshHit)
+				{
+					mStaticLightRecordCache.CommitMaterialGeneration(
+						mapChunkIndex,
+						staticChunk.lightMaterialGeneration);
+				}
+
+				const NRIStaticLightRecordCache::Entry* cacheEntry = mStaticLightRecordCache.Find(mapChunkIndex);
+				if (cacheEntry == nullptr)
+				{
+					AppendSceneView(
+						chunkView,
+						staticScene.materialBridge,
+						SceneLightRecordSource::StaticMapScene,
+						staticChunk.materialOffset,
+						staticChunk.materialOffset);
+					continue;
+				}
+
+				for (const NRIStaticLightRecordCache::Skeleton& skeleton : cacheEntry->skeletons)
+				{
+					SurfaceRecord record = {};
+					record.identityKey = skeleton.identityKey;
+					record.source = SceneLightRecordSource::StaticMapScene;
+					record.provenance = skeleton.provenance;
+					Copy3f(skeleton.center, record.center);
+					record.boundsRadius = skeleton.boundsRadius;
+					record.surfaceArea = skeleton.surfaceArea;
+					if (!NRIStaticLightRecordCache::RebaseMaterialIndex(
+							staticChunk.materialOffset,
+							skeleton.localMaterialOrdinal,
+							record.materialIndex))
+					{
+						record.materialIndex = UINT32_MAX;
+					}
+
+					if (record.materialIndex < staticScene.materialBridge.lightMetadata.size())
+					{
+						record.material = staticScene.materialBridge.lightMetadata[record.materialIndex];
+					}
+					else if (record.materialIndex < staticScene.materialBridge.materials.size())
+					{
+						const nri_scene::MaterialData& material = staticScene.materialBridge.materials[record.materialIndex];
+						record.material.sectorIndex = material.sectorIndex != UINT32_MAX ? (int32_t)material.sectorIndex : -1;
+						record.material.paletteIndex = material.paletteIndex;
+						record.material.materialFlags = material.flags;
+						record.material.alpha = material.alpha;
+						record.material.lightLevel = material.lightLevel;
+					}
+					AppendSurfaceRecord(record, 0);
+				}
+				mStaticLightRecordCache.NoteAppendedSkeletons((uint32_t)cacheEntry->skeletons.size());
 			}
 		});
 
@@ -3638,6 +3735,7 @@ SceneLightSystem::FrameAssemblyTimingStats SceneLightSystem::AssembleFrameSurfac
 			}
 		});
 	}
+	timings.staticRecordCache = mStaticLightRecordCache.GetFrameStats();
 
 	return timings;
 }

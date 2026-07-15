@@ -5,6 +5,7 @@
 #include "../scene/nri_map_world.h"
 #include "../scene/nri_scene_bridge.h"
 #include "nri_emissive_sampling_distribution.h"
+#include "nri_static_light_record_cache.h"
 #include "lightoverlay.h"
 #include "v_video.h"
 
@@ -643,6 +644,7 @@ public:
 		double dynamicAppendMs = 0.0;
 		double surfaceLightOverlayAppendMs = 0.0;
 		double persistentVoxelAppendMs = 0.0;
+		NRIStaticLightRecordCache::FrameStats staticRecordCache = {};
 	};
 
 	struct PersistentDynamicSurfaceStats
@@ -960,6 +962,7 @@ private:
 	PersistentDynamicEmissiveHighWaterStats mPersistentDynamicEmissiveHighWaterStats = {};
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	NRIEmissiveSamplingDistribution mEmissiveSamplingDistribution;
+	NRIStaticLightRecordCache mStaticLightRecordCache;
 	std::vector<SurfaceRecord> mSurfaceRecords;
 	SurfaceRecordIndex mSurfaceRecordIndex = {};
 	FrameAppendStats mFrameAppendStats = {};
