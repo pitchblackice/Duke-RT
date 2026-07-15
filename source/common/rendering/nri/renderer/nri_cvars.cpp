@@ -839,6 +839,14 @@ CUSTOM_CVAR(Int, nri_ptscenebufferrangeuploadmaxpercent, 75, 0)
 	}
 }
 
+CUSTOM_CVAR(Int, nri_ptsceneuploadvalidateinterval, 0, 0)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+}
+
 CUSTOM_CVAR(Int, nri_ptactorspritetrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)

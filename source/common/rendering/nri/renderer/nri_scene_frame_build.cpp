@@ -985,6 +985,8 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			overlayInputs.persistentVoxelOverlayStats = hasPersistentVoxelOverlay ? &persistentVoxelOverlayStats : nullptr;
 
 			overlayInputs.hasRuntimeSpaceLinkOverlay = hasRuntimeSpaceLinkOverlayForAssembly;
+			overlayInputs.runtimeSpaceLinkStamp = mSceneUploadProducerGenerations.Publish(
+				SceneBufferUploadDomain::RuntimeSpaceLink, 0, 0, true, true);
 			overlayInputs.runtimeSpaceLinkGeometry = &runtimeSpaceLinkGeometry;
 			overlayInputs.runtimeSpaceLinkMaterials = &runtimeSpaceLinkMaterialBridge;
 			overlayInputs.runtimeSpaceLinkTelemetry = {
@@ -996,6 +998,8 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				&mLastPerfShellTraceStats.overlayRuntimeSpaceLinkAppend };
 
 			overlayInputs.hasRuntimeMutationOverlay = hasRuntimeMutationOverlayForAssembly;
+			overlayInputs.runtimeMutationStamp = mSceneUploadProducerGenerations.Publish(
+				SceneBufferUploadDomain::RuntimeMutation, 0, 0, true, true);
 			overlayInputs.runtimeMutationGeometry = &runtimeMutationFrame.geometry;
 			overlayInputs.runtimeMutationMaterials = &runtimeMutationFrame.materialBridge;
 			overlayInputs.runtimeMutationTelemetry = {
@@ -1007,6 +1011,10 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				&mLastPerfShellTraceStats.overlayRuntimeMutationAppend };
 
 			overlayInputs.hasActiveDynamicOverlay = hasActiveDynamicOverlay;
+			const uint64_t activeDynamicLayoutKey = activeDynamicSceneView != nullptr ?
+				BuildNRISceneViewUploadLayoutKey(*activeDynamicSceneView, mMapWorld.buildSerial) : 0;
+			overlayInputs.activeDynamicStamp = mSceneUploadProducerGenerations.Publish(
+				SceneBufferUploadDomain::Dynamic, 0, activeDynamicLayoutKey, true, false);
 			overlayInputs.activeDynamicSceneView = activeDynamicSceneView;
 			overlayInputs.activeDynamicGeometry = activeDynamicGeometry;
 			overlayInputs.activeDynamicMaterials = activeDynamicMaterials;
@@ -1019,6 +1027,10 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				&mLastPerfShellTraceStats.overlayDynamicAppend };
 
 			overlayInputs.hasLocalPlayerReflectionOverlay = hasLocalPlayerReflectionOverlay;
+			const uint64_t localPlayerReflectionLayoutKey = hasLocalPlayerReflectionOverlay ?
+				BuildNRISceneViewUploadLayoutKey(localPlayerReflectionSceneView, mMapWorld.buildSerial) : 0;
+			overlayInputs.localPlayerReflectionStamp = mSceneUploadProducerGenerations.Publish(
+				SceneBufferUploadDomain::LocalPlayerReflection, 0, localPlayerReflectionLayoutKey, true, false);
 			overlayInputs.localPlayerReflectionGeometry = &localPlayerReflectionGeometry;
 			overlayInputs.localPlayerReflectionMaterials = &localPlayerReflectionMaterialBridge;
 			overlayInputs.localPlayerReflectionTelemetry = {
@@ -1030,6 +1042,15 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				&mLastPerfShellTraceStats.overlayLocalPlayerReflectionAppend };
 
 			overlayInputs.hasRuntimeDebugSphereOverlay = hasRuntimeDebugSphereOverlay;
+			const uint64_t debugSphereProductKey = nri_scene::HashCombine64(
+				mMapWorld.buildSerial,
+				mDebugOverlays.ContentGeneration());
+			overlayInputs.runtimeDebugSphereStamp = mSceneUploadProducerGenerations.Publish(
+				SceneBufferUploadDomain::RuntimeDebugSphere,
+				debugSphereProductKey,
+				debugSphereProductKey,
+				false,
+				false);
 			overlayInputs.runtimeDebugSphereGeometry = &debugSphereGeometry;
 			overlayInputs.runtimeDebugSphereMaterials = &debugSphereMaterialBridge;
 			overlayInputs.runtimeDebugSphereTelemetry = {
@@ -1047,6 +1068,15 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			uint32_t surfaceLightMaterialCount = 0;
 			PerfShellTraceStats::OverlayAppendSourceTraceEntry surfaceLightAppend = {};
 			overlayInputs.hasSurfaceLightOverlay = hasSurfaceLightOverlay;
+			const uint64_t surfaceLightProductKey = nri_scene::HashCombine64(
+				mMapWorld.buildSerial,
+				mLastPerfShellTraceStats.sceneReuseSurfaceLightKey);
+			overlayInputs.surfaceLightStamp = mSceneUploadProducerGenerations.Publish(
+				SceneBufferUploadDomain::SurfaceLightOverlay,
+				surfaceLightProductKey,
+				surfaceLightProductKey,
+				false,
+				false);
 			overlayInputs.surfaceLightGeometry = &surfaceLightGeometry;
 			overlayInputs.surfaceLightMaterials = &surfaceLightMaterialBridge;
 			overlayInputs.surfaceLightTelemetry = {

@@ -4902,6 +4902,22 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectBufferUploadPersistentVoxelMaterialBatchBarrierCommands,
 			(unsigned long long)shell.sceneSelectBufferUploadPersistentVoxelMaterialBatchGapBytes);
 		Printf(
+			"PERF pt scene buffer producer identity NRI: frame=%llu checks=%u uses=%u fallbacks=%u stamped_bytes=%llu fallback_bytes=%llu fallback_spans=%u coverage_rejects=%u validation_checks=%u validation_mismatches=%u visibility_cache_hits=%u visibility_cache_builds=%u visibility_validation_checks=%u visibility_validation_mismatches=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.sceneSelectBufferUploadProducerStampChecks,
+			shell.sceneSelectBufferUploadProducerStampUses,
+			shell.sceneSelectBufferUploadProducerStampFallbacks,
+			(unsigned long long)shell.sceneSelectBufferUploadProducerStampStampedBytes,
+			(unsigned long long)shell.sceneSelectBufferUploadProducerStampFallbackBytes,
+			shell.sceneSelectBufferUploadProducerStampFallbackSpans,
+			shell.sceneSelectBufferUploadProducerStampCoverageRejects,
+			shell.sceneSelectBufferUploadIdentityValidationChecks,
+			shell.sceneSelectBufferUploadIdentityValidationMismatches,
+			shell.sceneSelectBufferUploadVisibilityIdentityCacheHits,
+			shell.sceneSelectBufferUploadVisibilityIdentityCacheBuilds,
+			shell.sceneSelectBufferUploadVisibilityIdentityValidationChecks,
+			shell.sceneSelectBufferUploadVisibilityIdentityValidationMismatches);
+		Printf(
 			"PERF pt scene buffer dirty range detail NRI: frame=%llu dirty_range=%.3f dirty_checks=%u dirty_skips=%u dirty_forced_full=%u dirty_missing_mirror=%u dirty_size_mismatch=%u dirty_source_full=%u dirty_source_byte_scan=%u dirty_source_typed=%u dirty_raw_ranges=%u dirty_ranges=%u dirty_changed=%llu dirty_uploaded=%llu dirty_gap=%llu dirty_reject_coalesce=%u range_uploads=%u range_upload_bytes=%llu range_fallbacks=%u range_fallback_fragmented=%u range_fallback_large=%u primitive_range_uploads=%u material_range_uploads=%u vertex_dirty_ranges=%u vertex_dirty_changed=%llu vertex_dirty_uploaded=%llu index_dirty_ranges=%u index_dirty_changed=%llu index_dirty_uploaded=%llu primitive_dirty_ranges=%u primitive_dirty_changed=%llu primitive_dirty_uploaded=%llu material_dirty_ranges=%u material_dirty_changed=%llu material_dirty_uploaded=%llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneSelectBufferUploadDirtyRangeMs,
@@ -4938,6 +4954,18 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectBufferUploadMaterialDirtyRanges,
 			(unsigned long long)shell.sceneSelectBufferUploadMaterialDirtyChangedBytes,
 			(unsigned long long)shell.sceneSelectBufferUploadMaterialDirtyUploadedBytes);
+		Printf(
+			"PERF pt scene buffer typed upload NRI: frame=%llu typed_sources=%u byte_scan_sources=%u vertex_ranges=%u index_ranges=%u primitive_ranges=%u material_ranges=%u range_uploads=%u range_uploaded=%llu validation_mismatches=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.sceneSelectBufferUploadDirtyRangeSourceTyped,
+			shell.sceneSelectBufferUploadDirtyRangeSourceByteScan,
+			shell.sceneSelectBufferUploadVertexRangeUploads,
+			shell.sceneSelectBufferUploadIndexRangeUploads,
+			shell.sceneSelectBufferUploadPrimitiveRangeUploads,
+			shell.sceneSelectBufferUploadMaterialRangeUploads,
+			shell.sceneSelectBufferUploadRangeUploads,
+			(unsigned long long)shell.sceneSelectBufferUploadRangeUploadedBytes,
+			shell.sceneSelectBufferUploadIdentityValidationMismatches);
 		const auto getSceneBufferUploadDomainName =
 			[](NRIRenderer::SceneBufferUploadDomain domain) -> const char*
 		{

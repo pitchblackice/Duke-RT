@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nri_resources.h"
+#include "nri_scene_upload_identity.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -30,12 +31,6 @@ struct SceneBufferDebugStats
 	uint64_t growthRequestedBytesLastFrame = 0;
 	uint64_t growthAllocatedBytesLastFrame = 0;
 	uint64_t peakUsedBytes = 0;
-};
-
-struct SceneUploadDirtyRange
-{
-	uint64_t byteOffset = 0;
-	uint64_t size = 0;
 };
 
 enum ResidentUploadKind
@@ -85,4 +80,8 @@ struct SceneUploadBufferRingSlot
 	std::vector<uint8_t> indexMirror;
 	std::vector<uint8_t> primitiveMirror;
 	std::vector<uint8_t> materialMirror;
+	std::vector<NRISceneBufferUploadDomainSpan> publishedSpans;
+	uint64_t publishedPrimitiveExtraIdentity = 0;
+	uint64_t publishedMaterialExtraIdentity = 0;
+	bool publishedSpanIdentitiesValid = false;
 };

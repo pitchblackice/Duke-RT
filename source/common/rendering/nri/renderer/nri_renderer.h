@@ -114,41 +114,9 @@ public:
 		Count,
 	};
 
-	enum class SceneBufferUploadDomain : uint32_t
-	{
-		StaticOverlay = 0,
-		RuntimeSpaceLink,
-		RuntimeMutation,
-		Dynamic,
-		LocalPlayerReflection,
-		RuntimeDebugSphere,
-		SurfaceLightOverlay,
-		PersistentVoxelMaterial,
-		Count,
-	};
-
-	struct SceneBufferUploadProducerStamp
-	{
-		uint64_t vertexPayloadStamp = 0;
-		uint64_t indexPayloadStamp = 0;
-		uint64_t primitivePayloadStamp = 0;
-		uint64_t primitiveProvenanceStamp = 0;
-		uint64_t materialPayloadStamp = 0;
-	};
-
-	struct SceneBufferUploadDomainSpan
-	{
-		SceneBufferUploadDomain domain = SceneBufferUploadDomain::StaticOverlay;
-		uint32_t vertexOffset = 0;
-		uint32_t vertexCount = 0;
-		uint32_t indexOffset = 0;
-		uint32_t indexCount = 0;
-		uint32_t primitiveOffset = 0;
-		uint32_t primitiveCount = 0;
-		uint32_t materialOffset = 0;
-		uint32_t materialCount = 0;
-		SceneBufferUploadProducerStamp stamp = {};
-	};
+	using SceneBufferUploadDomain = NRISceneBufferUploadDomain;
+	using SceneBufferUploadProducerStamp = NRISceneBufferUploadProducerStamp;
+	using SceneBufferUploadDomainSpan = NRISceneBufferUploadDomainSpan;
 
 	struct StateCommitDomainGenerations
 	{
@@ -680,6 +648,14 @@ public:
 		uint32_t sceneSelectBufferUploadProducerStampIndexUses = 0;
 		uint32_t sceneSelectBufferUploadProducerStampPrimitiveUses = 0;
 		uint32_t sceneSelectBufferUploadProducerStampMaterialUses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampFallbackSpans = 0;
+		uint32_t sceneSelectBufferUploadProducerStampCoverageRejects = 0;
+		uint32_t sceneSelectBufferUploadIdentityValidationChecks = 0;
+		uint32_t sceneSelectBufferUploadIdentityValidationMismatches = 0;
+		uint32_t sceneSelectBufferUploadVisibilityIdentityCacheHits = 0;
+		uint32_t sceneSelectBufferUploadVisibilityIdentityCacheBuilds = 0;
+		uint32_t sceneSelectBufferUploadVisibilityIdentityValidationChecks = 0;
+		uint32_t sceneSelectBufferUploadVisibilityIdentityValidationMismatches = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeChecks = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeSkips = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeForcedFull = 0;
@@ -701,6 +677,8 @@ public:
 		uint32_t sceneSelectBufferUploadRangeFallbackLarge = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRangeUploads = 0;
 		uint32_t sceneSelectBufferUploadMaterialRangeUploads = 0;
+		uint32_t sceneSelectBufferUploadVertexRangeUploads = 0;
+		uint32_t sceneSelectBufferUploadIndexRangeUploads = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheChecks = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheHits = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheMisses = 0;
@@ -741,6 +719,8 @@ public:
 		uint64_t sceneSelectBufferUploadPrimitiveDirtyUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadMaterialDirtyUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadRangeUploadedBytes = 0;
+		uint64_t sceneSelectBufferUploadProducerStampStampedBytes = 0;
+		uint64_t sceneSelectBufferUploadProducerStampFallbackBytes = 0;
 		std::array<SceneBufferUploadDomainTraceEntry, SceneBufferUploadDomainCount> sceneSelectBufferUploadDomains = {};
 		double sceneSelectInstanceHandlesMs = 0.0;
 		double sceneSelectTexturePrepMs = 0.0;
@@ -2149,6 +2129,16 @@ private:
 		std::vector<nri_scene::PrimitiveData> primitives;
 	};
 
+	struct PrimitiveVisibilityIdentityCache
+	{
+		bool valid = false;
+		bool mapValid = false;
+		uint64_t mapBuildSerial = 0;
+		uint32_t chunkCount = 0;
+		uint32_t statsChunkCount = 0;
+		uint64_t identity = 0;
+	};
+
 	struct DynamicOverlayBlasAsset
 	{
 		uint64_t key = 0;
@@ -2644,6 +2634,9 @@ private:
 	NRIBufferResource mResidentStaticBlasScratchBuffer;
 	NRIBufferResource mEmissiveTopLevelScratchBuffer;
 	SelectPrimitiveRewriteCache mSelectPrimitiveRewriteCache = {};
+	PrimitiveVisibilityIdentityCache mPrimitiveVisibilityIdentityCache = {};
+	NRISceneUploadProducerGenerations mSceneUploadProducerGenerations;
+	NRISceneUploadIdentityValidator mSceneUploadIdentityValidator;
 	std::vector<nri_scene::MaterialData> mSelectCapturedGpuMaterialScratch;
 	std::vector<nri_scene::MaterialData> mSelectDynamicGpuMaterialScratch;
 	std::vector<nri_scene::MaterialData> mSelectPersistentVoxelGpuMaterialScratch;
@@ -2668,6 +2661,8 @@ private:
 	uint32_t mSceneDataFrameRingOverCapFrameIndex = UINT32_MAX;
 	std::vector<SceneUploadDirtyRange> mSceneUploadPrimitiveDirtyRangeScratch;
 	std::vector<SceneUploadDirtyRange> mSceneUploadMaterialDirtyRangeScratch;
+	std::vector<SceneUploadDirtyRange> mSceneUploadVertexDirtyRangeScratch;
+	std::vector<SceneUploadDirtyRange> mSceneUploadIndexDirtyRangeScratch;
 	std::vector<DynamicOverlayBlasAsset> mDynamicOverlayBlasAssets;
 	std::vector<nri_scene::SceneVertex> mDynamicOverlayBlasVertexScratch;
 	std::vector<uint32_t> mDynamicOverlayBlasIndexScratch;

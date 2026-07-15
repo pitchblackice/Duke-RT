@@ -24,32 +24,38 @@ struct NRISceneFrameOverlayBuildInputs
 	const NRIPersistentVoxelOverlayStats* persistentVoxelOverlayStats = nullptr;
 
 	bool hasRuntimeSpaceLinkOverlay = false;
+	NRIRenderer::SceneBufferUploadProducerStamp runtimeSpaceLinkStamp = {};
 	const nri_scene::GeometryData* runtimeSpaceLinkGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* runtimeSpaceLinkMaterials = nullptr;
 	NRISceneFrameOverlaySourceTelemetry runtimeSpaceLinkTelemetry = {};
 
 	bool hasRuntimeMutationOverlay = false;
+	NRIRenderer::SceneBufferUploadProducerStamp runtimeMutationStamp = {};
 	const nri_scene::GeometryData* runtimeMutationGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* runtimeMutationMaterials = nullptr;
 	NRISceneFrameOverlaySourceTelemetry runtimeMutationTelemetry = {};
 
 	bool hasActiveDynamicOverlay = false;
+	NRIRenderer::SceneBufferUploadProducerStamp activeDynamicStamp = {};
 	const nri_scene::SceneView* activeDynamicSceneView = nullptr;
 	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
 	NRISceneFrameOverlaySourceTelemetry activeDynamicTelemetry = {};
 
 	bool hasLocalPlayerReflectionOverlay = false;
+	NRIRenderer::SceneBufferUploadProducerStamp localPlayerReflectionStamp = {};
 	const nri_scene::GeometryData* localPlayerReflectionGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* localPlayerReflectionMaterials = nullptr;
 	NRISceneFrameOverlaySourceTelemetry localPlayerReflectionTelemetry = {};
 
 	bool hasRuntimeDebugSphereOverlay = false;
+	NRIRenderer::SceneBufferUploadProducerStamp runtimeDebugSphereStamp = {};
 	const nri_scene::GeometryData* runtimeDebugSphereGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* runtimeDebugSphereMaterials = nullptr;
 	NRISceneFrameOverlaySourceTelemetry runtimeDebugSphereTelemetry = {};
 
 	bool hasSurfaceLightOverlay = false;
+	NRIRenderer::SceneBufferUploadProducerStamp surfaceLightStamp = {};
 	const nri_scene::GeometryData* surfaceLightGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* surfaceLightMaterials = nullptr;
 	NRISceneFrameOverlaySourceTelemetry surfaceLightTelemetry = {};
@@ -65,3 +71,4 @@ struct NRISceneFrameOverlayBuildOutputs
 void BuildNRISceneFrameOverlay(
 	const NRISceneFrameOverlayBuildInputs& inputs,
 	const NRISceneFrameOverlayBuildOutputs& outputs);
+uint64_t BuildNRISceneViewUploadLayoutKey(const nri_scene::SceneView& sceneView, uint64_t mapWorldBuildSerial);

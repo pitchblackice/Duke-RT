@@ -1002,6 +1002,8 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_sector_lighting.cpp
 	common/rendering/nri/renderer/nri_scene_lights.cpp
 	common/rendering/nri/renderer/nri_scene_upload.cpp
+	common/rendering/nri/renderer/nri_scene_upload_identity.cpp
+	common/rendering/nri/renderer/nri_scene_upload_dirty_plan.cpp
 	common/rendering/nri/renderer/nri_scene_upload_ranges.cpp
 	common/rendering/nri/renderer/nri_static_scene.cpp
 	common/rendering/nri/renderer/nri_static_scene_diagnostics.cpp

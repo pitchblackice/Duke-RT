@@ -202,6 +202,9 @@ void NRIRenderer::DestroyCachedTextures()
 
 void NRIRenderer::DestroySceneBuffers()
 {
+	mSceneUploadProducerGenerations.Reset();
+	mSceneUploadIdentityValidator.Reset();
+	mPrimitiveVisibilityIdentityCache = {};
 	ResetPersistentVoxelBlasCompaction();
 	mStaticMapScene.buffersResident = false;
 	nri_static_scene_geometry::ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);

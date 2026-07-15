@@ -7,6 +7,8 @@
 #include "../scene/nri_hash.h"
 #include "nri_runtime_mutation_trace.h"
 #include "nri_scene_lights.h"
+#include "nri_scene_upload_dirty_plan.h"
+#include "nri_scene_upload_identity.h"
 #include "nri_shader_contracts.h"
 #include "nri_static_scene_geometry.h"
 #include "nri_upload_hash.h"
@@ -883,13 +885,7 @@ bool NRIRenderer::UploadSceneBuffers(
 		mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRequestedBytes = geometry.primitives.size() * sizeof(nri_scene::PrimitiveData);
 		mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialRequestedBytes = materials.size() * sizeof(nri_scene::MaterialData);
 	}
-	enum class SceneUploadBufferKind
-	{
-		Vertex,
-		Index,
-		Primitive,
-		Material
-	};
+	using SceneUploadBufferKind = NRISceneUploadBufferKind;
 	const auto getDomainEntry = [&](SceneBufferUploadDomain domain) -> PerfShellTraceStats::SceneBufferUploadDomainTraceEntry*
 	{
 		const size_t domainIndex = (size_t)domain;
@@ -919,6 +915,11 @@ bool NRIRenderer::UploadSceneBuffers(
 		case SceneUploadBufferKind::Material:
 			outOffset = (uint64_t)span.materialOffset * sizeof(nri_scene::MaterialData);
 			outSize = (uint64_t)span.materialCount * sizeof(nri_scene::MaterialData);
+			break;
+		case SceneUploadBufferKind::Provenance:
+		case SceneUploadBufferKind::Count:
+			outOffset = 0;
+			outSize = 0;
 			break;
 		}
 	};
@@ -1122,63 +1123,42 @@ bool NRIRenderer::UploadSceneBuffers(
 		}
 	};
 	const auto buildProducerPayloadHash =
-		[&](SceneUploadBufferKind kind, uint64_t payloadSize, uint32_t payloadStride, uint64_t extraIdentity, uint64_t& outHash) -> bool
+		[&](SceneUploadBufferKind kind, const void* payloadData, uint64_t payloadSize, uint32_t payloadStride, uint64_t extraIdentity, uint64_t& outHash, bool& outQuarantined) -> bool
 	{
+		outQuarantined = false;
 		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampChecks++;
-		if (domainSpans == nullptr)
+		NRISceneUploadPayloadView payload = {};
+		payload.data = payloadData;
+		payload.byteSize = payloadSize;
+		payload.stride = payloadStride;
+		payload.extraIdentity = extraIdentity;
+		const NRISceneUploadIdentityBuildResult built =
+			BuildNRISceneUploadPayloadIdentity(domainSpans, kind, payload, &mSceneUploadIdentityValidator);
+		outQuarantined = built.stats.quarantinedSpans != 0;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampStampedBytes += built.stats.stampedBytes;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbackBytes += built.stats.fallbackBytes;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbackSpans += built.stats.fallbackSpans;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampCoverageRejects += built.stats.coverageRejects;
+		for (size_t domainIndex = 0; domainIndex < built.stats.domainChecks.size(); ++domainIndex)
+		{
+			auto& domain = mLastPerfShellTraceStats.sceneSelectBufferUploadDomains[domainIndex];
+			domain.stampChecks += built.stats.domainChecks[domainIndex];
+			domain.stampMisses += built.stats.domainFallbacks[domainIndex];
+		}
+		if (!built.completeCoverage)
 		{
 			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
 			return false;
 		}
-		uint64_t coveredBytes = 0;
-		uint64_t hash = 1469598103934665603ull;
-		hash = nri_scene::HashCombine64(hash, (uint64_t)kind);
-		hash = nri_scene::HashCombine64(hash, payloadSize);
-		hash = nri_scene::HashCombine64(hash, payloadStride);
-		hash = nri_scene::HashCombine64(hash, extraIdentity);
-		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		outHash = built.identity;
+		if (built.usedOnlyProducerStamps)
 		{
-			uint64_t offset = 0;
-			uint64_t size = 0;
-			getSpanByteRange(span, kind, offset, size);
-			if (size == 0)
-			{
-				continue;
-			}
-			uint64_t stamp = 0;
-			switch (kind)
-			{
-			case SceneUploadBufferKind::Vertex:
-				stamp = span.stamp.vertexPayloadStamp;
-				break;
-			case SceneUploadBufferKind::Index:
-				stamp = span.stamp.indexPayloadStamp;
-				break;
-			case SceneUploadBufferKind::Primitive:
-				stamp = span.stamp.primitivePayloadStamp;
-				break;
-			case SceneUploadBufferKind::Material:
-				stamp = span.stamp.materialPayloadStamp;
-				break;
-			}
-			if (stamp == 0)
-			{
-				mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
-				return false;
-			}
-			coveredBytes += size;
-			hash = nri_scene::HashCombine64(hash, (uint64_t)span.domain);
-			hash = nri_scene::HashCombine64(hash, offset);
-			hash = nri_scene::HashCombine64(hash, size);
-			hash = nri_scene::HashCombine64(hash, stamp);
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampUses++;
 		}
-		if (coveredBytes != payloadSize)
+		else
 		{
 			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
-			return false;
 		}
-		outHash = hash != 0 ? hash : 1;
-		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampUses++;
 		switch (kind)
 		{
 		case SceneUploadBufferKind::Vertex:
@@ -1193,55 +1173,38 @@ bool NRIRenderer::UploadSceneBuffers(
 		case SceneUploadBufferKind::Material:
 			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampMaterialUses++;
 			break;
+		case SceneUploadBufferKind::Provenance:
+		case SceneUploadBufferKind::Count:
+			break;
 		}
 		return true;
 	};
 	const auto buildProducerProvenanceHash =
-		[&](uint64_t primitiveCount, uint64_t& outHash) -> bool
+		[&](const std::vector<nri_scene::SurfaceProvenance>& provenance, uint64_t& outHash, bool& outQuarantined) -> bool
 	{
-		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampChecks++;
-		if (domainSpans == nullptr)
-		{
-			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
-			return false;
-		}
-		uint64_t coveredPrimitives = 0;
-		uint64_t hash = 1469598103934665603ull;
-		hash = nri_scene::HashCombine64(hash, primitiveCount);
-		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
-		{
-			if (span.primitiveCount == 0)
-			{
-				continue;
-			}
-			if (span.stamp.primitiveProvenanceStamp == 0)
-			{
-				mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
-				return false;
-			}
-			coveredPrimitives += span.primitiveCount;
-			hash = nri_scene::HashCombine64(hash, (uint64_t)span.domain);
-			hash = nri_scene::HashCombine64(hash, (uint64_t)span.primitiveOffset);
-			hash = nri_scene::HashCombine64(hash, (uint64_t)span.primitiveCount);
-			hash = nri_scene::HashCombine64(hash, span.stamp.primitiveProvenanceStamp);
-		}
-		if (coveredPrimitives != primitiveCount)
-		{
-			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
-			return false;
-		}
-		outHash = hash != 0 ? hash : 1;
-		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampUses++;
-		return true;
+		return buildProducerPayloadHash(
+			SceneUploadBufferKind::Provenance,
+			provenance.empty() ? nullptr : provenance.data(),
+			(uint64_t)provenance.size() * sizeof(nri_scene::SurfaceProvenance),
+			sizeof(nri_scene::SurfaceProvenance),
+			0,
+			outHash,
+			outQuarantined);
 	};
 	const uint64_t primitiveInputSize = geometry.primitives.size() * sizeof(nri_scene::PrimitiveData);
 	uint64_t primitiveInputPayloadHash = 0;
 	uint64_t primitiveProvenanceHash = 0;
 	uint64_t primitiveVisibilityIdentityHash = 0;
+	bool primitiveInputQuarantined = false;
+	bool primitiveProvenanceQuarantined = false;
+	bool forceValidationVertexUpload = false;
+	bool forceValidationIndexUpload = false;
+	bool forceValidationPrimitiveUpload = false;
+	bool forceValidationMaterialUpload = false;
 	const std::vector<nri_scene::PrimitiveData>* gpuPrimitives = nullptr;
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteMs);
-		if (buildProducerPayloadHash(SceneUploadBufferKind::Primitive, primitiveInputSize, sizeof(nri_scene::PrimitiveData), 0, primitiveInputPayloadHash))
+		if (buildProducerPayloadHash(SceneUploadBufferKind::Primitive, geometry.primitives.data(), primitiveInputSize, sizeof(nri_scene::PrimitiveData), 0, primitiveInputPayloadHash, primitiveInputQuarantined))
 		{
 			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampRewritePrimitiveUses++;
 		}
@@ -1250,7 +1213,7 @@ bool NRIRenderer::UploadSceneBuffers(
 			ScopedPtPerfTimer hashTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewritePrimitiveHashMs);
 			primitiveInputPayloadHash = HashUploadPayloadBytes(geometry.primitives.data(), primitiveInputSize);
 		}
-		if (buildProducerProvenanceHash((uint64_t)geometry.primitiveProvenance.size(), primitiveProvenanceHash))
+		if (buildProducerProvenanceHash(geometry.primitiveProvenance, primitiveProvenanceHash, primitiveProvenanceQuarantined))
 		{
 			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampRewriteProvenanceUses++;
 		}
@@ -1261,7 +1224,69 @@ bool NRIRenderer::UploadSceneBuffers(
 		}
 		{
 			ScopedPtPerfTimer hashTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteVisibilityHashMs);
-			primitiveVisibilityIdentityHash = HashPrimitiveRewriteVisibilityIdentity(mMapWorld);
+			const bool cacheHit =
+				mPrimitiveVisibilityIdentityCache.valid &&
+				mPrimitiveVisibilityIdentityCache.mapValid == mMapWorld.valid &&
+				mPrimitiveVisibilityIdentityCache.mapBuildSerial == mMapWorld.buildSerial &&
+				mPrimitiveVisibilityIdentityCache.chunkCount == mMapWorld.chunks.size() &&
+				mPrimitiveVisibilityIdentityCache.statsChunkCount == mMapWorld.stats.chunkCount;
+			if (cacheHit)
+			{
+				primitiveVisibilityIdentityHash = mPrimitiveVisibilityIdentityCache.identity;
+				mLastPerfShellTraceStats.sceneSelectBufferUploadVisibilityIdentityCacheHits++;
+			}
+			else
+			{
+				primitiveVisibilityIdentityHash = HashPrimitiveRewriteVisibilityIdentity(mMapWorld);
+				mPrimitiveVisibilityIdentityCache.valid = true;
+				mPrimitiveVisibilityIdentityCache.mapValid = mMapWorld.valid;
+				mPrimitiveVisibilityIdentityCache.mapBuildSerial = mMapWorld.buildSerial;
+				mPrimitiveVisibilityIdentityCache.chunkCount = (uint32_t)mMapWorld.chunks.size();
+				mPrimitiveVisibilityIdentityCache.statsChunkCount = mMapWorld.stats.chunkCount;
+				mPrimitiveVisibilityIdentityCache.identity = primitiveVisibilityIdentityHash;
+				mLastPerfShellTraceStats.sceneSelectBufferUploadVisibilityIdentityCacheBuilds++;
+			}
+			const int visibilityValidationInterval = (int)nri_ptsceneuploadvalidateinterval;
+			if (cacheHit && visibilityValidationInterval > 0 && mFrameIndex % (uint64_t)visibilityValidationInterval == 0)
+			{
+				const uint64_t exactVisibilityIdentity = HashPrimitiveRewriteVisibilityIdentity(mMapWorld);
+				mLastPerfShellTraceStats.sceneSelectBufferUploadVisibilityIdentityValidationChecks++;
+				if (exactVisibilityIdentity != primitiveVisibilityIdentityHash)
+				{
+					mLastPerfShellTraceStats.sceneSelectBufferUploadVisibilityIdentityValidationMismatches++;
+					primitiveVisibilityIdentityHash = exactVisibilityIdentity;
+					mPrimitiveVisibilityIdentityCache.identity = exactVisibilityIdentity;
+				}
+			}
+		}
+		const int identityValidationInterval = (int)nri_ptsceneuploadvalidateinterval;
+		if (domainSpans != nullptr && identityValidationInterval > 0 && mFrameIndex % (uint64_t)identityValidationInterval == 0)
+		{
+			NRISceneUploadIdentityValidationStats validation = {};
+			NRISceneUploadPayloadView primitivePayload = {};
+			primitivePayload.data = geometry.primitives.data();
+			primitivePayload.byteSize = primitiveInputSize;
+			primitivePayload.stride = sizeof(nri_scene::PrimitiveData);
+			if (!mSceneUploadIdentityValidator.Validate(*domainSpans, SceneUploadBufferKind::Primitive, primitivePayload, validation))
+			{
+				primitiveInputPayloadHash = HashUploadPayloadBytes(geometry.primitives.data(), primitiveInputSize);
+				forceValidationPrimitiveUpload = true;
+			}
+			mLastPerfShellTraceStats.sceneSelectBufferUploadIdentityValidationChecks += validation.checks;
+			mLastPerfShellTraceStats.sceneSelectBufferUploadIdentityValidationMismatches += validation.mismatches;
+
+			validation = {};
+			NRISceneUploadPayloadView provenancePayload = {};
+			provenancePayload.data = geometry.primitiveProvenance.data();
+			provenancePayload.byteSize = (uint64_t)geometry.primitiveProvenance.size() * sizeof(nri_scene::SurfaceProvenance);
+			provenancePayload.stride = sizeof(nri_scene::SurfaceProvenance);
+			if (!mSceneUploadIdentityValidator.Validate(*domainSpans, SceneUploadBufferKind::Provenance, provenancePayload, validation))
+			{
+				primitiveProvenanceHash = HashPrimitiveRewriteProvenancePayload(geometry.primitiveProvenance);
+				forceValidationPrimitiveUpload = true;
+			}
+			mLastPerfShellTraceStats.sceneSelectBufferUploadIdentityValidationChecks += validation.checks;
+			mLastPerfShellTraceStats.sceneSelectBufferUploadIdentityValidationMismatches += validation.mismatches;
 		}
 		mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheChecks++;
 		if (mSelectPrimitiveRewriteCache.valid &&
@@ -1355,29 +1380,92 @@ bool NRIRenderer::UploadSceneBuffers(
 	uint64_t indexPayloadHash = 0;
 	uint64_t primitivePayloadHash = 0;
 	uint64_t materialPayloadHash = 0;
+	uint64_t finalMaterialProductIdentity = 0;
+	bool vertexQuarantined = false;
+	bool indexQuarantined = false;
+	bool primitiveQuarantined = false;
+	bool materialQuarantined = false;
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMs);
-		if (!buildProducerPayloadHash(SceneUploadBufferKind::Vertex, vertexSize, sizeof(nri_scene::SceneVertex), 0, vertexPayloadHash))
+		if (!buildProducerPayloadHash(SceneUploadBufferKind::Vertex, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), 0, vertexPayloadHash, vertexQuarantined))
 		{
 			vertexPayloadHash = HashUploadPayloadBytes(geometry.vertices.data(), vertexSize);
 		}
-		if (!buildProducerPayloadHash(SceneUploadBufferKind::Index, indexSize, sizeof(uint32_t), 0, indexPayloadHash))
+		if (!buildProducerPayloadHash(SceneUploadBufferKind::Index, geometry.indices.data(), indexSize, sizeof(uint32_t), 0, indexPayloadHash, indexQuarantined))
 		{
 			indexPayloadHash = HashUploadPayloadBytes(geometry.indices.data(), indexSize);
 		}
-		if (!buildProducerPayloadHash(SceneUploadBufferKind::Primitive, primitiveSize, sizeof(nri_scene::PrimitiveData), primitiveVisibilityIdentityHash, primitivePayloadHash))
+		if (!buildProducerPayloadHash(SceneUploadBufferKind::Primitive, gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize, sizeof(nri_scene::PrimitiveData), primitiveVisibilityIdentityHash, primitivePayloadHash, primitiveQuarantined))
 		{
 			primitivePayloadHash = HashUploadPayloadBytes(gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize);
 		}
-		if (!buildProducerPayloadHash(SceneUploadBufferKind::Material, materialSize, sizeof(nri_scene::MaterialData), 0, materialPayloadHash))
+		finalMaterialProductIdentity = HashUploadPayloadBytes(materials.data(), materialSize);
+		if (!buildProducerPayloadHash(SceneUploadBufferKind::Material, materials.data(), materialSize, sizeof(nri_scene::MaterialData), finalMaterialProductIdentity, materialPayloadHash, materialQuarantined))
 		{
 			materialPayloadHash = HashUploadPayloadBytes(materials.data(), materialSize);
 		}
+
+		const int identityValidationInterval = (int)nri_ptsceneuploadvalidateinterval;
+		if (domainSpans != nullptr && identityValidationInterval > 0 && mFrameIndex % (uint64_t)identityValidationInterval == 0)
+		{
+			const auto validatePayload =
+				[&](SceneUploadBufferKind kind, const void* data, uint64_t size, uint32_t stride, uint64_t extraIdentity, uint64_t& identity, bool& forceUpload)
+			{
+					NRISceneUploadPayloadView payload = {};
+					payload.data = data;
+					payload.byteSize = size;
+					payload.stride = stride;
+					payload.extraIdentity = extraIdentity;
+					NRISceneUploadIdentityValidationStats validation = {};
+					if (!mSceneUploadIdentityValidator.Validate(*domainSpans, kind, payload, validation))
+					{
+						identity = HashUploadPayloadBytes(data, size);
+						forceUpload = true;
+					}
+					mLastPerfShellTraceStats.sceneSelectBufferUploadIdentityValidationChecks += validation.checks;
+					mLastPerfShellTraceStats.sceneSelectBufferUploadIdentityValidationMismatches += validation.mismatches;
+				};
+			validatePayload(SceneUploadBufferKind::Vertex, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), 0, vertexPayloadHash, forceValidationVertexUpload);
+			validatePayload(SceneUploadBufferKind::Index, geometry.indices.data(), indexSize, sizeof(uint32_t), 0, indexPayloadHash, forceValidationIndexUpload);
+			validatePayload(SceneUploadBufferKind::Material, materials.data(), materialSize, sizeof(nri_scene::MaterialData), finalMaterialProductIdentity, materialPayloadHash, forceValidationMaterialUpload);
+		}
+		if (forceValidationPrimitiveUpload || primitiveInputQuarantined || primitiveProvenanceQuarantined || primitiveQuarantined)
+		{
+			primitivePayloadHash = HashUploadPayloadBytes(
+				gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr,
+				primitiveSize);
+		}
 	}
+	forceValidationVertexUpload = forceValidationVertexUpload || vertexQuarantined;
+	forceValidationIndexUpload = forceValidationIndexUpload || indexQuarantined;
+	forceValidationPrimitiveUpload = forceValidationPrimitiveUpload || primitiveInputQuarantined || primitiveProvenanceQuarantined || primitiveQuarantined;
+	forceValidationMaterialUpload = forceValidationMaterialUpload || materialQuarantined;
 
 	// Scene upload buffers are ringed by queued frame. The frame shell waits before
 	// reusing a queued-frame slot, so the selected slot is safe to overwrite here.
 	bool waitedForWrites = true;
+	NRISceneUploadDirtyPlan vertexTypedPlan = {};
+	NRISceneUploadDirtyPlan indexTypedPlan = {};
+	NRISceneUploadDirtyPlan primitiveTypedPlan = {};
+	NRISceneUploadDirtyPlan materialTypedPlan = {};
+	if (domainSpans != nullptr && uploadSlot.publishedSpanIdentitiesValid)
+	{
+		const uint64_t maxGapBytes = (uint64_t)(int)nri_ptscenebufferdirtyrangegap;
+		vertexTypedPlan = BuildNRISceneUploadDirtyPlan(
+			*domainSpans, uploadSlot.publishedSpans, SceneUploadBufferKind::Vertex,
+			vertexSize, sizeof(nri_scene::SceneVertex), 0, 0, maxGapBytes);
+		indexTypedPlan = BuildNRISceneUploadDirtyPlan(
+			*domainSpans, uploadSlot.publishedSpans, SceneUploadBufferKind::Index,
+			indexSize, sizeof(uint32_t), 0, 0, maxGapBytes);
+		primitiveTypedPlan = BuildNRISceneUploadDirtyPlan(
+			*domainSpans, uploadSlot.publishedSpans, SceneUploadBufferKind::Primitive,
+			primitiveSize, sizeof(nri_scene::PrimitiveData), primitiveVisibilityIdentityHash,
+			uploadSlot.publishedPrimitiveExtraIdentity, maxGapBytes);
+		materialTypedPlan = BuildNRISceneUploadDirtyPlan(
+			*domainSpans, uploadSlot.publishedSpans, SceneUploadBufferKind::Material,
+			materialSize, sizeof(nri_scene::MaterialData), finalMaterialProductIdentity,
+			uploadSlot.publishedMaterialExtraIdentity, maxGapBytes);
+	}
 	const auto notePayloadHashState =
 		[&](const NRIBufferResource& resource,
 			uint64_t payloadHash,
@@ -1679,12 +1767,14 @@ bool NRIRenderer::UploadSceneBuffers(
 			SceneBufferDebugStats& stats,
 			std::vector<uint8_t>& payloadMirror,
 			std::vector<SceneUploadDirtyRange>* dirtyRangeScratch,
+			const NRISceneUploadDirtyPlan* typedPlan,
 			const void* bufferData,
 			uint64_t bufferSize,
 			uint32_t bufferStride,
 			uint64_t payloadHash,
 			bool skipUpload,
 			bool allowRangeUpload,
+			bool forceIdentityUpload,
 			nri::BufferUsageBits usageBits,
 			nri::AccessStage afterAccess,
 			double& uploadMs,
@@ -1707,7 +1797,9 @@ bool NRIRenderer::UploadSceneBuffers(
 			resource.usedSize != bufferSize ||
 			resource.payloadSize != bufferSize ||
 			resource.stride != bufferStride ||
-			resource.payloadStride != bufferStride;
+			resource.payloadStride != bufferStride ||
+			forceIdentityUpload ||
+			(typedPlan != nullptr && typedPlan->forceFull);
 		const bool traceDirtyRanges = ShouldTraceSceneBufferDirtyRanges();
 		SceneUploadDirtyRangeStats dirtyStats = {};
 		const bool collectDirtyRanges = allowRangeUpload && (traceDirtyRanges || (!skipUpload && !forceFullDirty));
@@ -1720,6 +1812,26 @@ bool NRIRenderer::UploadSceneBuffers(
 			dirtyRanges = 0;
 			dirtyChangedBytes = 0;
 			dirtyUploadedBytes = 0;
+		}
+		else if (typedPlan != nullptr && typedPlan->typed && !forceFullDirty)
+		{
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeMs);
+			mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeSourceTyped++;
+			dirtyStats.rawRanges = typedPlan->rawRanges;
+			dirtyStats.coalescedRanges = (uint32_t)typedPlan->ranges.size();
+			dirtyStats.rejectedCoalesces = typedPlan->rejectedCoalesces;
+			dirtyStats.changedBytes = typedPlan->changedBytes;
+			dirtyStats.uploadedBytes = typedPlan->uploadBytes;
+			dirtyStats.gapBytes = typedPlan->gapBytes;
+			if (dirtyRangeScratch != nullptr)
+			{
+				*dirtyRangeScratch = typedPlan->ranges;
+			}
+			addDirtyRangeStats(dirtyStats, dirtyRanges, dirtyChangedBytes, dirtyUploadedBytes);
+			if (dirtyRangeScratch != nullptr)
+			{
+				addDomainRangeBytes(bufferKind, *dirtyRangeScratch, true);
+			}
 		}
 		else
 		{
@@ -1847,13 +1959,29 @@ bool NRIRenderer::UploadSceneBuffers(
 	addDomainPayload(SceneUploadBufferKind::Index, skipIndexUpload);
 	addDomainPayload(SceneUploadBufferKind::Primitive, skipPrimitiveUpload);
 	addDomainPayload(SceneUploadBufferKind::Material, skipMaterialUpload);
-	uint32_t ignoredRangeUploadCount = 0;
-
-	return
-		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, vertexMirror, nullptr, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, skipVertexUpload, false, NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIResourceAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyUploadedBytes, ignoredRangeUploadCount, SceneUploadBufferKind::Vertex) &&
-		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, indexMirror, nullptr, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, skipIndexUpload, false, NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIResourceAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyUploadedBytes, ignoredRangeUploadCount, SceneUploadBufferKind::Index) &&
-		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, primitiveMirror, &mSceneUploadPrimitiveDirtyRangeScratch, gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIResourceComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRangeUploads, SceneUploadBufferKind::Primitive) &&
-		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, materialMirror, &mSceneUploadMaterialDirtyRangeScratch, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, skipMaterialUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIResourceComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialRangeUploads, SceneUploadBufferKind::Material);
+	const bool uploaded =
+		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, vertexMirror, &mSceneUploadVertexDirtyRangeScratch, (vertexTypedPlan.typed || vertexTypedPlan.forceFull) ? &vertexTypedPlan : nullptr, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, skipVertexUpload, vertexTypedPlan.typed, forceValidationVertexUpload, NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIResourceAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexRangeUploads, SceneUploadBufferKind::Vertex) &&
+		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, indexMirror, &mSceneUploadIndexDirtyRangeScratch, (indexTypedPlan.typed || indexTypedPlan.forceFull) ? &indexTypedPlan : nullptr, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, skipIndexUpload, indexTypedPlan.typed, forceValidationIndexUpload, NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIResourceAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexRangeUploads, SceneUploadBufferKind::Index) &&
+		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, primitiveMirror, &mSceneUploadPrimitiveDirtyRangeScratch, (primitiveTypedPlan.typed || primitiveTypedPlan.forceFull) ? &primitiveTypedPlan : nullptr, gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, true, forceValidationPrimitiveUpload, nri::BufferUsageBits::SHADER_RESOURCE, NRIResourceComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRangeUploads, SceneUploadBufferKind::Primitive) &&
+		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, materialMirror, &mSceneUploadMaterialDirtyRangeScratch, (materialTypedPlan.typed || materialTypedPlan.forceFull) ? &materialTypedPlan : nullptr, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, skipMaterialUpload, true, forceValidationMaterialUpload, nri::BufferUsageBits::SHADER_RESOURCE, NRIResourceComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialRangeUploads, SceneUploadBufferKind::Material);
+	if (uploaded)
+	{
+		if (domainSpans != nullptr)
+		{
+			uploadSlot.publishedSpans = *domainSpans;
+			uploadSlot.publishedPrimitiveExtraIdentity = primitiveVisibilityIdentityHash;
+			uploadSlot.publishedMaterialExtraIdentity = finalMaterialProductIdentity;
+			uploadSlot.publishedSpanIdentitiesValid = true;
+		}
+		else
+		{
+			uploadSlot.publishedSpans.clear();
+			uploadSlot.publishedPrimitiveExtraIdentity = 0;
+			uploadSlot.publishedMaterialExtraIdentity = 0;
+			uploadSlot.publishedSpanIdentitiesValid = false;
+		}
+	}
+	return uploaded;
 }
 
 

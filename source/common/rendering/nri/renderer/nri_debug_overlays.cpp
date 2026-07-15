@@ -145,6 +145,11 @@ bool NRIDebugOverlaySystem::AddRuntimeDebugSphere(const float center[3], float d
 
 	mRuntimeDebugSpheres.push_back(std::move(sphere));
 	outId = mRuntimeDebugSpheres.back().id;
+	mContentGeneration++;
+	if (mContentGeneration == 0)
+	{
+		mContentGeneration = 1;
+	}
 	return true;
 }
 
@@ -161,6 +166,11 @@ bool NRIDebugOverlaySystem::RemoveRuntimeDebugSphere(uint32_t id)
 	}
 
 	mRuntimeDebugSpheres.erase(it);
+	mContentGeneration++;
+	if (mContentGeneration == 0)
+	{
+		mContentGeneration = 1;
+	}
 	return true;
 }
 
@@ -172,6 +182,11 @@ bool NRIDebugOverlaySystem::ClearRuntimeDebugSpheres()
 	}
 
 	mRuntimeDebugSpheres.clear();
+	mContentGeneration++;
+	if (mContentGeneration == 0)
+	{
+		mContentGeneration = 1;
+	}
 	return true;
 }
 
@@ -204,6 +219,14 @@ void NRIDebugOverlaySystem::PrintRuntimeDebugSpheres() const
 
 void NRIDebugOverlaySystem::InvalidateRuntimeDebugSphereTessellation()
 {
+	if (!mRuntimeDebugSpheres.empty())
+	{
+		mContentGeneration++;
+		if (mContentGeneration == 0)
+		{
+			mContentGeneration = 1;
+		}
+	}
 	for (RuntimeDebugSphere& sphere : mRuntimeDebugSpheres)
 	{
 		sphere.cacheValid = false;
