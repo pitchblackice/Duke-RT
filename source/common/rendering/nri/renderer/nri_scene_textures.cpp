@@ -954,17 +954,63 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 		std::max<uint64_t>(1ull, (uint64_t)mFrameBuffer->mQueuedFrames.size()) : 1ull;
 	const uint64_t completedTextureSerial =
 		currentTextureSerial > queuedFrameCount ? currentTextureSerial - queuedFrameCount : 0ull;
+	const bool combinedMaterialSet = &materials == &mSceneMaterialFrameCache.Materials();
 	const bool authoritativeTextureSet =
-		&materials == &mSceneMaterialFrameCache.Materials() ||
+		combinedMaterialSet ||
 		(reason != nullptr && std::strcmp(reason, "static_map_scene") == 0);
-	mSceneTextureStableSlotsActive = authoritativeTextureSet ?
-		mSceneTextures.SlotTable().UpdateActiveKeys(
-			mSceneTextureKeyScratch,
-			currentTextureSerial,
-			completedTextureSerial) :
-		mSceneTextures.SlotTable().EnsureActiveKeys(
-			mSceneTextureKeyScratch,
-			completedTextureSerial);
+	const bool combinedUsesResidentStaticBuffer =
+		combinedMaterialSet &&
+		mStaticMapScene.valid &&
+		mStaticMapScene.buffersResident &&
+		!mStaticMapScene.gpuMaterials.empty();
+	if (combinedUsesResidentStaticBuffer && !mStaticMapScene.gpuMaterialsUseStableTextureSlots)
+	{
+		// The combined bridge preserves the static bridge's texture prefix, so
+		// legacy indices remain valid. Do not switch descriptors to stable order
+		// without also converting and uploading the durable static atlas.
+		bool staticTexturePrefixMatches =
+			materials.textures.size() >= mStaticMapScene.materialBridge.textures.size();
+		for (size_t textureIndex = 0;
+			staticTexturePrefixMatches && textureIndex < mStaticMapScene.materialBridge.textures.size();
+			++textureIndex)
+		{
+			staticTexturePrefixMatches =
+				materials.textures[textureIndex].key == mStaticMapScene.materialBridge.textures[textureIndex].key;
+		}
+		if (!staticTexturePrefixMatches)
+		{
+			if (nri_ptscenestats || ShouldTraceSceneTexturePerf())
+			{
+				Printf("NRI PT scene textures: event=namespace_mismatch reason=%s static_namespace=legacy combined_prefix=changed action=reject\n",
+					reason != nullptr ? reason : "none");
+			}
+			return false;
+		}
+		mSceneTextureStableSlotsActive = false;
+	}
+	else
+	{
+		mSceneTextureStableSlotsActive = authoritativeTextureSet ?
+			mSceneTextures.SlotTable().UpdateActiveKeys(
+				mSceneTextureKeyScratch,
+				currentTextureSerial,
+				completedTextureSerial) :
+			mSceneTextures.SlotTable().EnsureActiveKeys(
+				mSceneTextureKeyScratch,
+				completedTextureSerial);
+		if (combinedUsesResidentStaticBuffer && !mSceneTextureStableSlotsActive)
+		{
+			// The static atlas already contains stable slot indices. Slot-table
+			// allocation is transactional; preserve the last coherent descriptor
+			// set and fail this scene update rather than publishing legacy order.
+			if (nri_ptscenestats || ShouldTraceSceneTexturePerf())
+			{
+				Printf("NRI PT scene textures: event=namespace_mismatch reason=%s static_namespace=stable combined_namespace=legacy action=reject\n",
+					reason != nullptr ? reason : "none");
+			}
+			return false;
+		}
+	}
 	const nri_scene::MaterialBridgeData* gpuMaterialSource = &materials;
 	if (mSceneTextureStableSlotsActive && &materials == &mSceneMaterialFrameCache.Materials())
 	{
