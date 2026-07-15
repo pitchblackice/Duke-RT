@@ -18,6 +18,7 @@ struct NRILocalPlayerReflectionCaptureStats
 	int32_t viewpointActorIndex = -1;
 	int32_t localPlayerActorIndex = -1;
 	bool viewpointMatchesLocalPlayer = false;
+	bool primaryVisible = false;
 	bool capturedScene = false;
 	uint32_t rawFacingSprites = 0;
 	uint32_t rawVoxelSprites = 0;
@@ -38,6 +39,7 @@ struct NRILocalPlayerReflectionCaptureRequest
 	HWDrawInfo* drawInfo = nullptr;
 	NRIMirrorRebuildSceneViewStatsFn rebuildSceneViewStats = nullptr;
 	bool residentVoxelReady = false;
+	bool localPlayerPrimaryVisible = false;
 };
 
 struct NRILocalPlayerReflectionCaptureResult

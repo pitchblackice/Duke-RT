@@ -16,10 +16,30 @@ struct NRISceneInstanceVisibility
 	uint32_t metadataFlags = SceneInstanceMetadataFlag_None;
 };
 
-inline NRISceneInstanceVisibility ResolveNRIPersistentVoxelInstanceVisibility(bool indirectOnly)
+struct NRISceneInstanceVisibilityContext
+{
+	int32_t localPlayerActorIndex = -1;
+	bool localPlayerPrimaryVisible = false;
+};
+
+inline bool IsNRILocalPlayerPrimaryVisibleFromViewpoint(int32_t viewpointActorIndex, int32_t localPlayerActorIndex)
+{
+	return viewpointActorIndex >= 0 &&
+		localPlayerActorIndex >= 0 &&
+		viewpointActorIndex != localPlayerActorIndex;
+}
+
+inline NRISceneInstanceVisibility ResolveNRIPersistentVoxelInstanceVisibility(
+	bool indirectOnly,
+	int32_t actorIndex,
+	const NRISceneInstanceVisibilityContext& context)
 {
 	NRISceneInstanceVisibility result = {};
-	if (indirectOnly)
+	const bool directVisibleLocalPlayer =
+		indirectOnly &&
+		context.localPlayerPrimaryVisible &&
+		actorIndex == context.localPlayerActorIndex;
+	if (indirectOnly && !directVisibleLocalPlayer)
 	{
 		result.tlasMask = NRI_TLAS_MASK_REFLECTION | NRI_TLAS_MASK_GI;
 		result.metadataFlags = SceneInstanceMetadataFlag_IndirectOnly;

@@ -35,6 +35,7 @@ namespace
 			a.viewpointActorIndex != b.viewpointActorIndex ||
 			a.localPlayerActorIndex != b.localPlayerActorIndex ||
 			a.viewpointMatchesLocalPlayer != b.viewpointMatchesLocalPlayer ||
+			a.primaryVisible != b.primaryVisible ||
 			a.capturedScene != b.capturedScene ||
 			a.rawFacingSprites != b.rawFacingSprites ||
 			a.rawVoxelSprites != b.rawVoxelSprites ||
@@ -174,10 +175,11 @@ namespace
 			return;
 		}
 
-		Printf("NRI PT local player reflection capture: view_actor=%d local_actor=%d camera_match=%s raw_facing=%u raw_voxels=%u captured=%s surfaces=%u match=%u other=%u actorless=%u filtered=%u\n",
+		Printf("NRI PT local player reflection capture: view_actor=%d local_actor=%d camera_match=%s primary_visible=%s raw_facing=%u raw_voxels=%u captured=%s surfaces=%u match=%u other=%u actorless=%u filtered=%u\n",
 			stats.viewpointActorIndex,
 			stats.localPlayerActorIndex,
 			stats.viewpointMatchesLocalPlayer ? "yes" : "no",
+			stats.primaryVisible ? "yes" : "no",
 			stats.rawFacingSprites,
 			stats.rawVoxelSprites,
 			stats.capturedScene ? "yes" : "no",
@@ -231,6 +233,7 @@ public:
 		HWDrawInfo& di,
 		nri_scene::SceneView& outView,
 		bool residentVoxelReady,
+		bool localPlayerPrimaryVisible,
 		NRIMirrorRebuildSceneViewStatsFn rebuildSceneViewStats,
 		bool* outCurrentVoxel,
 		NRILocalPlayerReflectionCaptureStats* outStats = nullptr)
@@ -269,6 +272,7 @@ public:
 		const int32_t actorIndex = (int32_t)localPlayerActor->GetIndex();
 		captureStats.localPlayerActorIndex = actorIndex;
 		captureStats.viewpointMatchesLocalPlayer = di.Viewpoint.CameraActor == localPlayerActor;
+		captureStats.primaryVisible = localPlayerPrimaryVisible;
 		auto stageStart = std::chrono::steady_clock::now();
 		HWDrawInfo* captureDi = HWDrawInfo::StartDrawInfo(&di, di.Viewpoint, &di.VPUniforms);
 		captureDi->visibility = di.visibility;
@@ -332,7 +336,11 @@ public:
 			captureStats.capturedOtherActorSurfaces,
 			captureStats.capturedActorlessSurfaces);
 
-		outView.primitiveFlags = nri_scene::PrimitiveFlag_ReflectionOnly;
+		// The ordinary dynamic scene owns primary-visible model/facing sprites in
+		// external views. Only a voxel awaiting residency needs this direct fallback.
+		outView.primitiveFlags = sceneCapture.currentVoxel && localPlayerPrimaryVisible ?
+			nri_scene::PrimitiveFlag_None :
+			nri_scene::PrimitiveFlag_ReflectionOnly;
 		captureStats.filteredSurfaceCount = captureStats.capturedSurfaceCount;
 		publishStats();
 		return true;
@@ -404,6 +412,7 @@ NRILocalPlayerReflectionCaptureResult CaptureNRILocalPlayerReflectionDynamicScen
 		*request.drawInfo,
 		outView,
 		request.residentVoxelReady,
+		request.localPlayerPrimaryVisible,
 		request.rebuildSceneViewStats,
 		&result.currentVoxel,
 		&result.stats);

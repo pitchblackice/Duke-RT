@@ -662,6 +662,12 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				return captured;
 			}();
 		const int32_t localPlayerActorIndex = ResolveNRILocalPlayerActorIndex();
+		const int32_t viewpointActorIndex =
+			di.Viewpoint.CameraActor != nullptr ? (int32_t)di.Viewpoint.CameraActor->GetIndex() : -1;
+		const bool localPlayerPrimaryVisible =
+			IsNRILocalPlayerPrimaryVisibleFromViewpoint(viewpointActorIndex, localPlayerActorIndex);
+		NRISceneInstanceVisibilityContext sceneInstanceVisibilityContext = {};
+		sceneInstanceVisibilityContext.localPlayerActorIndex = localPlayerActorIndex;
 		const bool residentLocalPlayerVoxelReady =
 			mPersistentVoxels.HasResidentIndirectOnlyActor(localPlayerActorIndex);
 		NRILocalPlayerReflectionCaptureResult localPlayerReflectionResult = {};
@@ -672,6 +678,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			request.drawInfo = &di;
 			request.rebuildSceneViewStats = RebuildSceneViewStats;
 			request.residentVoxelReady = residentLocalPlayerVoxelReady;
+			request.localPlayerPrimaryVisible = localPlayerPrimaryVisible;
 			localPlayerReflectionResult =
 				CaptureNRILocalPlayerReflectionDynamicScene(request, localPlayerReflectionSceneView);
 			localPlayerReflectionCaptureStats = localPlayerReflectionResult.stats;
@@ -679,11 +686,18 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		}();
 		const bool hasResidentLocalPlayerVoxel =
 			localPlayerReflectionResult.currentVoxel && residentLocalPlayerVoxelReady;
+		// Capture precedes the admission pump. Promote only an instance that was
+		// already resident so the focused fallback remains the sole primary owner
+		// during the one-frame residency handoff.
+		sceneInstanceVisibilityContext.localPlayerPrimaryVisible =
+			localPlayerPrimaryVisible && hasResidentLocalPlayerVoxel;
 		if ((int)perf_looptraceframes > 0 || (int)nri_pttraceframes > 0)
 		{
-			Printf("PERF pt local player voxel route NRI: frame=%llu actor=%d current_voxel=%u resident=%u second_scene=%u\n",
+			Printf("PERF pt local player voxel route NRI: frame=%llu actor=%d view_actor=%d primary_visible=%u current_voxel=%u resident=%u second_scene=%u\n",
 				(unsigned long long)mFrameIndex,
 				localPlayerActorIndex,
+				viewpointActorIndex,
+				localPlayerPrimaryVisible ? 1u : 0u,
 				localPlayerReflectionResult.currentVoxel ? 1u : 0u,
 				hasResidentLocalPlayerVoxel ? 1u : 0u,
 				hasLocalPlayerReflectionScene ? 1u : 0u);
@@ -1239,6 +1253,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 							sceneInstances,
 							mFrameIndex,
 							persistentVoxelSettings,
+							sceneInstanceVisibilityContext,
 							(bool)nri_voxelstats,
 							persistentVoxelTlasServices,
 							persistentVoxelTlasStats))

@@ -11,6 +11,7 @@
 #include "nri_resources.h"
 #include "nri_runtime_mutation.h"
 #include "nri_scene_lights.h"
+#include "nri_scene_instance_visibility.h"
 #include "nri_voxel_compute_meshing.h"
 
 #include "../scene/nri_geometry_bridge.h"
@@ -1085,6 +1086,7 @@ public:
 		std::vector<SceneInstanceData>& sceneInstances,
 		uint32_t frameIndex,
 		const NRIPersistentVoxelSettings& settings,
+		const NRISceneInstanceVisibilityContext& visibilityContext,
 		bool voxelStatsEnabled,
 		const NRIPersistentVoxelTlasServices& services,
 		NRIPersistentVoxelTlasBuildStats& outStats);

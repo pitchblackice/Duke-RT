@@ -1692,6 +1692,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 	std::vector<SceneInstanceData>& sceneInstances,
 	uint32_t frameIndex,
 	const NRIPersistentVoxelSettings& settings,
+	const NRISceneInstanceVisibilityContext& visibilityContext,
 	bool voxelStatsEnabled,
 	const NRIPersistentVoxelTlasServices& services,
 	NRIPersistentVoxelTlasBuildStats& outStats)
@@ -2471,7 +2472,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			}
 		}
 		const NRISceneInstanceVisibility instanceVisibility =
-			ResolveNRIPersistentVoxelInstanceVisibility(actor.indirectOnly);
+			ResolveNRIPersistentVoxelInstanceVisibility(actor.indirectOnly, actor.actorIndex, visibilityContext);
 		persistentVoxelInstance.mask = instanceVisibility.tlasMask;
 		persistentVoxelInstance.shaderBindingTableLocalOffset = 0;
 		persistentVoxelInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
@@ -2531,7 +2532,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 		persistentVoxelInstance.instanceId = raySceneBuilder.AddLegacyInstance(persistentVoxelInstance, sceneInstance);
 		if (actor.indirectOnly && ((int)perf_looptraceframes > 0 || (int)nri_pttraceframes > 0 || voxelStatsEnabled))
 		{
-			Printf("PERF pt local player voxel instance NRI: frame=%u actor=%d actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx material_key=0x%llx instance_id=%u mask=0x%x metadata=0x%x captured=%u retained_age=%llu blas=1\n",
+			Printf("PERF pt local player voxel instance NRI: frame=%u actor=%d actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx material_key=0x%llx instance_id=%u mask=0x%x metadata=0x%x primary_visible=%u captured=%u retained_age=%llu blas=1\n",
 				frameIndex,
 				actor.actorIndex,
 				(unsigned long long)actor.identityKey,
@@ -2541,6 +2542,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 				persistentVoxelInstance.instanceId,
 				(uint32_t)persistentVoxelInstance.mask,
 				sceneInstance.metadata2,
+				(actor.actorIndex == visibilityContext.localPlayerActorIndex && visibilityContext.localPlayerPrimaryVisible) ? 1u : 0u,
 				actor.capturedThisFrame ? 1u : 0u,
 				(unsigned long long)actor.retainedFrameAge);
 		}
