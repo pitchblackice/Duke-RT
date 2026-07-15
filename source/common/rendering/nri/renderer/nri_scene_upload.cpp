@@ -225,6 +225,8 @@ namespace
 	static NRISceneDataLightBufferReuseView BuildSceneDataLightBufferReuseView(const NRIBufferResource& resource)
 	{
 		NRISceneDataLightBufferReuseView view = {};
+		view.resourceIdentity = reinterpret_cast<uintptr_t>(resource.buffer);
+		view.descriptorIdentity = reinterpret_cast<uintptr_t>(resource.shaderView);
 		view.resourceReady = resource.buffer != nullptr;
 		view.descriptorReady = resource.shaderView != nullptr;
 		view.usedSize = resource.usedSize;
@@ -2776,7 +2778,10 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 
 		if (runtimeLightUsesFrameSlot)
 		{
-			sceneDataFrameSlot->lightReuse.runtimeLight.Commit(runtimeLightPayloadHash, (uint32_t)runtimeLights.size());
+			sceneDataFrameSlot->lightReuse.runtimeLight.Commit(
+				runtimeLightPayloadHash,
+				(uint32_t)runtimeLights.size(),
+				BuildSceneDataLightBufferReuseView(runtimeLightBuffer));
 		}
 		else
 		{
@@ -2892,7 +2897,9 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 				runtimeLightTileCountX,
 				runtimeLightTileCountY,
 				runtimeLightTileIndexCount,
-				runtimeLightMaxTileOccupancy);
+				runtimeLightMaxTileOccupancy,
+				BuildSceneDataLightBufferReuseView(runtimeLightTileHeaderBuffer),
+				BuildSceneDataLightBufferReuseView(runtimeLightTileIndexBuffer));
 		}
 		else
 		{
@@ -3092,7 +3099,11 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 
 		if (runtimeLightUsesFrameSlot)
 		{
-			sceneDataFrameSlot->lightReuse.sectorLight.Commit(sectorLightingPayloadHash, (uint32_t)sectorLights.size());
+			sceneDataFrameSlot->lightReuse.sectorLight.Commit(
+				sectorLightingPayloadHash,
+				(uint32_t)sectorLights.size(),
+				BuildSceneDataLightBufferReuseView(sectorLightHeaderBuffer),
+				BuildSceneDataLightBufferReuseView(sectorLightBuffer));
 		}
 		else
 		{
@@ -3303,7 +3314,10 @@ bool NRISceneUploadManager::UpdateRuntimeLightAndSectorSceneData(NRIRenderer& re
 
 		if (runtimeLightUsesFrameSlot)
 		{
-			sceneDataFrameSlot->lightReuse.runtimeLight.Commit(runtimeLightPayloadHash, (uint32_t)runtimeLights.size());
+			sceneDataFrameSlot->lightReuse.runtimeLight.Commit(
+				runtimeLightPayloadHash,
+				(uint32_t)runtimeLights.size(),
+				BuildSceneDataLightBufferReuseView(runtimeLightBuffer));
 		}
 		else
 		{
@@ -3419,7 +3433,9 @@ bool NRISceneUploadManager::UpdateRuntimeLightAndSectorSceneData(NRIRenderer& re
 				runtimeLightTileCountX,
 				runtimeLightTileCountY,
 				runtimeLightTileIndexCount,
-				runtimeLightMaxTileOccupancy);
+				runtimeLightMaxTileOccupancy,
+				BuildSceneDataLightBufferReuseView(runtimeLightTileHeaderBuffer),
+				BuildSceneDataLightBufferReuseView(runtimeLightTileIndexBuffer));
 		}
 		else
 		{
@@ -3531,7 +3547,11 @@ bool NRISceneUploadManager::UpdateRuntimeLightAndSectorSceneData(NRIRenderer& re
 
 		if (runtimeLightUsesFrameSlot)
 		{
-			sceneDataFrameSlot->lightReuse.sectorLight.Commit(sectorLightingPayloadHash, (uint32_t)sectorLights.size());
+			sceneDataFrameSlot->lightReuse.sectorLight.Commit(
+				sectorLightingPayloadHash,
+				(uint32_t)sectorLights.size(),
+				BuildSceneDataLightBufferReuseView(sectorLightHeaderBuffer),
+				BuildSceneDataLightBufferReuseView(sectorLightBuffer));
 		}
 		else
 		{

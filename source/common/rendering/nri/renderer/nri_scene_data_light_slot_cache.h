@@ -5,6 +5,8 @@
 
 struct NRISceneDataLightBufferReuseView
 {
+	uintptr_t resourceIdentity = 0;
+	uintptr_t descriptorIdentity = 0;
 	bool resourceReady = false;
 	bool descriptorReady = false;
 	uint64_t usedSize = 0;
@@ -20,11 +22,21 @@ struct NRISceneDataLightBufferReuseView
 			usedSize >= requiredBytes &&
 			capacity >= std::max<uint64_t>(requiredBytes, requiredStride);
 	}
+
+	bool Matches(uintptr_t expectedResourceIdentity, uintptr_t expectedDescriptorIdentity) const
+	{
+		return resourceIdentity != 0 &&
+			descriptorIdentity != 0 &&
+			resourceIdentity == expectedResourceIdentity &&
+			descriptorIdentity == expectedDescriptorIdentity;
+	}
 };
 
 struct NRISceneDataRuntimeLightSlotIdentity
 {
 	uint64_t payloadHash = 0;
+	uintptr_t resourceIdentity = 0;
+	uintptr_t descriptorIdentity = 0;
 	uint32_t lightCount = 0;
 	bool valid = false;
 
@@ -38,6 +50,7 @@ struct NRISceneDataRuntimeLightSlotIdentity
 			valid &&
 			payloadHash == candidateHash &&
 			lightCount == candidateLightCount &&
+			buffer.Matches(resourceIdentity, descriptorIdentity) &&
 			buffer.CanReuse((uint64_t)lightCount * elementStride, elementStride);
 	}
 
@@ -46,17 +59,27 @@ struct NRISceneDataRuntimeLightSlotIdentity
 		valid = false;
 	}
 
-	void Commit(uint64_t newPayloadHash, uint32_t newLightCount)
+	void Commit(
+		uint64_t newPayloadHash,
+		uint32_t newLightCount,
+		const NRISceneDataLightBufferReuseView& buffer)
 	{
 		payloadHash = newPayloadHash;
 		lightCount = newLightCount;
-		valid = true;
+		resourceIdentity = buffer.resourceIdentity;
+		descriptorIdentity = buffer.descriptorIdentity;
+		valid = buffer.resourceReady && buffer.descriptorReady &&
+			resourceIdentity != 0 && descriptorIdentity != 0;
 	}
 };
 
 struct NRISceneDataRuntimeLightClusterSlotIdentity
 {
 	uint64_t payloadHash = 0;
+	uintptr_t headerResourceIdentity = 0;
+	uintptr_t headerDescriptorIdentity = 0;
+	uintptr_t indexResourceIdentity = 0;
+	uintptr_t indexDescriptorIdentity = 0;
 	uint32_t tileCountX = 0;
 	uint32_t tileCountY = 0;
 	uint32_t tileIndexCount = 0;
@@ -73,6 +96,8 @@ struct NRISceneDataRuntimeLightClusterSlotIdentity
 		return
 			valid &&
 			payloadHash == candidateHash &&
+			headerBuffer.Matches(headerResourceIdentity, headerDescriptorIdentity) &&
+			indexBuffer.Matches(indexResourceIdentity, indexDescriptorIdentity) &&
 			headerBuffer.CanReuse((uint64_t)tileCountX * tileCountY * headerStride, headerStride) &&
 			indexBuffer.CanReuse((uint64_t)tileIndexCount * indexStride, indexStride);
 	}
@@ -87,20 +112,33 @@ struct NRISceneDataRuntimeLightClusterSlotIdentity
 		uint32_t newTileCountX,
 		uint32_t newTileCountY,
 		uint32_t newTileIndexCount,
-		uint32_t newMaxTileOccupancy)
+		uint32_t newMaxTileOccupancy,
+		const NRISceneDataLightBufferReuseView& headerBuffer,
+		const NRISceneDataLightBufferReuseView& indexBuffer)
 	{
 		payloadHash = newPayloadHash;
 		tileCountX = newTileCountX;
 		tileCountY = newTileCountY;
 		tileIndexCount = newTileIndexCount;
 		maxTileOccupancy = newMaxTileOccupancy;
-		valid = true;
+		headerResourceIdentity = headerBuffer.resourceIdentity;
+		headerDescriptorIdentity = headerBuffer.descriptorIdentity;
+		indexResourceIdentity = indexBuffer.resourceIdentity;
+		indexDescriptorIdentity = indexBuffer.descriptorIdentity;
+		valid = headerBuffer.resourceReady && headerBuffer.descriptorReady &&
+			indexBuffer.resourceReady && indexBuffer.descriptorReady &&
+			headerResourceIdentity != 0 && headerDescriptorIdentity != 0 &&
+			indexResourceIdentity != 0 && indexDescriptorIdentity != 0;
 	}
 };
 
 struct NRISceneDataSectorLightSlotIdentity
 {
 	uint64_t payloadHash = 0;
+	uintptr_t headerResourceIdentity = 0;
+	uintptr_t headerDescriptorIdentity = 0;
+	uintptr_t dataResourceIdentity = 0;
+	uintptr_t dataDescriptorIdentity = 0;
 	uint32_t sectorCount = 0;
 	bool valid = false;
 
@@ -116,6 +154,8 @@ struct NRISceneDataSectorLightSlotIdentity
 			valid &&
 			payloadHash == candidateHash &&
 			sectorCount == candidateSectorCount &&
+			headerBuffer.Matches(headerResourceIdentity, headerDescriptorIdentity) &&
+			dataBuffer.Matches(dataResourceIdentity, dataDescriptorIdentity) &&
 			headerBuffer.CanReuse(headerStride, headerStride) &&
 			dataBuffer.CanReuse((uint64_t)sectorCount * dataStride, dataStride);
 	}
@@ -125,11 +165,22 @@ struct NRISceneDataSectorLightSlotIdentity
 		valid = false;
 	}
 
-	void Commit(uint64_t newPayloadHash, uint32_t newSectorCount)
+	void Commit(
+		uint64_t newPayloadHash,
+		uint32_t newSectorCount,
+		const NRISceneDataLightBufferReuseView& headerBuffer,
+		const NRISceneDataLightBufferReuseView& dataBuffer)
 	{
 		payloadHash = newPayloadHash;
 		sectorCount = newSectorCount;
-		valid = true;
+		headerResourceIdentity = headerBuffer.resourceIdentity;
+		headerDescriptorIdentity = headerBuffer.descriptorIdentity;
+		dataResourceIdentity = dataBuffer.resourceIdentity;
+		dataDescriptorIdentity = dataBuffer.descriptorIdentity;
+		valid = headerBuffer.resourceReady && headerBuffer.descriptorReady &&
+			dataBuffer.resourceReady && dataBuffer.descriptorReady &&
+			headerResourceIdentity != 0 && headerDescriptorIdentity != 0 &&
+			dataResourceIdentity != 0 && dataDescriptorIdentity != 0;
 	}
 };
 
