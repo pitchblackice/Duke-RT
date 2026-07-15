@@ -23,6 +23,7 @@
 #include "nri_scene_frame_geometry.h"
 #include "nri_surface_light_overlay.h"
 #include "nri_scene_material_frame_cache.h"
+#include "nri_scene_texture_frame_cache.h"
 #include "nri_scene_textures.h"
 #include "nri_sky_environment.h"
 #include "nri_scene_lights.h"
@@ -800,6 +801,16 @@ public:
 		uint32_t sceneReuseSurfaceLightValidationChecked = 0;
 		uint32_t sceneReuseSurfaceLightValidationMismatch = 0;
 		uint64_t sceneReuseSurfaceLightKey = 0;
+		uint32_t sceneReuseTextureCalled = 0;
+		uint32_t sceneReuseTextureHit = 0;
+		uint32_t sceneReuseTextureCandidateHit = 0;
+		uint32_t sceneReuseTextureBuild = 0;
+		uint32_t sceneReuseTextureReject = 0;
+		uint32_t sceneReuseTextureValidationChecked = 0;
+		uint32_t sceneReuseTextureValidationMismatch = 0;
+		uint32_t sceneReuseTextureDynamicCount = 0;
+		uint32_t sceneReuseTextureMissReasonMask = 0;
+		uint64_t sceneReuseTextureKey = 0;
 		double dynamicCaptureCountMs = 0.0;
 		double dynamicCaptureWallsMs = 0.0;
 		double dynamicCaptureFlatsMs = 0.0;
@@ -2296,7 +2307,7 @@ private:
 	bool EnsurePaletteTexture(const nri_scene::MaterialBridgeData& materials);
 	uint32_t FindSceneTextureCacheIndex(uint64_t key) const;
 	bool EnsureSceneTextureCacheEntry(const nri_scene::TextureUpload& upload, double* outRealizeMs = nullptr);
-	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason = nullptr);
+	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason = nullptr, const NRISceneTextureFrameReuseInputs* reuseInputs = nullptr);
 	void ResolveSceneMaterialTextureSlots(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& gpuMaterials) const;
 	bool EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky);
 	bool EnsureStaticMapScene();
@@ -2597,6 +2608,7 @@ private:
 	const NRITextureResource* GetActiveSkyTexture() const { return mSkyEnvironment.ActiveTexture(); }
 
 	NRISceneTextureResidency mSceneTextures;
+	NRISceneTextureFrameCache mSceneTextureFrameCache;
 	NRIMaterialTextureWarmupCursor mStaticPreloadMaterialCursor = {};
 	NRIMaterialTextureWarmupCursor mVoxelPreloadMaterialCursor = {};
 	PreloadMaterialStatus mPreloadMaterialStatus = {};

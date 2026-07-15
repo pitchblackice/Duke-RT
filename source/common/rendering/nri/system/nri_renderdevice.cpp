@@ -5140,7 +5140,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.sceneSelectStateCommitGenSceneConstants,
 			shell.sceneSelectStateCommitChangedSceneConstants);
 		Printf(
-			"PERF pt scene reuse NRI: frame=%llu presentation_gen=%llu simulation_gen=%llu engine_gen=%llu map_gen=%llu ticks=%u zero_tick=%u main_view=%u drawmode=%d surface_light_called=%u surface_light_hit=%u surface_light_candidate_hit=%u surface_light_build=%u surface_light_reject=%u surface_light_validation_checked=%u surface_light_validation_mismatch=%u surface_light_key=%llu surface_light_ms=%.3f\n",
+			"PERF pt scene reuse NRI: frame=%llu presentation_gen=%llu simulation_gen=%llu engine_gen=%llu map_gen=%llu ticks=%u zero_tick=%u main_view=%u drawmode=%d surface_light_called=%u surface_light_hit=%u surface_light_candidate_hit=%u surface_light_build=%u surface_light_reject=%u surface_light_validation_checked=%u surface_light_validation_mismatch=%u surface_light_key=%llu surface_light_ms=%.3f texture_called=%u texture_hit=%u texture_candidate_hit=%u texture_build=%u texture_reject=%u texture_validation_checked=%u texture_validation_mismatch=%u texture_dynamic=%u texture_miss_mask=%u texture_key=%llu texture_ms=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			(unsigned long long)shell.sceneReusePresentationGeneration,
 			(unsigned long long)shell.sceneReuseSimulationGeneration,
@@ -5158,7 +5158,18 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneReuseSurfaceLightValidationChecked,
 			shell.sceneReuseSurfaceLightValidationMismatch,
 			(unsigned long long)shell.sceneReuseSurfaceLightKey,
-			shell.sceneSelectSurfaceLightMs);
+			shell.sceneSelectSurfaceLightMs,
+			shell.sceneReuseTextureCalled,
+			shell.sceneReuseTextureHit,
+			shell.sceneReuseTextureCandidateHit,
+			shell.sceneReuseTextureBuild,
+			shell.sceneReuseTextureReject,
+			shell.sceneReuseTextureValidationChecked,
+			shell.sceneReuseTextureValidationMismatch,
+			shell.sceneReuseTextureDynamicCount,
+			shell.sceneReuseTextureMissReasonMask,
+			(unsigned long long)shell.sceneReuseTextureKey,
+			shell.sceneSelectTexturesMs);
 		Printf(
 			"PERF pt dynamic capture detail NRI: frame=%llu calls=%u walls=%u flats=%u sprites=%u voxel_proxies=%u unsupported_models=%u voxel_stores=%u voxel_rebuilds=%u voxel_deferred=%u mesh_builds=%u mesh_deferred=%u mesh_hits=%u mesh_misses=%u mesh_invalid=%u duplication_audits=%u duplication_entries_scanned=%u duplication_temp_containers=%u model_candidates=%u model_sorted=%u model_sort_skipped=%u scratch_reuses=%u scratch_grows=%u scratch_fallbacks=%u budget_truncations=%u surface_builds=%u count=%.3f wall=%.3f flat=%.3f facing=%.3f model=%.3f model_classify=%.3f model_mesh=%.3f model_mesh_build=%.3f model_sort=%.3f model_surface=%.3f model_store=%.3f voxel_frame=%.3f stats=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,

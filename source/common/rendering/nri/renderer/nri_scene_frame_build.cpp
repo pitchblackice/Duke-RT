@@ -1139,7 +1139,19 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				texturesReady = paletteReady && [&]()
 				{
 					ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectTexturesMs);
-					return EnsureSceneTextures(mStaticMapScene.sceneView, combinedMaterialBridge, combinedGpuMaterials, false, "static_map_overlay_combined");
+					NRISceneTextureFrameReuseInputs textureReuseInputs = {};
+					textureReuseInputs.engineUpdateGeneration = inputs.engineUpdateGeneration;
+					textureReuseInputs.mapBuildSerial = mMapWorld.buildSerial;
+					textureReuseInputs.ticksExecutedThisPresentation = inputs.ticksExecutedThisPresentation;
+					textureReuseInputs.allowReuse = (bool)nri_ptzerotickreuse;
+					textureReuseInputs.validateReuse = (bool)nri_ptzerotickreusevalidate;
+					return EnsureSceneTextures(
+						mStaticMapScene.sceneView,
+						combinedMaterialBridge,
+						combinedGpuMaterials,
+						false,
+						"static_map_overlay_combined",
+						&textureReuseInputs);
 				}();
 				dynamicGpuMaterials.clear();
 				persistentVoxelGpuMaterials.clear();

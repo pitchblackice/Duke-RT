@@ -866,7 +866,13 @@ void NRIRenderer::ResolveSceneMaterialTextureSlots(
 	NRIResolveSceneMaterialTextureSlots(mSceneTextures.SlotTable(), materials, gpuMaterials);
 }
 
-bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason)
+bool NRIRenderer::EnsureSceneTextures(
+	const nri_scene::SceneView& sceneView,
+	const nri_scene::MaterialBridgeData& materials,
+	std::vector<nri_scene::MaterialData>& outGpuMaterials,
+	bool preserveExistingSky,
+	const char* reason,
+	const NRISceneTextureFrameReuseInputs* reuseInputs)
 {
 	Clocker clock(NriPTSceneTextures);
 	static bool sLoggedActiveCanvasTextureReuse = false;
@@ -927,6 +933,19 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 	mLastPerfShellTraceStats.actorOverflowEmissiveClampCount = 0;
 	mLastPerfShellTraceStats.actorOverflowTraceOmittedCount = 0;
 	mSceneTextureStableSlotsActive = false;
+	if (reuseInputs != nullptr)
+	{
+		mLastPerfShellTraceStats.sceneReuseTextureCalled = 1;
+		mLastPerfShellTraceStats.sceneReuseTextureHit = 0;
+		mLastPerfShellTraceStats.sceneReuseTextureCandidateHit = 0;
+		mLastPerfShellTraceStats.sceneReuseTextureBuild = 1;
+		mLastPerfShellTraceStats.sceneReuseTextureReject = 0;
+		mLastPerfShellTraceStats.sceneReuseTextureValidationChecked = 0;
+		mLastPerfShellTraceStats.sceneReuseTextureValidationMismatch = 0;
+		mLastPerfShellTraceStats.sceneReuseTextureDynamicCount = 0;
+		mLastPerfShellTraceStats.sceneReuseTextureMissReasonMask = 0;
+		mLastPerfShellTraceStats.sceneReuseTextureKey = 0;
+	}
 	if (ShouldTraceSkyPerf())
 	{
 		gRendererSkyPerfTraceStats.ensureSceneTexturesCalls++;
@@ -937,6 +956,45 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 		else
 		{
 			gRendererSkyPerfTraceStats.ensureSceneTexturesPreserveFalseCalls++;
+		}
+	}
+
+	const bool combinedMaterialSet = &materials == &mSceneMaterialFrameCache.Materials();
+	const bool combinedUsesResidentStaticBuffer =
+		combinedMaterialSet &&
+		mStaticMapScene.valid &&
+		mStaticMapScene.buffersResident &&
+		!mStaticMapScene.gpuMaterials.empty();
+	const bool reuseOwnerEligible =
+		reuseInputs != nullptr &&
+		reuseInputs->allowReuse &&
+		reuseInputs->engineUpdateGeneration != 0 &&
+		reuseInputs->mapBuildSerial != 0 &&
+		combinedUsesResidentStaticBuffer &&
+		mStaticMapScene.gpuMaterialsUseStableTextureSlots;
+	NRISceneTextureFrameProductKey reuseKey = {};
+	const NRISceneTextureFrameProduct* reuseProduct = nullptr;
+	uint64_t reuseTraceKey = 0;
+	if (reuseOwnerEligible)
+	{
+		reuseKey.engineUpdateGeneration = reuseInputs->engineUpdateGeneration;
+		reuseKey.mapBuildSerial = reuseInputs->mapBuildSerial;
+		reuseKey.slotMappingRevision = mSceneTextures.SlotTable().MappingRevision();
+		reuseKey.activeCanvasSourcePointer = (uintptr_t)mFrameBuffer->mActiveCanvasSourceTexture;
+		reuseKey.textureCount = (uint32_t)materials.textures.size();
+		reuseKey.residentStaticUsesStableSlots = true;
+		if (reuseInputs->ticksExecutedThisPresentation == 0)
+		{
+			reuseProduct = mSceneTextureFrameCache.Find(
+				reuseKey,
+				materials,
+				&mLastPerfShellTraceStats.sceneReuseTextureMissReasonMask);
+		}
+		reuseTraceKey = reuseProduct != nullptr ? reuseProduct->traceKey : 0;
+		if (reuseInputs != nullptr)
+		{
+			mLastPerfShellTraceStats.sceneReuseTextureCandidateHit = reuseProduct != nullptr ? 1u : 0u;
+			mLastPerfShellTraceStats.sceneReuseTextureKey = reuseTraceKey;
 		}
 	}
 
@@ -954,15 +1012,9 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 		std::max<uint64_t>(1ull, (uint64_t)mFrameBuffer->mQueuedFrames.size()) : 1ull;
 	const uint64_t completedTextureSerial =
 		currentTextureSerial > queuedFrameCount ? currentTextureSerial - queuedFrameCount : 0ull;
-	const bool combinedMaterialSet = &materials == &mSceneMaterialFrameCache.Materials();
 	const bool authoritativeTextureSet =
 		combinedMaterialSet ||
 		(reason != nullptr && std::strcmp(reason, "static_map_scene") == 0);
-	const bool combinedUsesResidentStaticBuffer =
-		combinedMaterialSet &&
-		mStaticMapScene.valid &&
-		mStaticMapScene.buffersResident &&
-		!mStaticMapScene.gpuMaterials.empty();
 	if (combinedUsesResidentStaticBuffer && !mStaticMapScene.gpuMaterialsUseStableTextureSlots)
 	{
 		// The combined bridge preserves the static bridge's texture prefix, so
@@ -1010,6 +1062,18 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 			}
 			return false;
 		}
+	}
+	if (reuseProduct != nullptr &&
+		(reuseProduct->key.slotMappingRevision != mSceneTextures.SlotTable().MappingRevision() ||
+		 reuseProduct->stableSlotMode != mSceneTextureStableSlotsActive))
+	{
+		if (reuseProduct->key.slotMappingRevision != mSceneTextures.SlotTable().MappingRevision())
+			mLastPerfShellTraceStats.sceneReuseTextureMissReasonMask |= NRISceneTextureFrameMiss_SlotMapping;
+		if (reuseProduct->stableSlotMode != mSceneTextureStableSlotsActive)
+			mLastPerfShellTraceStats.sceneReuseTextureMissReasonMask |= NRISceneTextureFrameMiss_Namespace;
+		mLastPerfShellTraceStats.sceneReuseTextureCandidateHit = 0;
+		mLastPerfShellTraceStats.sceneReuseTextureKey = 0;
+		reuseProduct = nullptr;
 	}
 	const nri_scene::MaterialBridgeData* gpuMaterialSource = &materials;
 	if (mSceneTextureStableSlotsActive && &materials == &mSceneMaterialFrameCache.Materials())
@@ -1062,75 +1126,129 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 		return false;
 	}
 
-	std::vector<nri::Descriptor*> descriptors(NRI_SCENE_DESCRIPTOR_NUM, mFrameBuffer->mWhiteTexture->GetResource().shaderView);
-	descriptors[0] = mSceneTextures.PaletteTexture().shaderView;
-	descriptors[1] = GetActiveSkyTexture() != nullptr ? GetActiveSkyTexture()->shaderView : mFrameBuffer->mWhiteTexture->GetResource().shaderView;
-	if (mSceneTextureStableSlotsActive)
+	std::vector<nri::Descriptor*> descriptors;
+	std::vector<NRISceneTextureDynamicDependency> dynamicDependencies;
+	const bool useCachedDescriptorProduct = reuseProduct != nullptr && !reuseInputs->validateReuse;
+	if (useCachedDescriptorProduct)
 	{
-		// EnsureSceneTextures is also used by subset owners such as resident
-		// mutation slices. Preserve descriptors for every other live stable slot.
-		mSceneTextures.PopulateStableSlotDescriptors(descriptors, 2u);
-	}
-
-	for (uint32_t i = 0; i < (uint32_t)materials.textures.size(); ++i)
-	{
-		const auto& upload = materials.textures[i];
-		const NRISceneTextureSlotHandle stableHandle =
-			mSceneTextureStableSlotsActive ? mSceneTextures.SlotTable().Lookup(upload.key) : NRISceneTextureSlotHandle{};
-		if (mSceneTextureStableSlotsActive && !stableHandle)
+		descriptors = reuseProduct->descriptorTemplate;
+		dynamicDependencies = reuseProduct->dynamicDependencies;
+		if (descriptors.size() != NRI_SCENE_DESCRIPTOR_NUM)
 		{
-			continue;
-		}
-		if (!mSceneTextureStableSlotsActive && i >= NRI_MAX_SCENE_TEXTURES)
-		{
-			break;
-		}
-		SceneTextureResolveResult textureResult = {};
-		const bool dynamicDescriptor =
-			upload.sourceTexture != nullptr &&
-			(upload.sourceTexture == mFrameBuffer->mActiveCanvasSourceTexture || upload.sourceTexture->isHardwareCanvas());
-		nri::Descriptor* stableDescriptor =
-			mSceneTextureStableSlotsActive && !dynamicDescriptor ?
-			mSceneTextures.FindStableSlotDescriptor(upload.key, stableHandle) : nullptr;
-		if (stableDescriptor != nullptr)
-		{
-			textureResult.descriptor = stableDescriptor;
-			mSceneTextures.CacheStats().stableDescriptorHitsLastBuild++;
-			mLastPerfShellTraceStats.sceneTextureStableDescriptorHits++;
-		}
-		else if (!mSceneTextures.ResolveTextureDescriptor(*mFrameBuffer, upload, tracePerf, textureResult))
-		{
+			mLastPerfShellTraceStats.sceneReuseTextureReject = 1;
+			mSceneTextureFrameCache.Reset();
 			return false;
 		}
-		else if (mSceneTextureStableSlotsActive && !dynamicDescriptor)
+		descriptors[0] = mSceneTextures.PaletteTexture().shaderView;
+		descriptors[1] = GetActiveSkyTexture() != nullptr ? GetActiveSkyTexture()->shaderView : mFrameBuffer->mWhiteTexture->GetResource().shaderView;
+		mSceneTextures.CacheStats().stableDescriptorHitsLastBuild = reuseProduct->telemetry.stableDescriptorHits;
+		mLastPerfShellTraceStats.sceneTextureStableDescriptorHits = reuseProduct->telemetry.stableDescriptorHits;
+		for (const NRISceneTextureDynamicDependency& dependency : dynamicDependencies)
 		{
-			mSceneTextures.StoreStableSlotDescriptor(upload.key, stableHandle, textureResult.descriptor);
-			mSceneTextures.CacheStats().stableDescriptorMissesLastBuild++;
-			mLastPerfShellTraceStats.sceneTextureStableDescriptorMisses++;
-		}
-		if (textureResult.activeCanvasSelfReference)
-		{
-			if (!sLoggedActiveCanvasTextureReuse || nri_ptdebug > 0)
+			if (dependency.uploadIndex >= materials.textures.size() || dependency.descriptorIndex >= descriptors.size())
 			{
-				Printf(TEXTCOLOR_ORANGE "NRI PT textures: using a fallback descriptor for the canvas currently being rendered to avoid self-referential camera-texture uploads.\n");
-				sLoggedActiveCanvasTextureReuse = true;
+				mLastPerfShellTraceStats.sceneReuseTextureReject = 1;
+				mSceneTextureFrameCache.Reset();
+				return false;
 			}
-			continue;
+			descriptors[dependency.descriptorIndex] = mFrameBuffer->mWhiteTexture->GetResource().shaderView;
+			SceneTextureResolveResult textureResult = {};
+			if (!mSceneTextures.ResolveTextureDescriptor(
+				*mFrameBuffer,
+				materials.textures[dependency.uploadIndex],
+				tracePerf,
+				textureResult))
+			{
+				mLastPerfShellTraceStats.sceneReuseTextureReject = 1;
+				return false;
+			}
+			lookupMisses += textureResult.cacheMiss ? 1u : 0u;
+			insertCount += textureResult.inserted ? 1u : 0u;
+			lookupMs += textureResult.lookupMs;
+			realizeMs += textureResult.realizeMs;
+			if (!textureResult.activeCanvasSelfReference && textureResult.descriptor != nullptr)
+			{
+				descriptors[dependency.descriptorIndex] = textureResult.descriptor;
+			}
 		}
-		if (textureResult.cacheMiss)
+	}
+	else
+	{
+		descriptors.assign(NRI_SCENE_DESCRIPTOR_NUM, mFrameBuffer->mWhiteTexture->GetResource().shaderView);
+		descriptors[0] = mSceneTextures.PaletteTexture().shaderView;
+		descriptors[1] = GetActiveSkyTexture() != nullptr ? GetActiveSkyTexture()->shaderView : mFrameBuffer->mWhiteTexture->GetResource().shaderView;
+		if (mSceneTextureStableSlotsActive)
 		{
-			lookupMisses++;
+			// EnsureSceneTextures is also used by subset owners such as resident
+			// mutation slices. Preserve descriptors for every other live stable slot.
+			mSceneTextures.PopulateStableSlotDescriptors(descriptors, 2u);
 		}
-		if (textureResult.inserted)
+
+		for (uint32_t i = 0; i < (uint32_t)materials.textures.size(); ++i)
 		{
-			insertCount++;
-		}
-		lookupMs += textureResult.lookupMs;
-		realizeMs += textureResult.realizeMs;
-		if (textureResult.descriptor != nullptr)
-		{
-			const uint32_t descriptorSlot = mSceneTextureStableSlotsActive ? stableHandle.slot : i;
-			descriptors[2 + descriptorSlot] = textureResult.descriptor;
+			const auto& upload = materials.textures[i];
+			const NRISceneTextureSlotHandle stableHandle =
+				mSceneTextureStableSlotsActive ? mSceneTextures.SlotTable().Lookup(upload.key) : NRISceneTextureSlotHandle{};
+			if (mSceneTextureStableSlotsActive && !stableHandle)
+			{
+				continue;
+			}
+			if (!mSceneTextureStableSlotsActive && i >= NRI_MAX_SCENE_TEXTURES)
+			{
+				break;
+			}
+			SceneTextureResolveResult textureResult = {};
+			const bool dynamicDescriptor =
+				upload.sourceTexture != nullptr &&
+				(upload.sourceTexture == mFrameBuffer->mActiveCanvasSourceTexture || upload.sourceTexture->isHardwareCanvas());
+			if (dynamicDescriptor)
+			{
+				const uint32_t descriptorSlot = mSceneTextureStableSlotsActive ? stableHandle.slot : i;
+				dynamicDependencies.push_back({ i, 2u + descriptorSlot });
+			}
+			nri::Descriptor* stableDescriptor =
+				mSceneTextureStableSlotsActive && !dynamicDescriptor ?
+				mSceneTextures.FindStableSlotDescriptor(upload.key, stableHandle) : nullptr;
+			if (stableDescriptor != nullptr)
+			{
+				textureResult.descriptor = stableDescriptor;
+				mSceneTextures.CacheStats().stableDescriptorHitsLastBuild++;
+				mLastPerfShellTraceStats.sceneTextureStableDescriptorHits++;
+			}
+			else if (!mSceneTextures.ResolveTextureDescriptor(*mFrameBuffer, upload, tracePerf, textureResult))
+			{
+				return false;
+			}
+			else if (mSceneTextureStableSlotsActive && !dynamicDescriptor)
+			{
+				mSceneTextures.StoreStableSlotDescriptor(upload.key, stableHandle, textureResult.descriptor);
+				mSceneTextures.CacheStats().stableDescriptorMissesLastBuild++;
+				mLastPerfShellTraceStats.sceneTextureStableDescriptorMisses++;
+			}
+			if (textureResult.activeCanvasSelfReference)
+			{
+				if (!sLoggedActiveCanvasTextureReuse || nri_ptdebug > 0)
+				{
+					Printf(TEXTCOLOR_ORANGE "NRI PT textures: using a fallback descriptor for the canvas currently being rendered to avoid self-referential camera-texture uploads.\n");
+					sLoggedActiveCanvasTextureReuse = true;
+				}
+				continue;
+			}
+			if (textureResult.cacheMiss)
+			{
+				lookupMisses++;
+			}
+			if (textureResult.inserted)
+			{
+				insertCount++;
+			}
+			lookupMs += textureResult.lookupMs;
+			realizeMs += textureResult.realizeMs;
+			if (textureResult.descriptor != nullptr)
+			{
+				const uint32_t descriptorSlot = mSceneTextureStableSlotsActive ? stableHandle.slot : i;
+				descriptors[2 + descriptorSlot] = textureResult.descriptor;
+			}
 		}
 	}
 
@@ -1307,6 +1425,77 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 	}
 	mSceneTextures.CacheStats().descriptorMsLastBuild = descriptorMs;
 	mLastPerfShellTraceStats.sceneTextureDescriptorMs = descriptorMs;
+	if (useCachedDescriptorProduct)
+	{
+		mLastPerfShellTraceStats.sceneReuseTextureHit = updated ? 1u : 0u;
+		mLastPerfShellTraceStats.sceneReuseTextureBuild = 0;
+		mLastPerfShellTraceStats.sceneReuseTextureReject = updated ? 0u : 1u;
+		mLastPerfShellTraceStats.sceneReuseTextureDynamicCount = (uint32_t)dynamicDependencies.size();
+	}
+	if (reuseOwnerEligible && updated && !useCachedDescriptorProduct)
+	{
+		const uint64_t currentMappingRevision = mSceneTextures.SlotTable().MappingRevision();
+		NRISceneTextureFrameProductKey storedKey = reuseKey;
+		storedKey.slotMappingRevision = currentMappingRevision;
+		NRISceneTextureFrameProductTelemetry productTelemetry = {};
+		productTelemetry.requestedTextureCount = mLastPerfShellTraceStats.sceneTextureRequestedCount;
+		productTelemetry.referencedActorMaterialCount = mLastPerfShellTraceStats.sceneTextureReferencedActorMaterialCount;
+		productTelemetry.referencedBaseCount = mLastPerfShellTraceStats.sceneTextureReferencedBaseCount;
+		productTelemetry.referencedGlowCount = mLastPerfShellTraceStats.sceneTextureReferencedGlowCount;
+		productTelemetry.referencedNormalCount = mLastPerfShellTraceStats.sceneTextureReferencedNormalCount;
+		productTelemetry.referencedMetallicCount = mLastPerfShellTraceStats.sceneTextureReferencedMetallicCount;
+		productTelemetry.referencedRoughnessCount = mLastPerfShellTraceStats.sceneTextureReferencedRoughnessCount;
+		productTelemetry.referencedEmissiveCount = mLastPerfShellTraceStats.sceneTextureReferencedEmissiveCount;
+		productTelemetry.truncatedTextureCount = mSceneTextures.OverflowStats().truncatedTextureCountLastBuild;
+		productTelemetry.stableDescriptorHits = mLastPerfShellTraceStats.sceneTextureStableDescriptorHits;
+
+		if (reuseProduct != nullptr && reuseInputs->validateReuse)
+		{
+			bool descriptorTemplateMatches = reuseProduct->descriptorTemplate.size() == descriptors.size();
+			if (descriptorTemplateMatches)
+			{
+				std::vector<uint8_t> dynamicDescriptorSlots(descriptors.size(), 0u);
+				for (const NRISceneTextureDynamicDependency& dependency : dynamicDependencies)
+				{
+					if (dependency.descriptorIndex < dynamicDescriptorSlots.size())
+						dynamicDescriptorSlots[dependency.descriptorIndex] = 1u;
+				}
+				for (size_t descriptorIndex = 2; descriptorIndex < descriptors.size(); ++descriptorIndex)
+				{
+					if (dynamicDescriptorSlots[descriptorIndex] == 0u &&
+						reuseProduct->descriptorTemplate[descriptorIndex] != descriptors[descriptorIndex])
+					{
+						descriptorTemplateMatches = false;
+						break;
+					}
+				}
+			}
+			const bool dynamicDependenciesMatch =
+				reuseProduct->dynamicDependencies.size() == dynamicDependencies.size() &&
+				(reuseProduct->dynamicDependencies.empty() ||
+				 std::memcmp(
+					reuseProduct->dynamicDependencies.data(),
+					dynamicDependencies.data(),
+					dynamicDependencies.size() * sizeof(dynamicDependencies[0])) == 0);
+			const bool validationMismatch =
+				!descriptorTemplateMatches ||
+				!dynamicDependenciesMatch ||
+				reuseProduct->stableSlotMode != mSceneTextureStableSlotsActive ||
+				reuseProduct->key.slotMappingRevision != currentMappingRevision;
+			mLastPerfShellTraceStats.sceneReuseTextureValidationChecked = 1;
+			mLastPerfShellTraceStats.sceneReuseTextureValidationMismatch = validationMismatch ? 1u : 0u;
+		}
+
+		mSceneTextureFrameCache.Store(
+			storedKey,
+			materials,
+			descriptors,
+			dynamicDependencies,
+			productTelemetry,
+			mSceneTextureStableSlotsActive);
+		mLastPerfShellTraceStats.sceneReuseTextureKey = mSceneTextureFrameCache.LastTraceKey();
+		mLastPerfShellTraceStats.sceneReuseTextureDynamicCount = (uint32_t)dynamicDependencies.size();
+	}
 	if (updated && &materials == &mStaticMapScene.materialBridge)
 	{
 		// The resident static material buffer can outlive this call and later be

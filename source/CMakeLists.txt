@@ -981,6 +981,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_scene_frame_builder.cpp
 	common/rendering/nri/renderer/nri_scene_material_frame_cache.cpp
 	common/rendering/nri/renderer/nri_scene_material_texture_slots.cpp
+	common/rendering/nri/renderer/nri_scene_texture_frame_cache.cpp
 	common/rendering/nri/renderer/nri_scene_texture_slot_table.cpp
 	common/rendering/nri/renderer/nri_scene_textures.cpp
 	common/rendering/nri/renderer/nri_sky_environment.cpp
