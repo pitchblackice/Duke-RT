@@ -1288,13 +1288,14 @@ public:
 		uint32_t dynamicCaptureVoxelMaintenanceCacheEntriesScanned = 0;
 		uint32_t dynamicCaptureVoxelMaintenanceRemovals = 0;
 		uint32_t dynamicCaptureVoxelMaintenanceTransformSyncs = 0;
-		uint32_t dynamicCaptureVoxelLifecycleEventsRead = 0;
+		uint32_t dynamicCaptureVoxelLifecycleEventsApplied = 0;
+		uint32_t dynamicCaptureVoxelLifecycleEventsDiscarded = 0;
 		uint32_t dynamicCaptureVoxelLifecycleInsertEvents = 0;
 		uint32_t dynamicCaptureVoxelLifecycleRemoveEvents = 0;
 		uint32_t dynamicCaptureVoxelLifecycleStatEvents = 0;
 		uint32_t dynamicCaptureVoxelLifecycleResetEvents = 0;
 		uint32_t dynamicCaptureVoxelLifecycleOverflows = 0;
-		uint32_t dynamicCaptureVoxelLifecycleCacheEntriesTouched = 0;
+		uint32_t dynamicCaptureVoxelLifecycleRemovalEntriesMarked = 0;
 		uint32_t dynamicCaptureModelActorCandidates = 0;
 		uint32_t dynamicCaptureModelActorSorted = 0;
 		uint32_t dynamicCaptureModelActorSortSkipped = 0;

@@ -1,5 +1,6 @@
 #include "nri_renderdevice.h"
 #include "../renderer/nri_cvars.h"
+#include "../renderer/nri_diagnostic_cadence.h"
 
 #include "../framegen/nri_framegen.h"
 #include "../renderer/nri_renderer.h"
@@ -26,6 +27,7 @@
 #include "coreplayer.h"
 #include "coreactor.h"
 #include "gamecontrol.h"
+#include "gameupdate.h"
 #include "lightoverlay.h"
 #include "startup_recovery.h"
 
@@ -87,14 +89,15 @@ namespace
 		}
 	}
 
-	static bool ShouldEmitProgressiveSlowdownTrace(uint64_t frameNumber)
+	static bool ShouldEmitProgressiveSlowdownTrace(uint64_t presentationGeneration)
 	{
 		if (!nri_ptslowdowntrace)
 		{
 			return false;
 		}
-		const uint64_t interval = (uint64_t)(std::max)(1, (int)nri_ptslowdowntraceinterval);
-		return frameNumber == 1 || (interval != 0 && frameNumber % interval == 0);
+		return ShouldSampleNRIPeriodicDiagnostic(
+			presentationGeneration,
+			(uint32_t)(std::max)(1, (int)nri_ptslowdowntraceinterval));
 	}
 
 	static void EmitProgressiveSlowdownTrace(
@@ -3948,7 +3951,8 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 		return true;
 	}
 	mLastFrameBoundaryStats.pathTracedSceneRendered = mLastFrameBoundaryStats.pathTracedSceneRendered || rendered;
-	if (rendered && ShouldEmitProgressiveSlowdownTrace(mLastFrameBoundaryStats.frameNumber))
+	if (rendered && ShouldEmitProgressiveSlowdownTrace(
+		GetGameUpdateSnapshot().presentationGeneration))
 	{
 		EmitProgressiveSlowdownTrace(
 			mLastFrameBoundaryStats.frameNumber,
@@ -5199,7 +5203,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.sceneReuseTextureKey,
 			shell.sceneSelectTexturesMs);
 		Printf(
-			"PERF pt dynamic capture detail NRI: frame=%llu calls=%u walls=%u flats=%u sprites=%u voxel_proxies=%u unsupported_models=%u voxel_stores=%u voxel_rebuilds=%u voxel_deferred=%u mesh_builds=%u mesh_deferred=%u mesh_hits=%u mesh_misses=%u mesh_invalid=%u duplication_audits=%u duplication_entries_scanned=%u duplication_temp_containers=%u duplication_ms=%.3f maintenance_calls=%u maintenance_skips=%u maintenance_legacy=%u maintenance_delta=%u maintenance_reason=0x%08x live_actors_enumerated=%u cache_entries_scanned=%u maintenance_removals=%u transform_syncs=%u lifecycle_events=%u lifecycle_inserts=%u lifecycle_removes=%u lifecycle_stats=%u lifecycle_resets=%u lifecycle_overflows=%u lifecycle_touched=%u lifecycle_ms=%.3f live_enumeration_ms=%.3f reconcile_ms=%.3f model_candidates=%u model_sorted=%u model_sort_skipped=%u scratch_reuses=%u scratch_grows=%u scratch_fallbacks=%u budget_truncations=%u surface_builds=%u count=%.3f wall=%.3f flat=%.3f facing=%.3f model=%.3f model_classify=%.3f model_mesh=%.3f model_mesh_build=%.3f model_sort=%.3f model_surface=%.3f model_store=%.3f voxel_frame=%.3f stats=%.3f\n",
+			"PERF pt dynamic capture detail NRI: frame=%llu calls=%u walls=%u flats=%u sprites=%u voxel_proxies=%u unsupported_models=%u voxel_stores=%u voxel_rebuilds=%u voxel_deferred=%u mesh_builds=%u mesh_deferred=%u mesh_hits=%u mesh_misses=%u mesh_invalid=%u duplication_audits=%u duplication_entries_scanned=%u duplication_temp_containers=%u duplication_ms=%.3f maintenance_calls=%u maintenance_skips=%u maintenance_legacy=%u maintenance_delta=%u maintenance_reason=0x%08x live_actors_enumerated=%u cache_entries_scanned=%u maintenance_removals=%u transform_syncs=%u lifecycle_events_applied=%u lifecycle_events_discarded=%u lifecycle_inserts=%u lifecycle_removes=%u lifecycle_stats=%u lifecycle_resets=%u lifecycle_overflows=%u lifecycle_removal_marked=%u lifecycle_ms=%.3f live_enumeration_ms=%.3f reconcile_ms=%.3f model_candidates=%u model_sorted=%u model_sort_skipped=%u scratch_reuses=%u scratch_grows=%u scratch_fallbacks=%u budget_truncations=%u surface_builds=%u count=%.3f wall=%.3f flat=%.3f facing=%.3f model=%.3f model_classify=%.3f model_mesh=%.3f model_mesh_build=%.3f model_sort=%.3f model_surface=%.3f model_store=%.3f voxel_frame=%.3f stats=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.dynamicCaptureCalls,
 			shell.dynamicCaptureWallSurfaces,
@@ -5228,13 +5232,14 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.dynamicCaptureVoxelMaintenanceCacheEntriesScanned,
 			shell.dynamicCaptureVoxelMaintenanceRemovals,
 			shell.dynamicCaptureVoxelMaintenanceTransformSyncs,
-			shell.dynamicCaptureVoxelLifecycleEventsRead,
+			shell.dynamicCaptureVoxelLifecycleEventsApplied,
+			shell.dynamicCaptureVoxelLifecycleEventsDiscarded,
 			shell.dynamicCaptureVoxelLifecycleInsertEvents,
 			shell.dynamicCaptureVoxelLifecycleRemoveEvents,
 			shell.dynamicCaptureVoxelLifecycleStatEvents,
 			shell.dynamicCaptureVoxelLifecycleResetEvents,
 			shell.dynamicCaptureVoxelLifecycleOverflows,
-			shell.dynamicCaptureVoxelLifecycleCacheEntriesTouched,
+			shell.dynamicCaptureVoxelLifecycleRemovalEntriesMarked,
 			shell.dynamicCaptureVoxelLifecycleMs,
 			shell.dynamicCaptureVoxelLiveEnumerationMs,
 			shell.dynamicCaptureVoxelReconcileMs,

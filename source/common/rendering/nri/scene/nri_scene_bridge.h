@@ -228,13 +228,14 @@ struct DynamicCapturePerfStats
 	uint32_t voxelMaintenanceCacheEntriesScanned = 0;
 	uint32_t voxelMaintenanceRemovals = 0;
 	uint32_t voxelMaintenanceTransformSyncs = 0;
-	uint32_t voxelLifecycleEventsRead = 0;
+	uint32_t voxelLifecycleEventsApplied = 0;
+	uint32_t voxelLifecycleEventsDiscarded = 0;
 	uint32_t voxelLifecycleInsertEvents = 0;
 	uint32_t voxelLifecycleRemoveEvents = 0;
 	uint32_t voxelLifecycleStatEvents = 0;
 	uint32_t voxelLifecycleResetEvents = 0;
 	uint32_t voxelLifecycleOverflows = 0;
-	uint32_t voxelLifecycleCacheEntriesTouched = 0;
+	uint32_t voxelLifecycleRemovalEntriesMarked = 0;
 	uint32_t modelActorCandidates = 0;
 	uint32_t modelActorSorted = 0;
 	uint32_t modelActorSortSkipped = 0;

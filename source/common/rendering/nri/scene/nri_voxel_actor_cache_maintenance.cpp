@@ -1,6 +1,5 @@
 #include "nri_voxel_actor_cache_maintenance.h"
-
-#include <algorithm>
+#include "../renderer/nri_diagnostic_cadence.h"
 
 NRIVoxelActorMaintenanceDecision NRIVoxelActorMaintenanceGate::Evaluate(
 	const NRIVoxelActorMaintenanceInput& input)
@@ -63,7 +62,32 @@ bool ShouldCollectNRIVoxelActorDuplicationAudit(const NRIVoxelActorDuplicationAu
 		return false;
 	}
 
-	const uint64_t interval = (uint64_t)(std::max)(1u, input.slowdownInterval);
-	return input.presentationGeneration == 1 ||
-		(input.presentationGeneration != 0 && input.presentationGeneration % interval == 0);
+	return ShouldSampleNRIPeriodicDiagnostic(
+		input.presentationGeneration,
+		input.slowdownInterval);
+}
+
+NRIVoxelActorPendingRemovalAction ResolveNRIVoxelActorPendingRemoval(
+	bool pendingRemoval,
+	uint64_t lastSeenFrame,
+	uint64_t currentFrame)
+{
+	if (!pendingRemoval)
+	{
+		return NRIVoxelActorPendingRemovalAction::None;
+	}
+	return lastSeenFrame == currentFrame ?
+		NRIVoxelActorPendingRemovalAction::RetainCurrentFrame :
+		NRIVoxelActorPendingRemovalAction::Erase;
+}
+
+NRIVoxelActorLifecycleJournalDecision ResolveNRIVoxelActorLifecycleJournal(
+	const NRIVoxelActorLifecycleJournalInput& input)
+{
+	NRIVoxelActorLifecycleJournalDecision decision = {};
+	decision.applyEvents = input.lifecycleModeEnabled && !input.overflowed;
+	decision.advanceCursor = true;
+	decision.forceLegacyReconcile = input.lifecycleModeEnabled &&
+		(input.overflowed || input.resetSeen);
+	return decision;
 }

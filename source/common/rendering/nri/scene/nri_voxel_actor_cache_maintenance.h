@@ -29,6 +29,13 @@ struct NRIVoxelActorMaintenanceDecision
 	uint32_t reasonMask = NRIVoxelActorMaintenanceReason_None;
 };
 
+enum class NRIVoxelActorPendingRemovalAction : uint8_t
+{
+	None,
+	RetainCurrentFrame,
+	Erase,
+};
+
 class NRIVoxelActorMaintenanceGate
 {
 public:
@@ -51,4 +58,24 @@ struct NRIVoxelActorDuplicationAuditInput
 	bool slowdownTraceEnabled = false;
 };
 
+struct NRIVoxelActorLifecycleJournalInput
+{
+	bool lifecycleModeEnabled = true;
+	bool overflowed = false;
+	bool resetSeen = false;
+};
+
+struct NRIVoxelActorLifecycleJournalDecision
+{
+	bool applyEvents = true;
+	bool advanceCursor = true;
+	bool forceLegacyReconcile = false;
+};
+
 bool ShouldCollectNRIVoxelActorDuplicationAudit(const NRIVoxelActorDuplicationAuditInput& input);
+NRIVoxelActorPendingRemovalAction ResolveNRIVoxelActorPendingRemoval(
+	bool pendingRemoval,
+	uint64_t lastSeenFrame,
+	uint64_t currentFrame);
+NRIVoxelActorLifecycleJournalDecision ResolveNRIVoxelActorLifecycleJournal(
+	const NRIVoxelActorLifecycleJournalInput& input);

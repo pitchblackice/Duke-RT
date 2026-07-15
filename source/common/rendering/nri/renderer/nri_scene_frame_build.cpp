@@ -617,13 +617,14 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				mLastPerfShellTraceStats.dynamicCaptureVoxelMaintenanceCacheEntriesScanned += captureStats.voxelMaintenanceCacheEntriesScanned;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelMaintenanceRemovals += captureStats.voxelMaintenanceRemovals;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelMaintenanceTransformSyncs += captureStats.voxelMaintenanceTransformSyncs;
-				mLastPerfShellTraceStats.dynamicCaptureVoxelLifecycleEventsRead += captureStats.voxelLifecycleEventsRead;
+				mLastPerfShellTraceStats.dynamicCaptureVoxelLifecycleEventsApplied += captureStats.voxelLifecycleEventsApplied;
+				mLastPerfShellTraceStats.dynamicCaptureVoxelLifecycleEventsDiscarded += captureStats.voxelLifecycleEventsDiscarded;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelLifecycleInsertEvents += captureStats.voxelLifecycleInsertEvents;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelLifecycleRemoveEvents += captureStats.voxelLifecycleRemoveEvents;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelLifecycleStatEvents += captureStats.voxelLifecycleStatEvents;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelLifecycleResetEvents += captureStats.voxelLifecycleResetEvents;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelLifecycleOverflows += captureStats.voxelLifecycleOverflows;
-				mLastPerfShellTraceStats.dynamicCaptureVoxelLifecycleCacheEntriesTouched += captureStats.voxelLifecycleCacheEntriesTouched;
+				mLastPerfShellTraceStats.dynamicCaptureVoxelLifecycleRemovalEntriesMarked += captureStats.voxelLifecycleRemovalEntriesMarked;
 				mLastPerfShellTraceStats.dynamicCaptureModelActorCandidates += captureStats.modelActorCandidates;
 				mLastPerfShellTraceStats.dynamicCaptureModelActorSorted += captureStats.modelActorSorted;
 				mLastPerfShellTraceStats.dynamicCaptureModelActorSortSkipped += captureStats.modelActorSortSkipped;

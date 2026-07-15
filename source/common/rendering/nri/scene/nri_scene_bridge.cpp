@@ -4705,6 +4705,30 @@ namespace
 		{
 			gDynamicCapturePerfStats.voxelMaintenanceCacheEntriesScanned++;
 			VoxelActorCacheEntry& entry = it->second;
+			// Removal events are authoritative and may outlive the actor object.
+			// Never inspect actorPtr after such an event; GetIndex() is the actor's
+			// spawn-unique identity, so a later allocation at the same address owns
+			// a different cache key.
+			const NRIVoxelActorPendingRemovalAction pendingRemovalAction =
+				ResolveNRIVoxelActorPendingRemoval(
+					entry.pendingRemoval,
+					entry.lastSeenFrame,
+					gVoxelActorCacheFrame);
+			if (pendingRemovalAction == NRIVoxelActorPendingRemovalAction::RetainCurrentFrame)
+			{
+				gVoxelActorPendingRemoval = true;
+				++it;
+				continue;
+			}
+			if (pendingRemovalAction == NRIVoxelActorPendingRemovalAction::Erase)
+			{
+				EmitVoxelActorStateTrace(nullptr, nullptr, &entry, "remove-lifecycle", VoxelActorPendingReason::ActorNotLive);
+				it = gVoxelActorCache.erase(it);
+				stats.voxelCacheSurfaceRemoves++;
+				gDynamicCapturePerfStats.voxelMaintenanceRemovals++;
+				++gVoxelActorCacheSerial;
+				continue;
+			}
 			DCoreActor* actor = reinterpret_cast<DCoreActor*>(entry.actorPtr);
 			const bool identityMatches = actor != nullptr &&
 				entry.actorIndex >= 0 &&
@@ -4746,16 +4770,53 @@ namespace
 			DurationMs(start, std::chrono::steady_clock::now());
 	}
 
-	bool ApplyVoxelActorLifecycleEvents()
+	struct VoxelActorLifecycleApplyResult
+	{
+		bool forceReconcile = false;
+		bool forceLegacyReconcile = false;
+	};
+
+	VoxelActorLifecycleApplyResult ApplyVoxelActorLifecycleEvents()
 	{
 		const auto start = std::chrono::steady_clock::now();
 		const ActorLifecycleReadResult read =
 			GetActorLifecycleJournal().ReadAfter(gVoxelActorLifecycleCursor, gVoxelActorLifecycleEvents);
-		gVoxelActorLifecycleCursor = read.latestSerial;
-		gDynamicCapturePerfStats.voxelLifecycleEventsRead += (uint32_t)gVoxelActorLifecycleEvents.size();
+		const bool resetSeen = std::any_of(
+			gVoxelActorLifecycleEvents.begin(),
+			gVoxelActorLifecycleEvents.end(),
+			[](const ActorLifecycleEvent& event)
+			{
+				return event.type == ActorLifecycleEventType::Reset;
+			});
+		NRIVoxelActorLifecycleJournalInput journalInput = {};
+		journalInput.lifecycleModeEnabled = true;
+		journalInput.overflowed = read.overflowed;
+		journalInput.resetSeen = resetSeen;
+		const NRIVoxelActorLifecycleJournalDecision journalDecision =
+			ResolveNRIVoxelActorLifecycleJournal(journalInput);
+		if (journalDecision.advanceCursor)
+		{
+			gVoxelActorLifecycleCursor = read.latestSerial;
+		}
 		gDynamicCapturePerfStats.voxelLifecycleOverflows += read.overflowed ? 1u : 0u;
+		VoxelActorLifecycleApplyResult result = {};
+		result.forceLegacyReconcile = journalDecision.forceLegacyReconcile;
+		if (!journalDecision.applyEvents)
+		{
+			// The retained tail is not a coherent history. In particular, applying
+			// a tail Reset before reconciling current state can discard valid
+			// post-reset entries. Skip it and fail closed to the exact live map.
+			gDynamicCapturePerfStats.voxelLifecycleEventsDiscarded +=
+				(uint32_t)gVoxelActorLifecycleEvents.size();
+			gVoxelActorLifecycleEvents.clear();
+			result.forceReconcile = true;
+			gDynamicCapturePerfStats.voxelLifecycleMs +=
+				DurationMs(start, std::chrono::steady_clock::now());
+			return result;
+		}
 
-		bool forceReconcile = read.overflowed;
+		gDynamicCapturePerfStats.voxelLifecycleEventsApplied += (uint32_t)gVoxelActorLifecycleEvents.size();
+
 		for (const ActorLifecycleEvent& event : gVoxelActorLifecycleEvents)
 		{
 			switch (event.type)
@@ -4773,50 +4834,64 @@ namespace
 				{
 					found->second.pendingRemoval = true;
 					gVoxelActorPendingRemoval = true;
-					gDynamicCapturePerfStats.voxelLifecycleCacheEntriesTouched++;
+					gDynamicCapturePerfStats.voxelLifecycleRemovalEntriesMarked++;
 				}
-				forceReconcile = true;
+				result.forceReconcile = true;
 				break;
 			}
 			case ActorLifecycleEventType::StatChanged:
 				gDynamicCapturePerfStats.voxelLifecycleStatEvents++;
-				forceReconcile = true;
+				result.forceReconcile = true;
 				break;
 			case ActorLifecycleEventType::Reset:
 				gDynamicCapturePerfStats.voxelLifecycleResetEvents++;
-				if (!gVoxelActorCache.empty())
-				{
-					gDynamicCapturePerfStats.voxelMaintenanceRemovals += (uint32_t)gVoxelActorCache.size();
-					gVoxelActorCache.clear();
-					++gVoxelActorCacheSerial;
-				}
-				gVoxelActorPendingRemoval = false;
+				// Reset may be consumed after current-level actors have already been
+				// captured (notably a same-map save reload). Reconcile against the
+				// live map instead of clearing the mixed pre/post-reset cache here.
 				gVoxelActorMaintenanceGate.Reset();
-				forceReconcile = true;
+				result.forceReconcile = true;
 				break;
 			}
 		}
 		gDynamicCapturePerfStats.voxelLifecycleMs +=
 			DurationMs(start, std::chrono::steady_clock::now());
-		return forceReconcile;
+		return result;
 	}
 
 	void PruneVoxelActorCache(SceneDebugStats& stats)
 	{
 		gDynamicCapturePerfStats.voxelMaintenanceCalls++;
 		const bool lifecycleMode = (bool)nri_ptvoxelactorlifecycle;
-		const bool forceReconcile = lifecycleMode ? ApplyVoxelActorLifecycleEvents() : false;
+		VoxelActorLifecycleApplyResult lifecycle = {};
+		if (lifecycleMode)
+		{
+			lifecycle = ApplyVoxelActorLifecycleEvents();
+		}
+		else
+		{
+			// Legacy reconciliation already observes current state. Keep its
+			// journal cursor current so a later mode change cannot replay stale
+			// removals or resets into the delta path.
+			NRIVoxelActorLifecycleJournalInput journalInput = {};
+			journalInput.lifecycleModeEnabled = false;
+			const NRIVoxelActorLifecycleJournalDecision journalDecision =
+				ResolveNRIVoxelActorLifecycleJournal(journalInput);
+			if (journalDecision.advanceCursor)
+			{
+				gVoxelActorLifecycleCursor = GetActorLifecycleJournal().LatestSerial();
+			}
+			gVoxelActorLifecycleEvents.clear();
+		}
 		const GameUpdateSnapshot gameUpdate = GetGameUpdateSnapshot();
 		NRIVoxelActorMaintenanceInput input = {};
 		input.simulationGeneration = gameUpdate.simulationGeneration;
 		input.lifecycleModeEnabled = lifecycleMode;
 		input.voxelsEnabled = (bool)r_voxels;
-		input.forceReconcile = forceReconcile || gVoxelActorPendingRemoval;
+		input.forceReconcile = lifecycle.forceReconcile || gVoxelActorPendingRemoval;
 		const NRIVoxelActorMaintenanceDecision decision = gVoxelActorMaintenanceGate.Evaluate(input);
 		gDynamicCapturePerfStats.voxelMaintenanceReasonMask |= decision.reasonMask;
 
-		if (decision.legacyEnumeration || (lifecycleMode && forceReconcile &&
-			gDynamicCapturePerfStats.voxelLifecycleOverflows != 0))
+		if (decision.legacyEnumeration || lifecycle.forceLegacyReconcile)
 		{
 			gDynamicCapturePerfStats.voxelMaintenanceLegacyReconciles++;
 			PruneVoxelActorCacheLegacy(stats);
