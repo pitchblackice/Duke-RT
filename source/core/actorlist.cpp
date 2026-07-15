@@ -33,6 +33,7 @@
 */
 
 #include "build.h"
+#include "actor_lifecycle_journal.h"
 #include "c_dispatch.h"
 #include "coreactor.h"
 #include "gamefuncs.h"
@@ -192,6 +193,12 @@ int ChangeActorStat(DCoreActor* actor, int statnum, bool tail)
 	assert(actor->spr.statnum >= 0 && actor->spr.statnum < MAXSTATUS);
 	RemoveActorStat(actor);
 	InsertActorStat(actor, statnum, tail);
+	GetActorLifecycleJournal().Record(
+		ActorLifecycleEventType::StatChanged,
+		reinterpret_cast<uintptr_t>(actor),
+		(int32_t)actor->GetIndex(),
+		oldstat,
+		statnum);
 	return 0;
 }
 
@@ -368,6 +375,12 @@ DCoreActor* InsertActor(PClass* type, sectortype* sector, int stat, bool tail)
 
 	Numsprites++;
 	actor->time = leveltimer++;
+	GetActorLifecycleJournal().Record(
+		ActorLifecycleEventType::Inserted,
+		reinterpret_cast<uintptr_t>(actor),
+		(int32_t)actor->GetIndex(),
+		-1,
+		stat);
 	return actor;
 }
 
@@ -434,6 +447,13 @@ void DCoreActor::OnDestroy()
 
 	if(link_stat == INT_MAX) return;
 
+	GetActorLifecycleJournal().Record(
+		ActorLifecycleEventType::Removed,
+		reinterpret_cast<uintptr_t>(this),
+		(int32_t)GetIndex(),
+		link_stat,
+		-1);
+
 	int stat = link_stat;
 	RemoveActorStat(this);
 
@@ -490,6 +510,7 @@ void InitSpriteLists()
 		}
 	}
 	Numsprites = 0;
+	GetActorLifecycleJournal().Record(ActorLifecycleEventType::Reset);
 }
 
 //==========================================================================

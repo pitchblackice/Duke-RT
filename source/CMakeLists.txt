@@ -1088,6 +1088,7 @@ set (PCH_SOURCES
 	core/thingdef_data.cpp
 	core/thingdef_properties.cpp
 	core/actorlist.cpp
+	core/actor_lifecycle_journal.cpp
 	core/automap.cpp
 	core/cheats.cpp
 	core/cheathandler.cpp
