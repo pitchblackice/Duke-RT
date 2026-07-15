@@ -219,6 +219,22 @@ struct DynamicCapturePerfStats
 	uint32_t voxelDuplicationAuditCalls = 0;
 	uint32_t voxelDuplicationAuditEntriesScanned = 0;
 	uint32_t voxelDuplicationAuditTemporaryContainersBuilt = 0;
+	uint32_t voxelMaintenanceCalls = 0;
+	uint32_t voxelMaintenanceSimulationSkips = 0;
+	uint32_t voxelMaintenanceLegacyReconciles = 0;
+	uint32_t voxelMaintenanceDeltaReconciles = 0;
+	uint32_t voxelMaintenanceReasonMask = 0;
+	uint32_t voxelMaintenanceLiveActorsEnumerated = 0;
+	uint32_t voxelMaintenanceCacheEntriesScanned = 0;
+	uint32_t voxelMaintenanceRemovals = 0;
+	uint32_t voxelMaintenanceTransformSyncs = 0;
+	uint32_t voxelLifecycleEventsRead = 0;
+	uint32_t voxelLifecycleInsertEvents = 0;
+	uint32_t voxelLifecycleRemoveEvents = 0;
+	uint32_t voxelLifecycleStatEvents = 0;
+	uint32_t voxelLifecycleResetEvents = 0;
+	uint32_t voxelLifecycleOverflows = 0;
+	uint32_t voxelLifecycleCacheEntriesTouched = 0;
 	uint32_t modelActorCandidates = 0;
 	uint32_t modelActorSorted = 0;
 	uint32_t modelActorSortSkipped = 0;
@@ -239,6 +255,10 @@ struct DynamicCapturePerfStats
 	double modelSortMs = 0.0;
 	double modelStoreMs = 0.0;
 	double voxelFrameMs = 0.0;
+	double voxelLifecycleMs = 0.0;
+	double voxelMaintenanceLiveEnumerationMs = 0.0;
+	double voxelMaintenanceReconcileMs = 0.0;
+	double voxelDuplicationAuditMs = 0.0;
 	double statsMs = 0.0;
 };
 
