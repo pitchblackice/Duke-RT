@@ -346,6 +346,8 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 	}
 
 	bool textureTableGrew = false;
+	const bool staticMaterialsUseStableTextureSlots =
+		mStaticMapScene.gpuMaterialsUseStableTextureSlots;
 	for (uint32_t chunkListIndex : chunkListIndices)
 	{
 		if (chunkListIndex >= mStaticMapScene.chunks.size() ||
@@ -453,6 +455,8 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 				cacheEntry.materialCount != atlasChunk.materialCount ||
 				cacheEntry.actorOverrideHash != actorOverrideHash ||
 				cacheEntry.emissiveOverrideHash != emissiveOverrideHash ||
+				cacheEntry.stableTextureSlots != staticMaterialsUseStableTextureSlots ||
+				cacheEntry.textureSlotRevision != (staticMaterialsUseStableTextureSlots ? mSceneTextures.SlotTable().MappingRevision() : 0) ||
 				cacheEntry.gpuMaterials.size() != atlasChunk.materialCount)
 			{
 				continue;
@@ -503,12 +507,33 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 			remappedGpuMaterials = remappedChunkBridge.materials;
 			ApplyEmissiveMaterialOverrides(remappedChunkBridge, remappedGpuMaterials);
 			ApplyActorShadowMaterialOverrides(remappedChunkBridge, remappedGpuMaterials);
+			if (staticMaterialsUseStableTextureSlots && !textureTableGrew)
+			{
+				NRISceneMaterialTextureSlotResolveStats resolveStats = {};
+				NRIResolveSceneMaterialTextureSlots(
+					mSceneTextures.SlotTable(),
+					mStaticMapScene.materialBridge,
+					remappedGpuMaterials,
+					&resolveStats);
+				if (resolveStats.requiredFallbacks != 0 || resolveStats.optionalFallbacks != 0)
+				{
+					if (nri_ptscenestats)
+					{
+						Printf("NRI PT static scene trace: event=resident_material_refresh_failed reason=stable-slot-resolution chunk=%u chunk_list_index=%u required_fallbacks=%u optional_fallbacks=%u\n",
+							chunkCache.chunkIndex,
+							chunkListIndex,
+							resolveStats.requiredFallbacks,
+							resolveStats.optionalFallbacks);
+					}
+					return false;
+				}
+			}
 		}
 		std::copy_n(
 			remappedGpuMaterials.data(),
 			atlasChunk.materialCount,
 			mStaticMapScene.gpuMaterials.data() + atlasChunk.materialOffset);
-		if (!reusedCachedRemap || !reusedCachedGpuPayload)
+		if (!textureTableGrew && (!reusedCachedRemap || !reusedCachedGpuPayload))
 		{
 			StaticMapSceneCache::ChunkCache::ResidentMaterialSliceCacheEntry cacheEntry = {};
 			cacheEntry.animatedGeometrySignature = chunkCache.animatedGeometrySignature;
@@ -516,6 +541,9 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 			cacheEntry.materialBridgeHash = materialBridgeHash;
 			cacheEntry.actorOverrideHash = actorOverrideHash;
 			cacheEntry.emissiveOverrideHash = emissiveOverrideHash;
+			cacheEntry.textureSlotRevision = staticMaterialsUseStableTextureSlots ?
+				mSceneTextures.SlotTable().MappingRevision() : 0;
+			cacheEntry.stableTextureSlots = staticMaterialsUseStableTextureSlots;
 			cacheEntry.materialCount = atlasChunk.materialCount;
 			cacheEntry.remappedMaterialBridge = remappedChunkBridge;
 			cacheEntry.gpuMaterials = remappedGpuMaterials;
@@ -558,6 +586,11 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 			mLastPerfResourceTraceStats.residentChunkBatchMaterialBytes +=
 				(uint64_t)atlasChunk.materialCount * sizeof(nri_scene::MaterialData);
 		}
+	}
+	++mStaticMapScene.materialGeneration;
+	if (mStaticMapScene.materialGeneration == 0)
+	{
+		mStaticMapScene.materialGeneration = 1;
 	}
 
 	if (!textureTableGrew)

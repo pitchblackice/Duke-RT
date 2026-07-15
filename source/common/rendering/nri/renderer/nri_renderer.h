@@ -21,6 +21,7 @@
 #include "nri_runtime_space_link_state.h"
 #include "nri_scene_data_frame_ring.h"
 #include "nri_scene_frame_geometry.h"
+#include "nri_scene_material_frame_cache.h"
 #include "nri_scene_textures.h"
 #include "nri_sky_environment.h"
 #include "nri_scene_lights.h"
@@ -605,6 +606,12 @@ public:
 		double sceneSelectLightMergeMs = 0.0;
 		double sceneSelectStaticInstancesMs = 0.0;
 		double sceneSelectMaterialBridgeMs = 0.0;
+		uint32_t sceneMaterialResidentRebuilds = 0;
+		uint32_t sceneMaterialResidentHits = 0;
+		uint32_t sceneMaterialStaticRowsCopied = 0;
+		uint32_t sceneMaterialPersistentRowsAppended = 0;
+		uint32_t sceneMaterialOverlayRowsAppended = 0;
+		uint32_t sceneMaterialResidentRowsReused = 0;
 		double sceneSelectPaletteMs = 0.0;
 		double sceneSelectTexturesMs = 0.0;
 		double sceneSelectMaterialSplitMs = 0.0;
@@ -877,6 +884,17 @@ public:
 		double sceneTextureLookupMs = 0.0;
 		double sceneTextureRealizeMs = 0.0;
 		double sceneTextureDescriptorMs = 0.0;
+		uint32_t sceneTextureDescriptorWrites = 0;
+		uint32_t sceneTextureDescriptorSkips = 0;
+		uint32_t sceneTextureDescriptorRowsWritten = 0;
+		uint32_t sceneTextureStableSlotMode = 0;
+		uint32_t sceneTextureSlotsLive = 0;
+		uint32_t sceneTextureSlotsQuarantined = 0;
+		uint32_t sceneTextureSlotsFree = 0;
+		uint64_t sceneTextureSlotReuses = 0;
+		uint64_t sceneTextureSlotExhaustions = 0;
+		uint32_t sceneTextureStableDescriptorHits = 0;
+		uint32_t sceneTextureStableDescriptorMisses = 0;
 		double sceneTextureTransitionMs = 0.0;
 		double actorOverrideMapBuildMs = 0.0;
 		double materialBuildMs = 0.0;
@@ -2263,6 +2281,7 @@ private:
 	uint32_t FindSceneTextureCacheIndex(uint64_t key) const;
 	bool EnsureSceneTextureCacheEntry(const nri_scene::TextureUpload& upload, double* outRealizeMs = nullptr);
 	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason = nullptr);
+	void ResolveSceneMaterialTextureSlots(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& gpuMaterials) const;
 	bool EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky);
 	bool EnsureStaticMapScene();
 	void ResetResidentMapChunkRegistry();
@@ -2524,6 +2543,10 @@ private:
 	std::array<nri::Pipeline*, (size_t)PipelineSlot::Count> mPipelines = {};
 	nri::DescriptorSet* mSamplerSet = nullptr;
 	std::vector<nri::DescriptorSet*> mSceneTextureSets;
+	std::vector<uint64_t> mSceneTextureKeyScratch;
+	std::vector<uint64_t> mSceneTextureSetHashes;
+	std::vector<uint8_t> mSceneTextureSetHashValid;
+	bool mSceneTextureStableSlotsActive = false;
 	std::vector<nri::DescriptorSet*> mSceneDataSets;
 	std::vector<SceneDataDescriptorSnapshot> mSceneDataSnapshots;
 	nri::DescriptorSet* mActiveSceneDataSet = nullptr;
@@ -2596,6 +2619,7 @@ private:
 	nri_scene::GeometryData mSelectLocalPlayerReflectionGeometryScratch;
 	nri_scene::GeometryData mSelectOverlayGeometryScratch;
 	nri_scene::MaterialBridgeData mSelectOverlayMaterialBridgeScratch;
+	NRISceneMaterialFrameCache mSceneMaterialFrameCache;
 	NRISceneFrameGeometry mSceneFrameGeometry;
 	std::vector<nri::TopLevelInstance> mSelectTopLevelInstanceScratch;
 	std::vector<SceneInstanceData> mSelectSceneInstanceScratch;

@@ -4752,6 +4752,15 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectTexturePrepMs,
 			shell.sceneSelectStateCommitMs);
 		Printf(
+			"PERF pt material residency NRI: frame=%llu resident_rebuilds=%u resident_hits=%u static_rows_copied=%u persistent_rows_appended=%u overlay_rows_appended=%u resident_rows_reused=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.sceneMaterialResidentRebuilds,
+			shell.sceneMaterialResidentHits,
+			shell.sceneMaterialStaticRowsCopied,
+			shell.sceneMaterialPersistentRowsAppended,
+			shell.sceneMaterialOverlayRowsAppended,
+			shell.sceneMaterialResidentRowsReused);
+		Printf(
 			"PERF pt scene select accounting NRI: frame=%llu select=%.3f accounted=%.3f unaccounted=%.3f static_map=%.3f spacelink=%.3f mutation=%.3f dynamic_capture=%.3f dynamic_geo=%.3f local_player_reflection_geo=%.3f persistent_batch=%.3f persistent_emissive=%.3f persistent_dynamic=%.3f dynamic_merge=%.3f dynamic_merge_copy=%.3f dynamic_merge_append=%.3f dynamic_merge_stats=%.3f dynamic_merge_geo=%.3f dynamic_merge_portal=%.3f dynamic_merge_material=%.3f dynamic_merge_live_surfaces=%u dynamic_merge_cache_surfaces=%u dynamic_merge_appended_surfaces=%u dynamic_merge_duplicate_surfaces=%u dynamic_merge_cache_prims=%u dynamic_merge_cache_mats=%u dynamic_merge_delta_attempts=%u dynamic_merge_delta_used=%u dynamic_merge_delta_fallbacks=%u dynamic_merge_delta_fallback_nonzero=%u light_merge=%.3f debug_sphere=%.3f overlay=%.3f static_instances=%.3f material_bridge=%.3f palette=%.3f textures=%.3f material_split=%.3f buffer_upload=%.3f persistent_voxel_as=%.3f dynamic_as=%.3f instance_handles=%.3f world_tlas=%.3f scene_data=%.3f texture_prep=%.3f state_commit=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneSelectMs,
@@ -6003,7 +6012,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				entry.syncSkips);
 		}
 		Printf(
-			"PERF pt texture detail NRI: frame=%llu reason=%s requested=%u actor_materials=%u base=%u glow=%u normal=%u metallic=%u roughness=%u emissive=%u cache=%u misses=%u inserts=%u transitions=%u lookup_ms=%.3f realize_ms=%.3f descriptor_ms=%.3f transition_ms=%.3f material_builds=%u override_builds=%u override_ms=%.3f material_ms=%.3f\n",
+			"PERF pt texture detail NRI: frame=%llu reason=%s requested=%u actor_materials=%u base=%u glow=%u normal=%u metallic=%u roughness=%u emissive=%u cache=%u misses=%u inserts=%u transitions=%u lookup_ms=%.3f realize_ms=%.3f descriptor_ms=%.3f transition_ms=%.3f stable_slots=%u slots_live=%u slots_quarantined=%u slots_free=%u slot_reuses=%llu slot_exhaustions=%llu stable_descriptor_hits=%u stable_descriptor_misses=%u descriptor_writes=%u descriptor_skips=%u descriptor_rows=%u material_builds=%u override_builds=%u override_ms=%.3f material_ms=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneTextureReason.empty() ? "none" : shell.sceneTextureReason.c_str(),
 			shell.sceneTextureRequestedCount,
@@ -6022,6 +6031,17 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneTextureRealizeMs,
 			shell.sceneTextureDescriptorMs,
 			shell.sceneTextureTransitionMs,
+			shell.sceneTextureStableSlotMode,
+			shell.sceneTextureSlotsLive,
+			shell.sceneTextureSlotsQuarantined,
+			shell.sceneTextureSlotsFree,
+			(unsigned long long)shell.sceneTextureSlotReuses,
+			(unsigned long long)shell.sceneTextureSlotExhaustions,
+			shell.sceneTextureStableDescriptorHits,
+			shell.sceneTextureStableDescriptorMisses,
+			shell.sceneTextureDescriptorWrites,
+			shell.sceneTextureDescriptorSkips,
+			shell.sceneTextureDescriptorRowsWritten,
 			shell.materialBuildCalls,
 			shell.actorOverrideMapBuildCalls,
 			shell.actorOverrideMapBuildMs,

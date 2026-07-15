@@ -474,7 +474,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	nri_scene::MaterialBridgeData& surfaceLightMaterialBridge = frame.surfaceLightMaterialBridge;
 	nri_scene::GeometryData& overlayGeometry = mSelectOverlayGeometryScratch;
 	nri_scene::MaterialBridgeData& overlayMaterialBridge = mSelectOverlayMaterialBridgeScratch;
-	nri_scene::MaterialBridgeData& combinedMaterialBridge = frame.combinedMaterialBridge;
+	nri_scene::MaterialBridgeData& combinedMaterialBridge = mSceneMaterialFrameCache.Materials();
 	auto& capturedGpuMaterials = mSelectCapturedGpuMaterialScratch;
 	auto& dynamicGpuMaterials = mSelectDynamicGpuMaterialScratch;
 	auto& persistentVoxelGpuMaterials = mSelectPersistentVoxelGpuMaterialScratch;
@@ -1078,14 +1078,26 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			{
 				{
 					ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMaterialBridgeMs);
-					combinedMaterialBridge = mStaticMapScene.materialBridge;
-					combinedOverlayMaterialOffset = (uint32_t)combinedMaterialBridge.materials.size();
-					if (hasPersistentVoxelOverlay)
-					{
-						mPersistentVoxels.AppendMaterialBridgeTo(combinedMaterialBridge);
-						combinedOverlayMaterialOffset = (uint32_t)combinedMaterialBridge.materials.size();
-					}
-					nri_scene::AppendMaterialBridge(overlayMaterialBridge, combinedMaterialBridge);
+					NRISceneMaterialFrameCacheStats cacheStats = {};
+					const nri_scene::MaterialBridgeData* persistentMaterials =
+						hasPersistentVoxelOverlay ? &mPersistentVoxels.MaterialBridge() : nullptr;
+					mSceneMaterialFrameCache.Build(
+						mStaticMapScene.materialBridge,
+						mStaticMapScene.buildSerial,
+						mStaticMapScene.materialGeneration,
+						persistentMaterials,
+						hasPersistentVoxelOverlay ? mPersistentVoxels.MaterialResourceGeneration() : 0,
+						overlayMaterialBridge,
+						cacheStats);
+					combinedOverlayMaterialOffset =
+						(uint32_t)mStaticMapScene.materialBridge.materials.size() +
+						(hasPersistentVoxelOverlay ? mPersistentVoxels.OverlayMaterialCount() : 0u);
+					mLastPerfShellTraceStats.sceneMaterialResidentRebuilds += cacheStats.residentRebuilds;
+					mLastPerfShellTraceStats.sceneMaterialResidentHits += cacheStats.residentHits;
+					mLastPerfShellTraceStats.sceneMaterialStaticRowsCopied += cacheStats.staticRowsCopied;
+					mLastPerfShellTraceStats.sceneMaterialPersistentRowsAppended += cacheStats.persistentRowsAppended;
+					mLastPerfShellTraceStats.sceneMaterialOverlayRowsAppended += cacheStats.overlayRowsAppended;
+					mLastPerfShellTraceStats.sceneMaterialResidentRowsReused += cacheStats.residentRowsReused;
 				}
 				paletteReady = [&]()
 				{
@@ -1685,13 +1697,18 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		activeMaterialBridge == &combinedMaterialBridge &&
 		!overlayGeometry.primitives.empty())
 	{
-		refreshedCombinedGpuMaterials = combinedMaterialBridge.materials;
-		ApplyEmissiveMaterialOverrides(combinedMaterialBridge, refreshedCombinedGpuMaterials);
-		ApplyActorShadowMaterialOverrides(combinedMaterialBridge, refreshedCombinedGpuMaterials);
+		const nri_scene::MaterialBridgeData& refreshedMaterialSource =
+			mSceneTextureStableSlotsActive ?
+			mSceneMaterialFrameCache.ResolveTextureSlots(mSceneTextures.SlotTable()) :
+			combinedMaterialBridge;
+		refreshedCombinedGpuMaterials = refreshedMaterialSource.materials;
+		ApplyEmissiveMaterialOverrides(refreshedMaterialSource, refreshedCombinedGpuMaterials);
+		ApplyActorShadowMaterialOverrides(refreshedMaterialSource, refreshedCombinedGpuMaterials);
 		if (!nri_material_policy::MaterialDataVectorEqual(refreshedCombinedGpuMaterials, combinedGpuMaterials))
 		{
 			const size_t staticMaterialCount = mStaticMapScene.gpuMaterials.size();
-			if (refreshedCombinedGpuMaterials.size() < staticMaterialCount)
+			const size_t persistentVoxelMaterialCount = mSceneMaterialFrameCache.PersistentMaterialCount();
+			if (refreshedCombinedGpuMaterials.size() < staticMaterialCount + persistentVoxelMaterialCount)
 			{
 				LogFallback("PT runtime overlay material refresh produced an invalid material slice.");
 				if (preserveHistory)
@@ -1702,8 +1719,14 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			}
 
 			combinedGpuMaterials.swap(refreshedCombinedGpuMaterials);
-			dynamicGpuMaterials.assign(combinedGpuMaterials.begin() + staticMaterialCount, combinedGpuMaterials.end());
+			persistentVoxelGpuMaterials.assign(
+				combinedGpuMaterials.begin() + staticMaterialCount,
+				combinedGpuMaterials.begin() + staticMaterialCount + persistentVoxelMaterialCount);
+			dynamicGpuMaterials.assign(
+				combinedGpuMaterials.begin() + staticMaterialCount + persistentVoxelMaterialCount,
+				combinedGpuMaterials.end());
 			if (!UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials) ||
+				(persistentVoxelMaterialCount != 0 && !UploadPersistentVoxelArenaMaterialBuffers(persistentVoxelGpuMaterials)) ||
 				!NRISceneUploadManager::UpdateSceneDataSet(*this,
 					mStaticVertexBuffer,
 					mStaticIndexBuffer,

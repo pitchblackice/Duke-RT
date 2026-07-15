@@ -4,6 +4,7 @@
 
 #include "nri_persistent_voxel_admission_index.h"
 #include "nri_persistent_voxel_material_closure.h"
+#include "nri_persistent_voxel_material_range_allocator.h"
 #include "nri_frame_resources.h"
 #include "nri_persistent_voxel_shared_blas.h"
 #include "nri_renderer_settings.h"
@@ -52,6 +53,7 @@ struct PersistentVoxelBatch
 		uint32_t indexCount = 0;
 		uint32_t materialOffset = 0;
 		uint32_t materialCount = 0;
+		uint64_t materialSlotGeneration = 0;
 		std::array<float, 12> instanceTransform = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 		std::array<float, 12> previousInstanceTransform = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 		nri_scene::MaterialBridgeData materialBridge;
@@ -134,6 +136,7 @@ struct PersistentVoxelMaterialVariantResource
 	uint32_t materialOffset = 0;
 	uint32_t materialCount = 0;
 	uint32_t materialCapacity = 0;
+	uint64_t materialSlotGeneration = 0;
 	uint32_t lastDesiredMapGeneration = 0;
 	uint32_t lastUsedMapGeneration = 0;
 	uint32_t lastUsedFrame = 0;
@@ -906,6 +909,7 @@ class NRIPersistentVoxelResidency
 public:
 	void Reset(const char* reason, bool clearSharedResources, bool traceReset, const NRIPersistentVoxelResetServices& services);
 	void ResetLevelSchedulingState(const char* reason, bool traceReset, const NRIPersistentVoxelResetServices& services);
+	bool CompactMaterialRangesForQuiescentLevelTransition(const char* reason, bool traceEnabled);
 	bool SyncMapGeneration(uint64_t buildSerial, const char* reason, bool traceEnabled, const NRIPersistentVoxelResetServices& services);
 	void ReconcileResidency(
 		const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
@@ -1046,6 +1050,9 @@ public:
 	bool HasPreloadPending() const;
 	NRIPersistentVoxelPreloadStatus BuildPreloadStatusSnapshot() const;
 	uint32_t OverlayMaterialCount() const;
+	const nri_scene::MaterialBridgeData& MaterialBridge() const { return batch.materialBridge; }
+	uint64_t MaterialResourceGeneration() const { return batchMaterialResourceGeneration; }
+	const NRIPersistentVoxelMaterialRangeStats& MaterialRangeStats() const { return materialRangeAllocator.Stats(); }
 	uint32_t EstimatePrimitiveCountForInstanceOffset(uint32_t primitiveOffset) const;
 	nri_scene::SceneDebugStats BuildOverlayDebugStats() const;
 	uint64_t BuildSceneGenerationHash() const;
@@ -1134,11 +1141,13 @@ public:
 	uint32_t arenaVertexCursor = 0;
 	uint32_t arenaIndexCursor = 0;
 	uint32_t arenaPrimitiveCursor = 0;
-	uint32_t arenaMaterialCursor = 0;
+	NRIPersistentVoxelMaterialRangeAllocator materialRangeAllocator;
 	uint64_t arenaPresizeBuildSerial = 0;
 	uint64_t blasPolicyTraceBuildSerial = 0;
 	uint64_t materialResourceGeneration = 1;
 	uint64_t batchMaterialResourceGeneration = 0;
+	uint64_t materialRangeCompactions = 0;
+	uint64_t materialRangeCompactedRows = 0;
 	uint64_t uploadedMaterialResourceGeneration = 0;
 	uint32_t committedWorldTlasFrameIndex = UINT32_MAX;
 	uint32_t pendingMaterialLayoutInvalidatedResources = 0;

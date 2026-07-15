@@ -1935,6 +1935,8 @@ void NRIRenderer::Shutdown()
 
 	mSamplerSet = nullptr;
 	mSceneTextureSets.clear();
+	mSceneTextureSetHashes.clear();
+	mSceneTextureSetHashValid.clear();
 	mSceneDataSets.clear();
 	mSceneDataSnapshots.clear();
 	mActiveSceneDataSet = nullptr;
@@ -1974,6 +1976,9 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 			"level-unload",
 			(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats,
 			BuildNRIPersistentVoxelResetServices(*this));
+		mPersistentVoxels.CompactMaterialRangesForQuiescentLevelTransition(
+			"level-unload",
+			(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats);
 	}
 
 	DestroyStaticMapSceneCache("level-unload");

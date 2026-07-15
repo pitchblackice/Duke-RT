@@ -118,6 +118,8 @@ struct StaticMapSceneCache
 			uint64_t materialBridgeHash = 0;
 			uint64_t actorOverrideHash = 0;
 			uint64_t emissiveOverrideHash = 0;
+			uint64_t textureSlotRevision = 0;
+			bool stableTextureSlots = false;
 			uint32_t materialCount = 0;
 			nri_scene::MaterialBridgeData remappedMaterialBridge;
 			std::vector<nri_scene::MaterialData> gpuMaterials;
@@ -174,6 +176,8 @@ struct StaticMapSceneCache
 	bool buffersResident = false;
 	bool accelerationResident = false;
 	uint64_t buildSerial = 0;
+	uint64_t materialGeneration = 0;
+	bool gpuMaterialsUseStableTextureSlots = false;
 	uint32_t sceneBuildCount = 0;
 	uint32_t gpuUploadCount = 0;
 	uint32_t accelerationBuildCount = 0;

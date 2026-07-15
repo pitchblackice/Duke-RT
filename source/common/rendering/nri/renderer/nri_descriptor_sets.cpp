@@ -71,6 +71,8 @@ bool NRIDescriptorSetManager::AllocateDescriptorSets(NRIRenderer& renderer)
 {
 	const uint32_t queuedFrameCount = renderer.mFrameBuffer != nullptr ? std::max(1u, (uint32_t)renderer.mFrameBuffer->mQueuedFrames.size()) : 1u;
 	renderer.mSceneTextureSets.assign(queuedFrameCount, nullptr);
+	renderer.mSceneTextureSetHashes.assign(queuedFrameCount, 0);
+	renderer.mSceneTextureSetHashValid.assign(queuedFrameCount, 0);
 	renderer.mSceneDataSets.assign(queuedFrameCount, nullptr);
 	renderer.mSceneDataDescriptorsInitialized.assign(queuedFrameCount, 0u);
 	const uint32_t sceneDataSnapshotCount = std::max(8u, queuedFrameCount * 4u);

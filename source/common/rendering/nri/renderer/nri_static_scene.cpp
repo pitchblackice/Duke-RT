@@ -886,6 +886,11 @@ bool nri_static_scene::RebuildResidentStaticMaterialBridgeFromChunks(
 	}
 
 	staticScene.materialBridge = std::move(bridge);
+	++staticScene.materialGeneration;
+	if (staticScene.materialGeneration == 0)
+	{
+		staticScene.materialGeneration = 1;
+	}
 	return true;
 }
 
@@ -1945,6 +1950,7 @@ void nri_static_scene::InitializeStaticMapSceneCacheBuild(
 	outStaticScene.buffersResident = false;
 	outStaticScene.accelerationResident = false;
 	outStaticScene.buildSerial = mapWorld.buildSerial;
+	outStaticScene.materialGeneration = 1;
 	outStaticScene.sceneBuildCount = 0;
 	outStaticScene.gpuUploadCount = 0;
 	outStaticScene.accelerationBuildCount = 0;
