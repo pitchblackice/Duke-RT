@@ -1000,6 +1000,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_renderer_frame_state.cpp
 	common/rendering/nri/renderer/nri_scene_buffer_residency.cpp
 	common/rendering/nri/renderer/nri_sector_lighting.cpp
+	common/rendering/nri/renderer/nri_light_rule_product_cache.cpp
 	common/rendering/nri/renderer/nri_scene_lights.cpp
 	common/rendering/nri/renderer/nri_scene_upload.cpp
 	common/rendering/nri/renderer/nri_scene_upload_identity.cpp

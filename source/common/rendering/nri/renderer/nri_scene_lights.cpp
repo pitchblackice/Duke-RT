@@ -1940,41 +1940,6 @@ namespace
 		return PlayClock > 0 ? (double)PlayClock * (1.0 / 120.0) : 0.0;
 	}
 
-	uint64_t QuantizeLightOverlayPositionKey(const float position[3])
-	{
-		const int64_t x = (int64_t)std::llround(position[0] * 16.0f);
-		const int64_t y = (int64_t)std::llround(position[1] * 16.0f);
-		const int64_t z = (int64_t)std::llround(position[2] * 16.0f);
-		uint64_t key = 1469598103934665603ull;
-		key = nri_scene::HashCombine64(key, (uint64_t)x);
-		key = nri_scene::HashCombine64(key, (uint64_t)y);
-		key = nri_scene::HashCombine64(key, (uint64_t)z);
-		return key;
-	}
-
-	void ComputeCapturedSurfaceCenter(const nri_scene::SurfaceRef& surface, float outCenter[3])
-	{
-		outCenter[0] = 0.0f;
-		outCenter[1] = 0.0f;
-		outCenter[2] = 0.0f;
-		if (surface.vertices.empty())
-		{
-			return;
-		}
-
-		for (const nri_scene::CapturedVertex& vertex : surface.vertices)
-		{
-			outCenter[0] += vertex.position[0];
-			outCenter[1] += vertex.position[1];
-			outCenter[2] += vertex.position[2];
-		}
-
-		const float invCount = 1.0f / (float)surface.vertices.size();
-		outCenter[0] *= invCount;
-		outCenter[1] *= invCount;
-		outCenter[2] *= invCount;
-	}
-
 	uint32_t BuildActorOverlayRuleId(const ResolvedLightOverlayActorRule& rule)
 	{
 		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.actorClassName.GetChars(), rule.source);
@@ -2091,405 +2056,6 @@ namespace
 			{
 				outRulesById[actorRule.ruleId] = actorRule;
 			}
-		}
-	}
-
-	bool IsSupportedMapOverlayRule(const ResolvedLightOverlayMapLightRule& rule)
-	{
-		return rule.lightType.IsEmpty() || rule.lightType.CompareNoCase("point") == 0;
-	}
-
-	bool IsSupportedSurfaceLightRule(const ResolvedLightOverlaySurfaceLightRule& rule)
-	{
-		return rule.lightType.IsEmpty() || rule.lightType.CompareNoCase("point") == 0 || rule.lightType.CompareNoCase("rect") == 0;
-	}
-
-	uint32_t BuildMapOverlayRuleId(const ResolvedLightOverlayMapLightRule& rule)
-	{
-		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.mapName.GetChars(), rule.source);
-	}
-
-	uint32_t BuildSurfaceLightRuleId(const ResolvedLightOverlaySurfaceLightRule& rule)
-	{
-		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.mapName.GetChars(), rule.source);
-	}
-
-	uint32_t BuildEmissiveOverrideRuleId(const ResolvedLightOverlayEmissiveOverrideRule& rule)
-	{
-		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.mapName.GetChars(), rule.source);
-	}
-
-	std::string NormalizeLightOverlayTextureSelector(const char* value)
-	{
-		std::string normalized = value != nullptr ? value : "";
-		for (char& c : normalized)
-		{
-			c = (char)std::tolower((unsigned char)c);
-		}
-
-		const size_t slash = normalized.find_last_of("/\\");
-		const size_t dot = normalized.find_last_of('.');
-		if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
-		{
-			normalized.erase(dot);
-		}
-		return normalized;
-	}
-
-	uint64_t BuildMapOverlayStableKey(uint32_t ruleId, const float position[3])
-	{
-		uint64_t key = 1469598103934665603ull;
-		key = nri_scene::HashCombine64(key, (uint64_t)ruleId);
-		key = nri_scene::HashCombine64(key, QuantizeLightOverlayPositionKey(position));
-		return key;
-	}
-
-	void ConvertMapOverlayWorldVectorToPathTracing(const float source[3], float destination[3])
-	{
-		destination[0] = source[0];
-		destination[1] = -source[2];
-		destination[2] = -source[1];
-	}
-
-	bool TryResolveSectorMapOverlayAnchorPosition(const nri_scene::PTMapWorld& mapWorld, int32_t sectorIndex, float outPosition[3])
-	{
-		const nri_scene::PTMapChunk* matchedChunk = nullptr;
-		for (const auto& chunk : mapWorld.chunks)
-		{
-			if (chunk.sectorIndex == sectorIndex)
-			{
-				matchedChunk = &chunk;
-				break;
-			}
-		}
-		if (matchedChunk == nullptr)
-		{
-			return false;
-		}
-
-		float flatCenterSum[3] = {};
-		int flatCenterCount = 0;
-		float anyCenterSum[3] = {};
-		int anyCenterCount = 0;
-		const uint32_t endSurface = matchedChunk->firstSurface + matchedChunk->surfaceCount;
-		for (uint32_t surfaceIndex = matchedChunk->firstSurface; surfaceIndex < endSurface && surfaceIndex < mapWorld.surfaces.size(); ++surfaceIndex)
-		{
-			const auto& surface = mapWorld.surfaces[surfaceIndex].surface;
-			if (surface.provenance.sectorIndex != sectorIndex)
-			{
-				continue;
-			}
-
-			float center[3] = {};
-			ComputeCapturedSurfaceCenter(surface, center);
-			anyCenterSum[0] += center[0];
-			anyCenterSum[1] += center[1];
-			anyCenterSum[2] += center[2];
-			anyCenterCount++;
-
-			if (surface.provenance.sourceType == nri_scene::SurfaceSourceType::MapFloorSection ||
-				surface.provenance.sourceType == nri_scene::SurfaceSourceType::MapCeilingSection)
-			{
-				flatCenterSum[0] += center[0];
-				flatCenterSum[1] += center[1];
-				flatCenterSum[2] += center[2];
-				flatCenterCount++;
-			}
-		}
-
-		const float* sum = flatCenterCount > 0 ? flatCenterSum : anyCenterSum;
-		const int count = flatCenterCount > 0 ? flatCenterCount : anyCenterCount;
-		if (count <= 0)
-		{
-			return false;
-		}
-
-		const float invCount = 1.0f / (float)count;
-		outPosition[0] = sum[0] * invCount;
-		outPosition[1] = sum[1] * invCount;
-		outPosition[2] = sum[2] * invCount;
-		return true;
-	}
-
-	bool TryResolveWallMapOverlayAnchorPosition(const nri_scene::PTMapWorld& mapWorld, int32_t wallIndex, float outPosition[3])
-	{
-		float centerSum[3] = {};
-		int centerCount = 0;
-		for (const auto& mapSurface : mapWorld.surfaces)
-		{
-			if (mapSurface.surface.provenance.wallIndex != wallIndex)
-			{
-				continue;
-			}
-
-			float center[3] = {};
-			ComputeCapturedSurfaceCenter(mapSurface.surface, center);
-			centerSum[0] += center[0];
-			centerSum[1] += center[1];
-			centerSum[2] += center[2];
-			centerCount++;
-		}
-
-		if (centerCount <= 0)
-		{
-			return false;
-		}
-
-		const float invCount = 1.0f / (float)centerCount;
-		outPosition[0] = centerSum[0] * invCount;
-		outPosition[1] = centerSum[1] * invCount;
-		outPosition[2] = centerSum[2] * invCount;
-		return true;
-	}
-
-	bool TryResolveMapOverlayAnchorPosition(const nri_scene::PTMapWorld& mapWorld, const ResolvedLightOverlayMapLightRule& rule, float outPosition[3])
-	{
-		switch (rule.anchorType)
-		{
-		case LightOverlayAnchorType::Position:
-			if (!rule.hasAnchorPosition)
-			{
-				return false;
-			}
-			ConvertMapOverlayWorldVectorToPathTracing(rule.anchorPosition, outPosition);
-			return true;
-
-		case LightOverlayAnchorType::Sector:
-			return rule.anchorIndex >= 0 && TryResolveSectorMapOverlayAnchorPosition(mapWorld, rule.anchorIndex, outPosition);
-
-		case LightOverlayAnchorType::Wall:
-			return rule.anchorIndex >= 0 && TryResolveWallMapOverlayAnchorPosition(mapWorld, rule.anchorIndex, outPosition);
-
-		default:
-			return false;
-		}
-	}
-
-	void BuildStaticMapAnalyticOverlayRules(
-		const ResolvedLightOverlaySet& resolved,
-		const nri_scene::PTMapWorld& mapWorld,
-		std::vector<SceneLightSystem::AnalyticLightRegistry::MapOverlayRule>& outRules)
-	{
-		for (const auto& resolvedRule : resolved.mapLightRules)
-		{
-			if (!IsSupportedMapOverlayRule(resolvedRule) ||
-				resolvedRule.intensity <= 0.0f ||
-				resolvedRule.radius <= 0.0f)
-			{
-				continue;
-			}
-
-			float anchorPosition[3] = {};
-			if (!TryResolveMapOverlayAnchorPosition(mapWorld, resolvedRule, anchorPosition))
-			{
-				continue;
-			}
-
-			SceneLightSystem::AnalyticLightRegistry::MapOverlayRule overlayRule = {};
-			float offset[3] = {};
-			ConvertMapOverlayWorldVectorToPathTracing(resolvedRule.offset, offset);
-			overlayRule.ruleId = BuildMapOverlayRuleId(resolvedRule);
-			overlayRule.source = SceneLightRecordSource::StaticMapScene;
-			overlayRule.position[0] = anchorPosition[0] + offset[0];
-			overlayRule.position[1] = anchorPosition[1] + offset[1];
-			overlayRule.position[2] = anchorPosition[2] + offset[2];
-			overlayRule.stableKey = BuildMapOverlayStableKey(overlayRule.ruleId, overlayRule.position);
-			overlayRule.color[0] = resolvedRule.color[0];
-			overlayRule.color[1] = resolvedRule.color[1];
-			overlayRule.color[2] = resolvedRule.color[2];
-			overlayRule.intensity = resolvedRule.intensity;
-			overlayRule.radius = resolvedRule.radius;
-			overlayRule.flickerFrames = resolvedRule.flickerFrames;
-			outRules.push_back(overlayRule);
-		}
-
-		for (const auto& resolvedRule : resolved.surfaceLightRules)
-		{
-			if (!IsSupportedSurfaceLightRule(resolvedRule) ||
-				!resolvedRule.hasPosition ||
-				!resolvedRule.hasNormal ||
-				resolvedRule.intensity <= 0.0f ||
-				resolvedRule.radius <= 0.0f)
-			{
-				continue;
-			}
-
-			SceneLightSystem::AnalyticLightRegistry::MapOverlayRule overlayRule = {};
-			const float offset = resolvedRule.hasOffset ? resolvedRule.offset : 0.0f;
-			overlayRule.ruleId = BuildSurfaceLightRuleId(resolvedRule);
-			overlayRule.source = SceneLightRecordSource::DynamicScene;
-			overlayRule.position[0] = resolvedRule.position[0] + resolvedRule.normal[0] * offset;
-			overlayRule.position[1] = resolvedRule.position[1] + resolvedRule.normal[1] * offset;
-			overlayRule.position[2] = resolvedRule.position[2] + resolvedRule.normal[2] * offset;
-			overlayRule.stableKey = BuildMapOverlayStableKey(overlayRule.ruleId, overlayRule.position);
-			overlayRule.color[0] = resolvedRule.color[0];
-			overlayRule.color[1] = resolvedRule.color[1];
-			overlayRule.color[2] = resolvedRule.color[2];
-			overlayRule.intensity = resolvedRule.intensity;
-			overlayRule.radius = resolvedRule.radius;
-			overlayRule.hasSectorResponse = resolvedRule.hasSectorResponse;
-			overlayRule.sectorResponse = resolvedRule.sectorResponse;
-			overlayRule.hasSignalSector = resolvedRule.hasSignalSector;
-			overlayRule.signalSector = resolvedRule.signalSector;
-			overlayRule.hasResponseIntensity = resolvedRule.hasResponseIntensity;
-			overlayRule.responseIntensity = resolvedRule.responseIntensity;
-			overlayRule.hasResponseMin = resolvedRule.hasResponseMin;
-			overlayRule.responseMin = resolvedRule.responseMin;
-			overlayRule.hasResponseMax = resolvedRule.hasResponseMax;
-			overlayRule.responseMax = resolvedRule.responseMax;
-			overlayRule.hasResponseInputMin = resolvedRule.hasResponseInputMin;
-			overlayRule.responseInputMin = resolvedRule.responseInputMin;
-			overlayRule.hasResponseInputMax = resolvedRule.hasResponseInputMax;
-			overlayRule.responseInputMax = resolvedRule.responseInputMax;
-			outRules.push_back(overlayRule);
-		}
-	}
-
-	void BuildEmissiveOverrideRules(
-		const ResolvedLightOverlaySet& resolved,
-		std::vector<SceneLightSystem::EmissiveOverrideRule>& outRules)
-	{
-		outRules.clear();
-		outRules.reserve((size_t)resolved.emissiveOverrideRules.Size());
-		for (const auto& resolvedRule : resolved.emissiveOverrideRules)
-		{
-			if (!resolvedRule.hasSectorFilter &&
-				!resolvedRule.hasWallFilter &&
-				!resolvedRule.hasTileFilter)
-			{
-				continue;
-			}
-
-			SceneLightSystem::EmissiveOverrideRule rule = {};
-			rule.ruleId = BuildEmissiveOverrideRuleId(resolvedRule);
-			rule.hasSectorFilter = resolvedRule.hasSectorFilter;
-			rule.sectorFilter = resolvedRule.sectorFilter;
-			rule.hasWallFilter = resolvedRule.hasWallFilter;
-			rule.wallFilter = resolvedRule.wallFilter;
-			rule.hasTileFilter = resolvedRule.hasTileFilter && resolvedRule.tileFilter >= 0;
-			rule.tileFilter = rule.hasTileFilter ? (uint32_t)resolvedRule.tileFilter : 0u;
-			rule.hasIntensityScale = resolvedRule.hasIntensityScale;
-			rule.intensityScale = resolvedRule.intensityScale;
-			rule.hasReachScale = resolvedRule.hasReachScale;
-			rule.reachScale = resolvedRule.reachScale;
-			rule.hasSectorResponse = resolvedRule.hasSectorResponse;
-			rule.sectorResponse = resolvedRule.sectorResponse;
-			rule.hasSignalSector = resolvedRule.hasSignalSector && resolvedRule.signalSector >= 0;
-			rule.signalSector = rule.hasSignalSector ? resolvedRule.signalSector : -1;
-			rule.hasResponseIntensity = resolvedRule.hasResponseIntensity;
-			rule.responseIntensity = resolvedRule.responseIntensity;
-			rule.hasResponseMin = resolvedRule.hasResponseMin;
-			rule.responseMin = resolvedRule.responseMin;
-			rule.hasResponseMax = resolvedRule.hasResponseMax;
-			rule.responseMax = resolvedRule.responseMax;
-			rule.hasResponseInputMin = resolvedRule.hasResponseInputMin;
-			rule.responseInputMin = resolvedRule.responseInputMin;
-			rule.hasResponseInputMax = resolvedRule.hasResponseInputMax;
-			rule.responseInputMax = resolvedRule.responseInputMax;
-			rule.hasResponseIntensityMin = resolvedRule.hasResponseIntensityMin;
-			rule.responseIntensityMin = resolvedRule.responseIntensityMin;
-			rule.hasResponseIntensityMax = resolvedRule.hasResponseIntensityMax;
-			rule.responseIntensityMax = resolvedRule.responseIntensityMax;
-			rule.hasResponseReachMin = resolvedRule.hasResponseReachMin;
-			rule.responseReachMin = resolvedRule.responseReachMin;
-			rule.hasResponseReachMax = resolvedRule.hasResponseReachMax;
-			rule.responseReachMax = resolvedRule.responseReachMax;
-			rule.hasMaterialResponse = resolvedRule.hasMaterialResponse;
-			rule.materialResponse = resolvedRule.materialResponse;
-			rule.hasMaterialResponseMin = resolvedRule.hasMaterialResponseMin;
-			rule.materialResponseMin = resolvedRule.materialResponseMin;
-			rule.hasMaterialResponseMax = resolvedRule.hasMaterialResponseMax;
-			rule.materialResponseMax = resolvedRule.materialResponseMax;
-			outRules.push_back(rule);
-		}
-	}
-
-	void BuildSurfaceLightFixtureResponseRules(
-		const ResolvedLightOverlaySet& resolved,
-		std::vector<SceneLightSystem::EmissiveOverrideRule>& outRules)
-	{
-		outRules.clear();
-		outRules.reserve((size_t)resolved.surfaceLightRules.Size());
-		for (const auto& resolvedRule : resolved.surfaceLightRules)
-		{
-			if (!resolvedRule.hasPosition || !resolvedRule.hasNormal)
-			{
-				continue;
-			}
-
-			const bool sectorResponseEnabled = resolvedRule.hasSectorResponse && resolvedRule.sectorResponse;
-			SceneLightSystem::EmissiveOverrideRule rule = {};
-			rule.ruleId = BuildSurfaceLightRuleId(resolvedRule);
-			rule.hasSectorResponse = true;
-			rule.sectorResponse = sectorResponseEnabled;
-			rule.hasSignalSector = resolvedRule.hasSignalSector && resolvedRule.signalSector >= 0;
-			rule.signalSector = rule.hasSignalSector ? resolvedRule.signalSector : -1;
-			rule.hasResponseIntensity = resolvedRule.hasResponseIntensity;
-			rule.responseIntensity = resolvedRule.responseIntensity;
-			rule.hasResponseMin = resolvedRule.hasResponseMin;
-			rule.responseMin = resolvedRule.responseMin;
-			rule.hasResponseMax = resolvedRule.hasResponseMax;
-			rule.responseMax = resolvedRule.responseMax;
-			rule.hasResponseInputMin = resolvedRule.hasResponseInputMin;
-			rule.responseInputMin = resolvedRule.responseInputMin;
-			rule.hasResponseInputMax = resolvedRule.hasResponseInputMax;
-			rule.responseInputMax = resolvedRule.responseInputMax;
-			if (resolvedRule.fixtureMaterialResponse && sectorResponseEnabled)
-			{
-				rule.hasMaterialResponse = true;
-				rule.materialResponse = true;
-				rule.hasMaterialResponseMin = resolvedRule.hasMaterialResponseMin;
-				rule.materialResponseMin = resolvedRule.materialResponseMin;
-				rule.hasMaterialResponseMax = resolvedRule.hasMaterialResponseMax;
-				rule.materialResponseMax = resolvedRule.materialResponseMax;
-			}
-			outRules.push_back(rule);
-		}
-	}
-
-	void BuildEmissiveMaterialResponseRules(
-		const ResolvedLightOverlaySet& resolved,
-		std::vector<SceneLightSystem::EmissiveMaterialResponseRule>& outRules)
-	{
-		outRules.clear();
-		outRules.reserve((size_t)resolved.emissiveMaterialResponseRules.Size());
-		for (const auto& resolvedRule : resolved.emissiveMaterialResponseRules)
-		{
-			SceneLightSystem::EmissiveMaterialResponseRule rule = {};
-			rule.ruleId = BuildResolvedLightOverlayRuleId(resolvedRule.id.GetChars(), "", resolvedRule.source);
-			rule.textureIds.reserve((size_t)resolvedRule.tileFilters.Size() + (size_t)resolvedRule.textureNames.Size());
-			for (int tile : resolvedRule.tileFilters)
-			{
-				if (tile >= 0)
-				{
-					rule.textureIds.push_back((uint32_t)tile);
-				}
-			}
-			rule.textureRanges.reserve((size_t)resolvedRule.tileRanges.Size());
-			for (const auto& range : resolvedRule.tileRanges)
-			{
-				if (range.first >= 0 && range.last >= 0)
-				{
-					rule.textureRanges.emplace_back((uint32_t)range.first, (uint32_t)range.last);
-				}
-			}
-			for (const auto& textureName : resolvedRule.textureNames)
-			{
-				rule.textureNames.push_back(NormalizeLightOverlayTextureSelector(textureName.GetChars()));
-			}
-			if (rule.textureIds.empty() && rule.textureRanges.empty() && rule.textureNames.empty())
-			{
-				continue;
-			}
-			rule.hasMaterialResponse = resolvedRule.hasMaterialResponse;
-			rule.materialResponse = resolvedRule.materialResponse;
-			rule.hasMaterialResponseMin = resolvedRule.hasMaterialResponseMin;
-			rule.materialResponseMin = resolvedRule.materialResponseMin;
-			rule.hasMaterialResponseMax = resolvedRule.hasMaterialResponseMax;
-			rule.materialResponseMax = resolvedRule.materialResponseMax;
-			rule.hasVisibleGlowBlend = resolvedRule.hasVisibleGlowBlend;
-			rule.visibleGlowBlend = resolvedRule.visibleGlowBlend;
-			outRules.push_back(rule);
 		}
 	}
 
@@ -2723,19 +2289,24 @@ void NRIRenderer::RefreshSceneLightSystem(
 	mHasDirectionalLightState = true;
 	std::unordered_map<int32_t, std::vector<SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule>> actorOverlayRules;
 	std::unordered_map<uint32_t, SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule> actorOverlayRulesById;
-	std::vector<SceneLightSystem::AnalyticLightRegistry::MapOverlayRule> mapOverlayRules;
-	std::vector<SceneLightSystem::EmissiveOverrideRule> emissiveOverrideRules;
-	std::vector<SceneLightSystem::EmissiveOverrideRule> surfaceLightFixtureRules;
-	std::vector<SceneLightSystem::EmissiveMaterialResponseRule> emissiveMaterialResponseRules;
 	BuildActorAnalyticOverlayRules(resolvedLightOverlays, actorOverlayRules);
 	BuildActorAnalyticOverlayRuleLookup(resolvedLightOverlays, actorOverlayRulesById);
-	BuildEmissiveOverrideRules(resolvedLightOverlays, emissiveOverrideRules);
-	BuildSurfaceLightFixtureResponseRules(resolvedLightOverlays, surfaceLightFixtureRules);
-	BuildEmissiveMaterialResponseRules(resolvedLightOverlays, emissiveMaterialResponseRules);
-	if (mMapWorld.valid)
-	{
-		BuildStaticMapAnalyticOverlayRules(resolvedLightOverlays, mMapWorld, mapOverlayRules);
-	}
+	const NRILightRuleProducts& lightRuleProducts = mLightRuleProducts.Resolve(
+		resolvedLightOverlays,
+		mMapWorld.valid ? &mMapWorld : nullptr);
+	const NRILightRuleProductCacheStats& lightRuleCacheStats = mLightRuleProducts.GetStats();
+	mLastPerfShellTraceStats.sceneLightRuleResolvedGeneration = resolvedLightOverlays.resolvedGeneration;
+	mLastPerfShellTraceStats.sceneLightRuleMapBuildSerial = mMapWorld.valid ? mMapWorld.buildSerial : 0;
+	mLastPerfShellTraceStats.sceneLightRuleResolvedCacheHit = lightRuleCacheStats.resolvedProductsRebuilt ? 0u : 1u;
+	mLastPerfShellTraceStats.sceneLightRuleResolvedRebuild = lightRuleCacheStats.resolvedProductsRebuilt ? 1u : 0u;
+	mLastPerfShellTraceStats.sceneLightRuleMapAvailable = mMapWorld.valid ? 1u : 0u;
+	mLastPerfShellTraceStats.sceneLightRuleMapCacheHit =
+		mMapWorld.valid && !lightRuleCacheStats.staticMapProductsRebuilt ? 1u : 0u;
+	mLastPerfShellTraceStats.sceneLightRuleMapRebuild = lightRuleCacheStats.staticMapProductsRebuilt ? 1u : 0u;
+	mLastPerfShellTraceStats.sceneLightRuleMapProductCount = (uint32_t)lightRuleProducts.staticMapAnalyticOverlayRules.size();
+	mLastPerfShellTraceStats.sceneLightRuleEmissiveOverrideCount = (uint32_t)lightRuleProducts.emissiveOverrideRules.size();
+	mLastPerfShellTraceStats.sceneLightRuleFixtureCount = (uint32_t)lightRuleProducts.surfaceLightFixtureRules.size();
+	mLastPerfShellTraceStats.sceneLightRuleMaterialResponseCount = (uint32_t)lightRuleProducts.emissiveMaterialResponseRules.size();
 	const uint32_t gameplayLightTimeIndex = GetGameplayLightTimeIndexForSceneLights();
 	const double currentTimeSeconds = GetCurrentGameplayTimeSecondsForSceneLights();
 	TArray<PathTracingWeaponLightEvent> pendingMuzzleFlashEvents;
@@ -2754,15 +2325,15 @@ void NRIRenderer::RefreshSceneLightSystem(
 			mCurrentCameraPos,
 			actorOverlayRules.empty() ? nullptr : &actorOverlayRules,
 			actorOverlayRulesById.empty() ? nullptr : &actorOverlayRulesById,
-			mapOverlayRules.empty() ? nullptr : &mapOverlayRules);
+			lightRuleProducts.staticMapAnalyticOverlayRules.empty() ? nullptr : &lightRuleProducts.staticMapAnalyticOverlayRules);
 	}
 	{
 		nri_runtime_mutation::ScopedPtPerfTimer rebuildTimer(mLastPerfShellTraceStats.sceneLightEmissiveMs);
 		mSceneLights.RebuildEmissiveSurfaces(
 			NRI_MAX_EMISSIVE_SURFACES_FOR_REFRESH,
-			emissiveOverrideRules.empty() ? nullptr : &emissiveOverrideRules,
-			surfaceLightFixtureRules.empty() ? nullptr : &surfaceLightFixtureRules,
-			emissiveMaterialResponseRules.empty() ? nullptr : &emissiveMaterialResponseRules);
+			lightRuleProducts.emissiveOverrideRules.empty() ? nullptr : &lightRuleProducts.emissiveOverrideRules,
+			lightRuleProducts.surfaceLightFixtureRules.empty() ? nullptr : &lightRuleProducts.surfaceLightFixtureRules,
+			lightRuleProducts.emissiveMaterialResponseRules.empty() ? nullptr : &lightRuleProducts.emissiveMaterialResponseRules);
 	}
 	{
 		nri_runtime_mutation::ScopedPtPerfTimer rebuildTimer(mLastPerfShellTraceStats.sceneLightSectorMs);

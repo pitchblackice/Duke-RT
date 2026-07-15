@@ -27,6 +27,7 @@
 #include "nri_scene_textures.h"
 #include "nri_sky_environment.h"
 #include "nri_scene_lights.h"
+#include "nri_light_rule_product_cache.h"
 #include "nri_surface_probe.h"
 #include "nri_material_policy.h"
 #include "nri_static_scene.h"
@@ -516,6 +517,17 @@ public:
 		double sceneLightAnalyticMs = 0.0;
 		double sceneLightEmissiveMs = 0.0;
 		double sceneLightSectorMs = 0.0;
+		uint64_t sceneLightRuleMapBuildSerial = 0;
+		uint32_t sceneLightRuleResolvedGeneration = 0;
+		uint32_t sceneLightRuleResolvedCacheHit = 0;
+		uint32_t sceneLightRuleResolvedRebuild = 0;
+		uint32_t sceneLightRuleMapAvailable = 0;
+		uint32_t sceneLightRuleMapCacheHit = 0;
+		uint32_t sceneLightRuleMapRebuild = 0;
+		uint32_t sceneLightRuleMapProductCount = 0;
+		uint32_t sceneLightRuleEmissiveOverrideCount = 0;
+		uint32_t sceneLightRuleFixtureCount = 0;
+		uint32_t sceneLightRuleMaterialResponseCount = 0;
 		double runtimeSpaceLinkMs = 0.0;
 		double runtimeDebugSphereMs = 0.0;
 		double runtimeDebugSphereViewMs = 0.0;
@@ -2745,6 +2757,7 @@ private:
 	NRIRendererDiagnostics mDiagnostics;
 	NRIDebugOverlaySystem mDebugOverlays;
 	SceneLightSystem mSceneLights;
+	NRILightRuleProductCache mLightRuleProducts;
 	NRIDirectionalLightState mDirectionalLightState = {};
 	NRIPTNightVisionState mNightVisionState = {};
 	std::array<nri::Descriptor*, 26> mSceneDataDescriptors = {};

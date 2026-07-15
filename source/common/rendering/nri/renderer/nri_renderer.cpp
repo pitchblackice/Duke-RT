@@ -1713,6 +1713,7 @@ void NRIRenderer::Shutdown()
 {
 	ResetMuzzleFlashOverlayState("renderer-shutdown");
 	mLastResolvedLightOverlayGeneration = 0;
+	mLightRuleProducts.Reset();
 
 	if (mFrameBuffer == nullptr || mFrameBuffer->mDevice == nullptr)
 	{
@@ -1846,6 +1847,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	ResetPersistentDynamicEmissiveCache();
 	ResetMuzzleFlashOverlayState("level-unload");
 	mLastResolvedLightOverlayGeneration = 0;
+	mLightRuleProducts.Reset();
 
 	ClearRuntimePointLights();
 	ClearRuntimeDebugSpheres();

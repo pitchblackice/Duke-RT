@@ -4024,6 +4024,20 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.activeMaterialCount,
 			shell.sceneInstanceCount);
 		Printf(
+			"PERF pt light rule products NRI: frame=%llu resolved_generation=%u map_build_serial=%llu resolved_hit=%u resolved_rebuild=%u map_available=%u map_hit=%u map_rebuild=%u map_rules=%u emissive_overrides=%u fixture_rules=%u material_response_rules=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.sceneLightRuleResolvedGeneration,
+			(unsigned long long)shell.sceneLightRuleMapBuildSerial,
+			shell.sceneLightRuleResolvedCacheHit,
+			shell.sceneLightRuleResolvedRebuild,
+			shell.sceneLightRuleMapAvailable,
+			shell.sceneLightRuleMapCacheHit,
+			shell.sceneLightRuleMapRebuild,
+			shell.sceneLightRuleMapProductCount,
+			shell.sceneLightRuleEmissiveOverrideCount,
+			shell.sceneLightRuleFixtureCount,
+			shell.sceneLightRuleMaterialResponseCount);
+		Printf(
 			"PERF pt success diagnostics NRI: frame=%llu basic=%u composition=%u persistent_status=%u as_summary=%u deep_scene=%u deep_cache_hits=%u deep_rebuilds=%u instance_rows=%u persistent_status_calls=%u static_chunk_rows=%u static_chunk_updates=%u static_surface_rows=%u static_surface_updates=%u registry_rows=%u temp_containers=%u voxel_dup_audits=%u voxel_dup_rows=%u voxel_dup_temp_containers=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.successDiagnosticsBasicCollected ? 1u : 0u,
