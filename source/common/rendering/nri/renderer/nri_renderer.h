@@ -27,7 +27,6 @@
 #include "nri_scene_textures.h"
 #include "nri_sky_environment.h"
 #include "nri_scene_lights.h"
-#include "nri_light_rule_product_cache.h"
 #include "nri_surface_probe.h"
 #include "nri_material_policy.h"
 #include "nri_static_scene.h"
@@ -517,38 +516,6 @@ public:
 		double sceneLightAnalyticMs = 0.0;
 		double sceneLightEmissiveMs = 0.0;
 		double sceneLightSectorMs = 0.0;
-		uint32_t sceneLightStaticCacheProbes = 0;
-		uint32_t sceneLightStaticCacheStableHits = 0;
-		uint32_t sceneLightStaticCacheMaterialHits = 0;
-		uint32_t sceneLightStaticCacheRebuilds = 0;
-		uint32_t sceneLightStaticCacheLegacyFallbacks = 0;
-		uint32_t sceneLightStaticCacheQuarantinedFallbacks = 0;
-		uint32_t sceneLightStaticCacheValidationChecks = 0;
-		uint32_t sceneLightStaticCacheValidationMismatches = 0;
-		uint32_t sceneLightStaticCacheQuarantinedEntries = 0;
-		uint32_t sceneLightEmissiveCacheProbes = 0;
-		uint32_t sceneLightEmissiveCacheHits = 0;
-		uint32_t sceneLightEmissiveCacheRebuilds = 0;
-		uint32_t sceneLightEmissiveCacheLiveFallbacks = 0;
-		uint32_t sceneLightEmissiveCacheQuarantinedFallbacks = 0;
-		uint32_t sceneLightEmissiveCacheEvaluatedRecords = 0;
-		uint32_t sceneLightEmissiveCacheReusedCandidates = 0;
-		uint32_t sceneLightEmissiveCacheValidationChecks = 0;
-		uint32_t sceneLightEmissiveCacheValidationMismatches = 0;
-		uint32_t sceneLightEmissiveCacheResidentEntries = 0;
-		uint32_t sceneLightEmissiveCacheResidentCandidates = 0;
-		uint32_t sceneLightEmissiveCacheQuarantinedEntries = 0;
-		uint64_t sceneLightRuleMapBuildSerial = 0;
-		uint32_t sceneLightRuleResolvedGeneration = 0;
-		uint32_t sceneLightRuleResolvedCacheHit = 0;
-		uint32_t sceneLightRuleResolvedRebuild = 0;
-		uint32_t sceneLightRuleMapAvailable = 0;
-		uint32_t sceneLightRuleMapCacheHit = 0;
-		uint32_t sceneLightRuleMapRebuild = 0;
-		uint32_t sceneLightRuleMapProductCount = 0;
-		uint32_t sceneLightRuleEmissiveOverrideCount = 0;
-		uint32_t sceneLightRuleFixtureCount = 0;
-		uint32_t sceneLightRuleMaterialResponseCount = 0;
 		double runtimeSpaceLinkMs = 0.0;
 		double runtimeDebugSphereMs = 0.0;
 		double runtimeDebugSphereViewMs = 0.0;
@@ -2778,7 +2745,6 @@ private:
 	NRIRendererDiagnostics mDiagnostics;
 	NRIDebugOverlaySystem mDebugOverlays;
 	SceneLightSystem mSceneLights;
-	NRILightRuleProductCache mLightRuleProducts;
 	NRIDirectionalLightState mDirectionalLightState = {};
 	NRIPTNightVisionState mNightVisionState = {};
 	std::array<nri::Descriptor*, 26> mSceneDataDescriptors = {};

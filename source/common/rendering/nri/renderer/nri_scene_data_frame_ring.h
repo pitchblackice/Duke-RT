@@ -1,7 +1,6 @@
 #pragma once
 
 #include "nri_frame_resources.h"
-#include "nri_scene_data_light_slot_cache.h"
 #include "nri_scene_lights.h"
 
 #include <algorithm>
@@ -56,7 +55,6 @@ struct NRISceneDataFrameSlot
 	float emissiveTotalPower = 0.0f;
 	float emissiveDominantPower = 0.0f;
 	std::vector<NRIEmissivePrimitiveDebugRecord> emissivePrimitiveDebugRecords;
-	NRISceneDataLightSlotReuseState lightReuse;
 
 	uint64_t UsedBytes() const
 	{

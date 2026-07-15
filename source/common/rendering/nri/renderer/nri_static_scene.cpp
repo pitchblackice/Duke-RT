@@ -27,16 +27,6 @@
 
 namespace
 {
-	uint64_t NextStaticLightGeneration()
-	{
-		static uint64_t generation = 0;
-		if (++generation == 0)
-		{
-			generation = 1;
-		}
-		return generation;
-	}
-
 	double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
 	{
 		return std::chrono::duration<double, std::milli>(end - start).count();
@@ -896,13 +886,6 @@ bool nri_static_scene::RebuildResidentStaticMaterialBridgeFromChunks(
 	}
 
 	staticScene.materialBridge = std::move(bridge);
-	for (auto& chunk : staticScene.chunks)
-	{
-		if (chunk.active)
-		{
-			chunk.AdvanceLightMaterialGeneration();
-		}
-	}
 	++staticScene.materialGeneration;
 	if (staticScene.materialGeneration == 0)
 	{
@@ -1027,11 +1010,6 @@ bool nri_static_scene::RefreshStaticMapAnimatedMaterials(
 		staticScene.lightChunkViews[chunkListIndex] = std::move(liveChunkView);
 		chunkCache.materialBridge = std::move(liveChunkMaterials);
 		chunkCache.animatedMaterialSignature = liveAnimatedMaterialSignature;
-		// A fresh capture may preserve geometry semantically while reordering
-		// drawlist surfaces. Static light skeletons retain source order and local
-		// material ordinals, so replacing the view must invalidate both domains.
-		chunkCache.AdvanceLightGeometryGeneration();
-		chunkCache.AdvanceLightMaterialGeneration();
 		refreshedAnyChunk = true;
 		refreshedChunkCount++;
 	}
@@ -2065,8 +2043,6 @@ void nri_static_scene::AppendStaticMapSceneCacheChunk(
 	chunkCache.primitiveCount = (uint32_t)chunkGeometry.primitives.size();
 	chunkCache.materialOffset = (uint32_t)outStaticScene.materialBridge.materials.size();
 	chunkCache.materialCount = (uint32_t)chunkMaterials.materials.size();
-	chunkCache.lightGeometryGeneration = NextStaticLightGeneration();
-	chunkCache.lightMaterialGeneration = NextStaticLightGeneration();
 	chunkCache.geometryTopologySignature = nri_static_scene_geometry::ComputeGeometryTopologySignature(chunkGeometry);
 	chunkCache.primitiveLayoutSignature = nri_static_scene_geometry::ComputePrimitiveLayoutSignature(chunkGeometry);
 	chunkCache.exactGeometrySignature = nri_runtime_mutation::ComputeExactGeometrySignature(chunkSceneView);

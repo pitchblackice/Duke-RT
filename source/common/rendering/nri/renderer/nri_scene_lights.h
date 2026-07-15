@@ -5,8 +5,6 @@
 #include "../scene/nri_map_world.h"
 #include "../scene/nri_scene_bridge.h"
 #include "nri_emissive_sampling_distribution.h"
-#include "nri_static_emissive_candidate_cache.h"
-#include "nri_static_light_record_cache.h"
 #include "lightoverlay.h"
 #include "v_video.h"
 
@@ -468,17 +466,6 @@ public:
 		bool lastBuildPropertiesChanged = false;
 	};
 
-	struct StaticEmissiveCandidateEvaluation
-	{
-		EmissiveSurfaceRegistry::EmissiveSurfaceRecord emissive = {};
-		uint32_t requiredStableFrames = 0;
-		bool matchedOverride = false;
-		bool matchedMaterialResponse = false;
-		bool accepted = false;
-	};
-
-	using StaticEmissiveCandidateCache = NRIStaticEmissiveCandidateCache<StaticEmissiveCandidateEvaluation>;
-
 	struct EmissiveOverrideRule
 	{
 		uint32_t ruleId = 0;
@@ -656,7 +643,6 @@ public:
 		double dynamicAppendMs = 0.0;
 		double surfaceLightOverlayAppendMs = 0.0;
 		double persistentVoxelAppendMs = 0.0;
-		NRIStaticLightRecordCache::FrameStats staticRecordCache = {};
 	};
 
 	struct PersistentDynamicSurfaceStats
@@ -778,7 +764,6 @@ public:
 		const std::vector<AnalyticLightRegistry::MapOverlayRule>* mapOverlayRules = nullptr);
 	void RebuildEmissiveSurfaces(
 		uint32_t maxActiveSurfaces,
-		uint32_t resolvedLightOverlayGeneration,
 		const std::vector<EmissiveOverrideRule>* overrideRules = nullptr,
 		const std::vector<EmissiveOverrideRule>* surfaceLightFixtureRules = nullptr,
 		const std::vector<EmissiveMaterialResponseRule>* materialResponseRules = nullptr);
@@ -918,7 +903,6 @@ public:
 
 	const AnalyticLightRegistry& GetAnalyticLights() const { return mAnalyticLights; }
 	const EmissiveSurfaceRegistry& GetEmissiveSurfaces() const { return mEmissiveSurfaces; }
-	const StaticEmissiveCandidateCache::FrameStats& GetStaticEmissiveCandidateCacheStats() const { return mStaticEmissiveCandidateCache.GetFrameStats(); }
 	const SectorLightingRegistry& GetSectorLighting() const { return mSectorLighting; }
 	const EnvironmentLightingState& GetEnvironmentLighting() const { return mEnvironmentLighting; }
 
@@ -956,13 +940,6 @@ private:
 		float surfaceArea = 0.0f;
 	};
 
-	struct StaticEmissiveRecordSpan
-	{
-		uint32_t firstRecordIndex = 0;
-		NRIStaticEmissiveCandidateIdentity identity = {};
-		bool cacheable = false;
-	};
-
 	static NRILightingSettings CaptureSettings();
 	bool IsActorPublishedForOverlayActivation(int32_t actorIndex) const;
 	void AppendSurfaceRecord(SurfaceRecord record, uint32_t materialIndexBase);
@@ -974,13 +951,6 @@ private:
 		uint32_t materialLookupIndexBase,
 		uint32_t& inOutLocalMaterialIndex,
 		const std::vector<uint64_t>* identityOverrides);
-	bool EvaluateEmissiveCandidate(
-		const SurfaceRecord& record,
-		const NRILightingSettings& settings,
-		const std::vector<EmissiveOverrideRule>* overrideRules,
-		const std::vector<EmissiveOverrideRule>* surfaceLightFixtureRules,
-		const std::vector<EmissiveMaterialResponseRule>* materialResponseRules,
-		StaticEmissiveCandidateEvaluation& outEvaluation);
 
 	AnalyticLightRegistry mAnalyticLights = {};
 	EmissiveSurfaceRegistry mEmissiveSurfaces = {};
@@ -990,17 +960,10 @@ private:
 	PersistentDynamicEmissiveHighWaterStats mPersistentDynamicEmissiveHighWaterStats = {};
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	NRIEmissiveSamplingDistribution mEmissiveSamplingDistribution;
-	NRIStaticLightRecordCache mStaticLightRecordCache;
-	StaticEmissiveCandidateCache mStaticEmissiveCandidateCache;
 	std::vector<SurfaceRecord> mSurfaceRecords;
-	std::vector<StaticEmissiveRecordSpan> mStaticEmissiveRecordSpans;
-	uint32_t mStaticEmissiveRecordPrefixCount = 0;
 	SurfaceRecordIndex mSurfaceRecordIndex = {};
 	FrameAppendStats mFrameAppendStats = {};
 	uint64_t mFrameSerial = 0;
-	uint64_t mEmissiveHeuristicGeneration = 1;
-	uint32_t mStaticLightValidationCursor = 0;
-	uint32_t mStaticEmissiveValidationCursor = 0;
 	uint32_t mNextRuntimePointLightId = 1;
 	std::unordered_set<uint64_t> mActivatedActorOverlayKeys;
 	std::unordered_set<int32_t> mPublishedActorOverlayIndices;
