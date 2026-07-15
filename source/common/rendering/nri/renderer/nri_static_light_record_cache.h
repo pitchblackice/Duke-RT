@@ -35,17 +35,22 @@ public:
 		uint32_t materialRefreshHits = 0;
 		uint32_t rebuilds = 0;
 		uint32_t legacyFallbacks = 0;
+		uint32_t quarantinedFallbacks = 0;
 		uint32_t excludedInactive = 0;
 		uint32_t excludedReplacement = 0;
 		uint32_t appendedSkeletons = 0;
+		uint32_t validationChecks = 0;
+		uint32_t validationMismatches = 0;
 		uint32_t residentEntries = 0;
 		uint32_t residentSkeletons = 0;
+		uint32_t quarantinedEntries = 0;
 	};
 
 	enum class ProbeResult : uint8_t
 	{
 		Excluded,
 		LegacyFallback,
+		QuarantinedFallback,
 		Rebuild,
 		StableHit,
 		MaterialRefreshHit,
@@ -73,6 +78,18 @@ public:
 		{
 			mFrameStats.legacyFallbacks++;
 			return ProbeResult::LegacyFallback;
+		}
+
+		const auto quarantineIt = mQuarantinedGeometryGenerations.find(chunkIndex);
+		if (quarantineIt != mQuarantinedGeometryGenerations.end())
+		{
+			if (quarantineIt->second == geometryGeneration)
+			{
+				mFrameStats.quarantinedFallbacks++;
+				return ProbeResult::QuarantinedFallback;
+			}
+			mQuarantinedGeometryGenerations.erase(quarantineIt);
+			RefreshResidentStats();
 		}
 
 		const auto it = mEntries.find(chunkIndex);
@@ -125,6 +142,44 @@ public:
 		return it != mEntries.end() ? &it->second : nullptr;
 	}
 
+	bool ValidateAndQuarantine(
+		uint32_t chunkIndex,
+		uint64_t geometryGeneration,
+		const std::vector<Skeleton>& reconstructed)
+	{
+		mFrameStats.validationChecks++;
+		const Entry* cached = Find(chunkIndex);
+		if (cached != nullptr &&
+			cached->geometryGeneration == geometryGeneration &&
+			SkeletonListsEqual(cached->skeletons, reconstructed))
+		{
+			return true;
+		}
+
+		mQuarantinedGeometryGenerations[chunkIndex] = geometryGeneration;
+		mFrameStats.validationMismatches++;
+		RefreshResidentStats();
+		return false;
+	}
+
+	static bool SkeletonListsEqual(
+		const std::vector<Skeleton>& left,
+		const std::vector<Skeleton>& right)
+	{
+		if (left.size() != right.size())
+		{
+			return false;
+		}
+		for (size_t index = 0; index < left.size(); ++index)
+		{
+			if (!SkeletonsEqual(left[index], right[index]))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	static bool RebaseMaterialIndex(uint32_t materialOffset, uint32_t localMaterialOrdinal, uint32_t& outMaterialIndex)
 	{
 		if (localMaterialOrdinal > UINT32_MAX - materialOffset)
@@ -149,6 +204,7 @@ public:
 	void Reset()
 	{
 		mEntries.clear();
+		mQuarantinedGeometryGenerations.clear();
 		mResidentSkeletonCount = 0;
 		mFrameStats = {};
 	}
@@ -157,13 +213,55 @@ public:
 	size_t Size() const { return mEntries.size(); }
 
 private:
+	static bool ProvenanceEqual(
+		const nri_scene::SurfaceProvenance& left,
+		const nri_scene::SurfaceProvenance& right)
+	{
+		if (left.sourceType != right.sourceType ||
+			left.sectorIndex != right.sectorIndex ||
+			left.wallIndex != right.wallIndex ||
+			left.sectionIndex != right.sectionIndex ||
+			left.mapChunkIndex != right.mapChunkIndex ||
+			left.nextSectorIndex != right.nextSectorIndex ||
+			left.actorIndex != right.actorIndex ||
+			left.drawListType != right.drawListType ||
+			left.cstat != right.cstat ||
+			left.materialFlags != right.materialFlags ||
+			left.actorOverlayRuleCount != right.actorOverlayRuleCount)
+		{
+			return false;
+		}
+		for (uint32_t index = 0; index < nri_scene::MaxActorOverlayRuleIdsPerSurface; ++index)
+		{
+			if (left.actorOverlayRuleIds[index] != right.actorOverlayRuleIds[index])
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	static bool SkeletonsEqual(const Skeleton& left, const Skeleton& right)
+	{
+		return left.identityKey == right.identityKey &&
+			left.localMaterialOrdinal == right.localMaterialOrdinal &&
+			left.center[0] == right.center[0] &&
+			left.center[1] == right.center[1] &&
+			left.center[2] == right.center[2] &&
+			left.boundsRadius == right.boundsRadius &&
+			left.surfaceArea == right.surfaceArea &&
+			ProvenanceEqual(left.provenance, right.provenance);
+	}
+
 	void RefreshResidentStats()
 	{
 		mFrameStats.residentEntries = (uint32_t)mEntries.size();
 		mFrameStats.residentSkeletons = (uint32_t)mResidentSkeletonCount;
+		mFrameStats.quarantinedEntries = (uint32_t)mQuarantinedGeometryGenerations.size();
 	}
 
 	std::unordered_map<uint32_t, Entry> mEntries;
+	std::unordered_map<uint32_t, uint64_t> mQuarantinedGeometryGenerations;
 	size_t mResidentSkeletonCount = 0;
 	FrameStats mFrameStats = {};
 };

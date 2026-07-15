@@ -41,6 +41,87 @@ namespace
 		return std::chrono::duration<double, std::milli>(end - start).count();
 	}
 
+	uint32_t FloatIdentityBits(float value)
+	{
+		uint32_t bits = 0;
+		static_assert(sizeof(bits) == sizeof(value), "float identity size must match");
+		std::memcpy(&bits, &value, sizeof(bits));
+		return bits;
+	}
+
+	NRIStaticEmissiveSettingsIdentity BuildStaticEmissiveSettingsIdentity(const NRILightingSettings& settings)
+	{
+		NRIStaticEmissiveSettingsIdentity identity = {};
+		identity.emissiveMinPowerBits = FloatIdentityBits(settings.emissiveMinPower);
+		identity.emissiveMinSurfaceBits = FloatIdentityBits(settings.emissiveMinSurface);
+		identity.glowScaleBits = FloatIdentityBits(settings.glowScale);
+		identity.glowReachBits = FloatIdentityBits(settings.glowReach);
+		identity.glowFalloffBits = FloatIdentityBits(settings.glowFalloff);
+		identity.sectorEmissionSignalStrengthBits = FloatIdentityBits(settings.sectorEmissionSignalStrength);
+		identity.sectorEmissionResponseMinBits = FloatIdentityBits(settings.sectorEmissionResponseMin);
+		identity.sectorEmissionResponseMaxBits = FloatIdentityBits(settings.sectorEmissionResponseMax);
+		return identity;
+	}
+
+	bool StaticEmissiveCandidateEvaluationsEqual(
+		const SceneLightSystem::StaticEmissiveCandidateEvaluation& left,
+		const SceneLightSystem::StaticEmissiveCandidateEvaluation& right)
+	{
+		const auto& a = left.emissive;
+		const auto& b = right.emissive;
+		return left.accepted == right.accepted &&
+			left.requiredStableFrames == right.requiredStableFrames &&
+			left.matchedOverride == right.matchedOverride &&
+			left.matchedMaterialResponse == right.matchedMaterialResponse &&
+			a.stableKey == b.stableKey &&
+			a.sourceFlags == b.sourceFlags &&
+			a.sourceRuleId == b.sourceRuleId &&
+			a.overrideRuleId == b.overrideRuleId &&
+			a.source == b.source &&
+			a.actorIndex == b.actorIndex &&
+			a.sectorIndex == b.sectorIndex &&
+			a.authoredSectorIndex == b.authoredSectorIndex &&
+			a.wallIndex == b.wallIndex &&
+			a.textureId == b.textureId &&
+			a.emissiveTextureIndex == b.emissiveTextureIndex &&
+			a.materialIndex == b.materialIndex &&
+			a.emissiveMode == b.emissiveMode &&
+			a.center[0] == b.center[0] &&
+			a.center[1] == b.center[1] &&
+			a.center[2] == b.center[2] &&
+			a.boundsRadius == b.boundsRadius &&
+			a.surfaceArea == b.surfaceArea &&
+			a.emissiveColor[0] == b.emissiveColor[0] &&
+			a.emissiveColor[1] == b.emissiveColor[1] &&
+			a.emissiveColor[2] == b.emissiveColor[2] &&
+			a.emissiveIntensity == b.emissiveIntensity &&
+			a.reachScale == b.reachScale &&
+			a.hasSectorResponseParams == b.hasSectorResponseParams &&
+			a.sectorResponseIntensity == b.sectorResponseIntensity &&
+			a.sectorResponseMin == b.sectorResponseMin &&
+			a.sectorResponseMax == b.sectorResponseMax &&
+			a.hasSectorResponseInputRange == b.hasSectorResponseInputRange &&
+			a.sectorResponseInputMin == b.sectorResponseInputMin &&
+			a.sectorResponseInputMax == b.sectorResponseInputMax &&
+			a.hasSectorResponseIntensityMin == b.hasSectorResponseIntensityMin &&
+			a.sectorResponseIntensityMin == b.sectorResponseIntensityMin &&
+			a.hasSectorResponseIntensityMax == b.hasSectorResponseIntensityMax &&
+			a.sectorResponseIntensityMax == b.sectorResponseIntensityMax &&
+			a.hasSectorResponseReachMin == b.hasSectorResponseReachMin &&
+			a.sectorResponseReachMin == b.sectorResponseReachMin &&
+			a.hasSectorResponseReachMax == b.hasSectorResponseReachMax &&
+			a.sectorResponseReachMax == b.sectorResponseReachMax &&
+			a.materialResponseEnabled == b.materialResponseEnabled &&
+			a.materialResponseExplicit == b.materialResponseExplicit &&
+			a.hasMaterialResponseParams == b.hasMaterialResponseParams &&
+			a.hasMaterialResponseMin == b.hasMaterialResponseMin &&
+			a.hasMaterialResponseMax == b.hasMaterialResponseMax &&
+			a.materialResponseMin == b.materialResponseMin &&
+			a.materialResponseMax == b.materialResponseMax &&
+			a.powerEstimate == b.powerEstimate &&
+			a.sectorResponseEnabled == b.sectorResponseEnabled;
+	}
+
 	float ResolveAnalyticEmitterRadius(const SceneLightSystem::SceneAnalyticLight& light)
 	{
 		const float authoredRadius = std::max(light.emitterRadius, 0.0f);
@@ -2248,6 +2329,15 @@ void NRIRenderer::RefreshSceneLightSystem(
 	mLastPerfShellTraceStats.sceneLightDynamicAppendMs += assemblyTimings.dynamicAppendMs;
 	mLastPerfShellTraceStats.sceneLightDynamicAppendMs += assemblyTimings.surfaceLightOverlayAppendMs;
 	mLastPerfShellTraceStats.sceneLightPersistentVoxelAppendMs += assemblyTimings.persistentVoxelAppendMs;
+	mLastPerfShellTraceStats.sceneLightStaticCacheProbes = assemblyTimings.staticRecordCache.probes;
+	mLastPerfShellTraceStats.sceneLightStaticCacheStableHits = assemblyTimings.staticRecordCache.stableHits;
+	mLastPerfShellTraceStats.sceneLightStaticCacheMaterialHits = assemblyTimings.staticRecordCache.materialRefreshHits;
+	mLastPerfShellTraceStats.sceneLightStaticCacheRebuilds = assemblyTimings.staticRecordCache.rebuilds;
+	mLastPerfShellTraceStats.sceneLightStaticCacheLegacyFallbacks = assemblyTimings.staticRecordCache.legacyFallbacks;
+	mLastPerfShellTraceStats.sceneLightStaticCacheQuarantinedFallbacks = assemblyTimings.staticRecordCache.quarantinedFallbacks;
+	mLastPerfShellTraceStats.sceneLightStaticCacheValidationChecks = assemblyTimings.staticRecordCache.validationChecks;
+	mLastPerfShellTraceStats.sceneLightStaticCacheValidationMismatches = assemblyTimings.staticRecordCache.validationMismatches;
+	mLastPerfShellTraceStats.sceneLightStaticCacheQuarantinedEntries = assemblyTimings.staticRecordCache.quarantinedEntries;
 
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
 	const bool resolvedGenerationChanged =
@@ -2317,6 +2407,10 @@ void NRIRenderer::RefreshSceneLightSystem(
 	mSceneLights.RefreshTransientMuzzleFlashLights(currentTimeSeconds, pendingMuzzleFlashEvents, nri_ptdebug > 0);
 
 	{
+		nri_runtime_mutation::ScopedPtPerfTimer rebuildTimer(mLastPerfShellTraceStats.sceneLightSectorMs);
+		mSceneLights.RebuildSectorLighting(gameplayLightTimeIndex, (uint32_t)sector.Size());
+	}
+	{
 		nri_runtime_mutation::ScopedPtPerfTimer rebuildTimer(mLastPerfShellTraceStats.sceneLightAnalyticMs);
 		mSceneLights.RebuildAnalyticLights(
 			gameplayLightTimeIndex,
@@ -2331,14 +2425,24 @@ void NRIRenderer::RefreshSceneLightSystem(
 		nri_runtime_mutation::ScopedPtPerfTimer rebuildTimer(mLastPerfShellTraceStats.sceneLightEmissiveMs);
 		mSceneLights.RebuildEmissiveSurfaces(
 			NRI_MAX_EMISSIVE_SURFACES_FOR_REFRESH,
+			resolvedLightOverlays.resolvedGeneration,
 			lightRuleProducts.emissiveOverrideRules.empty() ? nullptr : &lightRuleProducts.emissiveOverrideRules,
 			lightRuleProducts.surfaceLightFixtureRules.empty() ? nullptr : &lightRuleProducts.surfaceLightFixtureRules,
 			lightRuleProducts.emissiveMaterialResponseRules.empty() ? nullptr : &lightRuleProducts.emissiveMaterialResponseRules);
 	}
-	{
-		nri_runtime_mutation::ScopedPtPerfTimer rebuildTimer(mLastPerfShellTraceStats.sceneLightSectorMs);
-		mSceneLights.RebuildSectorLighting(gameplayLightTimeIndex, (uint32_t)sector.Size());
-	}
+	const auto& staticEmissiveCacheStats = mSceneLights.GetStaticEmissiveCandidateCacheStats();
+	mLastPerfShellTraceStats.sceneLightEmissiveCacheProbes = staticEmissiveCacheStats.probes;
+	mLastPerfShellTraceStats.sceneLightEmissiveCacheHits = staticEmissiveCacheStats.hits;
+	mLastPerfShellTraceStats.sceneLightEmissiveCacheRebuilds = staticEmissiveCacheStats.rebuilds;
+	mLastPerfShellTraceStats.sceneLightEmissiveCacheLiveFallbacks = staticEmissiveCacheStats.liveFallbacks;
+	mLastPerfShellTraceStats.sceneLightEmissiveCacheQuarantinedFallbacks = staticEmissiveCacheStats.quarantinedFallbacks;
+	mLastPerfShellTraceStats.sceneLightEmissiveCacheEvaluatedRecords = staticEmissiveCacheStats.evaluatedRecords;
+	mLastPerfShellTraceStats.sceneLightEmissiveCacheReusedCandidates = staticEmissiveCacheStats.reusedCandidates;
+	mLastPerfShellTraceStats.sceneLightEmissiveCacheValidationChecks = staticEmissiveCacheStats.validationChecks;
+	mLastPerfShellTraceStats.sceneLightEmissiveCacheValidationMismatches = staticEmissiveCacheStats.validationMismatches;
+	mLastPerfShellTraceStats.sceneLightEmissiveCacheResidentEntries = staticEmissiveCacheStats.residentEntries;
+	mLastPerfShellTraceStats.sceneLightEmissiveCacheResidentCandidates = staticEmissiveCacheStats.residentCandidates;
+	mLastPerfShellTraceStats.sceneLightEmissiveCacheQuarantinedEntries = staticEmissiveCacheStats.quarantinedEntries;
 	TraceEmissiveSectorResponseChange();
 	const auto& frameAppendStats = mSceneLights.GetFrameAppendStats();
 	mLastPerfShellTraceStats.sceneLightSurfaceRecordCount = frameAppendStats.totalRecordCount;
@@ -2467,9 +2571,15 @@ void SceneLightSystem::Reset()
 	mPersistentDynamicEmissiveHighWaterStats = {};
 	mActorSpriteDebugStats = {};
 	mStaticLightRecordCache.Reset();
+	mStaticEmissiveCandidateCache.Reset();
 	mSurfaceRecords.clear();
+	mStaticEmissiveRecordSpans.clear();
+	mStaticEmissiveRecordPrefixCount = 0;
 	mFrameAppendStats = {};
 	mFrameSerial = 0;
+	mEmissiveHeuristicGeneration = 1;
+	mStaticLightValidationCursor = 0;
+	mStaticEmissiveValidationCursor = 0;
 	mActivatedActorOverlayKeys.clear();
 	mPublishedActorOverlayIndices.clear();
 	mEmissiveStableSurfaceStates.clear();
@@ -2482,6 +2592,7 @@ void SceneLightSystem::Reset()
 void SceneLightSystem::ResetLevelState()
 {
 	mStaticLightRecordCache.Reset();
+	mStaticEmissiveCandidateCache.Reset();
 	mEmissiveSamplingDistribution.Reset();
 	mAnalyticLights.manualLights.clear();
 	mAnalyticLights.transientLights.clear();
@@ -2537,8 +2648,12 @@ void SceneLightSystem::ResetLevelState()
 	mPersistentDynamicEmissiveHighWaterStats = {};
 	mActorSpriteDebugStats = {};
 	mSurfaceRecords.clear();
+	mStaticEmissiveRecordSpans.clear();
+	mStaticEmissiveRecordPrefixCount = 0;
 	mFrameAppendStats = {};
 	mFrameSerial = 0;
+	mStaticLightValidationCursor = 0;
+	mStaticEmissiveValidationCursor = 0;
 	mActivatedActorOverlayKeys.clear();
 	mPublishedActorOverlayIndices.clear();
 	mEmissiveStableSurfaceStates.clear();
@@ -3093,7 +3208,10 @@ void SceneLightSystem::BeginFrame(uint64_t frameSerial)
 {
 	mFrameSerial = frameSerial;
 	mStaticLightRecordCache.BeginFrame();
+	mStaticEmissiveCandidateCache.BeginFrame();
 	mSurfaceRecords.clear();
+	mStaticEmissiveRecordSpans.clear();
+	mStaticEmissiveRecordPrefixCount = 0;
 	mSurfaceRecordIndex.Clear();
 	mPublishedActorOverlayIndices.clear();
 	mFrameAppendStats = {};
@@ -3145,6 +3263,14 @@ SceneLightSystem::FrameAssemblyTimingStats SceneLightSystem::AssembleFrameSurfac
 		const size_t chunkCount = std::min(staticScene.lightChunkViews.size(), staticScene.chunks.size());
 		measure(timings.staticAppendMs, [&]()
 		{
+			struct StaticChunkAssemblyDecision
+			{
+				NRIStaticLightRecordCache::ProbeResult cacheProbe = NRIStaticLightRecordCache::ProbeResult::Excluded;
+				bool useRuntimeMutationReplacement = false;
+			};
+			std::vector<StaticChunkAssemblyDecision> decisions(chunkCount);
+			std::vector<size_t> validationEligibleChunks;
+			validationEligibleChunks.reserve(chunkCount);
 			for (size_t chunkListIndex = 0; chunkListIndex < chunkCount; ++chunkListIndex)
 			{
 				const auto& staticChunk = staticScene.chunks[chunkListIndex];
@@ -3153,71 +3279,152 @@ SceneLightSystem::FrameAssemblyTimingStats SceneLightSystem::AssembleFrameSurfac
 					staticChunk.active &&
 					services.isRuntimeMutationReplacementActive != nullptr &&
 					services.isRuntimeMutationReplacementActive(services.runtimeMutationUser, mapChunkIndex);
-				const NRIStaticLightRecordCache::ProbeResult cacheProbe = mStaticLightRecordCache.Probe(
+				StaticChunkAssemblyDecision& decision = decisions[chunkListIndex];
+				decision.useRuntimeMutationReplacement = useRuntimeMutationReplacement;
+				decision.cacheProbe = mStaticLightRecordCache.Probe(
 					mapChunkIndex,
 					staticChunk.lightGeometryGeneration,
 					staticChunk.lightMaterialGeneration,
 					staticChunk.active,
 					useRuntimeMutationReplacement);
+				if (decision.cacheProbe == NRIStaticLightRecordCache::ProbeResult::Excluded)
+				{
+					mStaticEmissiveCandidateCache.InvalidateChunk(mapChunkIndex);
+					continue;
+				}
+				if (decision.cacheProbe == NRIStaticLightRecordCache::ProbeResult::StableHit ||
+					decision.cacheProbe == NRIStaticLightRecordCache::ProbeResult::MaterialRefreshHit)
+				{
+					validationEligibleChunks.push_back(chunkListIndex);
+				}
+			}
+
+			size_t validationChunkListIndex = SIZE_MAX;
+			const int validationInterval = (int)nri_ptsceneuploadvalidateinterval;
+			if (validationInterval > 0 &&
+				input.frameSerial % (uint64_t)validationInterval == 0 &&
+				!validationEligibleChunks.empty())
+			{
+				validationChunkListIndex = validationEligibleChunks[
+					mStaticLightValidationCursor % (uint32_t)validationEligibleChunks.size()];
+				mStaticLightValidationCursor++;
+			}
+
+			const auto reconstructSkeletons = [&](const nri_scene::SceneView& chunkView)
+			{
+				std::vector<NRIStaticLightRecordCache::Skeleton> skeletons;
+				skeletons.reserve(
+					chunkView.opaqueWalls.size() +
+					chunkView.opaqueFlats.size() +
+					chunkView.opaqueSprites.size());
+				uint32_t localMaterialOrdinal = 0;
+				const auto appendSkeletons = [&](const auto& surfaces)
+				{
+					for (const nri_scene::SurfaceRef& surface : surfaces)
+					{
+						NRIStaticLightRecordCache::Skeleton skeleton = {};
+						skeleton.localMaterialOrdinal = localMaterialOrdinal++;
+						skeleton.provenance = surface.provenance;
+						ComputeSurfaceBounds(surface, skeleton.center, skeleton.boundsRadius);
+						skeleton.surfaceArea = ComputeSurfaceArea(surface);
+						skeleton.identityKey = ComputeSurfaceIdentityKey(
+							SceneLightRecordSource::StaticMapScene,
+							skeleton.provenance,
+							skeleton.center);
+						skeletons.push_back(skeleton);
+					}
+				};
+				appendSkeletons(chunkView.opaqueWalls);
+				appendSkeletons(chunkView.opaqueFlats);
+				appendSkeletons(chunkView.opaqueSprites);
+				return skeletons;
+			};
+
+			for (size_t chunkListIndex = 0; chunkListIndex < chunkCount; ++chunkListIndex)
+			{
+				const auto& staticChunk = staticScene.chunks[chunkListIndex];
+				const uint32_t mapChunkIndex = staticChunk.chunkIndex;
+				const StaticChunkAssemblyDecision& decision = decisions[chunkListIndex];
+				const NRIStaticLightRecordCache::ProbeResult cacheProbe = decision.cacheProbe;
 				if (cacheProbe == NRIStaticLightRecordCache::ProbeResult::Excluded)
 				{
 					continue;
 				}
 
 				const nri_scene::SceneView& chunkView = staticScene.lightChunkViews[chunkListIndex];
+				StaticEmissiveRecordSpan emissiveSpan = {};
+				emissiveSpan.firstRecordIndex = (uint32_t)mSurfaceRecords.size();
+				emissiveSpan.identity.mapChunkIndex = mapChunkIndex;
+				emissiveSpan.identity.geometryGeneration = staticChunk.lightGeometryGeneration;
+				emissiveSpan.identity.materialGeneration = staticChunk.lightMaterialGeneration;
+				emissiveSpan.identity.materialOffset = staticChunk.materialOffset;
+				emissiveSpan.identity.active = staticChunk.active;
+				emissiveSpan.identity.runtimeMutationReplacement = decision.useRuntimeMutationReplacement;
+				emissiveSpan.cacheable = true;
 				if (cacheProbe == NRIStaticLightRecordCache::ProbeResult::LegacyFallback)
 				{
+					mStaticEmissiveCandidateCache.InvalidateChunk(mapChunkIndex);
 					AppendSceneView(
 						chunkView,
 						staticScene.materialBridge,
 						SceneLightRecordSource::StaticMapScene,
 						staticChunk.materialOffset,
 						staticChunk.materialOffset);
+					emissiveSpan.cacheable = false;
+					emissiveSpan.identity.recordCount = (uint32_t)mSurfaceRecords.size() - emissiveSpan.firstRecordIndex;
+					mStaticEmissiveRecordSpans.push_back(emissiveSpan);
 					continue;
 				}
 
+				std::vector<NRIStaticLightRecordCache::Skeleton> reconstructedSkeletons;
+				const std::vector<NRIStaticLightRecordCache::Skeleton>* skeletonsToAppend = nullptr;
+				bool validationMismatch = false;
+				if (cacheProbe == NRIStaticLightRecordCache::ProbeResult::QuarantinedFallback)
+				{
+					reconstructedSkeletons = reconstructSkeletons(chunkView);
+					skeletonsToAppend = &reconstructedSkeletons;
+					emissiveSpan.cacheable = false;
+					mStaticEmissiveCandidateCache.InvalidateChunk(mapChunkIndex);
+				}
 				if (cacheProbe == NRIStaticLightRecordCache::ProbeResult::Rebuild)
 				{
-					std::vector<NRIStaticLightRecordCache::Skeleton> skeletons;
-					skeletons.reserve(
-						chunkView.opaqueWalls.size() +
-						chunkView.opaqueFlats.size() +
-						chunkView.opaqueSprites.size());
-					uint32_t localMaterialOrdinal = 0;
-					const auto appendSkeletons = [&](const auto& surfaces)
-					{
-						for (const nri_scene::SurfaceRef& surface : surfaces)
-						{
-							NRIStaticLightRecordCache::Skeleton skeleton = {};
-							skeleton.localMaterialOrdinal = localMaterialOrdinal++;
-							skeleton.provenance = surface.provenance;
-							ComputeSurfaceBounds(surface, skeleton.center, skeleton.boundsRadius);
-							skeleton.surfaceArea = ComputeSurfaceArea(surface);
-							skeleton.identityKey = ComputeSurfaceIdentityKey(
-								SceneLightRecordSource::StaticMapScene,
-								skeleton.provenance,
-								skeleton.center);
-							skeletons.push_back(skeleton);
-						}
-					};
-					appendSkeletons(chunkView.opaqueWalls);
-					appendSkeletons(chunkView.opaqueFlats);
-					appendSkeletons(chunkView.opaqueSprites);
+					reconstructedSkeletons = reconstructSkeletons(chunkView);
 					mStaticLightRecordCache.Commit(
 						mapChunkIndex,
 						staticChunk.lightGeometryGeneration,
 						staticChunk.lightMaterialGeneration,
-						std::move(skeletons));
+						reconstructedSkeletons);
 				}
-				else if (cacheProbe == NRIStaticLightRecordCache::ProbeResult::MaterialRefreshHit)
+				else if (chunkListIndex == validationChunkListIndex)
+				{
+					reconstructedSkeletons = reconstructSkeletons(chunkView);
+					if (!mStaticLightRecordCache.ValidateAndQuarantine(
+							mapChunkIndex,
+							staticChunk.lightGeometryGeneration,
+							reconstructedSkeletons))
+					{
+						skeletonsToAppend = &reconstructedSkeletons;
+						validationMismatch = true;
+						emissiveSpan.cacheable = false;
+						mStaticEmissiveCandidateCache.InvalidateChunk(mapChunkIndex);
+					}
+				}
+				if (cacheProbe == NRIStaticLightRecordCache::ProbeResult::MaterialRefreshHit && !validationMismatch)
 				{
 					mStaticLightRecordCache.CommitMaterialGeneration(
 						mapChunkIndex,
 						staticChunk.lightMaterialGeneration);
 				}
 
-				const NRIStaticLightRecordCache::Entry* cacheEntry = mStaticLightRecordCache.Find(mapChunkIndex);
-				if (cacheEntry == nullptr)
+				if (skeletonsToAppend == nullptr)
+				{
+					const NRIStaticLightRecordCache::Entry* cacheEntry = mStaticLightRecordCache.Find(mapChunkIndex);
+					if (cacheEntry != nullptr)
+					{
+						skeletonsToAppend = &cacheEntry->skeletons;
+					}
+				}
+				if (skeletonsToAppend == nullptr)
 				{
 					AppendSceneView(
 						chunkView,
@@ -3225,43 +3432,52 @@ SceneLightSystem::FrameAssemblyTimingStats SceneLightSystem::AssembleFrameSurfac
 						SceneLightRecordSource::StaticMapScene,
 						staticChunk.materialOffset,
 						staticChunk.materialOffset);
-					continue;
+					emissiveSpan.cacheable = false;
+					mStaticEmissiveCandidateCache.InvalidateChunk(mapChunkIndex);
 				}
-
-				for (const NRIStaticLightRecordCache::Skeleton& skeleton : cacheEntry->skeletons)
+				else
 				{
-					SurfaceRecord record = {};
-					record.identityKey = skeleton.identityKey;
-					record.source = SceneLightRecordSource::StaticMapScene;
-					record.provenance = skeleton.provenance;
-					Copy3f(skeleton.center, record.center);
-					record.boundsRadius = skeleton.boundsRadius;
-					record.surfaceArea = skeleton.surfaceArea;
-					if (!NRIStaticLightRecordCache::RebaseMaterialIndex(
-							staticChunk.materialOffset,
-							skeleton.localMaterialOrdinal,
-							record.materialIndex))
+					for (const NRIStaticLightRecordCache::Skeleton& skeleton : *skeletonsToAppend)
 					{
-						record.materialIndex = UINT32_MAX;
-					}
+						SurfaceRecord record = {};
+						record.identityKey = skeleton.identityKey;
+						record.source = SceneLightRecordSource::StaticMapScene;
+						record.provenance = skeleton.provenance;
+						Copy3f(skeleton.center, record.center);
+						record.boundsRadius = skeleton.boundsRadius;
+						record.surfaceArea = skeleton.surfaceArea;
+						if (!NRIStaticLightRecordCache::RebaseMaterialIndex(
+								staticChunk.materialOffset,
+								skeleton.localMaterialOrdinal,
+								record.materialIndex))
+						{
+							record.materialIndex = UINT32_MAX;
+						}
 
-					if (record.materialIndex < staticScene.materialBridge.lightMetadata.size())
-					{
-						record.material = staticScene.materialBridge.lightMetadata[record.materialIndex];
+						if (record.materialIndex < staticScene.materialBridge.lightMetadata.size())
+						{
+							record.material = staticScene.materialBridge.lightMetadata[record.materialIndex];
+						}
+						else if (record.materialIndex < staticScene.materialBridge.materials.size())
+						{
+							const nri_scene::MaterialData& material = staticScene.materialBridge.materials[record.materialIndex];
+							record.material.sectorIndex = material.sectorIndex != UINT32_MAX ? (int32_t)material.sectorIndex : -1;
+							record.material.paletteIndex = material.paletteIndex;
+							record.material.materialFlags = material.flags;
+							record.material.alpha = material.alpha;
+							record.material.lightLevel = material.lightLevel;
+						}
+						AppendSurfaceRecord(record, 0);
 					}
-					else if (record.materialIndex < staticScene.materialBridge.materials.size())
-					{
-						const nri_scene::MaterialData& material = staticScene.materialBridge.materials[record.materialIndex];
-						record.material.sectorIndex = material.sectorIndex != UINT32_MAX ? (int32_t)material.sectorIndex : -1;
-						record.material.paletteIndex = material.paletteIndex;
-						record.material.materialFlags = material.flags;
-						record.material.alpha = material.alpha;
-						record.material.lightLevel = material.lightLevel;
-					}
-					AppendSurfaceRecord(record, 0);
 				}
-				mStaticLightRecordCache.NoteAppendedSkeletons((uint32_t)cacheEntry->skeletons.size());
+				if (skeletonsToAppend != nullptr)
+				{
+					mStaticLightRecordCache.NoteAppendedSkeletons((uint32_t)skeletonsToAppend->size());
+				}
+				emissiveSpan.identity.recordCount = (uint32_t)mSurfaceRecords.size() - emissiveSpan.firstRecordIndex;
+				mStaticEmissiveRecordSpans.push_back(emissiveSpan);
 			}
+			mStaticEmissiveRecordPrefixCount = (uint32_t)mSurfaceRecords.size();
 		});
 
 		measure(timings.runtimeMutationAppendMs, [&]()
@@ -4050,8 +4266,102 @@ void SceneLightSystem::RebuildAnalyticLights(
 	mAnalyticLights.activeLights = std::move(nextLights);
 }
 
+bool SceneLightSystem::EvaluateEmissiveCandidate(
+	const SurfaceRecord& record,
+	const NRILightingSettings& settings,
+	const std::vector<EmissiveOverrideRule>* overrideRules,
+	const std::vector<EmissiveOverrideRule>* surfaceLightFixtureRules,
+	const std::vector<EmissiveMaterialResponseRule>* materialResponseRules,
+	StaticEmissiveCandidateEvaluation& outEvaluation)
+{
+	outEvaluation = {};
+	uint32_t sourceFlags = SceneEmissiveSurfaceSourceFlag_None;
+	uint32_t sourceRuleId = 0;
+	float emissiveColor[3] = {};
+	float emissiveIntensity = 0.0f;
+	uint32_t emissiveMode = nri_scene::MaterialEmissiveMode_None;
+	uint32_t emissiveTextureIndex = UINT32_MAX;
+	float emissiveSamplingScale = 1.0f;
+	float emissiveFalloffScale = 1.0f;
+	if (!EvaluateEmissiveMaterial(mEmissiveSurfaces, record.material, settings, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode, emissiveTextureIndex, emissiveSamplingScale, emissiveFalloffScale))
+	{
+		return false;
+	}
+
+	if (record.surfaceArea < std::max(settings.emissiveMinSurface, 0.0f))
+	{
+		return false;
+	}
+
+	const float resolvedLuminance = emissiveMode == nri_scene::MaterialEmissiveMode_UseBaseTexture ?
+		ComputeColorLuminance(record.material.averageColor) :
+		ComputeColorLuminance(emissiveColor);
+
+	EmissiveSurfaceRegistry::EmissiveSurfaceRecord& emissive = outEvaluation.emissive;
+	emissive.stableKey = BuildEmissiveTopologyKey(record);
+	emissive.sourceFlags = sourceFlags;
+	emissive.sourceRuleId = sourceRuleId;
+	emissive.source = record.source;
+	emissive.actorIndex = record.provenance.actorIndex;
+	emissive.sectorIndex = record.provenance.sectorIndex;
+	emissive.authoredSectorIndex = record.provenance.sectorIndex;
+	emissive.wallIndex = record.provenance.wallIndex;
+	emissive.textureId = record.material.textureId;
+	emissive.emissiveTextureIndex = emissiveTextureIndex;
+	emissive.materialIndex = record.materialIndex;
+	emissive.emissiveMode = emissiveMode;
+	emissive.surfaceArea = record.surfaceArea;
+	emissive.boundsRadius = record.boundsRadius;
+	Copy3f(record.center, emissive.center);
+	Copy3f(emissiveColor, emissive.emissiveColor);
+	emissive.emissiveIntensity = emissiveIntensity;
+	if (materialResponseRules != nullptr)
+	{
+		for (const EmissiveMaterialResponseRule& rule : *materialResponseRules)
+		{
+			if (EmissiveMaterialResponseRuleMatchesSurface(rule, record))
+			{
+				ApplyEmissiveMaterialResponseRule(rule, emissive);
+				outEvaluation.matchedMaterialResponse = true;
+			}
+		}
+	}
+	if (surfaceLightFixtureRules != nullptr)
+	{
+		for (const EmissiveOverrideRule& rule : *surfaceLightFixtureRules)
+		{
+			if (SurfaceLightFixtureRuleMatchesSurface(rule, record))
+			{
+				ApplyEmissiveOverrideRule(rule, emissive, settings);
+				outEvaluation.matchedOverride = true;
+				break;
+			}
+		}
+	}
+	if (overrideRules != nullptr)
+	{
+		for (const EmissiveOverrideRule& rule : *overrideRules)
+		{
+			if (EmissiveOverrideMatchesSurface(rule, record))
+			{
+				ApplyEmissiveOverrideRule(rule, emissive, settings);
+				outEvaluation.matchedOverride = true;
+			}
+		}
+	}
+	emissive.powerEstimate = record.surfaceArea * resolvedLuminance * emissive.emissiveIntensity;
+	if (emissive.powerEstimate < std::max(settings.emissiveMinPower, 0.0f))
+	{
+		return false;
+	}
+	outEvaluation.requiredStableFrames = record.material.emissiveStableFrames;
+	outEvaluation.accepted = true;
+	return true;
+}
+
 void SceneLightSystem::RebuildEmissiveSurfaces(
 	uint32_t maxActiveSurfaces,
+	uint32_t resolvedLightOverlayGeneration,
 	const std::vector<EmissiveOverrideRule>* overrideRules,
 	const std::vector<EmissiveOverrideRule>* surfaceLightFixtureRules,
 	const std::vector<EmissiveMaterialResponseRule>* materialResponseRules)
@@ -4069,125 +4379,192 @@ void SceneLightSystem::RebuildEmissiveSurfaces(
 	std::vector<EmissiveSurfaceRegistry::EmissiveSurfaceRecord> nextSurfaces;
 	nextSurfaces.reserve(std::min<uint32_t>((uint32_t)mSurfaceRecords.size(), maxActiveSurfaces));
 
-	const float minSurfaceArea = std::max(settings.emissiveMinSurface, 0.0f);
-	const float minPower = std::max(settings.emissiveMinPower, 0.0f);
-
-	for (const SurfaceRecord& record : mSurfaceRecords)
+	const auto appendEvaluation = [&](const StaticEmissiveCandidateEvaluation& evaluation)
 	{
-		uint32_t sourceFlags = SceneEmissiveSurfaceSourceFlag_None;
-		uint32_t sourceRuleId = 0;
-		float emissiveColor[3] = {};
-		float emissiveIntensity = 0.0f;
-		uint32_t emissiveMode = nri_scene::MaterialEmissiveMode_None;
-		uint32_t emissiveTextureIndex = UINT32_MAX;
-		float emissiveSamplingScale = 1.0f;
-		float emissiveFalloffScale = 1.0f;
-		if (!EvaluateEmissiveMaterial(mEmissiveSurfaces, record.material, settings, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode, emissiveTextureIndex, emissiveSamplingScale, emissiveFalloffScale))
+		if (!evaluation.accepted)
 		{
-			continue;
+			return;
 		}
-
-		if (record.surfaceArea < minSurfaceArea)
-		{
-			continue;
-		}
-
-		const float resolvedLuminance = emissiveMode == nri_scene::MaterialEmissiveMode_UseBaseTexture ?
-			ComputeColorLuminance(record.material.averageColor) :
-			ComputeColorLuminance(emissiveColor);
-
-		EmissiveSurfaceRegistry::EmissiveSurfaceRecord emissive = {};
-		emissive.stableKey = BuildEmissiveTopologyKey(record);
-		emissive.sourceFlags = sourceFlags;
-		emissive.sourceRuleId = sourceRuleId;
-		emissive.source = record.source;
-		emissive.actorIndex = record.provenance.actorIndex;
-		emissive.sectorIndex = record.provenance.sectorIndex;
-		emissive.authoredSectorIndex = record.provenance.sectorIndex;
-		emissive.wallIndex = record.provenance.wallIndex;
-		emissive.textureId = record.material.textureId;
-		emissive.emissiveTextureIndex = emissiveTextureIndex;
-		emissive.materialIndex = record.materialIndex;
-		emissive.emissiveMode = emissiveMode;
-		emissive.surfaceArea = record.surfaceArea;
-		emissive.boundsRadius = record.boundsRadius;
-		Copy3f(record.center, emissive.center);
-		Copy3f(emissiveColor, emissive.emissiveColor);
-		emissive.emissiveIntensity = emissiveIntensity;
-		bool matchedMaterialResponse = false;
-		if (materialResponseRules != nullptr)
-		{
-			for (const EmissiveMaterialResponseRule& rule : *materialResponseRules)
-			{
-				if (EmissiveMaterialResponseRuleMatchesSurface(rule, record))
-				{
-					ApplyEmissiveMaterialResponseRule(rule, emissive);
-					matchedMaterialResponse = true;
-				}
-			}
-		}
-		bool matchedOverride = false;
-		if (surfaceLightFixtureRules != nullptr)
-		{
-			for (const EmissiveOverrideRule& rule : *surfaceLightFixtureRules)
-			{
-				if (SurfaceLightFixtureRuleMatchesSurface(rule, record))
-				{
-					ApplyEmissiveOverrideRule(rule, emissive, settings);
-					matchedOverride = true;
-					break;
-				}
-			}
-		}
-		if (overrideRules != nullptr)
-		{
-			for (const EmissiveOverrideRule& rule : *overrideRules)
-			{
-				if (EmissiveOverrideMatchesSurface(rule, record))
-				{
-					ApplyEmissiveOverrideRule(rule, emissive, settings);
-					matchedOverride = true;
-				}
-			}
-		}
-		emissive.powerEstimate = record.surfaceArea * resolvedLuminance * emissive.emissiveIntensity;
-		if (emissive.powerEstimate < minPower)
-		{
-			continue;
-		}
-		if (record.material.emissiveStableFrames > 1)
+		const EmissiveSurfaceRegistry::EmissiveSurfaceRecord& emissive = evaluation.emissive;
+		if (evaluation.requiredStableFrames > 1)
 		{
 			const uint64_t stableKey = nri_scene::HashCombine64(emissive.stableKey, 0x414354495645454Dull);
-			if (!IsEmissiveStableForSampling(stableKey, record.material.emissiveStableFrames, record.center, record.boundsRadius, record.surfaceArea))
+			if (!IsEmissiveStableForSampling(
+					stableKey,
+					evaluation.requiredStableFrames,
+					emissive.center,
+					emissive.boundsRadius,
+					emissive.surfaceArea))
 			{
-				continue;
+				return;
 			}
 		}
 
 		if (nextSurfaces.size() >= maxActiveSurfaces)
 		{
 			mEmissiveSurfaces.truncatedSurfaceCount++;
-			continue;
+			return;
 		}
-		if (matchedOverride)
+		if (evaluation.matchedOverride)
 		{
 			mEmissiveSurfaces.overrideMatchedSurfaceCount++;
 		}
-		if (matchedMaterialResponse)
+		if (evaluation.matchedMaterialResponse)
 		{
 			mEmissiveSurfaces.materialResponseMatchedSurfaceCount++;
 		}
 		nextSurfaces.push_back(emissive);
 
-		if ((sourceFlags & (SceneEmissiveSurfaceSourceFlag_AutoFullbright | SceneEmissiveSurfaceSourceFlag_AutoTextureGlow | SceneEmissiveSurfaceSourceFlag_AutoGlowmap)) != 0)
+		if ((emissive.sourceFlags & (SceneEmissiveSurfaceSourceFlag_AutoFullbright | SceneEmissiveSurfaceSourceFlag_AutoTextureGlow | SceneEmissiveSurfaceSourceFlag_AutoGlowmap)) != 0)
 		{
 			mEmissiveSurfaces.autoTaggedCount++;
 		}
-		if ((sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) != 0)
+		if ((emissive.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) != 0)
 		{
 			mEmissiveSurfaces.explicitRuleMatchCount++;
 		}
 		mEmissiveSurfaces.totalPowerEstimate += emissive.powerEstimate;
+	};
+
+	bool staticSpansValid = mStaticEmissiveRecordPrefixCount <= mSurfaceRecords.size();
+	uint32_t expectedStaticRecordIndex = 0;
+	for (const StaticEmissiveRecordSpan& span : mStaticEmissiveRecordSpans)
+	{
+		if (expectedStaticRecordIndex > mStaticEmissiveRecordPrefixCount ||
+			span.firstRecordIndex != expectedStaticRecordIndex ||
+			span.identity.recordCount > mStaticEmissiveRecordPrefixCount - expectedStaticRecordIndex)
+		{
+			staticSpansValid = false;
+			break;
+		}
+		expectedStaticRecordIndex += span.identity.recordCount;
+	}
+	staticSpansValid = staticSpansValid && expectedStaticRecordIndex == mStaticEmissiveRecordPrefixCount;
+	if (!staticSpansValid)
+	{
+		mStaticEmissiveCandidateCache.Reset();
+	}
+
+	uint32_t liveTailStart = 0;
+	if (staticSpansValid)
+	{
+		struct StaticEmissiveSpanProbe
+		{
+			NRIStaticEmissiveCandidateIdentity identity = {};
+			const std::vector<StaticEmissiveCandidateEvaluation>* cachedResults = nullptr;
+			StaticEmissiveCandidateCache::ProbeResult result = StaticEmissiveCandidateCache::ProbeResult::LiveFallback;
+		};
+		const NRIStaticEmissiveSettingsIdentity settingsIdentity = BuildStaticEmissiveSettingsIdentity(settings);
+		std::vector<StaticEmissiveSpanProbe> probes(mStaticEmissiveRecordSpans.size());
+		std::vector<size_t> validationEligibleSpans;
+		validationEligibleSpans.reserve(mStaticEmissiveRecordSpans.size());
+		for (size_t spanIndex = 0; spanIndex < mStaticEmissiveRecordSpans.size(); ++spanIndex)
+		{
+			const StaticEmissiveRecordSpan& span = mStaticEmissiveRecordSpans[spanIndex];
+			StaticEmissiveSpanProbe& probe = probes[spanIndex];
+			NRIStaticEmissiveCandidateIdentity identity = span.identity;
+			identity.resolvedLightOverlayGeneration = span.cacheable ? resolvedLightOverlayGeneration : 0;
+			identity.emissiveHeuristicGeneration = mEmissiveHeuristicGeneration;
+			identity.settings = settingsIdentity;
+			probe.identity = identity;
+			probe.result = mStaticEmissiveCandidateCache.Probe(identity, probe.cachedResults);
+			if (probe.result == StaticEmissiveCandidateCache::ProbeResult::Hit)
+			{
+				validationEligibleSpans.push_back(spanIndex);
+			}
+		}
+
+		size_t validationSpanIndex = SIZE_MAX;
+		const int validationInterval = (int)nri_ptsceneuploadvalidateinterval;
+		if (validationInterval > 0 &&
+			mFrameSerial % (uint64_t)validationInterval == 0 &&
+			!validationEligibleSpans.empty())
+		{
+			validationSpanIndex = validationEligibleSpans[
+				mStaticEmissiveValidationCursor % (uint32_t)validationEligibleSpans.size()];
+			mStaticEmissiveValidationCursor++;
+		}
+
+		const auto rebuildSpanResults = [&](const StaticEmissiveRecordSpan& span)
+		{
+			std::vector<StaticEmissiveCandidateEvaluation> rebuiltResults;
+			rebuiltResults.reserve(span.identity.recordCount);
+			for (uint32_t recordOffset = 0; recordOffset < span.identity.recordCount; ++recordOffset)
+			{
+				StaticEmissiveCandidateEvaluation evaluation = {};
+				EvaluateEmissiveCandidate(
+					mSurfaceRecords[span.firstRecordIndex + recordOffset],
+					settings,
+					overrideRules,
+					surfaceLightFixtureRules,
+					materialResponseRules,
+					evaluation);
+				rebuiltResults.push_back(evaluation);
+			}
+			mStaticEmissiveCandidateCache.NoteEvaluatedRecords(span.identity.recordCount);
+			return rebuiltResults;
+		};
+
+		for (size_t spanIndex = 0; spanIndex < mStaticEmissiveRecordSpans.size(); ++spanIndex)
+		{
+			const StaticEmissiveRecordSpan& span = mStaticEmissiveRecordSpans[spanIndex];
+			const StaticEmissiveSpanProbe& probe = probes[spanIndex];
+			std::vector<StaticEmissiveCandidateEvaluation> rebuiltResults;
+			const std::vector<StaticEmissiveCandidateEvaluation>* results = probe.cachedResults;
+			bool reusedCachedResults = probe.result == StaticEmissiveCandidateCache::ProbeResult::Hit;
+			if (probe.result != StaticEmissiveCandidateCache::ProbeResult::Hit || spanIndex == validationSpanIndex)
+			{
+				rebuiltResults = rebuildSpanResults(span);
+				results = &rebuiltResults;
+				if (probe.result == StaticEmissiveCandidateCache::ProbeResult::Hit)
+				{
+					reusedCachedResults = mStaticEmissiveCandidateCache.ValidateAndQuarantine(
+						probe.identity,
+						rebuiltResults,
+						StaticEmissiveCandidateEvaluationsEqual);
+					if (reusedCachedResults)
+					{
+						results = probe.cachedResults;
+					}
+				}
+			}
+
+			uint32_t acceptedResultCount = 0;
+			for (const StaticEmissiveCandidateEvaluation& evaluation : *results)
+			{
+				appendEvaluation(evaluation);
+				acceptedResultCount += evaluation.accepted ? 1u : 0u;
+			}
+			if (reusedCachedResults)
+			{
+				mStaticEmissiveCandidateCache.NoteReusedCandidates(acceptedResultCount);
+			}
+			if (probe.result == StaticEmissiveCandidateCache::ProbeResult::Rebuild)
+			{
+				mStaticEmissiveCandidateCache.Commit(probe.identity, std::move(rebuiltResults));
+			}
+		}
+		liveTailStart = mStaticEmissiveRecordPrefixCount;
+	}
+
+	const uint32_t recordCount = (uint32_t)mSurfaceRecords.size();
+	if (liveTailStart < recordCount)
+	{
+		mStaticEmissiveCandidateCache.NoteEvaluatedRecords(recordCount - liveTailStart);
+	}
+	for (uint32_t recordIndex = liveTailStart; recordIndex < recordCount; ++recordIndex)
+	{
+		StaticEmissiveCandidateEvaluation evaluation = {};
+		if (EvaluateEmissiveCandidate(
+				mSurfaceRecords[recordIndex],
+				settings,
+				overrideRules,
+				surfaceLightFixtureRules,
+				materialResponseRules,
+				evaluation))
+		{
+			appendEvaluation(evaluation);
+		}
 	}
 
 	std::vector<uint64_t> nextTopologyKeys;
@@ -6043,6 +6420,11 @@ bool SceneLightSystem::AddTextureEmissiveHeuristic(uint32_t textureId, uint32_t 
 		rule.emissiveColor[2] = std::max(emissiveColor[2], 0.0f);
 	}
 	mEmissiveSurfaces.textureRules.push_back(rule);
+	if (++mEmissiveHeuristicGeneration == 0)
+	{
+		mEmissiveHeuristicGeneration = 1;
+	}
+	mStaticEmissiveCandidateCache.Reset();
 	mEmissiveSurfaces.materialBindingChanged = true;
 	mEmissiveSurfaces.materialPropertiesChanged = true;
 	outRuleId = rule.ruleId;
@@ -6057,6 +6439,11 @@ bool SceneLightSystem::ClearTextureEmissiveHeuristics()
 	}
 
 	mEmissiveSurfaces.textureRules.clear();
+	if (++mEmissiveHeuristicGeneration == 0)
+	{
+		mEmissiveHeuristicGeneration = 1;
+	}
+	mStaticEmissiveCandidateCache.Reset();
 	mEmissiveSurfaces.materialBindingChanged = true;
 	mEmissiveSurfaces.materialPropertiesChanged = true;
 	return true;
