@@ -66,6 +66,7 @@
 #include "i_time.h"
 #include "d_net.h"
 #include "gamecontrol.h"
+#include "gameupdate.h"
 #include "lightoverlay_editor.h"
 #include "c_console.h"
 #include "razemenu.h"
@@ -139,6 +140,11 @@ FString	savegamefile;
 
 namespace
 {
+	uint64_t gGameUpdateGeneration = 1;
+	uint64_t gEngineUpdateGeneration = 1;
+	uint64_t gPresentationGeneration = 0;
+	uint32_t gGameUpdateTicksThisPresentation = 0;
+
 	struct PerfTryRunTicsTraceStats
 	{
 		bool doWait = false;
@@ -243,6 +249,16 @@ namespace
 		default: return "unknown";
 		}
 	}
+}
+
+GameUpdateSnapshot GetGameUpdateSnapshot()
+{
+	GameUpdateSnapshot snapshot = {};
+	snapshot.presentationGeneration = gPresentationGeneration;
+	snapshot.engineUpdateGeneration = gEngineUpdateGeneration;
+	snapshot.simulationGeneration = gGameUpdateGeneration;
+	snapshot.ticksExecutedThisPresentation = gGameUpdateTicksThisPresentation;
+	return snapshot;
 }
 
 //==========================================================================
@@ -1198,6 +1214,7 @@ void TryRunTics (void)
 	int 		numplaying;
 	const double traceStartMs = I_msTimeF();
 	perfTryRunTicsTraceStats = {};
+	gGameUpdateTicksThisPresentation = 0;
 
 	// If paused, do not eat more CPU time than we need, because it
 	// will all be wasted anyway.
@@ -1266,6 +1283,8 @@ void TryRunTics (void)
 		{
 			C_Ticker();
 			M_Ticker();
+			++gEngineUpdateGeneration;
+			if (gEngineUpdateGeneration == 0) gEngineUpdateGeneration = 1;
 			// Repredict the player for new buffered movement
 #if 0
 			gi->Unpredict();
@@ -1312,6 +1331,8 @@ void TryRunTics (void)
 		{
 			C_Ticker ();
 			M_Ticker ();
+			++gEngineUpdateGeneration;
+			if (gEngineUpdateGeneration == 0) gEngineUpdateGeneration = 1;
 			// Repredict the player for new buffered movement
 #if 0
 			gi->Unpredict();
@@ -1354,6 +1375,14 @@ void TryRunTics (void)
 			C_Ticker ();
 			M_Ticker ();
 			GameTicker();
+			++gEngineUpdateGeneration;
+			if (gEngineUpdateGeneration == 0) gEngineUpdateGeneration = 1;
+			++gGameUpdateGeneration;
+			if (gGameUpdateGeneration == 0)
+			{
+				gGameUpdateGeneration = 1;
+			}
+			++gGameUpdateTicksThisPresentation;
 			gametic++;
 
 			NetUpdate ();	// check for new console commands
@@ -1406,6 +1435,8 @@ void MainLoop ()
 		try
 		{
 			traceFrame++;
+			++gPresentationGeneration;
+			if (gPresentationGeneration == 0) gPresentationGeneration = 1;
 			if (PerfLoopTraceActive())
 			{
 				PerfLoopTraceResetInputStats();
@@ -1457,8 +1488,11 @@ void MainLoop ()
 				const auto renderTrace = GetPerfRenderTraceStats();
 				const double frameMs = I_msTimeF() - frameStartMs;
 				Printf(
-					"PERF loop trace: frame=%llu state=%s gametic=%d startframe_ms=%.3f try_ms=%.3f try_traced_ms=%.3f display_ms=%.3f display_begin_ms=%.3f display_render_ms=%.3f display_overlay_ms=%.3f display_update_ms=%.3f starttic_ms=%.3f music_ms=%.3f frame_ms=%.3f do_wait=%d realtics=%d avail=%d counts=%d ticks=%d wait_loops=%d zero_return=%d wait_return=%d paused_return=%d display_skip=%d level_rendered=%d\n",
+					"PERF loop trace: frame=%llu presentation_gen=%llu simulation_gen=%llu engine_gen=%llu state=%s gametic=%d startframe_ms=%.3f try_ms=%.3f try_traced_ms=%.3f display_ms=%.3f display_begin_ms=%.3f display_render_ms=%.3f display_overlay_ms=%.3f display_update_ms=%.3f starttic_ms=%.3f music_ms=%.3f frame_ms=%.3f do_wait=%d realtics=%d avail=%d counts=%d ticks=%d wait_loops=%d zero_return=%d wait_return=%d paused_return=%d display_skip=%d level_rendered=%d\n",
 					(unsigned long long)traceFrame,
+					(unsigned long long)gPresentationGeneration,
+					(unsigned long long)gGameUpdateGeneration,
+					(unsigned long long)gEngineUpdateGeneration,
 					GetGameStateName(gamestate),
 					gametic,
 					startFrameMs,

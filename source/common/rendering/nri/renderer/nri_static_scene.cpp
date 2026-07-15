@@ -2644,6 +2644,7 @@ void NRIRenderer::DestroyStaticMapSceneResources(StaticMapSceneCache& staticScen
 void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)
 {
 	mStaticSceneDiagnostics.Invalidate();
+	mSurfaceLightOverlayCache.Reset();
 	if (nri_ptscenestats)
 	{
 		Printf("NRI PT static scene trace: event=destroy reason=%s frame=%u scene_valid=%s textures=%s buffers=%s acceleration=%s scene_build_serial=%llu map_build_serial=%llu chunks=%u\n",

@@ -21,6 +21,7 @@
 #include "nri_runtime_space_link_state.h"
 #include "nri_scene_data_frame_ring.h"
 #include "nri_scene_frame_geometry.h"
+#include "nri_surface_light_overlay.h"
 #include "nri_scene_material_frame_cache.h"
 #include "nri_scene_textures.h"
 #include "nri_sky_environment.h"
@@ -742,6 +743,7 @@ public:
 		std::array<SceneBufferUploadDomainTraceEntry, SceneBufferUploadDomainCount> sceneSelectBufferUploadDomains = {};
 		double sceneSelectInstanceHandlesMs = 0.0;
 		double sceneSelectTexturePrepMs = 0.0;
+		double sceneSelectSurfaceLightMs = 0.0;
 		double sceneSelectStateCommitMs = 0.0;
 		double sceneSelectStateCommitFlagsMs = 0.0;
 		double sceneSelectStateCommitDynamicStateMs = 0.0;
@@ -784,6 +786,20 @@ public:
 		uint32_t sceneSelectStateCommitChangedTlasInstances = 0;
 		uint32_t sceneSelectStateCommitChangedSceneConstants = 0;
 		uint32_t sceneSelectStateCommitChangedDomainCount = 0;
+		uint64_t sceneReusePresentationGeneration = 0;
+		uint64_t sceneReuseSimulationGeneration = 0;
+		uint64_t sceneReuseEngineGeneration = 0;
+		uint64_t sceneReuseMapBuildSerial = 0;
+		uint32_t sceneReuseTicksExecuted = 0;
+		uint32_t sceneReuseZeroTickCandidate = 0;
+		uint32_t sceneReuseSurfaceLightCalled = 0;
+		uint32_t sceneReuseSurfaceLightHit = 0;
+		uint32_t sceneReuseSurfaceLightCandidateHit = 0;
+		uint32_t sceneReuseSurfaceLightBuild = 0;
+		uint32_t sceneReuseSurfaceLightReject = 0;
+		uint32_t sceneReuseSurfaceLightValidationChecked = 0;
+		uint32_t sceneReuseSurfaceLightValidationMismatch = 0;
+		uint64_t sceneReuseSurfaceLightKey = 0;
 		double dynamicCaptureCountMs = 0.0;
 		double dynamicCaptureWallsMs = 0.0;
 		double dynamicCaptureFlatsMs = 0.0;
@@ -2438,7 +2454,12 @@ private:
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging);
 	NRISurfaceProbeEmissiveDiagnostics BuildSurfaceProbeEmissiveDiagnostics(const NRISurfaceProbeResult& probe) const;
-	bool BuildSurfaceLightOverlay(nri_scene::SceneView& outSceneView, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
+	bool BuildSurfaceLightOverlay(
+		nri_scene::SceneView& outSceneView,
+		nri_scene::GeometryData& outGeometry,
+		nri_scene::MaterialBridgeData& outMaterials,
+		bool allowReuse,
+		bool validateReuse);
 	void RefreshSceneLightSystem(
 		bool usedStaticMapScene,
 		const nri_scene::SceneView* capturedSceneView,
@@ -2681,6 +2702,7 @@ private:
 	NRISE29FloorDeformerRoute mSE29FloorDeformerRoute;
 	NRIMapMaterialOnlyRoute mMapMaterialOnlyRoute;
 	NRIRuntimeMutationSystem mRuntimeMutation;
+	NRISurfaceLightOverlayCache mSurfaceLightOverlayCache;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	NRIPersistentVoxelResidency mPersistentVoxels;
 	StateCommitDomainGenerations mLastStateCommitDomainGenerations = {};

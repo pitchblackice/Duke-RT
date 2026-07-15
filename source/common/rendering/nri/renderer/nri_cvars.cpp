@@ -808,6 +808,9 @@ CUSTOM_CVAR(Int, nri_ptmutationworklistvalidate, 0, 0)
 	}
 }
 
+CVAR(Bool, nri_ptzerotickreuse, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptzerotickreusevalidate, false, 0)
+
 CUSTOM_CVAR(Int, nri_ptscenebufferdirtyrangegap, 256, 0)
 {
 	if (self < 0)

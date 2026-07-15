@@ -14,6 +14,7 @@
 #include "nri_scene_frame_builder.h"
 #include "nri_scene_frame_diagnostics.h"
 #include "nri_scene_frame_coordinator_types.h"
+#include "gameupdate.h"
 #include "nri_scene_frame_mirrors.h"
 #include "nri_scene_frame_overlay.h"
 #include "nri_scene_frame_selection.h"
@@ -1090,6 +1091,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	}
 
 	RenderSceneFrameBuildInputs sceneFrameInputs = {};
+	const GameUpdateSnapshot gameUpdate = GetGameUpdateSnapshot();
+	sceneFrameInputs.simulationGeneration = gameUpdate.simulationGeneration;
+	sceneFrameInputs.engineUpdateGeneration = gameUpdate.engineUpdateGeneration;
+	sceneFrameInputs.presentationGeneration = gameUpdate.presentationGeneration;
+	sceneFrameInputs.ticksExecutedThisPresentation = gameUpdate.ticksExecutedThisPresentation;
 	sceneFrameInputs.bootstrapMode = bootstrapMode;
 	sceneFrameInputs.bootstrapCapturedView = bootstrapCapturedView;
 	sceneFrameInputs.bootstrapCapturedDiagnostics = bootstrapCapturedDiagnostics;

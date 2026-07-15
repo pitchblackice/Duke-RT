@@ -576,6 +576,12 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				residentStaticWorldGeometryChanged = runtimeMutationFrame.residentStaticSceneChanged;
 				return hasOverlay;
 			}();
+			mLastPerfShellTraceStats.sceneReusePresentationGeneration = inputs.presentationGeneration;
+			mLastPerfShellTraceStats.sceneReuseSimulationGeneration = inputs.simulationGeneration;
+			mLastPerfShellTraceStats.sceneReuseEngineGeneration = inputs.engineUpdateGeneration;
+			mLastPerfShellTraceStats.sceneReuseMapBuildSerial = mMapWorld.buildSerial;
+			mLastPerfShellTraceStats.sceneReuseTicksExecuted = inputs.ticksExecutedThisPresentation;
+			mLastPerfShellTraceStats.sceneReuseZeroTickCandidate = inputs.ticksExecutedThisPresentation == 0 ? 1u : 0u;
 			const bool hasDynamicScene = !deferOverlayThisFrame && [&]()
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.dynamicCaptureMs);
@@ -928,8 +934,16 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			mLastPerfShellTraceStats.runtimeDebugSphereMaterialCount = debugOverlayTelemetry.runtimeDebugSphereMaterialCount;
 			return built;
 		}();
-		const bool surfaceLightBuilt = !deferOverlayThisFrame &&
-			BuildSurfaceLightOverlay(surfaceLightSceneView, surfaceLightGeometry, surfaceLightMaterialBridge);
+		const bool surfaceLightBuilt = !deferOverlayThisFrame && [&]()
+		{
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectSurfaceLightMs);
+			return BuildSurfaceLightOverlay(
+				surfaceLightSceneView,
+				surfaceLightGeometry,
+				surfaceLightMaterialBridge,
+				(bool)nri_ptzerotickreuse && inputs.ticksExecutedThisPresentation == 0,
+				(bool)nri_ptzerotickreusevalidate);
+		}();
 		NRISceneFrameOverlayEligibilityInputs overlayEligibilityInputs = {};
 		overlayEligibilityInputs.deferOverlayThisFrame = deferOverlayThisFrame;
 		overlayEligibilityInputs.runtimeSpaceLinkBuilt = hasRuntimeSpaceLinkOverlay;

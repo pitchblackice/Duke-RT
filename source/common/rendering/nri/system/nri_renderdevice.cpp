@@ -5140,6 +5140,26 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.sceneSelectStateCommitGenSceneConstants,
 			shell.sceneSelectStateCommitChangedSceneConstants);
 		Printf(
+			"PERF pt scene reuse NRI: frame=%llu presentation_gen=%llu simulation_gen=%llu engine_gen=%llu map_gen=%llu ticks=%u zero_tick=%u main_view=%u drawmode=%d surface_light_called=%u surface_light_hit=%u surface_light_candidate_hit=%u surface_light_build=%u surface_light_reject=%u surface_light_validation_checked=%u surface_light_validation_mismatch=%u surface_light_key=%llu surface_light_ms=%.3f\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			(unsigned long long)shell.sceneReusePresentationGeneration,
+			(unsigned long long)shell.sceneReuseSimulationGeneration,
+			(unsigned long long)shell.sceneReuseEngineGeneration,
+			(unsigned long long)shell.sceneReuseMapBuildSerial,
+			shell.sceneReuseTicksExecuted,
+			shell.sceneReuseZeroTickCandidate,
+			drawmode == DM_MAINVIEW ? 1u : 0u,
+			drawmode,
+			shell.sceneReuseSurfaceLightCalled,
+			shell.sceneReuseSurfaceLightHit,
+			shell.sceneReuseSurfaceLightCandidateHit,
+			shell.sceneReuseSurfaceLightBuild,
+			shell.sceneReuseSurfaceLightReject,
+			shell.sceneReuseSurfaceLightValidationChecked,
+			shell.sceneReuseSurfaceLightValidationMismatch,
+			(unsigned long long)shell.sceneReuseSurfaceLightKey,
+			shell.sceneSelectSurfaceLightMs);
+		Printf(
 			"PERF pt dynamic capture detail NRI: frame=%llu calls=%u walls=%u flats=%u sprites=%u voxel_proxies=%u unsupported_models=%u voxel_stores=%u voxel_rebuilds=%u voxel_deferred=%u mesh_builds=%u mesh_deferred=%u mesh_hits=%u mesh_misses=%u mesh_invalid=%u duplication_audits=%u duplication_entries_scanned=%u duplication_temp_containers=%u model_candidates=%u model_sorted=%u model_sort_skipped=%u scratch_reuses=%u scratch_grows=%u scratch_fallbacks=%u budget_truncations=%u surface_builds=%u count=%.3f wall=%.3f flat=%.3f facing=%.3f model=%.3f model_classify=%.3f model_mesh=%.3f model_mesh_build=%.3f model_sort=%.3f model_surface=%.3f model_store=%.3f voxel_frame=%.3f stats=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.dynamicCaptureCalls,
