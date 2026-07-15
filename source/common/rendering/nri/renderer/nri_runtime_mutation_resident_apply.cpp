@@ -1215,10 +1215,11 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		}
 
 		auto& mutableChunk = mStaticMapScene.chunks[chunkListIndex];
-		if (!materialOnlyReplacement || mutableChunk.lightGeometryGeneration == 0)
-		{
-			mutableChunk.AdvanceLightGeometryGeneration();
-		}
+		// Replacing the light SceneView can change drawlist surface order even for
+		// a material-only resident update. The cached skeleton's local material
+		// ordinals are order-sensitive, so the replacement owns a geometry
+		// generation change as well as a material generation change.
+		mutableChunk.AdvanceLightGeometryGeneration();
 		mutableChunk.AdvanceLightMaterialGeneration();
 		mutableChunk.chunkIndex = mapChunk.chunkIndex;
 		mutableChunk.vertexOffset = nextAtlasChunk.vertexOffset;

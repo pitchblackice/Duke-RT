@@ -1027,6 +1027,10 @@ bool nri_static_scene::RefreshStaticMapAnimatedMaterials(
 		staticScene.lightChunkViews[chunkListIndex] = std::move(liveChunkView);
 		chunkCache.materialBridge = std::move(liveChunkMaterials);
 		chunkCache.animatedMaterialSignature = liveAnimatedMaterialSignature;
+		// A fresh capture may preserve geometry semantically while reordering
+		// drawlist surfaces. Static light skeletons retain source order and local
+		// material ordinals, so replacing the view must invalidate both domains.
+		chunkCache.AdvanceLightGeometryGeneration();
 		chunkCache.AdvanceLightMaterialGeneration();
 		refreshedAnyChunk = true;
 		refreshedChunkCount++;
