@@ -530,6 +530,104 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	uint32_t selectedPersistentVoxelSceneInstanceCount = 0;
 	uint32_t selectedSceneInstanceCount = 0;
 	uint32_t selectedTlasInstanceCount = 0;
+	struct PendingSceneDataPublication
+	{
+		const NRIBufferResource* staticVertexBuffer = nullptr;
+		const NRIBufferResource* staticIndexBuffer = nullptr;
+		const NRIBufferResource* staticPrimitiveBuffer = nullptr;
+		const NRIBufferResource* staticMaterialBuffer = nullptr;
+		const NRIBufferResource* dynamicVertexBuffer = nullptr;
+		const NRIBufferResource* dynamicIndexBuffer = nullptr;
+		const NRIBufferResource* dynamicPrimitiveBuffer = nullptr;
+		const NRIBufferResource* dynamicMaterialBuffer = nullptr;
+		const std::vector<SceneInstanceData>* sceneInstances = nullptr;
+		uint32_t staticPrimitiveCount = 0;
+		uint32_t dynamicPrimitiveCount = 0;
+		uint32_t staticMaterialCount = 0;
+		uint32_t dynamicMaterialCount = 0;
+		const char* reason = nullptr;
+
+		bool IsReady() const
+		{
+			return
+				staticVertexBuffer != nullptr &&
+				staticIndexBuffer != nullptr &&
+				staticPrimitiveBuffer != nullptr &&
+				staticMaterialBuffer != nullptr &&
+				dynamicVertexBuffer != nullptr &&
+				dynamicIndexBuffer != nullptr &&
+				dynamicPrimitiveBuffer != nullptr &&
+				dynamicMaterialBuffer != nullptr &&
+				sceneInstances != nullptr &&
+				!sceneInstances->empty();
+		}
+	} pendingSceneData;
+	const auto stageSceneDataPublication = [&pendingSceneData](
+		const NRIBufferResource& staticVertexBuffer,
+		const NRIBufferResource& staticIndexBuffer,
+		const NRIBufferResource& staticPrimitiveBuffer,
+		const NRIBufferResource& staticMaterialBuffer,
+		const NRIBufferResource& dynamicVertexBuffer,
+		const NRIBufferResource& dynamicIndexBuffer,
+		const NRIBufferResource& dynamicPrimitiveBuffer,
+		const NRIBufferResource& dynamicMaterialBuffer,
+		const std::vector<SceneInstanceData>& sceneInstances,
+		uint32_t staticPrimitiveCount,
+		uint32_t dynamicPrimitiveCount,
+		uint32_t staticMaterialCount,
+		uint32_t dynamicMaterialCount,
+		const char* reason)
+	{
+		pendingSceneData.staticVertexBuffer = &staticVertexBuffer;
+		pendingSceneData.staticIndexBuffer = &staticIndexBuffer;
+		pendingSceneData.staticPrimitiveBuffer = &staticPrimitiveBuffer;
+		pendingSceneData.staticMaterialBuffer = &staticMaterialBuffer;
+		pendingSceneData.dynamicVertexBuffer = &dynamicVertexBuffer;
+		pendingSceneData.dynamicIndexBuffer = &dynamicIndexBuffer;
+		pendingSceneData.dynamicPrimitiveBuffer = &dynamicPrimitiveBuffer;
+		pendingSceneData.dynamicMaterialBuffer = &dynamicMaterialBuffer;
+		pendingSceneData.sceneInstances = &sceneInstances;
+		pendingSceneData.staticPrimitiveCount = staticPrimitiveCount;
+		pendingSceneData.dynamicPrimitiveCount = dynamicPrimitiveCount;
+		pendingSceneData.staticMaterialCount = staticMaterialCount;
+		pendingSceneData.dynamicMaterialCount = dynamicMaterialCount;
+		pendingSceneData.reason = reason;
+	};
+	const auto stageResidentStaticWorld = [&](bool rebuildTopLevelAccelerationStructure, const char* reason) -> bool
+	{
+		auto& instances = mSelectTopLevelInstanceScratch;
+		auto& sceneInstances = mSelectSceneInstanceScratch;
+		instances.clear();
+		sceneInstances.clear();
+		BuildStaticMapInstances(instances, sceneInstances);
+		if (rebuildTopLevelAccelerationStructure &&
+			!BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static, sceneInstances))
+		{
+			return false;
+		}
+
+		selectedStaticSceneInstanceCount = (uint32_t)sceneInstances.size();
+		selectedDynamicSceneInstanceCount = 0;
+		selectedPersistentVoxelSceneInstanceCount = 0;
+		selectedSceneInstanceCount = (uint32_t)sceneInstances.size();
+		selectedTlasInstanceCount = (uint32_t)instances.size();
+		stageSceneDataPublication(
+			mStaticVertexBuffer,
+			mStaticIndexBuffer,
+			mStaticPrimitiveBuffer,
+			mStaticMaterialBuffer,
+			GetCurrentDynamicVertexBuffer(),
+			GetCurrentDynamicIndexBuffer(),
+			GetCurrentDynamicPrimitiveBuffer(),
+			GetCurrentDynamicMaterialBuffer(),
+			sceneInstances,
+			(uint32_t)mStaticMapScene.geometry.primitives.size(),
+			0u,
+			(uint32_t)mStaticMapScene.gpuMaterials.size(),
+			0u,
+			reason);
+		return true;
+	};
 	{
 		ScopedPtPerfTimer sceneSelectTimer(mLastPerfShellTraceStats.sceneSelectMs);
 		const bool staticMapSceneReady = allowStaticMapScene && [&]()
@@ -1110,9 +1208,10 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 
 			if (overlayGeometry.primitives.empty() && !hasPersistentVoxelOverlay)
 			{
-				accelerationReady =
-					BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static, sceneInstances) &&
-					NRISceneUploadManager::UpdateSceneDataSet(*this,
+				accelerationReady = BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static, sceneInstances);
+				if (accelerationReady)
+				{
+					stageSceneDataPublication(
 						mStaticVertexBuffer,
 						mStaticIndexBuffer,
 						mStaticPrimitiveBuffer,
@@ -1127,6 +1226,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						(uint32_t)mStaticMapScene.gpuMaterials.size(),
 						0u,
 						"static_only_scene");
+				}
 				if (accelerationReady && hasRuntimeMutationOverlay)
 				{
 					mBuiltStaticMapSceneASLastFrame = false;
@@ -1391,9 +1491,13 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						hasEffectiveOverlayInstances;
 					if (selectedSceneHasDynamicOverlay)
 					{
-						accelerationReady =
-							BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static | SceneDataBufferMask_Dynamic, sceneInstances) &&
-							NRISceneUploadManager::UpdateSceneDataSet(*this,
+						accelerationReady = BuildTopLevelAccelerationStructure(
+							instances,
+							SceneDataBufferMask_Static | SceneDataBufferMask_Dynamic,
+							sceneInstances);
+						if (accelerationReady)
+						{
+							stageSceneDataPublication(
 								mStaticVertexBuffer,
 								mStaticIndexBuffer,
 								mStaticPrimitiveBuffer,
@@ -1408,12 +1512,14 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 								(uint32_t)mStaticMapScene.gpuMaterials.size(),
 								(uint32_t)dynamicGpuMaterials.size(),
 								"static_plus_overlay_scene");
+						}
 					}
 					else
 					{
-						accelerationReady =
-							BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static, sceneInstances) &&
-							NRISceneUploadManager::UpdateSceneDataSet(*this,
+						accelerationReady = BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static, sceneInstances);
+						if (accelerationReady)
+						{
+							stageSceneDataPublication(
 								mStaticVertexBuffer,
 								mStaticIndexBuffer,
 								mStaticPrimitiveBuffer,
@@ -1428,6 +1534,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 								(uint32_t)mStaticMapScene.gpuMaterials.size(),
 								0u,
 								"static_only_effective_scene");
+						}
 					}
 				}
 			}
@@ -1567,7 +1674,15 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				LogFallback("PT runtime/dynamic overlay update failed; tracing the resident static world only.");
 				if (mGpuSceneHasDynamicOverlay)
 				{
-					RestoreStaticTopLevelScene();
+					if (!stageResidentStaticWorld(true, "restore_static_scene_after_overlay_failure"))
+					{
+						LogFallback("PT static scene restore failed after runtime/dynamic overlay update failure.");
+						if (preserveHistory)
+						{
+							RestoreRenderSceneHistorySnapshot(history);
+						}
+						return false;
+					}
 				}
 				paletteReady = true;
 				texturesReady = true;
@@ -1577,7 +1692,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		}
 		else if (mGpuSceneHasDynamicOverlay || residentStaticWorldGeometryChanged)
 		{
-			if (!RestoreStaticTopLevelScene())
+			if (!stageResidentStaticWorld(true, "restore_static_scene"))
 			{
 				LogFallback("PT static scene restore failed after dynamic overlay or resident chunk rebuild.");
 				if (preserveHistory)
@@ -1602,6 +1717,17 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		else
 		{
 			mGpuSceneHasDynamicOverlay = false;
+		}
+
+		if (!pendingSceneData.IsReady() &&
+			!stageResidentStaticWorld(false, "static_only_scene_final"))
+		{
+			LogFallback("PT static scene data staging failed.");
+			if (preserveHistory)
+			{
+				RestoreRenderSceneHistorySnapshot(history);
+			}
+			return false;
 		}
 	}
 	else
@@ -1673,7 +1799,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			sceneRecord.materialCount = (uint32_t)capturedGpuMaterials.size();
 			sceneRecord.visibilityChunk = UINT32_MAX;
 			sceneInstances.push_back(sceneRecord);
-			buffersReady = NRISceneUploadManager::UpdateSceneDataSet(*this,
+			stageSceneDataPublication(
 				GetCurrentDynamicVertexBuffer(),
 				GetCurrentDynamicIndexBuffer(),
 				GetCurrentDynamicPrimitiveBuffer(),
@@ -1741,7 +1867,17 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		return false;
 	}
 
-	selectedSceneInstanceCount = (uint32_t)mBoundSceneInstances.size();
+	if (!pendingSceneData.IsReady())
+	{
+		LogFallback("PT scene data publication was not staged.");
+		if (preserveHistory)
+		{
+			RestoreRenderSceneHistorySnapshot(history);
+		}
+		return false;
+	}
+
+	selectedSceneInstanceCount = (uint32_t)pendingSceneData.sceneInstances->size();
 	if (!mGpuSceneHasDynamicOverlay)
 	{
 		selectedStaticSceneInstanceCount = sceneLightUsesStaticMapScene ? selectedSceneInstanceCount : 0u;
@@ -1763,7 +1899,6 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		hasSurfaceLightOverlayForFrame ? &surfaceLightMaterialBridge : nullptr,
 		appendPersistentVoxelSceneLights);
 
-	bool refreshedSceneDataAfterLightRebuild = false;
 	if (mGpuSceneHasDynamicOverlay &&
 		activeMaterialBridge == &combinedMaterialBridge &&
 		!overlayGeometry.primitives.empty())
@@ -1797,22 +1932,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				combinedGpuMaterials.begin() + staticMaterialCount + persistentVoxelMaterialCount,
 				combinedGpuMaterials.end());
 			if (!UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials) ||
-				(persistentVoxelMaterialCount != 0 && !UploadPersistentVoxelArenaMaterialBuffers(persistentVoxelGpuMaterials)) ||
-				!NRISceneUploadManager::UpdateSceneDataSet(*this,
-					mStaticVertexBuffer,
-					mStaticIndexBuffer,
-					mStaticPrimitiveBuffer,
-					mStaticMaterialBuffer,
-					GetCurrentDynamicVertexBuffer(),
-					GetCurrentDynamicIndexBuffer(),
-					GetCurrentDynamicPrimitiveBuffer(),
-					GetCurrentDynamicMaterialBuffer(),
-					mBoundSceneInstances,
-					(uint32_t)mStaticMapScene.geometry.primitives.size(),
-					(uint32_t)overlayGeometry.primitives.size(),
-					(uint32_t)mStaticMapScene.gpuMaterials.size(),
-					(uint32_t)dynamicGpuMaterials.size(),
-					"resident_overlay_material_refresh"))
+				(persistentVoxelMaterialCount != 0 && !UploadPersistentVoxelArenaMaterialBuffers(persistentVoxelGpuMaterials)))
 			{
 				LogFallback("PT runtime overlay material refresh failed after scene-light rebuild.");
 				if (preserveHistory)
@@ -1823,88 +1943,33 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			}
 
 			activeGpuMaterials = &combinedGpuMaterials;
-			refreshedSceneDataAfterLightRebuild = true;
+			pendingSceneData.dynamicMaterialCount = (uint32_t)dynamicGpuMaterials.size();
 		}
 	}
 
-	if (mRuntimeLightSceneDataDirty && !refreshedSceneDataAfterLightRebuild)
+	if (!NRISceneUploadManager::UpdateSceneDataSet(
+		*this,
+		*pendingSceneData.staticVertexBuffer,
+		*pendingSceneData.staticIndexBuffer,
+		*pendingSceneData.staticPrimitiveBuffer,
+		*pendingSceneData.staticMaterialBuffer,
+		*pendingSceneData.dynamicVertexBuffer,
+		*pendingSceneData.dynamicIndexBuffer,
+		*pendingSceneData.dynamicPrimitiveBuffer,
+		*pendingSceneData.dynamicMaterialBuffer,
+		*pendingSceneData.sceneInstances,
+		pendingSceneData.staticPrimitiveCount,
+		pendingSceneData.dynamicPrimitiveCount,
+		pendingSceneData.staticMaterialCount,
+		pendingSceneData.dynamicMaterialCount,
+		pendingSceneData.reason))
 	{
-		if (mGpuSceneHasDynamicOverlay)
+		LogFallback("PT final scene data publication failed after scene-light rebuild.");
+		if (preserveHistory)
 		{
-			if (!NRISceneUploadManager::UpdateRuntimeLightAndSectorSceneData(*this, "runtime_overlay_light_refresh") &&
-				!NRISceneUploadManager::UpdateSceneDataSet(*this,
-				mStaticVertexBuffer,
-				mStaticIndexBuffer,
-				mStaticPrimitiveBuffer,
-				mStaticMaterialBuffer,
-				GetCurrentDynamicVertexBuffer(),
-				GetCurrentDynamicIndexBuffer(),
-				GetCurrentDynamicPrimitiveBuffer(),
-				GetCurrentDynamicMaterialBuffer(),
-				mBoundSceneInstances,
-				(uint32_t)mStaticMapScene.geometry.primitives.size(),
-				(uint32_t)overlayGeometry.primitives.size(),
-				(uint32_t)mStaticMapScene.gpuMaterials.size(),
-				(uint32_t)dynamicGpuMaterials.size(),
-				"runtime_overlay_light_refresh"))
-			{
-				LogFallback("PT runtime overlay light refresh failed after scene-light rebuild.");
-				if (preserveHistory)
-				{
-					RestoreRenderSceneHistorySnapshot(history);
-				}
-				return false;
-			}
+			RestoreRenderSceneHistorySnapshot(history);
 		}
-		else if (!sceneLightUsesStaticMapScene)
-		{
-			if (!NRISceneUploadManager::UpdateRuntimeLightAndSectorSceneData(*this, "captured_scene_light_refresh") &&
-				!NRISceneUploadManager::UpdateSceneDataSet(*this,
-				GetCurrentDynamicVertexBuffer(),
-				GetCurrentDynamicIndexBuffer(),
-				GetCurrentDynamicPrimitiveBuffer(),
-				GetCurrentDynamicMaterialBuffer(),
-				GetCurrentDynamicVertexBuffer(),
-				GetCurrentDynamicIndexBuffer(),
-				GetCurrentDynamicPrimitiveBuffer(),
-				GetCurrentDynamicMaterialBuffer(),
-				mBoundSceneInstances,
-				0u,
-				(uint32_t)capturedGeometry.primitives.size(),
-				0u,
-				(uint32_t)capturedGpuMaterials.size(),
-				"captured_scene_light_refresh"))
-			{
-				LogFallback("PT captured scene light refresh failed after scene-light rebuild.");
-				if (preserveHistory)
-				{
-					RestoreRenderSceneHistorySnapshot(history);
-				}
-				return false;
-			}
-		}
-	}
-
-	if (sceneLightUsesStaticMapScene && !mGpuSceneHasDynamicOverlay)
-	{
-		const bool needsResidentStaticLightRefresh =
-			mRuntimeLightSceneDataDirty ||
-			!mSceneLights.GetAnalyticLights().activeLights.empty() ||
-			mBoundRuntimeLightCount != 0 ||
-			mSceneLights.GetSectorLighting().activeSectorCount > 0 ||
-			mBoundSectorLightActiveCount != 0;
-		if (needsResidentStaticLightRefresh)
-		{
-			if (!RefreshResidentStaticSceneDataSet())
-			{
-				LogFallback("PT static scene light refresh failed.");
-				if (preserveHistory)
-				{
-					RestoreRenderSceneHistorySnapshot(history);
-				}
-				return false;
-			}
-		}
+		return false;
 	}
 
 	if (!UpdateEmissiveSamplingBuffers(emissiveSamplingContext, nullptr, true))
