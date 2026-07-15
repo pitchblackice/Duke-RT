@@ -3,6 +3,7 @@
 struct NRIFrameDiagnosticPolicyInput
 {
 	bool perfLoopTraceActive = false;
+	bool compactCaptureActive = false;
 	bool selfTestEnabled = false;
 	bool slowdownTraceEnabled = false;
 	bool sceneStatsEnabled = false;

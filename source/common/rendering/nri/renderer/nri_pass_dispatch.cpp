@@ -8,8 +8,10 @@
 #include "nri_scene_upload.h"
 #include "nri_shader_contracts.h"
 #include "../system/nri_renderdevice.h"
+#include "../system/nri_gpu_timing.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
+#include "perf_capture.h"
 #include "printf.h"
 
 #include <algorithm>
@@ -33,7 +35,7 @@ namespace
 
 	static bool ShouldCollectPtPerfTiming()
 	{
-		return ShouldTracePtPerf() || (bool)nri_ptslowdowntrace;
+		return ShouldTracePtPerf() || (bool)nri_ptslowdowntrace || PerfCompactCaptureTimingActive();
 	}
 
 	static bool ShouldCollectTraceShaderStats()
@@ -371,6 +373,7 @@ bool NRIPassDispatcher::DispatchFrameGraph(NRIPassDispatchContext& context, HWDr
 
 bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWDrawInfo&, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials)
 {
+	NRIScopedGpuTiming gpuTiming(context.mResources.frameBuffer, NRIGpuTimingScope::Trace);
 	Clocker clock(NriPTTraceOpaque);
 	ScopedPtPerfTimer traceOpaqueTimer(context.mLastPerfShellTraceStats.traceOpaqueMs);
 	{
@@ -530,6 +533,7 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 
 bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 {
+	NRIScopedGpuTiming gpuTiming(context.mResources.frameBuffer, NRIGpuTimingScope::Denoise);
 	Clocker clock(NriPTDenoiser);
 	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars();
 
@@ -596,6 +600,7 @@ bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 
 bool NRIPassDispatcher::DispatchComposition(NRIPassDispatchContext& context, NRIRenderer::FrameTextureSlot outputSlot)
 {
+	NRIScopedGpuTiming gpuTiming(context.mResources.frameBuffer, NRIGpuTimingScope::Composition);
 	Clocker clock(NriPTComposition);
 
 	NRITraceSceneConstants constants = {};
@@ -952,6 +957,7 @@ bool NRIPassDispatcher::DispatchFinalPresent(NRIPassDispatchContext& context, NR
 
 bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 {
+	NRIScopedGpuTiming gpuTiming(context.mResources.frameBuffer, NRIGpuTimingScope::Upscale);
 	Clocker clock(NriPTUpscale);
 
 	const NRIMainUpscalerKind mainKind = context.mUpscalerService.ResolveMainUpscalerKind(true);
@@ -1170,6 +1176,7 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 
 bool NRIPassDispatcher::DispatchFinal(NRIPassDispatchContext& context)
 {
+	NRIScopedGpuTiming gpuTiming(context.mResources.frameBuffer, NRIGpuTimingScope::Final);
 	Clocker clock(NriPTFinal);
 
 	NRITraceSceneConstants constants = {};

@@ -8,6 +8,7 @@
 #include "nri_sky_environment.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
+#include "perf_capture.h"
 #include "printf.h"
 #include "v_video.h"
 
@@ -43,7 +44,7 @@ namespace
 	{
 	public:
 		explicit ScopedFrameOutputPerfTimer(double& targetMs)
-			: mTarget((PerfLoopTraceActive() || ShouldEmitRendererTemporalTraceLogs()) ? &targetMs : nullptr)
+			: mTarget((PerfLoopTraceActive() || ShouldEmitRendererTemporalTraceLogs() || PerfCompactCaptureTimingActive()) ? &targetMs : nullptr)
 		{
 			if (mTarget != nullptr)
 			{

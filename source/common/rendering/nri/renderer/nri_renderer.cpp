@@ -45,6 +45,7 @@
 #include "texinfo.h"
 #include "texturemanager.h"
 #include "d_eventbase.h"
+#include "perf_capture.h"
 #include "v_video.h"
 
 #ifndef NOMINMAX
@@ -438,7 +439,7 @@ namespace
 
 	bool ShouldCollectPtPerfTiming()
 	{
-		return ShouldTracePtPerf() || (bool)nri_ptslowdowntrace;
+		return ShouldTracePtPerf() || (bool)nri_ptslowdowntrace || PerfCompactCaptureTimingActive();
 	}
 
 	bool ShouldCollectTraceShaderStats()

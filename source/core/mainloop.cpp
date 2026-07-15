@@ -96,6 +96,7 @@
 #include "texturemanager.h"
 #include "gameinput.h"
 #include "d_eventbase.h"
+#include "perf_capture.h"
 #include "hw_clock.h"
 
 CVAR(Bool, vid_activeinbackground, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -1437,11 +1438,15 @@ void MainLoop ()
 			traceFrame++;
 			++gPresentationGeneration;
 			if (gPresentationGeneration == 0) gPresentationGeneration = 1;
-			if (PerfLoopTraceActive())
+			PerfCompactCaptureBeginOuterFrame(gPresentationGeneration);
+			if (PerfLoopTraceActive() || PerfCompactCaptureTimingActive())
 			{
-				PerfLoopTraceResetInputStats();
-				PerfLoopTraceReset2DProducerStats();
-				PerfLoopTraceResetCameraStats();
+				if (PerfLoopTraceActive())
+				{
+					PerfLoopTraceResetInputStats();
+					PerfLoopTraceReset2DProducerStats();
+					PerfLoopTraceResetCameraStats();
+				}
 				perfTryRunTicsTraceStats = {};
 				perfDisplayTraceStats = {};
 				perf2DProducerTraceStats = {};
@@ -1480,6 +1485,57 @@ void MainLoop ()
 			const double musicStartMs = I_msTimeF();
 			Mus_UpdateMusic();		// must be at the end.
 			const double musicMs = I_msTimeF() - musicStartMs;
+			if (PerfCompactCaptureTimingActive())
+			{
+				const auto renderTrace = GetPerfRenderTraceStats();
+				PerfCompactOuterFrame compact = {};
+				compact.traceFrame = traceFrame;
+				compact.presentationGeneration = gPresentationGeneration;
+				compact.simulationGeneration = gGameUpdateGeneration;
+				compact.engineGeneration = gEngineUpdateGeneration;
+				compact.gametic = gametic;
+				compact.startFrameMs = startFrameMs;
+				compact.tryMs = tryRunMs;
+				compact.tryTracedMs = perfTryRunTicsTraceStats.durationMs;
+				compact.displayMs = displayMs;
+				compact.displayBeginMs = perfDisplayTraceStats.beginFrameMs;
+				compact.displayRenderMs = perfDisplayTraceStats.renderMs;
+				compact.displayOverlayMs = perfDisplayTraceStats.overlayMs;
+				compact.displayUpdateMs = perfDisplayTraceStats.updateMs;
+				compact.startTicMs = startTicMs;
+				compact.musicMs = musicMs;
+				compact.frameMs = I_msTimeF() - frameStartMs;
+				compact.nriTotalMs = renderTrace.nriAllMs;
+				compact.nriInitializeMs = renderTrace.nriInitializeMs;
+				compact.nriFrameResourcesMs = renderTrace.nriFrameResourcesMs;
+				compact.nriUpdateStateMs = renderTrace.nriUpdateStateMs;
+				compact.nriSceneCaptureMs = renderTrace.nriSceneCaptureMs;
+				compact.nriGeometryBuildMs = renderTrace.nriGeometryBuildMs;
+				compact.nriMaterialBuildMs = renderTrace.nriMaterialBuildMs;
+				compact.nriSceneTexturesMs = renderTrace.nriSceneTexturesMs;
+				compact.nriSceneBuffersMs = renderTrace.nriSceneBuffersMs;
+				compact.nriAccelerationMs = renderTrace.nriAccelerationMs;
+				compact.nriFrameGraphMs = renderTrace.nriFrameGraphMs;
+				compact.nriTraceMs = renderTrace.nriTraceOpaqueMs;
+				compact.nriDenoiseMs = renderTrace.nriDenoiserMs;
+				compact.nriComposeMs = renderTrace.nriCompositionMs;
+				compact.nriUpscaleMs = renderTrace.nriUpscaleMs;
+				compact.nriFinalMs = renderTrace.nriFinalMs;
+				compact.realtics = perfTryRunTicsTraceStats.realtics;
+				compact.availabletics = perfTryRunTicsTraceStats.availabletics;
+				compact.counts = perfTryRunTicsTraceStats.counts;
+				compact.ticks = perfTryRunTicsTraceStats.ticksRun;
+				compact.waitLoops = perfTryRunTicsTraceStats.waitLoopIterations;
+				compact.doWait = perfTryRunTicsTraceStats.doWait;
+				compact.zeroReturn = perfTryRunTicsTraceStats.zeroCountReturn;
+				compact.waitReturn = perfTryRunTicsTraceStats.waitLoopReturn;
+				compact.pausedReturn = perfTryRunTicsTraceStats.pausedReturn;
+				compact.displaySkipped = perfDisplayTraceStats.skippedInactive;
+				compact.levelRendered = perfDisplayTraceStats.levelRendered;
+				compact.stateIsLevel = gamestate == GS_LEVEL;
+				compact.nriActive = renderTrace.nriActive;
+				PerfCompactCaptureEndOuterFrame(compact);
+			}
 
 			if (PerfLoopTraceActive())
 			{
@@ -1728,6 +1784,7 @@ void MainLoop ()
 		}
 		catch (CRecoverableError &error)
 		{
+			PerfCompactCaptureAbort("recoverable-error");
 			if (PerfLoopTraceActive())
 			{
 				Printf("PERF loop trace caught: frame=%llu type=recoverable state=%s gametic=%d\n",
@@ -1746,6 +1803,7 @@ void MainLoop ()
 		}
 		catch (CVMAbortException &error)
 		{
+			PerfCompactCaptureAbort("vm-abort");
 			if (PerfLoopTraceActive())
 			{
 				Printf("PERF loop trace caught: frame=%llu type=vmabort state=%s gametic=%d\n",

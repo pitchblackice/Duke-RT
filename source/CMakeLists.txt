@@ -920,6 +920,8 @@ set (VULKAN_SOURCES
 
 set (NRI_SOURCES
 	common/rendering/nri/system/nri_renderdevice.cpp
+	common/rendering/nri/system/nri_perf_capture.cpp
+	common/rendering/nri/system/nri_gpu_timing.cpp
 	common/rendering/nri/system/nri_hwbuffer.cpp
 	common/rendering/nri/system/nri_hwtexture.cpp
 	common/rendering/nri/framegen/nri_framegen.cpp
@@ -1288,6 +1290,7 @@ set (PCH_SOURCES
 	common/thirdparty/libsmackerdec/src/SmackerDecoder.cpp
 	common/engine/cycler.cpp
 	common/engine/d_event.cpp
+	common/engine/perf_capture.cpp
 	common/engine/date.cpp
 	common/engine/stats.cpp
 	common/engine/sc_man.cpp

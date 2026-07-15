@@ -16,6 +16,7 @@
 #include "../system/nri_renderdevice.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
+#include "perf_capture.h"
 #include "mapinfo.h"
 #include "texturemanager.h"
 #include "texinfo.h"
@@ -362,11 +363,16 @@ namespace
 		return PerfLoopTraceActive() || ShouldEmitRendererTemporalTraceLogs();
 	}
 
+	static bool ShouldCollectStaticScenePerfTiming()
+	{
+		return ShouldTracePtPerf() || PerfCompactCaptureTimingActive();
+	}
+
 	class ScopedStaticScenePerfTimer
 	{
 	public:
 		explicit ScopedStaticScenePerfTimer(double& targetMs)
-			: mTarget(ShouldTracePtPerf() ? &targetMs : nullptr)
+			: mTarget(ShouldCollectStaticScenePerfTiming() ? &targetMs : nullptr)
 		{
 			if (mTarget != nullptr)
 			{

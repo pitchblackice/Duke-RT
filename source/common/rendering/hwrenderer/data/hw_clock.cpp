@@ -41,6 +41,7 @@
 #include "i_interface.h"
 #include "printf.h"
 #include "d_eventbase.h"
+#include "perf_capture.h"
 
 glcycle_t RenderWall,SetupWall,ClipWall;
 glcycle_t RenderFlat,SetupFlat;
@@ -336,5 +337,5 @@ bool glcycle_t::active = false;
 void  checkBenchActive()
 {
 	FStat *stat = FStat::FindStat("rendertimes");
-	glcycle_t::active = ((stat != NULL && stat->isActive()) || printstats || PerfLoopTraceActive());
+	glcycle_t::active = ((stat != NULL && stat->isActive()) || printstats || PerfLoopTraceActive() || PerfCompactCaptureTimingActive());
 }

@@ -13,6 +13,7 @@
 #include "nri_static_scene_geometry.h"
 #include "nri_upload_hash.h"
 #include "c_cvars.h"
+#include "perf_capture.h"
 #include "../../hwrenderer/data/hw_clock.h"
 
 #include <algorithm>
@@ -29,7 +30,7 @@ namespace
 
 	static bool ShouldCollectSceneDataTiming()
 	{
-		return (int)nri_pttraceframes > 0 || (int)perf_looptraceframes > 0 || (bool)nri_ptslowdowntrace;
+		return (int)nri_pttraceframes > 0 || (int)perf_looptraceframes > 0 || (bool)nri_ptslowdowntrace || PerfCompactCaptureTimingActive();
 	}
 
 	class ScopedPtPerfTimer

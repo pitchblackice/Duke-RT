@@ -12,6 +12,7 @@
 #include "../system/nri_renderdevice.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
+#include "perf_capture.h"
 
 #include <algorithm>
 #include <chrono>
@@ -28,7 +29,7 @@ namespace
 
 	bool ShouldCollectAccelerationPerfTiming()
 	{
-		return ((int)perf_looptraceframes > 0 || (!!nri_pttemporaltrace && (int)nri_pttraceframes > 0)) || (bool)nri_ptslowdowntrace;
+		return ((int)perf_looptraceframes > 0 || (!!nri_pttemporaltrace && (int)nri_pttraceframes > 0)) || (bool)nri_ptslowdowntrace || PerfCompactCaptureTimingActive();
 	}
 
 	class ScopedPtPerfTimer

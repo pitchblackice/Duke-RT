@@ -4,6 +4,7 @@
 #include "../system/nri_renderdevice.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
+#include "perf_capture.h"
 #include "gamestruct.h"
 #include "printf.h"
 
@@ -17,7 +18,7 @@ namespace
 {
 	static bool ShouldCollectFrameStatePerfTiming()
 	{
-		return (int)perf_looptraceframes > 0 || ShouldEmitRendererTemporalTraceLogs() || (bool)nri_ptslowdowntrace;
+		return (int)perf_looptraceframes > 0 || ShouldEmitRendererTemporalTraceLogs() || (bool)nri_ptslowdowntrace || PerfCompactCaptureTimingActive();
 	}
 
 	static double FrameStateDurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)

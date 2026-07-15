@@ -30,6 +30,7 @@
 #include "../system/nri_renderdevice.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
+#include "perf_capture.h"
 #include "coreactor.h"
 #include "coreplayer.h"
 #include "hw_voxels.h"
@@ -332,7 +333,7 @@ static bool ShouldTracePtPerf()
 
 static bool ShouldCollectPtPerfTiming()
 {
-	return ShouldTracePtPerf() || (bool)nri_ptslowdowntrace;
+	return ShouldTracePtPerf() || (bool)nri_ptslowdowntrace || PerfCompactCaptureTimingActive();
 }
 
 class ScopedPtPerfTimer
@@ -396,6 +397,7 @@ static NRIFrameDiagnosticPolicy GetFrameDiagnosticPolicy()
 {
 	NRIFrameDiagnosticPolicyInput input = {};
 	input.perfLoopTraceActive = PerfLoopTraceActive();
+	input.compactCaptureActive = PerfCompactCaptureTimingActive();
 	input.selfTestEnabled = nri_ptselftest;
 	input.slowdownTraceEnabled = nri_ptslowdowntrace;
 	input.sceneStatsEnabled = nri_ptscenestats;

@@ -1,4 +1,5 @@
 #include "nri_renderdevice.h"
+#include "nri_gpu_timing.h"
 #include "../renderer/nri_cvars.h"
 #include "../renderer/nri_diagnostic_cadence.h"
 
@@ -2286,12 +2287,17 @@ NRIRenderDevice::NRIRenderDevice(void* hMonitor, bool fullscreen)
 	vendorstring = "NRI";
 	glslversion = 6.6f;
 	mRenderer = std::make_unique<NRIRenderer>(this);
+	mGpuTiming = std::make_unique<NRIGpuTiming>();
 }
 
 NRIRenderDevice::~NRIRenderDevice()
 {
 	mShuttingDown = true;
 	WaitForCommands(true);
+	if (mGpuTiming != nullptr && mDevice != nullptr)
+	{
+		mGpuTiming->Destroy(mCore);
+	}
 
 	delete mVertexData;
 	mVertexData = nullptr;
@@ -2508,6 +2514,10 @@ void NRIRenderDevice::BeginFrame()
 	if (mFrameBegun)
 	{
 		return;
+	}
+	if (mGpuTiming != nullptr && mDevice != nullptr)
+	{
+		mGpuTiming->Prepare(mCore, *mDevice);
 	}
 
 	mFrameGeneration.BeginFrame(*this);
@@ -3409,6 +3419,7 @@ bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 		return true;
 	}
 
+	if (mGpuTiming != nullptr) mGpuTiming->FinalizeSegment(mCore, *mCommandBuffer);
 	mCore.EndCommandBuffer(*mCommandBuffer);
 	mCommandBufferOpen = false;
 
@@ -3417,6 +3428,7 @@ bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 	const nri::Result fenceResult = mCore.CreateFence(*mDevice, 0, submitFence);
 	if (fenceResult != nri::Result::SUCCESS)
 	{
+		if (mGpuTiming != nullptr) mGpuTiming->AbandonSlot(mCurrentQueuedFrameIndex);
 		AbandonRecordingCommandFenceValue();
 		mLastSubmitAndWaitResult = fenceResult;
 		if (mCreatedDeviceApi == nri::GraphicsAPI::D3D12 &&
@@ -3449,6 +3461,7 @@ bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 	}
 	else
 	{
+		if (mGpuTiming != nullptr) mGpuTiming->AbandonSlot(mCurrentQueuedFrameIndex);
 		AbandonRecordingCommandFenceValue();
 	}
 	mLastSubmitAndWaitResult = submitResult;
@@ -3460,7 +3473,12 @@ bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 		{
 			mLastSubmitAndWaitResult = nri::Result::DEVICE_LOST;
 		}
+		else if (mGpuTiming != nullptr)
+		{
+			mGpuTiming->RetireSlot(mCore, mCurrentQueuedFrameIndex);
+		}
 	}
+	if (!waitSucceeded && mGpuTiming != nullptr) mGpuTiming->AbandonSlot(mCurrentQueuedFrameIndex);
 
 	mCore.DestroyFence(submitFence);
 	return submitResult == nri::Result::SUCCESS && waitSucceeded;
@@ -3934,7 +3952,14 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 		return true;
 	}
 
+	NRIScopedGpuTiming sceneGpuTiming(
+		drawmode == DM_MAINVIEW && !portal ? this : nullptr,
+		NRIGpuTimingScope::Scene);
 	const bool rendered = mRenderer->RenderScene(di, drawmode, portal);
+	if (drawmode == DM_MAINVIEW && !portal)
+	{
+		CaptureCompactPerfRendererStats(rendered);
+	}
 	if (!rendered && drawmode == DM_OFFSCREEN && mActiveCanvasTexture != nullptr)
 	{
 		if (!sLoggedOffscreenCanvasSoftFallback || nri_ptdebug > 0)
@@ -9284,11 +9309,19 @@ bool NRIRenderDevice::BeginCommandList(const char* reason, bool waitForSlotReuse
 			}
 		}
 	}
+	if (mGpuTiming != nullptr)
+	{
+		mGpuTiming->RetireSlot(mCore, mCurrentQueuedFrameIndex);
+	}
 
 	mCore.ResetCommandAllocator(*mCommandAllocator);
 	const bool success = mCore.BeginCommandBuffer(*mCommandBuffer, mDescriptorPool) == nri::Result::SUCCESS;
 	mCommandBufferOpen = success;
 	mRecordingCommandFenceValue = success ? mNextCommandFenceValue++ : 0;
+	if (success && mGpuTiming != nullptr)
+	{
+		mGpuTiming->BeginSegment(mCore, *mCommandBuffer, mCurrentQueuedFrameIndex);
+	}
 	if (!success)
 	{
 		Printf(TEXTCOLOR_RED "NRI BeginCommandList failed (reason=%s queued_frame=%u frame_index=%llu frame_begun=%s).\n",
@@ -9462,6 +9495,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 	TransitionTexture(*mCurrentPresentTarget, { nri::AccessBits::NONE, nri::Layout::PRESENT, nri::StageBits::NONE });
 	transitionMs = I_msTimeF() - stageStartMs;
 	stageStartMs = I_msTimeF();
+	if (mGpuTiming != nullptr) mGpuTiming->FinalizeSegment(mCore, *mCommandBuffer);
 	mCore.EndCommandBuffer(*mCommandBuffer);
 	mCommandBufferOpen = false;
 	endCommandMs = I_msTimeF() - stageStartMs;
@@ -9520,6 +9554,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 	}
 	else
 	{
+		if (mGpuTiming != nullptr) mGpuTiming->AbandonSlot(mCurrentQueuedFrameIndex);
 		AbandonRecordingCommandFenceValue();
 	}
 	mFrameGeneration.OnRenderSubmitEnd(*this);
@@ -9613,6 +9648,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 		queuedFrame.lastSubmittedFrameIndex = mFrameIndex;
 		queuedFrame.hasSubmittedWork = true;
 	}
+	CaptureCompactPerfFrameBoundary(presentResult == nri::Result::SUCCESS);
 	RecordFrameSequence(mCurrentSwapChainImage, submittedFenceValue, presentResult);
 	FinishPendingScreenshotReadbacks(submitResult == nri::Result::SUCCESS, submittedFenceValue);
 	const bool tracedGameplayFrame = mTraceThisFrame && (mLastFrameBoundaryStats.pathTracedSceneRendered || mLastFrameBoundaryStats.postProcessInvoked);
@@ -10369,6 +10405,7 @@ bool NRIRenderDevice::CopyTextureToTexture(NRITextureResource& destination, NRIT
 		return true;
 	}
 
+	if (mGpuTiming != nullptr) mGpuTiming->FinalizeSegment(mCore, *mCommandBuffer);
 	mCore.EndCommandBuffer(*mCommandBuffer);
 	mCommandBufferOpen = false;
 
@@ -10376,6 +10413,7 @@ bool NRIRenderDevice::CopyTextureToTexture(NRITextureResource& destination, NRIT
 	nri::Fence* copyFence = nullptr;
 	if (mCore.CreateFence(*mDevice, 0, copyFence) != nri::Result::SUCCESS)
 	{
+		if (mGpuTiming != nullptr) mGpuTiming->AbandonSlot(mCurrentQueuedFrameIndex);
 		AbandonRecordingCommandFenceValue();
 		return false;
 	}
@@ -10396,12 +10434,15 @@ bool NRIRenderDevice::CopyTextureToTexture(NRITextureResource& destination, NRIT
 		if (waitSucceeded)
 		{
 			mRecordingCommandFenceValue = 0;
+			if (mGpuTiming != nullptr) mGpuTiming->RetireSlot(mCore, mCurrentQueuedFrameIndex);
 		}
 	}
 	else
 	{
+		if (mGpuTiming != nullptr) mGpuTiming->AbandonSlot(mCurrentQueuedFrameIndex);
 		AbandonRecordingCommandFenceValue();
 	}
+	if (!waitSucceeded && mGpuTiming != nullptr) mGpuTiming->AbandonSlot(mCurrentQueuedFrameIndex);
 	mCore.DestroyFence(copyFence);
 	return submitResult == nri::Result::SUCCESS && waitSucceeded;
 }

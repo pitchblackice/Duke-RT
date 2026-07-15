@@ -8,6 +8,7 @@
 #include "nri_static_scene_geometry.h"
 #include "../system/nri_renderdevice.h"
 #include "c_cvars.h"
+#include "perf_capture.h"
 
 #include <algorithm>
 #include <chrono>
@@ -19,7 +20,7 @@ namespace
 {
 	bool ShouldTraceResourcePerf()
 	{
-		return PerfLoopTraceActive() || ShouldEmitRendererTemporalTraceLogs();
+		return PerfLoopTraceActive() || ShouldEmitRendererTemporalTraceLogs() || PerfCompactCaptureTimingActive();
 	}
 
 	double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)

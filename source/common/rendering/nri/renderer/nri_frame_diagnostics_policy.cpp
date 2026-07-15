@@ -6,6 +6,7 @@ NRIFrameDiagnosticPolicy EvaluateNRIFrameDiagnosticPolicy(
 	NRIFrameDiagnosticPolicy policy = {};
 	policy.collectBasicSuccessStats =
 		input.perfLoopTraceActive ||
+		input.compactCaptureActive ||
 		input.selfTestEnabled ||
 		input.slowdownTraceEnabled;
 	policy.collectInstanceComposition =
