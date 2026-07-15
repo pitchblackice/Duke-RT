@@ -151,18 +151,51 @@ class IHardwareTexture;
 class FTexture;
 class FGameTexture;
 
+enum class PathTracingSmokeSourceKind : uint32_t
+{
+	Unspecified = 0,
+	ProjectileTrail = 1,
+	SurfaceImpact = 2,
+	ActorAmbient = 3
+};
+
 struct PathTracingWeaponLightEvent
 {
 	FString eventId;
 	int32_t emitterActorIndex = -1;
 	bool hasEmitterActorIndex = false;
+	int32_t ownerActorIndex = -1;
+	bool hasOwnerActorIndex = false;
 	DVector3 worldPosition;
 	DVector3 basisRight;
 	DVector3 basisForward;
 	DVector3 basisUp;
 	bool hasBasis = false;
+	DVector3 incomingDirection;
+	bool hasIncomingDirection = false;
+	DVector3 surfaceNormal;
+	bool hasSurfaceNormal = false;
+	PathTracingSmokeSourceKind smokeSourceKind = PathTracingSmokeSourceKind::Unspecified;
 	double absoluteTimeSeconds = 0.0;
 	uint64_t serial = 0;
+};
+
+// Gameplay can publish smoke provenance without depending on a renderer backend.
+// The base framebuffer adapts this event onto the existing shared PT effect queue.
+struct PathTracingSmokeSourceEvent
+{
+	FString eventId;
+	PathTracingSmokeSourceKind sourceKind = PathTracingSmokeSourceKind::Unspecified;
+	int32_t sourceActorIndex = -1;
+	bool hasSourceActorIndex = false;
+	int32_t ownerActorIndex = -1;
+	bool hasOwnerActorIndex = false;
+	DVector3 worldPosition;
+	DVector3 incomingDirection;
+	bool hasIncomingDirection = false;
+	DVector3 surfaceNormal;
+	bool hasSurfaceNormal = false;
+	double absoluteTimeSeconds = 0.0;
 };
 
 enum class PathTracingActorSpriteTraceStage : uint32_t
@@ -386,6 +419,7 @@ public:
 	virtual void NotifyLevelLoadBegin(const LevelTransitionInfo& info) {}
 	virtual void SetActiveRenderTarget() {}
 	virtual void EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent& event);
+	virtual void EmitPathTracingSmokeSourceEvent(const PathTracingSmokeSourceEvent& event);
 	virtual void EmitPathTracingActorSpriteTraceEvent(const PathTracingActorSpriteTraceEvent& event);
 	virtual void PrintPathTracingSurfaceProbeStatus() const;
 	virtual bool BuildPathTracingEmissiveLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const { outTarget = {}; return false; }

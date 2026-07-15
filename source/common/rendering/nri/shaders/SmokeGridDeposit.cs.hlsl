@@ -2,6 +2,8 @@
 
 int SmokeGridQuantize(float value, float scale)
 {
+	if (!isfinite(value) || !isfinite(scale) || scale <= 0.0)
+		return 0;
 	const float scaled = clamp(value * scale, -1073741824.0, 1073741824.0);
 	return (int)round(scaled);
 }
@@ -55,14 +57,38 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 		const float extinction = mass * max(style.Extinction, 0.0);
 		const float3 scattering = extinction * saturate(style.Albedo);
 		const float anisotropyWeight = dot(scattering, float3(0.2126, 0.7152, 0.0722));
-		const float densityRate = 0.69314718056 / max(style.DensityHalfLife, 0.001);
-		const float coolingRate = 0.69314718056 / max(style.CoolingHalfLife, 0.001);
-		const float3 injectionVelocity = command.Velocity * (style.VelocityInherit * style.MomentumScale) +
-			float3(0.0, -style.RiseVelocity, 0.0);
+		const float densityRate = 0.69314718056 /
+			max(SmokeSourceFinite(style.DensityHalfLife, 0.001), 0.001);
+		const float coolingRate = 0.69314718056 /
+			max(SmokeSourceFinite(style.CoolingHalfLife, 0.001), 0.001);
+		uint randomState = SmokeSourceCellSeed(command.Serial, cell);
+		const float3 randomDirection = SmokeSourceRandomDirection(randomState);
+		const float3 velocityDirection = SmokeSourceVelocityDirection(command.Velocity,
+			command.VelocityCone, randomDirection, randomState);
+		const float3 radialOffset = cellPosition - SmokeSourceFinite3(command.Position, cellPosition);
+		const float radialLengthSquared = dot(radialOffset, radialOffset);
+		const float3 expansionDirection = radialLengthSquared > 1e-8 ?
+			radialOffset * rsqrt(radialLengthSquared) : randomDirection;
+		const float3 inheritedVelocity = SmokeSourceFinite3(command.Velocity, 0.0) *
+			SmokeSourceFinite(style.VelocityInherit, 0.0) *
+			SmokeSourceFinite(style.MomentumScale, 1.0);
+		const float3 stochasticVelocity = velocityDirection *
+			SmokeSourceFinite(style.VelocityRandom, 0.0);
+		const float3 expansionVelocity = expansionDirection *
+			SmokeSourceFinite(style.ExpansionVelocity, 0.0);
+		const float3 riseVelocity = float3(0.0,
+			-SmokeSourceFinite(style.RiseVelocity, 0.0), 0.0);
+		const float3 injectionVelocity = SmokeSourceLimitVelocity(inheritedVelocity +
+			stochasticVelocity + expansionVelocity + riseVelocity, gSmokeGridConstants.MaxVelocity);
 		const float3 momentum = injectionVelocity * mass;
 		int original;
 		InterlockedAdd(gSmokeGridDeposit0[cellIndex].x, SmokeGridQuantize(mass, gSmokeGridConstants.MassQuantization), original);
-		InterlockedAdd(gSmokeGridDeposit0[cellIndex].y, SmokeGridQuantize(mass * max(style.Temperature, 0.0), gSmokeGridConstants.MassQuantization), original);
+		// Store thermal buoyancy as one moment. This preserves the authored
+		// single-style force and makes mixed-style deposition linear.
+		InterlockedAdd(gSmokeGridDeposit0[cellIndex].y, SmokeGridQuantize(mass *
+			max(SmokeSourceFinite(style.Temperature, 0.0), 0.0) *
+			max(SmokeSourceFinite(style.Buoyancy, 0.0), 0.0),
+			gSmokeGridConstants.MassQuantization), original);
 		InterlockedAdd(gSmokeGridDeposit0[cellIndex].z, SmokeGridQuantize(extinction, gSmokeGridConstants.MassQuantization), original);
 		InterlockedAdd(gSmokeGridDeposit0[cellIndex].w, SmokeGridQuantize(anisotropyWeight * clamp(style.Anisotropy, -0.95, 0.95), gSmokeGridConstants.MassQuantization), original);
 		InterlockedAdd(gSmokeGridDeposit1[cellIndex].x, SmokeGridQuantize(momentum.x, gSmokeGridConstants.MomentumQuantization), original);
@@ -74,8 +100,15 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 		InterlockedAdd(gSmokeGridDeposit2[cellIndex].z, SmokeGridQuantize(scattering.z, gSmokeGridConstants.MassQuantization), original);
 		InterlockedAdd(gSmokeGridDeposit2[cellIndex].w, SmokeGridQuantize(anisotropyWeight, gSmokeGridConstants.MassQuantization), original);
 		InterlockedAdd(gSmokeGridDeposit3[cellIndex].x, SmokeGridQuantize(mass * coolingRate, gSmokeGridConstants.MassQuantization), original);
-		InterlockedAdd(gSmokeGridDeposit3[cellIndex].y, SmokeGridQuantize(mass * max(style.Buoyancy, 0.0), gSmokeGridConstants.MassQuantization), original);
-		InterlockedAdd(gSmokeGridDeposit3[cellIndex].z, SmokeGridQuantize(mass * max(style.Drag, 0.0), gSmokeGridConstants.MassQuantization), original);
+		InterlockedAdd(gSmokeGridDeposit3[cellIndex].y, SmokeGridQuantize(mass *
+			max(SmokeSourceFinite(style.Turbulence, 0.0), 0.0),
+			gSmokeGridConstants.MassQuantization), original);
+		InterlockedAdd(gSmokeGridDeposit3[cellIndex].z, SmokeGridQuantize(mass *
+			max(SmokeSourceFinite(style.Drag, 0.0), 0.0),
+			gSmokeGridConstants.MassQuantization), original);
+		InterlockedAdd(gSmokeGridDeposit3[cellIndex].w, SmokeGridQuantize(mass *
+			max(abs(SmokeSourceFinite(style.TurbulenceScale, gSmokeGridConstants.CellSize)), 0.0001),
+			gSmokeGridConstants.MassQuantization), original);
 		InterlockedAdd(gSmokeGridControl[0].DepositedMassQ, (uint)max(SmokeGridQuantize(mass, gSmokeGridConstants.MassQuantization), 0));
 		InterlockedAdd(gSmokeGridControl[0].DepositionCells, 1u);
 	}

@@ -61,6 +61,9 @@ public:
 	virtual void Serialize(FSerializer& arc);
 
 	virtual void BeginPlay() {}
+	// Renderer-facing provenance hook. Games whose actors carry an owner can
+	// expose it without making common renderer code depend on game classes.
+	virtual DCoreActor* GetOwnerActor() { return nullptr; }
 	void OnDestroy() override;
 	size_t PropagateMark() override;
 	double GetOffsetAndHeight(double& height);
@@ -511,4 +514,3 @@ inline DCoreActor* GetDefaultByType(const PClass* type)
 {
 	return (DCoreActor*)(type->Defaults);
 }
-

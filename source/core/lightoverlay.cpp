@@ -68,7 +68,21 @@ namespace
 
 	static const char* SmokeTriggerName(LightOverlaySmokeTrigger trigger)
 	{
-		return trigger == LightOverlaySmokeTrigger::Spawn ? "spawn" : "spawn";
+		switch (trigger)
+		{
+		case LightOverlaySmokeTrigger::Interval: return "interval";
+		default: return "spawn";
+		}
+	}
+
+	static const char* SmokeDirectionPolicyName(LightOverlaySmokeDirectionPolicy policy)
+	{
+		switch (policy)
+		{
+		case LightOverlaySmokeDirectionPolicy::Normal: return "normal";
+		case LightOverlaySmokeDirectionPolicy::Incoming: return "incoming";
+		default: return "aim";
+		}
 	}
 
 	static void CopyVector3(const float source[3], float destination[3])
@@ -859,14 +873,26 @@ namespace
 			{
 				sc.MustGetString();
 				if (sc.Compare("actorclass")) { sc.MustGetString(); rule.actorClassName = sc.String; }
+				else if (sc.Compare("ownerclass")) { sc.MustGetString(); rule.ownerClassName = sc.String; }
+				else if (sc.Compare("excludeownerclass")) { sc.MustGetString(); rule.excludeOwnerClassName = sc.String; }
 				else if (sc.Compare("trigger"))
 				{
 					sc.MustGetString();
-					if (stricmp(sc.String, "spawn")) sc.ScriptMessage("Invalid smoke trigger '%s'; expected spawn", sc.String);
+					if (!stricmp(sc.String, "spawn")) rule.trigger = LightOverlaySmokeTrigger::Spawn;
+					else if (!stricmp(sc.String, "interval")) rule.trigger = LightOverlaySmokeTrigger::Interval;
+					else sc.ScriptMessage("Invalid smoke trigger '%s'; expected spawn or interval", sc.String);
 				}
 				else if (sc.Compare("style")) { sc.MustGetString(); rule.styleId = sc.String; }
 				else if (sc.Compare("count")) { sc.MustGetNumber(); rule.count = (uint32_t)std::clamp(sc.Number, 1, 256); }
+				else if (sc.Compare("offset")) MustParseVector3(rule.offset);
 				else if (sc.Compare("spawnradius")) { sc.MustGetFloat(); rule.spawnRadius = std::max(0.0f, (float)sc.Float); }
+				else if (sc.Compare("densityscale")) { sc.MustGetFloat(); rule.densityScale = std::max(0.0f, (float)sc.Float); }
+				else if (sc.Compare("radiusscale")) { sc.MustGetFloat(); rule.radiusScale = std::max(0.0f, (float)sc.Float); }
+				else if (sc.Compare("velocitycone")) { sc.MustGetFloat(); rule.velocityCone = std::clamp((float)sc.Float, 0.0f, 180.0f); }
+				else if (sc.Compare("velocityscale")) { sc.MustGetFloat(); rule.velocityScale = std::max(0.0f, (float)sc.Float); }
+				else if (sc.Compare("intervalseconds")) { sc.MustGetFloat(); rule.intervalSeconds = std::max(0.001f, (float)sc.Float); }
+				else if (sc.Compare("spacing")) { sc.MustGetFloat(); rule.spacing = std::max(0.0f, (float)sc.Float); }
+				else if (sc.Compare("maxsegmentsperframe")) { sc.MustGetNumber(); rule.maxSegmentsPerFrame = (uint32_t)std::clamp(sc.Number, 1, 256); }
 				else SkipUnknownField("smokeactorrule", sc.String);
 			}
 			FinalizeSourceLocation(rule.source);
@@ -890,6 +916,16 @@ namespace
 				else if (sc.Compare("densityscale")) { sc.MustGetFloat(); rule.densityScale = std::max(0.0f, (float)sc.Float); }
 				else if (sc.Compare("radiusscale")) { sc.MustGetFloat(); rule.radiusScale = std::max(0.0f, (float)sc.Float); }
 				else if (sc.Compare("velocitycone")) { sc.MustGetFloat(); rule.velocityCone = std::clamp((float)sc.Float, 0.0f, 180.0f); }
+				else if (sc.Compare("velocityscale")) { sc.MustGetFloat(); rule.velocityScale = std::max(0.0f, (float)sc.Float); }
+				else if (sc.Compare("normaloffset")) { sc.MustGetFloat(); rule.normalOffset = (float)sc.Float; }
+				else if (sc.Compare("direction"))
+				{
+					sc.MustGetString();
+					if (!stricmp(sc.String, "aim")) rule.directionPolicy = LightOverlaySmokeDirectionPolicy::Aim;
+					else if (!stricmp(sc.String, "normal")) rule.directionPolicy = LightOverlaySmokeDirectionPolicy::Normal;
+					else if (!stricmp(sc.String, "incoming")) rule.directionPolicy = LightOverlaySmokeDirectionPolicy::Incoming;
+					else sc.ScriptMessage("Invalid smoke direction '%s'; expected aim, normal, or incoming", sc.String);
+				}
 				else SkipUnknownField("smokeeventrule", sc.String);
 			}
 			FinalizeSourceLocation(rule.source);
@@ -1763,10 +1799,20 @@ namespace
 		AppendLine(text, 1, FStringf("smokeactorrule %s", QuoteLightOverlayString(rule.id).GetChars()));
 		AppendLine(text, 1, "{");
 		AppendLine(text, 2, FStringf("actorclass %s", QuoteLightOverlayString(rule.actorClassName).GetChars()));
+		if (rule.ownerClassName.IsNotEmpty()) AppendLine(text, 2, FStringf("ownerclass %s", QuoteLightOverlayString(rule.ownerClassName).GetChars()));
+		if (rule.excludeOwnerClassName.IsNotEmpty()) AppendLine(text, 2, FStringf("excludeownerclass %s", QuoteLightOverlayString(rule.excludeOwnerClassName).GetChars()));
 		AppendLine(text, 2, FStringf("trigger %s", SmokeTriggerName(rule.trigger)));
 		AppendLine(text, 2, FStringf("style %s", QuoteLightOverlayString(rule.styleId).GetChars()));
 		AppendLine(text, 2, FStringf("count %u", rule.count));
+		AppendVector3Field(text, 2, "offset", rule.offset);
 		AppendLine(text, 2, FStringf("spawnradius %s", FormatLightOverlayFloat(rule.spawnRadius).GetChars()));
+		AppendLine(text, 2, FStringf("densityscale %s", FormatLightOverlayFloat(rule.densityScale).GetChars()));
+		AppendLine(text, 2, FStringf("radiusscale %s", FormatLightOverlayFloat(rule.radiusScale).GetChars()));
+		AppendLine(text, 2, FStringf("velocitycone %s", FormatLightOverlayFloat(rule.velocityCone).GetChars()));
+		AppendLine(text, 2, FStringf("velocityscale %s", FormatLightOverlayFloat(rule.velocityScale).GetChars()));
+		AppendLine(text, 2, FStringf("intervalseconds %s", FormatLightOverlayFloat(rule.intervalSeconds).GetChars()));
+		AppendLine(text, 2, FStringf("spacing %s", FormatLightOverlayFloat(rule.spacing).GetChars()));
+		AppendLine(text, 2, FStringf("maxsegmentsperframe %u", rule.maxSegmentsPerFrame));
 		AppendLine(text, 1, "}");
 	}
 
@@ -1781,6 +1827,9 @@ namespace
 		AppendLine(text, 2, FStringf("densityscale %s", FormatLightOverlayFloat(rule.densityScale).GetChars()));
 		AppendLine(text, 2, FStringf("radiusscale %s", FormatLightOverlayFloat(rule.radiusScale).GetChars()));
 		AppendLine(text, 2, FStringf("velocitycone %s", FormatLightOverlayFloat(rule.velocityCone).GetChars()));
+		AppendLine(text, 2, FStringf("velocityscale %s", FormatLightOverlayFloat(rule.velocityScale).GetChars()));
+		AppendLine(text, 2, FStringf("normaloffset %s", FormatLightOverlayFloat(rule.normalOffset).GetChars()));
+		AppendLine(text, 2, FStringf("direction %s", SmokeDirectionPolicyName(rule.directionPolicy)));
 		AppendLine(text, 1, "}");
 	}
 
@@ -2180,14 +2229,23 @@ namespace
 		}
 		for (const auto* rule : SortRulesByOrder(database.smokeActorRules))
 		{
-			Printf("LIGHTOVR smokeactorrule %s: actorclass=%s trigger=%s style=%s count=%u spawnradius=%.3f source=%s\n",
-				rule->id.GetChars(), rule->actorClassName.GetChars(), SmokeTriggerName(rule->trigger), rule->styleId.GetChars(),
-				rule->count, rule->spawnRadius, SourceLocationText(rule->source).GetChars());
+			Printf("LIGHTOVR smokeactorrule %s: actorclass=%s ownerclass=%s excludeownerclass=%s trigger=%s style=%s "
+				"count=%u offset=(%.3f,%.3f,%.3f) spawnradius=%.3f densityscale=%.3f radiusscale=%.3f "
+				"velocitycone=%.3f velocityscale=%.3f intervalseconds=%.3f spacing=%.3f maxsegmentsperframe=%u source=%s\n",
+				rule->id.GetChars(), rule->actorClassName.GetChars(),
+				rule->ownerClassName.IsNotEmpty() ? rule->ownerClassName.GetChars() : "none",
+				rule->excludeOwnerClassName.IsNotEmpty() ? rule->excludeOwnerClassName.GetChars() : "none",
+				SmokeTriggerName(rule->trigger), rule->styleId.GetChars(), rule->count,
+				rule->offset[0], rule->offset[1], rule->offset[2], rule->spawnRadius, rule->densityScale,
+				rule->radiusScale, rule->velocityCone, rule->velocityScale, rule->intervalSeconds, rule->spacing,
+				rule->maxSegmentsPerFrame, SourceLocationText(rule->source).GetChars());
 		}
 		for (const auto* rule : SortRulesByOrder(database.smokeEventRules))
 		{
-			Printf("LIGHTOVR smokeeventrule %s: style=%s count=%u spawnradius=%.3f source=%s\n",
-				rule->id.GetChars(), rule->styleId.GetChars(), rule->count, rule->spawnRadius,
+			Printf("LIGHTOVR smokeeventrule %s: style=%s count=%u spawnradius=%.3f velocityscale=%.3f "
+				"normaloffset=%.3f direction=%s source=%s\n",
+				rule->id.GetChars(), rule->styleId.GetChars(), rule->count, rule->spawnRadius, rule->velocityScale,
+				rule->normalOffset, SmokeDirectionPolicyName(rule->directionPolicy),
 				SourceLocationText(rule->source).GetChars());
 		}
 
@@ -2333,15 +2391,22 @@ namespace
 		}
 		for (const auto& rule : resolved.smokeActorRules)
 		{
-			Printf("LIGHTOVR resolved smokeactorrule %s: actorclass=%s resolved=%s style=%s style_resolved=%s style_index=%u source=%s\n",
+			Printf("LIGHTOVR resolved smokeactorrule %s: actorclass=%s resolved=%s ownerclass=%s owner_resolved=%s "
+				"excludeownerclass=%s exclude_owner_resolved=%s trigger=%s style=%s style_resolved=%s style_index=%u source=%s\n",
 				rule.id.GetChars(), rule.actorClassName.GetChars(), rule.actorClassResolved ? "yes" : "no",
-				rule.styleId.GetChars(), rule.styleResolved ? "yes" : "no", rule.styleIndex,
+				rule.ownerClassName.IsNotEmpty() ? rule.ownerClassName.GetChars() : "none",
+				rule.ownerClassName.IsEmpty() ? "n/a" : (rule.ownerClassResolved ? "yes" : "no"),
+				rule.excludeOwnerClassName.IsNotEmpty() ? rule.excludeOwnerClassName.GetChars() : "none",
+				rule.excludeOwnerClassName.IsEmpty() ? "n/a" : (rule.excludeOwnerClassResolved ? "yes" : "no"),
+				SmokeTriggerName(rule.trigger), rule.styleId.GetChars(), rule.styleResolved ? "yes" : "no", rule.styleIndex,
 				SourceLocationText(rule.source).GetChars());
 		}
 		for (const auto& rule : resolved.smokeEventRules)
 		{
-			Printf("LIGHTOVR resolved smokeeventrule %s: style=%s style_resolved=%s style_index=%u source=%s\n",
+			Printf("LIGHTOVR resolved smokeeventrule %s: style=%s style_resolved=%s style_index=%u "
+				"velocityscale=%.3f normaloffset=%.3f direction=%s source=%s\n",
 				rule.id.GetChars(), rule.styleId.GetChars(), rule.styleResolved ? "yes" : "no", rule.styleIndex,
+				rule.velocityScale, rule.normalOffset, SmokeDirectionPolicyName(rule.directionPolicy),
 				SourceLocationText(rule.source).GetChars());
 		}
 
@@ -2670,6 +2735,16 @@ namespace
 			static_cast<ParsedLightOverlaySmokeActorRule&>(destination) = source;
 			destination.actorClass = PClass::FindActor(source.actorClassName);
 			destination.actorClassResolved = destination.actorClass != nullptr;
+			if (source.ownerClassName.IsNotEmpty())
+			{
+				destination.ownerClass = PClass::FindActor(source.ownerClassName);
+				destination.ownerClassResolved = destination.ownerClass != nullptr;
+			}
+			if (source.excludeOwnerClassName.IsNotEmpty())
+			{
+				destination.excludeOwnerClass = PClass::FindActor(source.excludeOwnerClassName);
+				destination.excludeOwnerClassResolved = destination.excludeOwnerClass != nullptr;
+			}
 			const auto style = smokeStyleLookup.find(MakeNormalizedKey(source.styleId));
 			destination.styleResolved = style != smokeStyleLookup.end();
 			if (destination.styleResolved) destination.styleIndex = style->second;

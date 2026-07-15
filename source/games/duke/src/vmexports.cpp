@@ -23,9 +23,11 @@ See the GNU General Public License for more details.
 #include "buildtiles.h"
 #include "global.h"
 #include "funct.h"
+#include "v_video.h"
 BEGIN_DUKE_NS
 
 void resetswitch(int tag);
+static constexpr double PathTracingBuildTickSeconds = 1.0 / 120.0;
 
 //---------------------------------------------------------------------------
 //
@@ -61,6 +63,62 @@ DEFINE_ACTION_FUNCTION(_Duke, MaxAmmoAmount)
 	PARAM_INT(weap);
 	int max = weap < 0 || weap >= MAX_WEAPONS ? 0 : gs.max_ammo_amount[weap];
 	ACTION_RETURN_INT(max);
+}
+
+DEFINE_ACTION_FUNCTION(_Duke, EmitPathTracingSmokeSourceEvent)
+{
+	PARAM_PROLOGUE;
+	PARAM_STRING(eventId);
+	PARAM_INT(sourceKind);
+	PARAM_OBJECT(source, DDukeActor);
+	PARAM_OBJECT(owner, DDukeActor);
+	PARAM_FLOAT(positionX);
+	PARAM_FLOAT(positionY);
+	PARAM_FLOAT(positionZ);
+	PARAM_FLOAT(incomingX);
+	PARAM_FLOAT(incomingY);
+	PARAM_FLOAT(incomingZ);
+	PARAM_FLOAT(normalX);
+	PARAM_FLOAT(normalY);
+	PARAM_FLOAT(normalZ);
+
+	if (screen == nullptr || eventId.IsEmpty())
+	{
+		return 0;
+	}
+
+	PathTracingSmokeSourceEvent event;
+	event.eventId = eventId;
+	event.sourceKind = sourceKind >= (int)PathTracingSmokeSourceKind::Unspecified &&
+		sourceKind <= (int)PathTracingSmokeSourceKind::ActorAmbient
+		? (PathTracingSmokeSourceKind)sourceKind
+		: PathTracingSmokeSourceKind::Unspecified;
+	if (source != nullptr)
+	{
+		event.sourceActorIndex = source->GetIndex();
+		event.hasSourceActorIndex = true;
+	}
+	if (owner != nullptr)
+	{
+		event.ownerActorIndex = owner->GetIndex();
+		event.hasOwnerActorIndex = true;
+	}
+	event.worldPosition = DVector3(positionX, positionY, positionZ);
+	event.incomingDirection = DVector3(incomingX, incomingY, incomingZ);
+	event.hasIncomingDirection = !event.incomingDirection.isZero();
+	if (event.hasIncomingDirection)
+	{
+		event.incomingDirection.MakeUnit();
+	}
+	event.surfaceNormal = DVector3(normalX, normalY, normalZ);
+	event.hasSurfaceNormal = !event.surfaceNormal.isZero();
+	if (event.hasSurfaceNormal)
+	{
+		event.surfaceNormal.MakeUnit();
+	}
+	event.absoluteTimeSeconds = PlayClock > 0 ? (double)PlayClock * PathTracingBuildTickSeconds : 0.0;
+	screen->EmitPathTracingSmokeSourceEvent(event);
+	return 0;
 }
 
 void S_PlaySpecialMusic(unsigned int m);

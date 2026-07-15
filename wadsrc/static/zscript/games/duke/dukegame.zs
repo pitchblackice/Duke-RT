@@ -159,6 +159,13 @@ struct Duke native
 	};
 	
 	const SLEEPTIME = 1536;
+	enum PTSmokeSourceKind
+	{
+		PTSMOKE_UNSPECIFIED = 0,
+		PTSMOKE_PROJECTILE_TRAIL = 1,
+		PTSMOKE_SURFACE_IMPACT = 2,
+		PTSMOKE_ACTOR_AMBIENT = 3,
+	}
 
 
 	native static void PlaySpecialMusic(int which);
@@ -168,6 +175,8 @@ struct Duke native
 	native static DukePlayer GetViewPlayer();
 	native static DukePlayer GetLocalPlayer();
 	native static int MaxAmmoAmount(int weap);
+	native static void EmitPathTracingSmokeSourceEvent(String eventId, int sourceKind,
+		DukeActor source, DukeActor owner, Vector3 position, Vector3 incomingDirection, Vector3 surfaceNormal);
 	native static DukePlayer checkcursectnums(sectortype sect);
 	native static int global_random();
 	native static int GetSoundFlags(Sound snd);

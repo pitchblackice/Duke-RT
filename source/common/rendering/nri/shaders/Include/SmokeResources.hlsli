@@ -4,6 +4,7 @@
 #include "NRI.hlsl"
 #include "SmokeConstants.hlsli"
 #include "SmokeData.hlsli"
+#include "SmokeSourceShaping.hlsli"
 #include "SmokeGridData.hlsli"
 #include "SmokeGridLightingData.hlsli"
 
@@ -298,20 +299,5 @@ RWTexture2D<float4> gSmokeVolumeHistoryOutput : register(u3, space3);
 RWTexture2D<float4> gSmokeVolumeMetaOutput : register(u4, space3);
 
 NRI_ROOT_CONSTANTS(SmokeConstants, gSmokeConstants, 0, NRI_SMOKE_SET_ROOT);
-
-uint SmokeHash(uint value)
-{
-	value ^= value >> 16u;
-	value *= 0x7feb352du;
-	value ^= value >> 15u;
-	value *= 0x846ca68bu;
-	return value ^ (value >> 16u);
-}
-
-float SmokeRandom01(inout uint state)
-{
-	state = SmokeHash(state);
-	return (float)(state & 0x00ffffffu) / 16777216.0;
-}
 
 #endif

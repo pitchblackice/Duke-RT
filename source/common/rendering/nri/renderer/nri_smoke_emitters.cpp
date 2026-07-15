@@ -5,6 +5,7 @@
 #include "printf.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace
 {
@@ -21,6 +22,24 @@ namespace
 		outDirection[1] = (float)-worldDirection.Z;
 		outDirection[2] = (float)-worldDirection.Y;
 	}
+
+	bool ActorMatchesClass(const DCoreActor* actor, const PClassActor* actorClass)
+	{
+		return actor != nullptr && actorClass != nullptr && actor->GetClass() != nullptr &&
+			(actor->GetClass() == actorClass || actor->GetClass()->IsDescendantOf(actorClass));
+	}
+
+	DVector3 ActorForward(const DCoreActor* actor)
+	{
+		const DVector2 forward = actor->spr.Angles.Yaw.ToVector();
+		return DVector3(forward.X, forward.Y, 0.0);
+	}
+
+	DVector3 ActorVelocity(const DCoreActor* actor)
+	{
+		const DVector2 forward = actor->spr.Angles.Yaw.ToVector();
+		return DVector3(forward.X * actor->vel.X, forward.Y * actor->vel.X, actor->vel.Z);
+	}
 }
 
 size_t NRISmokeEmitterSystem::IdentityHash::operator()(const Identity& value) const
@@ -33,11 +52,11 @@ size_t NRISmokeEmitterSystem::IdentityHash::operator()(const Identity& value) co
 
 void NRISmokeEmitterSystem::Reset()
 {
-	mEmitted.clear();
+	mActorStates.clear();
 	mGeneration = 0;
 }
 
-void NRISmokeEmitterSystem::Gather(uint32_t epoch, const TArray<PathTracingWeaponLightEvent>& weaponEvents,
+void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, const TArray<PathTracingWeaponLightEvent>& weaponEvents,
 	std::vector<NRISmokeStyleGpu>& styles, std::vector<NRISmokeInjectionCommandGpu>& commands,
 	uint32_t& nextSerial, uint32_t traceMode)
 {
@@ -45,7 +64,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, const TArray<PathTracingWeapo
 	if (mGeneration != resolved.resolvedGeneration)
 	{
 		mGeneration = resolved.resolvedGeneration;
-		mEmitted.clear();
+		mActorStates.clear();
 	}
 	styles.clear();
 	styles.resize(std::max<uint32_t>(1u, resolved.smokeStyles.Size()));
@@ -73,7 +92,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, const TArray<PathTracingWeapo
 		target.coolingHalfLife = source.coolingHalfLife;
 	}
 
-	std::unordered_set<Identity, IdentityHash> observed;
+	for (auto& entry : mActorStates) entry.second.observed = false;
 	std::vector<uint32_t> observedPerRule;
 	std::vector<uint32_t> emittedPerRule;
 	std::vector<uint32_t> particlesPerRule;
@@ -91,36 +110,104 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, const TArray<PathTracingWeapo
 		for (uint32_t ruleIndex = 0; ruleIndex < resolved.smokeActorRules.Size(); ++ruleIndex)
 		{
 			const auto& rule = resolved.smokeActorRules[ruleIndex];
-			if (!rule.actorClassResolved || !rule.styleResolved || rule.actorClass == nullptr ||
-				(actor->GetClass() != rule.actorClass && !actor->GetClass()->IsDescendantOf(rule.actorClass))) continue;
+			if (!rule.actorClassResolved || !rule.styleResolved || !ActorMatchesClass(actor, rule.actorClass)) continue;
+			DCoreActor* owner = actor->GetOwnerActor();
+			if (!rule.ownerClassName.IsEmpty() && (!rule.ownerClassResolved || !ActorMatchesClass(owner, rule.ownerClass))) continue;
+			if (!rule.excludeOwnerClassName.IsEmpty() &&
+				(!rule.excludeOwnerClassResolved || ActorMatchesClass(owner, rule.excludeOwnerClass))) continue;
 			Identity identity = { ruleIndex, (int32_t)actor->GetIndex(), actor };
-			observed.insert(identity);
-			if (traceMode != 0) observedPerRule[ruleIndex]++;
-			if (mEmitted.find(identity) != mEmitted.end()) continue;
-			NRISmokeInjectionCommandGpu command = {};
-			command.position[0] = (float)actor->spr.pos.X;
-			// Match WorldToPathTracingPosition used by analytic actor lights.
-			command.position[1] = (float)-actor->spr.pos.Z;
-			command.position[2] = (float)-actor->spr.pos.Y;
-			command.spawnRadius = rule.spawnRadius;
-			command.styleIndex = rule.styleIndex;
-			command.count = rule.count;
-			command.serial = nextSerial++;
-			command.epoch = epoch;
-			commands.push_back(command);
-			mEmitted.insert(identity);
-			if (traceMode != 0)
+			const DVector3 currentPosition = actor->spr.pos;
+			auto stateIt = mActorStates.find(identity);
+			if (stateIt == mActorStates.end())
 			{
-				emittedPerRule[ruleIndex]++;
-				particlesPerRule[ruleIndex] += command.count;
+				ActorState state = {};
+				state.previousPosition = currentPosition;
+				state.previousTimeSeconds = gameplayTimeSeconds;
+				stateIt = mActorStates.emplace(identity, state).first;
 			}
-			if (traceMode >= 2 && verbosePrinted < 32u)
+			ActorState& state = stateIt->second;
+			state.observed = true;
+			if (traceMode != 0) observedPerRule[ruleIndex]++;
+
+			std::vector<DVector3> emissionPositions;
+			if (!state.emitted)
 			{
-				Printf("NRI PT smoke emitter: event=spawn rule=%s class=%s actor=%d identity=%p serial=%u world=(%.3f,%.3f,%.3f) render=(%.3f,%.3f,%.3f) style=%u particles=%u\n",
-					rule.id.GetChars(), actor->GetClass()->TypeName.GetChars(), actor->GetIndex(), actor, command.serial,
-					actor->spr.pos.X, actor->spr.pos.Y, actor->spr.pos.Z,
-					command.position[0], command.position[1], command.position[2], command.styleIndex, command.count);
-				verbosePrinted++;
+				emissionPositions.push_back(currentPosition);
+				state.emitted = true;
+			}
+			else if (rule.trigger == LightOverlaySmokeTrigger::Interval)
+			{
+				const DVector3 segment = currentPosition - state.previousPosition;
+				const double segmentLength = segment.Length();
+				uint32_t candidateCount = 0;
+				double firstCrossing = 0.0;
+				double measure = 0.0;
+				const bool spatialCadence = rule.spacing > 0.0f && segmentLength > 0.0;
+				if (spatialCadence)
+				{
+					state.intervalRemainder = 0.0;
+					measure = segmentLength;
+					const double total = (double)state.spacingRemainder + measure;
+					candidateCount = (uint32_t)std::floor(total / (double)rule.spacing);
+					firstCrossing = (double)rule.spacing - (double)state.spacingRemainder;
+					state.spacingRemainder = (float)std::fmod(total, (double)rule.spacing);
+				}
+				else
+				{
+					measure = std::max(0.0, gameplayTimeSeconds - state.previousTimeSeconds);
+					const double total = state.intervalRemainder + measure;
+					candidateCount = (uint32_t)std::floor(total / (double)rule.intervalSeconds);
+					firstCrossing = (double)rule.intervalSeconds - state.intervalRemainder;
+					state.intervalRemainder = std::fmod(total, (double)rule.intervalSeconds);
+				}
+
+				const uint32_t emitCount = std::min(candidateCount, rule.maxSegmentsPerFrame);
+				const uint32_t skipped = candidateCount - emitCount;
+				const double stride = spatialCadence ? (double)rule.spacing : (double)rule.intervalSeconds;
+				for (uint32_t emissionIndex = 0; emissionIndex < emitCount; ++emissionIndex)
+				{
+					const double crossing = firstCrossing + (double)(skipped + emissionIndex) * stride;
+					const double fraction = measure > 0.0 ? std::clamp(crossing / measure, 0.0, 1.0) : 1.0;
+					emissionPositions.push_back(state.previousPosition + segment * fraction);
+				}
+			}
+
+			state.previousPosition = currentPosition;
+			state.previousTimeSeconds = gameplayTimeSeconds;
+			const DVector3 forward = ActorForward(actor);
+			const DVector3 right(-forward.Y, forward.X, 0.0);
+			const DVector3 up(0.0, 0.0, 1.0);
+			const DVector3 offset = right * rule.offset[0] + forward * rule.offset[1] + up * rule.offset[2];
+			const DVector3 velocity = ActorVelocity(actor) * rule.velocityScale;
+			for (const DVector3& emissionPosition : emissionPositions)
+			{
+				NRISmokeInjectionCommandGpu command = {};
+				WorldToPathTracingPosition(emissionPosition + offset, command.position);
+				WorldToPathTracingDirection(velocity, command.velocity);
+				command.spawnRadius = rule.spawnRadius;
+				command.styleIndex = rule.styleIndex;
+				command.count = rule.count;
+				command.serial = nextSerial++;
+				command.densityScale = rule.densityScale;
+				command.radiusScale = rule.radiusScale;
+				command.velocityCone = rule.velocityCone;
+				command.epoch = epoch;
+				commands.push_back(command);
+				if (traceMode != 0)
+				{
+					emittedPerRule[ruleIndex]++;
+					particlesPerRule[ruleIndex] += command.count;
+				}
+				if (traceMode >= 2 && verbosePrinted < 32u)
+				{
+					Printf("NRI PT smoke emitter: event=%s rule=%s class=%s actor=%d identity=%p serial=%u world=(%.3f,%.3f,%.3f) render=(%.3f,%.3f,%.3f) velocity=(%.3f,%.3f,%.3f) style=%u particles=%u\n",
+						rule.trigger == LightOverlaySmokeTrigger::Interval ? "interval" : "spawn",
+						rule.id.GetChars(), actor->GetClass()->TypeName.GetChars(), actor->GetIndex(), actor, command.serial,
+						emissionPosition.X + offset.X, emissionPosition.Y + offset.Y, emissionPosition.Z + offset.Z,
+						command.position[0], command.position[1], command.position[2],
+						command.velocity[0], command.velocity[1], command.velocity[2], command.styleIndex, command.count);
+					verbosePrinted++;
+				}
 			}
 		}
 	}
@@ -134,8 +221,8 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, const TArray<PathTracingWeapo
 				rule.id.GetChars(), rule.actorClassName.GetChars(), observedPerRule[ruleIndex], emittedPerRule[ruleIndex], particlesPerRule[ruleIndex]);
 		}
 	}
-	for (auto it = mEmitted.begin(); it != mEmitted.end(); )
-		it = observed.find(*it) == observed.end() ? mEmitted.erase(it) : std::next(it);
+	for (auto it = mActorStates.begin(); it != mActorStates.end(); )
+		it = !it->second.observed ? mActorStates.erase(it) : std::next(it);
 
 	uint32_t eventCommands = 0;
 	uint32_t eventParticles = 0;
@@ -154,11 +241,44 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, const TArray<PathTracingWeapo
 					event.basisForward * rule.offset[1] +
 					event.basisUp * rule.offset[2];
 			}
+			if (event.hasSurfaceNormal && !event.surfaceNormal.isZero())
+				worldPosition += event.surfaceNormal.Unit() * rule.normalOffset;
+
+			DVector3 worldVelocity;
+			bool directionAvailable = false;
+			switch (rule.directionPolicy)
+			{
+			case LightOverlaySmokeDirectionPolicy::Normal:
+				if (event.hasSurfaceNormal && !event.surfaceNormal.isZero())
+				{
+					worldVelocity = event.surfaceNormal.Unit();
+					directionAvailable = true;
+				}
+				break;
+			case LightOverlaySmokeDirectionPolicy::Incoming:
+				if (event.hasIncomingDirection && !event.incomingDirection.isZero())
+				{
+					worldVelocity = event.incomingDirection.Unit();
+					directionAvailable = true;
+				}
+				break;
+			case LightOverlaySmokeDirectionPolicy::Aim:
+			default:
+				break;
+			}
+			// Aim is also the safe fallback for older producers and events that do
+			// not carry the requested optional normal/incoming vector.
+			if (!directionAvailable && event.hasBasis && !event.basisForward.isZero())
+			{
+				worldVelocity = event.basisForward.Unit();
+				directionAvailable = true;
+			}
+			worldVelocity *= rule.velocityScale;
 
 			NRISmokeInjectionCommandGpu command = {};
 			WorldToPathTracingPosition(worldPosition, command.position);
-			if (event.hasBasis)
-				WorldToPathTracingDirection(event.basisForward, command.velocity);
+			if (directionAvailable)
+				WorldToPathTracingDirection(worldVelocity, command.velocity);
 			command.spawnRadius = rule.spawnRadius;
 			command.styleIndex = rule.styleIndex;
 			command.count = rule.count;
@@ -173,10 +293,11 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, const TArray<PathTracingWeapo
 
 			if (traceMode != 0 && verbosePrinted < 32u)
 			{
-				Printf("NRI PT smoke emitter: event=weapon rule=%s source_event=%s source_serial=%llu command_serial=%u style=%u particles=%u render=(%.3f,%.3f,%.3f) direction=(%.3f,%.3f,%.3f) cone=%.3f\n",
+				Printf("NRI PT smoke emitter: event=weapon rule=%s source_event=%s source_serial=%llu command_serial=%u style=%u particles=%u render=(%.3f,%.3f,%.3f) direction=(%.3f,%.3f,%.3f) cone=%.3f normal=%u incoming=%u\n",
 					rule.id.GetChars(), event.eventId.GetChars(), (unsigned long long)event.serial, command.serial,
 					command.styleIndex, command.count, command.position[0], command.position[1], command.position[2],
-					command.velocity[0], command.velocity[1], command.velocity[2], command.velocityCone);
+					command.velocity[0], command.velocity[1], command.velocity[2], command.velocityCone,
+					event.hasSurfaceNormal ? 1u : 0u, event.hasIncomingDirection ? 1u : 0u);
 				verbosePrinted++;
 			}
 		}

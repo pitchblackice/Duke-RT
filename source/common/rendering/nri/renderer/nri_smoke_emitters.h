@@ -4,13 +4,13 @@
 #include "v_video.h"
 
 #include <cstdint>
-#include <unordered_set>
+#include <unordered_map>
 #include <vector>
 
 class NRISmokeEmitterSystem
 {
 public:
-	void Gather(uint32_t epoch, const TArray<PathTracingWeaponLightEvent>& weaponEvents,
+	void Gather(uint32_t epoch, double gameplayTimeSeconds, const TArray<PathTracingWeaponLightEvent>& weaponEvents,
 		std::vector<NRISmokeStyleGpu>& styles, std::vector<NRISmokeInjectionCommandGpu>& commands,
 		uint32_t& nextSerial, uint32_t traceMode);
 	void Reset();
@@ -28,7 +28,16 @@ private:
 	{
 		size_t operator()(const Identity& value) const;
 	};
+	struct ActorState
+	{
+		DVector3 previousPosition;
+		double previousTimeSeconds = 0.0;
+		float spacingRemainder = 0.0f;
+		double intervalRemainder = 0.0;
+		bool emitted = false;
+		bool observed = false;
+	};
 
 	uint32_t mGeneration = 0;
-	std::unordered_set<Identity, IdentityHash> mEmitted;
+	std::unordered_map<Identity, ActorState, IdentityHash> mActorStates;
 };

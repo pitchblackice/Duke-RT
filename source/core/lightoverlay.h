@@ -22,6 +22,14 @@ enum class LightOverlayActorActivationPolicy : uint8_t
 enum class LightOverlaySmokeTrigger : uint8_t
 {
 	Spawn,
+	Interval,
+};
+
+enum class LightOverlaySmokeDirectionPolicy : uint8_t
+{
+	Aim,
+	Normal,
+	Incoming,
 };
 
 struct LightOverlaySourceLocation
@@ -309,10 +317,20 @@ struct ParsedLightOverlaySmokeActorRule
 	FString id;
 	LightOverlaySourceLocation source;
 	FString actorClassName;
+	FString ownerClassName;
+	FString excludeOwnerClassName;
 	LightOverlaySmokeTrigger trigger = LightOverlaySmokeTrigger::Spawn;
 	FString styleId;
 	uint32_t count = 1;
+	float offset[3] = { 0.0f, 0.0f, 0.0f };
 	float spawnRadius = 0.0f;
+	float densityScale = 1.0f;
+	float radiusScale = 1.0f;
+	float velocityCone = 0.0f;
+	float velocityScale = 1.0f;
+	float intervalSeconds = 0.1f;
+	float spacing = 0.0f;
+	uint32_t maxSegmentsPerFrame = 1;
 };
 
 struct ParsedLightOverlaySmokeEventRule
@@ -326,6 +344,9 @@ struct ParsedLightOverlaySmokeEventRule
 	float densityScale = 1.0f;
 	float radiusScale = 1.0f;
 	float velocityCone = 0.0f;
+	float velocityScale = 1.0f;
+	float normalOffset = 0.0f;
+	LightOverlaySmokeDirectionPolicy directionPolicy = LightOverlaySmokeDirectionPolicy::Aim;
 };
 
 struct ParsedLightOverlaySourceFile
@@ -603,6 +624,10 @@ struct ResolvedLightOverlaySmokeActorRule : ParsedLightOverlaySmokeActorRule
 {
 	PClassActor* actorClass = nullptr;
 	bool actorClassResolved = false;
+	PClassActor* ownerClass = nullptr;
+	bool ownerClassResolved = false;
+	PClassActor* excludeOwnerClass = nullptr;
+	bool excludeOwnerClassResolved = false;
 	uint32_t styleIndex = 0;
 	bool styleResolved = false;
 };

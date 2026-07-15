@@ -4,6 +4,7 @@
 #include "NRI.hlsl"
 #include "SmokeData.hlsli"
 #include "SmokeGridData.hlsli"
+#include "SmokeSourceShaping.hlsli"
 
 StructuredBuffer<SmokeStyle> gSmokeGridStyles : register(t0, space0);
 StructuredBuffer<SmokeInjectionCommand> gSmokeGridCommands : register(t1, space0);

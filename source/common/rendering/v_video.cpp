@@ -34,6 +34,7 @@
 
 
 #include <stdio.h>
+#include <cmath>
 
 #include "i_system.h"
 #include "c_cvars.h"
@@ -198,6 +199,48 @@ void DFrameBuffer::PrintPathTracingSurfaceProbeStatus() const
 
 void DFrameBuffer::EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent&)
 {
+}
+
+void DFrameBuffer::EmitPathTracingSmokeSourceEvent(const PathTracingSmokeSourceEvent& sourceEvent)
+{
+	if (sourceEvent.eventId.IsEmpty())
+	{
+		return;
+	}
+
+	PathTracingWeaponLightEvent event;
+	event.eventId = sourceEvent.eventId;
+	event.emitterActorIndex = sourceEvent.sourceActorIndex;
+	event.hasEmitterActorIndex = sourceEvent.hasSourceActorIndex;
+	event.ownerActorIndex = sourceEvent.ownerActorIndex;
+	event.hasOwnerActorIndex = sourceEvent.hasOwnerActorIndex;
+	event.worldPosition = sourceEvent.worldPosition;
+	event.incomingDirection = sourceEvent.incomingDirection;
+	event.hasIncomingDirection = sourceEvent.hasIncomingDirection;
+	event.surfaceNormal = sourceEvent.surfaceNormal;
+	event.hasSurfaceNormal = sourceEvent.hasSurfaceNormal;
+	event.smokeSourceKind = sourceEvent.sourceKind;
+	event.absoluteTimeSeconds = sourceEvent.absoluteTimeSeconds;
+
+	DVector3 forward;
+	if (sourceEvent.hasSurfaceNormal && !sourceEvent.surfaceNormal.isZero())
+	{
+		forward = sourceEvent.surfaceNormal.Unit();
+	}
+	else if (sourceEvent.hasIncomingDirection && !sourceEvent.incomingDirection.isZero())
+	{
+		forward = sourceEvent.incomingDirection.Unit();
+	}
+	if (!forward.isZero())
+	{
+		const DVector3 referenceUp = std::abs(forward.Z) < 0.999 ? DVector3(0.0, 0.0, 1.0) : DVector3(0.0, 1.0, 0.0);
+		event.basisRight = (referenceUp ^ forward).Unit();
+		event.basisForward = forward;
+		event.basisUp = (forward ^ event.basisRight).Unit();
+		event.hasBasis = !event.basisRight.isZero() && !event.basisUp.isZero();
+	}
+
+	EmitPathTracingWeaponLightEvent(event);
 }
 
 void DFrameBuffer::EmitPathTracingActorSpriteTraceEvent(const PathTracingActorSpriteTraceEvent&)

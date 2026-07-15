@@ -119,6 +119,11 @@ public:
 		return ownerActor;
 	}
 
+	DCoreActor* GetOwnerActor() override
+	{
+		return ownerActor;
+	}
+
 	inline void SetOwner(DDukeActor* a)
 	{
 		ownerActor = a;

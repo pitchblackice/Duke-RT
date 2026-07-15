@@ -1774,6 +1774,7 @@ if (HAVE_NRI)
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeGridAdvectFields.cs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeGridRebuild.cs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Include/SmokeData.hlsli"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Include/SmokeSourceShaping.hlsli"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Include/SmokeGridData.hlsli"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Include/SmokeGridResources.hlsli"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeLightPoint.cs.hlsl"

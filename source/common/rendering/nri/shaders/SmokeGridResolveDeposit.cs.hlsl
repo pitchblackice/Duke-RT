@@ -26,7 +26,13 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 	const float addedMass = max((float)q0.x * inverseMassQ, 0.0);
 	const float newMass = scalar.x + addedMass;
 	if (newMass > 1e-8)
+	{
 		velocity.xyz = (velocity.xyz * scalar.x + (float3)q1.xyz * inverseMomentumQ) / newMass;
+	}
+	// Velocity.xyz is a mass-weighted average. Velocity.w deliberately remains
+	// the additive turbulence-scale moment so trilinear sampling can divide it
+	// by the matching sampled mass without shrinking scale at smoke boundaries.
+	velocity.w += (float)q3.w * inverseMassQ;
 	scalar += (float4)q0 * inverseMassQ;
 	optical += (float4)q2 * inverseMassQ;
 	dynamics += float4((float)q1.w, (float)q3.x, (float)q3.y, (float)q3.z) * inverseMassQ;

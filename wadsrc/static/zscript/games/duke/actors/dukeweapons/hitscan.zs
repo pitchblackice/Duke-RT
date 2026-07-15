@@ -1,6 +1,45 @@
 
 extend class DukeActor
 {
+	static Vector3 PathTracingSmokeImpactNormal(HitInfo hit, Vector3 incomingDirection)
+	{
+		Vector3 normal;
+		if (hit.hitWall)
+		{
+			let tangent = hit.hitWall.delta();
+			normal = (tangent.Y, -tangent.X, 0);
+		}
+		else if (hit.hitActor)
+		{
+			normal = hit.hitpos - hit.hitActor.pos;
+		}
+		else if (hit.hitSector)
+		{
+			// Build Z grows toward the floor. The medium-facing normal therefore
+			// points down from a ceiling hit and up from a floor hit.
+			normal = (0, 0, incomingDirection.Z < 0 ? 1 : -1);
+		}
+
+		if (normal.LengthSquared() <= 0.000001)
+		{
+			normal = -incomingDirection;
+		}
+		if (normal.LengthSquared() > 0.000001)
+		{
+			normal = normal.Unit();
+			if ((normal dot incomingDirection) > 0)
+				normal = -normal;
+		}
+		return normal;
+	}
+
+	static void EmitPathTracingHitscanSmokeImpact(String eventId, DukeActor source, DukeActor owner,
+		HitInfo hit, Vector3 incomingDirection)
+	{
+		Duke.EmitPathTracingSmokeSourceEvent(eventId, Duke.PTSMOKE_SURFACE_IMPACT, source, owner,
+			hit.hitpos, incomingDirection, PathTracingSmokeImpactNormal(hit, incomingDirection));
+	}
+
 	static void tracers(Vector3 start, Vector3 dest, int n)
 	{
 		sectortype sect = nullptr;
@@ -85,8 +124,9 @@ extend class DukeActor
 			}
 		}
 
+		Vector3 incomingDirection = (ang.ToVector() * vel, zvel * 64);
 		actor.cstat &= ~CSTAT_SPRITE_BLOCK_ALL;
-		Raze.hitscan(pos, sectp, (ang.ToVector() * vel, zvel * 64), hit, CLIPMASK1);
+		Raze.hitscan(pos, sectp, incomingDirection, hit, CLIPMASK1);
 
 		if ((ud.mapflags & MFLAG_ALLSECTORTYPES) && hit.hitSector != nullptr && 
 			((hit.hitSector.lotag == ST_160_FLOOR_TELEPORT && zvel > 0) || (hit.hitSector.lotag == ST_161_CEILING_TELEPORT && zvel < 0))
@@ -146,7 +186,10 @@ extend class DukeActor
 						dlevel.checkhitceiling(hit.hitSector, spark);
 				}
 				if (zvel < 0 || hit.hitSector.lotag != ST_1_ABOVE_WATER)
+				{
 					spark.spawn("DukeSmallSmoke");
+					EmitPathTracingHitscanSmokeImpact("duke.hitscan.impact.plane", spark, actor, hit, incomingDirection);
+				}
 			}
 
 			let hitActor = DukeActor(hit.hitActor);
@@ -167,7 +210,11 @@ extend class DukeActor
 						jib.Angle += frandom(-11.25, 11.25);
 					}
 				}
-				else spark.spawn("DukeSmallSmoke");
+				else
+				{
+					spark.spawn("DukeSmallSmoke");
+					EmitPathTracingHitscanSmokeImpact("duke.hitscan.impact.actor", spark, actor, hit, incomingDirection);
+				}
 
 				if (p != null && Duke.isshootableswitch(hitActor.spritetexture()))
 				{
@@ -178,6 +225,7 @@ extend class DukeActor
 			else if (hit.hitWall)
 			{
 				spark.spawn("DukeSmallSmoke");
+				EmitPathTracingHitscanSmokeImpact("duke.hitscan.impact.wall", spark, actor, hit, incomingDirection);
 
 				if (!(Raze.tileflags(hit.hitWall.walltexture) & (Duke.TFLAG_DOORWALL | Duke.TFLAG_BLOCKDOOR)))
 				{

@@ -834,6 +834,13 @@ namespace
 		outEvent.basisForward = forward;
 		outEvent.basisUp = up;
 		outEvent.hasBasis = true;
+		// Synthetic smoke-event tests also provide a deterministic impact frame,
+		// allowing direction normal/incoming and normaloffset rules to be tested
+		// without manufacturing a gameplay collision.
+		outEvent.incomingDirection = forward;
+		outEvent.hasIncomingDirection = true;
+		outEvent.surfaceNormal = -forward;
+		outEvent.hasSurfaceNormal = true;
 		return true;
 	}
 }
