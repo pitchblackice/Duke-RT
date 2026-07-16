@@ -4850,6 +4850,8 @@ uint64_t SceneLightSystem::BuildRuntimeLightClusterCameraHash(const RuntimeLight
 	uint64_t hash = 1469598103934665603ull;
 	hash = nri_scene::HashCombine64(hash, (uint64_t)input.renderWidth);
 	hash = nri_scene::HashCombine64(hash, (uint64_t)input.renderHeight);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)input.tileSize);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)input.maxRuntimeLights);
 
 	if (mAnalyticLights.activeLights.empty())
 	{
