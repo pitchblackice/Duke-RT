@@ -2626,8 +2626,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				Clocker clock(NriPTGeometryBuild);
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildRuntimeMutationRebuildMs);
-				nri_scene::BuildGeometry(liveChunkView, liveGeometry);
-				AssignGeometryPortalIndices(mMapWorld, liveGeometry);
+				{
+					ScopedPtPerfTimer bridgeTimer(mLastPerfShellTraceStats.runtimeMutationGeometryBridgeMs);
+					nri_scene::BuildGeometry(liveChunkView, liveGeometry);
+				}
+				{
+					ScopedPtPerfTimer portalTimer(mLastPerfShellTraceStats.runtimeMutationPortalAssignMs);
+					AssignGeometryPortalIndices(mMapWorld, liveGeometry);
+				}
 			}
 			if (tryGetCachedRuntimeMutationMaterials(
 				liveAnimatedGeometrySignature,
@@ -2661,6 +2667,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				Clocker clock(NriPTGeometryBuild);
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildRuntimeMutationRebuildMs);
+				ScopedPtPerfTimer deformerTimer(mLastPerfShellTraceStats.runtimeMutationDeformerCanonicalMs);
 				NRISE29FloorDeformerRouteInput deformerRouteInput;
 				deformerRouteInput.movers = &mMapMovers;
 				deformerRouteInput.mapWorld = &mMapWorld;

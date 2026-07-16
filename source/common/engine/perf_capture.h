@@ -22,6 +22,9 @@ struct PerfCompactNriStats
 	double mutationMs = 0.0, mutationDiscoveryMs = 0.0, mutationBudgetMs = 0.0;
 	double mutationAnalyzeMs = 0.0, mutationStructuralMs = 0.0, mutationMaterialMs = 0.0;
 	double mutationResidentMs = 0.0, mutationCommitMs = 0.0;
+	double mutationGeometryBuildMs = 0.0, mutationGeometryBridgeMs = 0.0;
+	double mutationPortalAssignMs = 0.0, mutationDeformerCanonicalMs = 0.0;
+	double mutationMaterialBuildMs = 0.0;
 	double dynamicCaptureMs = 0.0, persistentBatchMs = 0.0;
 	double voxelAdmissionPumpMs = 0.0, voxelBatchCacheEntryMs = 0.0, voxelBatchSortMs = 0.0;
 	double voxelBatchInstanceSyncMs = 0.0, voxelBatchExistingActorMapMs = 0.0, voxelBatchActorLoopMs = 0.0;

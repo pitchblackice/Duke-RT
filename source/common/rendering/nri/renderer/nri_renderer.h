@@ -929,6 +929,9 @@ public:
 		double geometryBuildDebugSphereMs = 0.0;
 		double geometryBuildRuntimeMutationTruthMs = 0.0;
 		double geometryBuildRuntimeMutationRebuildMs = 0.0;
+		double runtimeMutationGeometryBridgeMs = 0.0;
+		double runtimeMutationPortalAssignMs = 0.0;
+		double runtimeMutationDeformerCanonicalMs = 0.0;
 		double geometryBuildRuntimeMutationMaterialOnlyMs = 0.0;
 		double geometryBuildRuntimeSpaceLinkMs = 0.0;
 		double geometryBuildResidentApplyMs = 0.0;

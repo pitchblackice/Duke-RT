@@ -115,6 +115,12 @@ namespace
 			nri.voxelBatchActorLoopMs, nri.voxelBatchMaterialVariantMs,
 			nri.voxelBatchMeshAdmissionMs, nri.voxelBatchMaterialBridgeMs, nri.voxelBatchStateMs,
 			(unsigned long long)gCapture.epoch, record.eligibleIndex);
+		Printf("PERF pt mutation preparation compact NRI: frame=%llu nri_frame=%llu geometry=%.3f bridge=%.3f portal=%.3f deformer=%.3f materials=%.3f compact=1 epoch=%llu sample=%u\n",
+			(unsigned long long)outer.traceFrame, (unsigned long long)nri.frame,
+			nri.mutationGeometryBuildMs, nri.mutationGeometryBridgeMs,
+			nri.mutationPortalAssignMs, nri.mutationDeformerCanonicalMs,
+			nri.mutationMaterialBuildMs,
+			(unsigned long long)gCapture.epoch, record.eligibleIndex);
 		Printf("PERF pt resource waits NRI: frame=%llu nri_frame=%llu total=%u/%.3f compact=1 epoch=%llu sample=%u\n",
 			(unsigned long long)outer.traceFrame, (unsigned long long)nri.frame,
 			nri.resourceWaitCalls, nri.resourceWaitMs,

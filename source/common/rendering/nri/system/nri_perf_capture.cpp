@@ -32,6 +32,12 @@ void NRIRenderDevice::CaptureCompactPerfRendererStats(bool rendered)
 	stats.mutationMaterialMs = shell.runtimeMutationMaterialRefreshMs;
 	stats.mutationResidentMs = shell.runtimeMutationResidentApplyMs;
 	stats.mutationCommitMs = shell.runtimeMutationCommitMs;
+	stats.mutationGeometryBuildMs = shell.geometryBuildRuntimeMutationRebuildMs;
+	stats.mutationGeometryBridgeMs = shell.runtimeMutationGeometryBridgeMs;
+	stats.mutationPortalAssignMs = shell.runtimeMutationPortalAssignMs;
+	stats.mutationDeformerCanonicalMs = shell.runtimeMutationDeformerCanonicalMs;
+	stats.mutationMaterialBuildMs = shell.materialBuildByLabel[
+		(size_t)NRIRenderer::MaterialBuildTraceSlot::RuntimeMutationChunk].materialBuildMs;
 	stats.dynamicCaptureMs = shell.dynamicCaptureMs;
 	stats.persistentBatchMs = shell.sceneSelectPersistentVoxelBatchMs;
 	stats.voxelAdmissionPumpMs = shell.sceneSelectPersistentVoxelAdmissionPumpMs;
