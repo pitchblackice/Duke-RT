@@ -5,6 +5,7 @@
 #include "nri_acceleration.h"
 #include "nri_diagnostic_names.h"
 #include "nri_frame_resources.h"
+#include "nri_frame_diagnostics_policy.h"
 #include "nri_material_policy.h"
 #include "nri_pass_dispatch.h"
 #include "nri_persistent_voxel_services.h"
@@ -13,6 +14,7 @@
 #include "nri_scene_frame_builder.h"
 #include "nri_scene_frame_diagnostics.h"
 #include "nri_scene_frame_coordinator_types.h"
+#include "gameupdate.h"
 #include "nri_scene_frame_mirrors.h"
 #include "nri_scene_frame_overlay.h"
 #include "nri_scene_frame_selection.h"
@@ -28,6 +30,7 @@
 #include "../system/nri_renderdevice.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
+#include "perf_capture.h"
 #include "coreactor.h"
 #include "coreplayer.h"
 #include "hw_voxels.h"
@@ -50,7 +53,6 @@
 #include <cstring>
 #include <limits>
 #include <string>
-#include <unordered_map>
 #include <unordered_set>
 
 namespace
@@ -331,7 +333,7 @@ static bool ShouldTracePtPerf()
 
 static bool ShouldCollectPtPerfTiming()
 {
-	return ShouldTracePtPerf() || (bool)nri_ptslowdowntrace;
+	return ShouldTracePtPerf() || (bool)nri_ptslowdowntrace || PerfCompactCaptureTimingActive();
 }
 
 class ScopedPtPerfTimer
@@ -358,6 +360,50 @@ private:
 	double* mTarget = nullptr;
 	std::chrono::steady_clock::time_point mStart = {};
 };
+
+class ScopedPtPerfAttributionFinalizer
+{
+public:
+	explicit ScopedPtPerfAttributionFinalizer(NRIRenderer::PerfShellTraceStats& stats)
+		: mStats(stats)
+	{
+	}
+
+	~ScopedPtPerfAttributionFinalizer()
+	{
+		const double coreStagesMs =
+			mStats.initResourcesMs +
+			mStats.mapWorldMs +
+			mStats.updateStateMs +
+			mStats.sceneSelectMs +
+			mStats.sceneLightsMs +
+			mStats.residentLightRefreshMs +
+			mStats.emissiveUpdateMs +
+			mStats.emissiveTlasMs +
+			mStats.surfaceProbeMs +
+			mStats.frameGraphMs;
+		mStats.unattributedMs = CalculateNRIFrameUnattributedMs(
+			mStats.totalMs,
+			coreStagesMs,
+			mStats.postFrameDiagnosticsMs);
+		mStats.otherMs = mStats.unattributedMs;
+	}
+
+private:
+	NRIRenderer::PerfShellTraceStats& mStats;
+};
+
+static NRIFrameDiagnosticPolicy GetFrameDiagnosticPolicy()
+{
+	NRIFrameDiagnosticPolicyInput input = {};
+	input.perfLoopTraceActive = PerfLoopTraceActive();
+	input.compactCaptureActive = PerfCompactCaptureTimingActive();
+	input.selfTestEnabled = nri_ptselftest;
+	input.slowdownTraceEnabled = nri_ptslowdowntrace;
+	input.sceneStatsEnabled = nri_ptscenestats;
+	input.voxelStatsEnabled = nri_voxelstats;
+	return EvaluateNRIFrameDiagnosticPolicy(input);
+}
 
 }
 
@@ -611,12 +657,15 @@ void NRIRenderer::CommitRenderSceneResult(const RenderSceneCompletionInputs& inp
 		RestoreRenderSceneHistorySnapshot(history);
 	}
 
-	if (inputs.success)
 	{
-		RecordRenderSceneSuccessStats(inputs);
-		EmitSelfTestSummary(inputs.traceFrameIndex, inputs.drawmode, inputs.portal);
+		ScopedPtPerfTimer diagnosticsTimer(mLastPerfShellTraceStats.postFrameDiagnosticsMs);
+		if (inputs.success)
+		{
+			RecordRenderSceneSuccessStats(inputs);
+			EmitSelfTestSummary(inputs.traceFrameIndex, inputs.drawmode, inputs.portal);
+		}
+		EmitRenderSceneTemporalTrace(inputs.traceFrameIndex);
 	}
-	EmitRenderSceneTemporalTrace(inputs.traceFrameIndex);
 }
 
 void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInputs& inputs)
@@ -626,17 +675,38 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 		return;
 	}
 
-	mLastPerfShellTraceStats.activePrimitiveCount = (uint32_t)inputs.activeGeometry->primitives.size();
-	mLastPerfShellTraceStats.dynamicPrimitiveCount = inputs.activeDynamicGeometry != nullptr ? (uint32_t)inputs.activeDynamicGeometry->primitives.size() : 0u;
-	mLastPerfShellTraceStats.activeMaterialCount = (uint32_t)inputs.activeGpuMaterials->size();
-	mLastPerfShellTraceStats.sceneInstanceCount = (uint32_t)mBoundSceneInstances.size();
-	mLastPerfShellTraceStats.sceneInstanceStaticCount = 0;
-	mLastPerfShellTraceStats.sceneInstanceDynamicCount = 0;
-	mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount = 0;
+	const NRIFrameDiagnosticPolicy policy = GetFrameDiagnosticPolicy();
+	if (!policy.collectDeepSceneAudit)
+	{
+		mStaticSceneDiagnostics.Discard();
+	}
+	mLastPerfShellTraceStats.successDiagnosticsBasicCollected = policy.collectBasicSuccessStats;
+	mLastPerfShellTraceStats.successDiagnosticsInstanceCompositionCollected = policy.collectInstanceComposition;
+	mLastPerfShellTraceStats.successDiagnosticsPersistentVoxelStatusCollected = policy.collectPersistentVoxelStatus;
+	mLastPerfShellTraceStats.successDiagnosticsAsSummaryCollected = policy.collectAsSummary;
+	mLastPerfShellTraceStats.successDiagnosticsDeepSceneAuditCollected = policy.collectDeepSceneAudit;
+	if (!policy.collectBasicSuccessStats &&
+		!policy.collectInstanceComposition &&
+		!policy.collectPersistentVoxelStatus &&
+		!policy.collectAsSummary &&
+		!policy.collectDeepSceneAudit)
+	{
+		return;
+	}
+
+	if (policy.collectBasicSuccessStats)
+	{
+		mLastPerfShellTraceStats.activePrimitiveCount = (uint32_t)inputs.activeGeometry->primitives.size();
+		mLastPerfShellTraceStats.dynamicPrimitiveCount = inputs.activeDynamicGeometry != nullptr ? (uint32_t)inputs.activeDynamicGeometry->primitives.size() : 0u;
+		mLastPerfShellTraceStats.activeMaterialCount = (uint32_t)inputs.activeGpuMaterials->size();
+		mLastPerfShellTraceStats.sceneInstanceCount = (uint32_t)mBoundSceneInstances.size();
+	}
+	if (policy.collectDeepSceneAudit)
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneInstanceStatsMs);
 		for (const SceneInstanceData& instance : mBoundSceneInstances)
 		{
+			mLastPerfShellTraceStats.successDiagnosticsInstanceRowsScanned++;
 			mLastPerfShellTraceStats.sceneRecordAuditRecords++;
 			mLastPerfShellTraceStats.hitMetadataAuditRecords++;
 			mLastPerfShellTraceStats.hitMetadataLegacyPrimitiveOffsetMatches++;
@@ -671,30 +741,41 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 			}
 		}
 	}
-	NRIPersistentVoxelStatusSnapshot persistentVoxelStatus = {};
+	if (policy.collectPersistentVoxelStatus)
 	{
-		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelResourceStatsMs);
-		mPersistentVoxels.FillResourceStatusSnapshot(persistentVoxelStatus);
+		NRIPersistentVoxelStatusSnapshot persistentVoxelStatus = {};
+		{
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelResourceStatsMs);
+			mPersistentVoxels.FillResourceStatusSnapshot(persistentVoxelStatus);
+		}
+		{
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelBatchStatsMs);
+			mPersistentVoxels.FillBatchStatusSnapshot(persistentVoxelStatus);
+		}
+		mLastPerfShellTraceStats.successDiagnosticsPersistentStatusCalls++;
+		mLastPerfShellTraceStats.persistentVoxelMeshVariantResourceCount = persistentVoxelStatus.meshVariantResourceCount;
+		mLastPerfShellTraceStats.persistentVoxelMaterialVariantResourceCount = persistentVoxelStatus.materialVariantResourceCount;
+		mLastPerfShellTraceStats.persistentVoxelBatchActorCount = persistentVoxelStatus.batchActorCount;
+		mLastPerfShellTraceStats.persistentVoxelInstanceRecordCount = persistentVoxelStatus.instanceRecordCount;
+		mLastPerfShellTraceStats.persistentVoxelAdmissionQueueCount = persistentVoxelStatus.admissionQueueCount;
+		mLastPerfShellTraceStats.persistentVoxelPendingInstanceCount = persistentVoxelStatus.pendingInstanceCount;
+		mLastPerfShellTraceStats.persistentVoxelResidentResourceBytes = persistentVoxelStatus.residentResourceBytes;
+		mLastPerfShellTraceStats.persistentVoxelZeroRefResourceBytes = persistentVoxelStatus.zeroRefResourceBytes;
+		mLastPerfShellTraceStats.persistentVoxelZeroRefMeshResourceCount = persistentVoxelStatus.zeroRefMeshResourceCount;
+		mLastPerfShellTraceStats.persistentVoxelZeroRefMaterialResourceCount = persistentVoxelStatus.zeroRefMaterialResourceCount;
+		mLastPerfShellTraceStats.persistentVoxelInstanceActiveCount = persistentVoxelStatus.activeInstanceCount;
+		mLastPerfShellTraceStats.persistentVoxelInstancePrimitiveCount = persistentVoxelStatus.instancePrimitiveCount;
+		mLastPerfShellTraceStats.persistentVoxelInstanceMaterialCount = persistentVoxelStatus.instanceMaterialCount;
+		mLastPerfShellTraceStats.persistentVoxelInstanceMinPrimitiveCount = persistentVoxelStatus.instanceMinPrimitiveCount;
+		mLastPerfShellTraceStats.persistentVoxelInstanceMaxPrimitiveCount = persistentVoxelStatus.instanceMaxPrimitiveCount;
 	}
+	if (!policy.collectAsSummary)
 	{
-		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelBatchStatsMs);
-		mPersistentVoxels.FillBatchStatusSnapshot(persistentVoxelStatus);
+		mLastPerfShellTraceStats.usedStaticMapScene = mUsedStaticMapSceneLastFrame;
+		mLastPerfShellTraceStats.usedDynamicOverlay = mGpuSceneHasDynamicOverlay;
+		mLastPerfShellTraceStats.usedPersistentDynamicEmissiveCache = inputs.usingPersistentDynamicEmissiveCache;
+		return;
 	}
-	mLastPerfShellTraceStats.persistentVoxelMeshVariantResourceCount = persistentVoxelStatus.meshVariantResourceCount;
-	mLastPerfShellTraceStats.persistentVoxelMaterialVariantResourceCount = persistentVoxelStatus.materialVariantResourceCount;
-	mLastPerfShellTraceStats.persistentVoxelBatchActorCount = persistentVoxelStatus.batchActorCount;
-	mLastPerfShellTraceStats.persistentVoxelInstanceRecordCount = persistentVoxelStatus.instanceRecordCount;
-	mLastPerfShellTraceStats.persistentVoxelAdmissionQueueCount = persistentVoxelStatus.admissionQueueCount;
-	mLastPerfShellTraceStats.persistentVoxelPendingInstanceCount = persistentVoxelStatus.pendingInstanceCount;
-	mLastPerfShellTraceStats.persistentVoxelResidentResourceBytes = persistentVoxelStatus.residentResourceBytes;
-	mLastPerfShellTraceStats.persistentVoxelZeroRefResourceBytes = persistentVoxelStatus.zeroRefResourceBytes;
-	mLastPerfShellTraceStats.persistentVoxelZeroRefMeshResourceCount = persistentVoxelStatus.zeroRefMeshResourceCount;
-	mLastPerfShellTraceStats.persistentVoxelZeroRefMaterialResourceCount = persistentVoxelStatus.zeroRefMaterialResourceCount;
-	mLastPerfShellTraceStats.persistentVoxelInstanceActiveCount = persistentVoxelStatus.activeInstanceCount;
-	mLastPerfShellTraceStats.persistentVoxelInstancePrimitiveCount = persistentVoxelStatus.instancePrimitiveCount;
-	mLastPerfShellTraceStats.persistentVoxelInstanceMaterialCount = persistentVoxelStatus.instanceMaterialCount;
-	mLastPerfShellTraceStats.persistentVoxelInstanceMinPrimitiveCount = persistentVoxelStatus.instanceMinPrimitiveCount;
-	mLastPerfShellTraceStats.persistentVoxelInstanceMaxPrimitiveCount = persistentVoxelStatus.instanceMaxPrimitiveCount;
 	const NRIPersistentVoxelSharedBlasFrameStats& sharedBlasStats = mPersistentVoxels.GetSharedBlasFrameStats();
 	mLastPerfShellTraceStats.voxelSharedBlasActiveActors = sharedBlasStats.activeActors;
 	mLastPerfShellTraceStats.voxelSharedBlasUniqueDesiredKeys = sharedBlasStats.uniqueDesiredKeys;
@@ -777,7 +858,12 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 	mLastPerfShellTraceStats.voxelLocalSpaceInvariantUnknownSpaceActors = sharedBlasStats.invariantUnknownSpaceActors;
 	mLastPerfShellTraceStats.voxelLocalSpaceInvariantMaxBoundsCenterMagnitude = sharedBlasStats.invariantMaxBoundsCenterMagnitude;
 	mLastPerfShellTraceStats.voxelLocalSpaceInvariantMaxBoundsAbs = sharedBlasStats.invariantMaxBoundsAbs;
-	mLastPerfShellTraceStats.asWorldTlasObjects = mTopLevelAS.accelerationStructure != nullptr && mActiveTlasInstanceCount > 0 ? 1u : 0u;
+	const NRIWorldTlasFrameSlot* worldTlasFrameSlot =
+		static_cast<const NRIRenderer*>(this)->GetCurrentWorldTlasFrameSlot();
+	mLastPerfShellTraceStats.asWorldTlasObjects =
+		worldTlasFrameSlot != nullptr &&
+		worldTlasFrameSlot->accelerationStructure.accelerationStructure != nullptr &&
+		mActiveTlasInstanceCount > 0 ? 1u : 0u;
 	mLastPerfShellTraceStats.asWorldTlasEntries = mActiveTlasInstanceCount;
 	mLastPerfShellTraceStats.asWorldTlasMaskAllWorkloadsRefs = mLastPerfShellTraceStats.asWorldTlasEntries;
 	mLastPerfShellTraceStats.asWorldTlasMaskOtherRefs = 0;
@@ -801,192 +887,73 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 		mLastPerfShellTraceStats.asVoxelActorInstances > mLastPerfShellTraceStats.asVoxelUniqueGeometryKeys ?
 		mLastPerfShellTraceStats.asVoxelActorInstances - mLastPerfShellTraceStats.asVoxelUniqueGeometryKeys :
 		0u;
-	for (const StaticMapSceneCache::ChunkCache& chunk : mStaticMapScene.chunks)
+	const ResidentMapChunkRegistry& staticRegistry = mStaticSceneResidency.Registry();
+	if (staticRegistry.valid)
 	{
-		if (!chunk.active || chunk.accelerationStructure.accelerationStructure == nullptr)
-		{
-			continue;
-		}
-		mLastPerfShellTraceStats.asBlasStatic++;
-		mLastPerfShellTraceStats.asStaticChunkOwnedBlas++;
+		mLastPerfShellTraceStats.asBlasStatic = staticRegistry.accelerationResidentChunkCount;
+		mLastPerfShellTraceStats.asStaticChunkOwnedBlas = staticRegistry.accelerationResidentChunkCount;
+		mLastPerfShellTraceStats.asStaticUniqueGeometrySignatures = staticRegistry.accelerationResidentChunkCount;
 	}
-	mLastPerfShellTraceStats.asStaticUniqueGeometrySignatures = mLastPerfShellTraceStats.asStaticChunkOwnedBlas;
-	mLastPerfShellTraceStats.asStaticSegmentBlas = 0;
+	if (policy.collectDeepSceneAudit)
 	{
-		std::unordered_map<uint64_t, uint32_t> staticSegmentSignatureRefs;
-		staticSegmentSignatureRefs.reserve(mStaticMapScene.chunks.size());
-		std::unordered_set<uint32_t> portalChunks;
-		portalChunks.reserve(mMapWorld.portals.size() * 2u);
-		if (mMapWorld.valid)
-		{
-			for (const nri_scene::PTMapPortal& portal : mMapWorld.portals)
-			{
-				if (portal.sourceChunkIndex != UINT32_MAX)
-				{
-					portalChunks.insert(portal.sourceChunkIndex);
-				}
-				const uint32_t targetEnd = std::min<uint32_t>(
-					portal.firstTarget + portal.targetCount,
-					(uint32_t)mMapWorld.portalTargets.size());
-				for (uint32_t targetIndex = portal.firstTarget; targetIndex < targetEnd; ++targetIndex)
-				{
-					const nri_scene::PTMapPortalTarget& target = mMapWorld.portalTargets[targetIndex];
-					if (target.chunkIndex != UINT32_MAX)
-					{
-						portalChunks.insert(target.chunkIndex);
-					}
-				}
-			}
-		}
-		for (uint32_t chunkListIndex = 0; chunkListIndex < mStaticMapScene.chunks.size(); ++chunkListIndex)
-		{
-			const StaticMapSceneCache::ChunkCache& chunk = mStaticMapScene.chunks[chunkListIndex];
-			if (!chunk.active || chunk.primitiveCount == 0)
-			{
-				continue;
-			}
-			mLastPerfShellTraceStats.asStaticSegmentCandidateChunks++;
-			const uint64_t segmentSignature =
-				chunk.exactGeometrySignature != 0 ? chunk.exactGeometrySignature :
-				(chunk.geometryPayloadHash != 0 ? chunk.geometryPayloadHash : chunk.geometryTopologySignature);
-			if (segmentSignature != 0)
-			{
-				staticSegmentSignatureRefs[segmentSignature]++;
-			}
-			if (chunk.hasAnimatedTextureCandidates || chunk.animatedRefreshSuppressed)
-			{
-				mLastPerfShellTraceStats.asStaticSegmentAnimatedChunks++;
-			}
-			if (portalChunks.find(chunk.chunkIndex) != portalChunks.end())
-			{
-				mLastPerfShellTraceStats.asStaticSegmentPortalChunks++;
-			}
-			if (mMapWorld.valid &&
-				chunk.chunkIndex < mMapWorld.chunks.size() &&
-				mMapWorld.chunks[chunk.chunkIndex].localSpaceIndex != UINT32_MAX)
-			{
-				mLastPerfShellTraceStats.asStaticSegmentLocalSpaceChunks++;
-			}
-			if (mStaticMapChunkAtlas.valid &&
-				chunkListIndex < mStaticMapChunkAtlas.chunks.size())
-			{
-				const StaticMapChunkAtlas::ChunkEntry& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
-				if (atlasChunk.valid &&
-					atlasChunk.primitiveCount == chunk.primitiveCount &&
-					atlasChunk.indexCount == chunk.indexCount &&
-					atlasChunk.vertexCount == chunk.vertexCount)
-				{
-					mLastPerfShellTraceStats.asStaticSegmentAtlasEligibleChunks++;
-				}
-			}
-
-			const bool chunkInLocalSpace =
-				mMapWorld.valid &&
-				chunk.chunkIndex < mMapWorld.chunks.size() &&
-				mMapWorld.chunks[chunk.chunkIndex].localSpaceIndex != UINT32_MAX;
-			const bool chunkAnimated = chunk.hasAnimatedTextureCandidates || chunk.animatedRefreshSuppressed;
-			const bool chunkAtlasContiguous =
-				mStaticMapChunkAtlas.valid &&
-				chunkListIndex < mStaticMapChunkAtlas.chunks.size() &&
-				mStaticMapChunkAtlas.chunks[chunkListIndex].valid &&
-				mStaticMapChunkAtlas.chunks[chunkListIndex].primitiveCount == chunk.primitiveCount &&
-				mStaticMapChunkAtlas.chunks[chunkListIndex].indexCount == chunk.indexCount &&
-				mStaticMapChunkAtlas.chunks[chunkListIndex].vertexCount == chunk.vertexCount;
-			if (mMapWorld.valid && chunk.chunkIndex < mMapWorld.chunks.size())
-			{
-				const nri_scene::PTMapChunk& mapChunk = mMapWorld.chunks[chunk.chunkIndex];
-				const uint32_t surfaceEnd = std::min<uint32_t>(
-					mapChunk.firstSurface + mapChunk.surfaceCount,
-					(uint32_t)mMapWorld.surfaces.size());
-				for (uint32_t surfaceIndex = mapChunk.firstSurface; surfaceIndex < surfaceEnd; ++surfaceIndex)
-				{
-					const nri_scene::PTMapSurface& surface = mMapWorld.surfaces[surfaceIndex];
-					mLastPerfShellTraceStats.asStaticSegmentCandidateSurfaces++;
-					switch (surface.surface.provenance.sourceType)
-					{
-					case nri_scene::SurfaceSourceType::MapWallBand:
-						mLastPerfShellTraceStats.asStaticSegmentWallCandidates++;
-						break;
-					case nri_scene::SurfaceSourceType::MapFloorSection:
-						mLastPerfShellTraceStats.asStaticSegmentFloorCandidates++;
-						break;
-					case nri_scene::SurfaceSourceType::MapCeilingSection:
-						mLastPerfShellTraceStats.asStaticSegmentCeilingCandidates++;
-						break;
-					case nri_scene::SurfaceSourceType::MapPortalSurface:
-						mLastPerfShellTraceStats.asStaticSegmentPortalCandidates++;
-						break;
-					default:
-						break;
-					}
-					if (chunkInLocalSpace)
-					{
-						mLastPerfShellTraceStats.asStaticSegmentLocalSpaceSurfaces++;
-					}
-					if (chunkAnimated)
-					{
-						mLastPerfShellTraceStats.asStaticSegmentAnimatedSurfaces++;
-					}
-					if ((surface.surface.provenance.materialFlags &
-						(nri_scene::MaterialFlag_Portal |
-							nri_scene::MaterialFlag_Mirror |
-							nri_scene::MaterialFlag_Sky |
-							nri_scene::MaterialFlag_PlainMirror |
-							nri_scene::MaterialFlag_TintEmission)) != 0)
-					{
-						mLastPerfShellTraceStats.asStaticSegmentMaterialRiskSurfaces++;
-					}
-					if (chunkAtlasContiguous)
-					{
-						mLastPerfShellTraceStats.asStaticSegmentContiguousChunkSurfaces++;
-					}
-				}
-			}
-		}
-		for (const auto& pair : staticSegmentSignatureRefs)
-		{
-			mLastPerfShellTraceStats.asStaticSegmentUniqueGeometrySignatures++;
-			if (pair.second > 1)
-			{
-				mLastPerfShellTraceStats.asStaticSegmentDuplicateKeys++;
-				mLastPerfShellTraceStats.asStaticSegmentDuplicateRefs += pair.second - 1u;
-			}
-		}
-		const ResidentMapChunkRegistry& registry = mStaticSceneResidency.Registry();
-		if (registry.valid)
-		{
-			for (const ResidentMapChunkRegistry::Entry& entry : registry.entries)
-			{
-				if (entry.valid && entry.active && entry.mappedInStaticScene)
-				{
-					mLastPerfShellTraceStats.asStaticSegmentRegistryMappedChunks++;
-				}
-			}
-		}
-		const StaticMapSegmentBlasCache& segmentCache = mStaticMapScene.segmentBlasCache;
-		if (segmentCache.valid && segmentCache.buildSerial == mStaticMapScene.buildSerial)
-		{
-			mLastPerfShellTraceStats.asStaticSegmentCacheCandidates = segmentCache.candidateCount;
-			mLastPerfShellTraceStats.asStaticSegmentCacheEntries = segmentCache.entryCount;
-			mLastPerfShellTraceStats.asStaticSegmentCacheHits = segmentCache.cacheHits;
-			mLastPerfShellTraceStats.asStaticSegmentCacheMisses = segmentCache.cacheMisses;
-			mLastPerfShellTraceStats.asStaticSegmentCacheDuplicateRefs = segmentCache.duplicateRefs;
-			mLastPerfShellTraceStats.asStaticSegmentCacheResidentBlas = segmentCache.residentBlasCount;
-			mLastPerfShellTraceStats.asStaticSegmentCacheBuildsThisFrame =
-				mBuiltStaticMapSceneASLastFrame ? segmentCache.buildsThisFrame : 0;
-			mLastPerfShellTraceStats.asStaticSegmentCacheBuildsLastRebuild = segmentCache.buildsThisFrame;
-			mLastPerfShellTraceStats.asStaticSegmentCacheInvalidations = segmentCache.invalidations;
-			mLastPerfShellTraceStats.asStaticSegmentCacheResidentBytes = segmentCache.residentMemoryBytes;
-			mLastPerfShellTraceStats.asStaticSegmentCacheBlasBuildEnabled = segmentCache.blasBuildEnabled;
-			mLastPerfShellTraceStats.asStaticSegmentRouteRouted = segmentCache.routeStats.routedSegment;
-			mLastPerfShellTraceStats.asStaticSegmentRouteChunkFallback = segmentCache.routeStats.routedChunkFallback;
-			mLastPerfShellTraceStats.asStaticSegmentRouteRejectDisabled = segmentCache.routeStats.rejectDisabled;
-			mLastPerfShellTraceStats.asStaticSegmentRouteRejectMissingCache = segmentCache.routeStats.rejectMissingCache;
-			mLastPerfShellTraceStats.asStaticSegmentRouteRejectMissingBlas = segmentCache.routeStats.rejectMissingBlas;
-			mLastPerfShellTraceStats.asStaticSegmentRouteSegmentBlasRefs = segmentCache.routeStats.segmentBlasRefs;
-			mLastPerfShellTraceStats.asStaticSegmentRouteChunkBlasRefs = segmentCache.routeStats.chunkBlasRefs;
-			mLastPerfShellTraceStats.asStaticSegmentBlas = segmentCache.residentBlasCount;
-		}
+		NRIStaticSceneDiagnosticsInput diagnosticsInput = {};
+		diagnosticsInput.mapWorld = &mMapWorld;
+		diagnosticsInput.staticScene = &mStaticMapScene;
+		diagnosticsInput.atlas = &mStaticMapChunkAtlas;
+		diagnosticsInput.registry = &staticRegistry;
+		diagnosticsInput.builtStaticMapSceneASLastFrame = mBuiltStaticMapSceneASLastFrame;
+		const NRIStaticSceneDiagnosticsSnapshot diagnostics =
+			mStaticSceneDiagnostics.Build(diagnosticsInput);
+		mLastPerfShellTraceStats.successDiagnosticsDeepSceneAuditCacheHits += diagnostics.cacheHit ? 1u : 0u;
+		mLastPerfShellTraceStats.successDiagnosticsDeepSceneAuditRebuilds += diagnostics.cacheHit ? 0u : 1u;
+		mLastPerfShellTraceStats.successDiagnosticsStaticChunkRowsScanned += diagnostics.diagnosticChunkRowsScanned;
+		mLastPerfShellTraceStats.successDiagnosticsStaticChunkRowsIncrementallyUpdated +=
+			diagnostics.diagnosticChunkRowsIncrementallyUpdated;
+		mLastPerfShellTraceStats.successDiagnosticsStaticSurfaceRowsScanned += diagnostics.diagnosticSurfaceRowsScanned;
+		mLastPerfShellTraceStats.successDiagnosticsStaticSurfaceRowsIncrementallyUpdated +=
+			diagnostics.diagnosticSurfaceRowsIncrementallyUpdated;
+		mLastPerfShellTraceStats.successDiagnosticsRegistryRowsScanned += diagnostics.diagnosticRegistryRowsScanned;
+		mLastPerfShellTraceStats.successDiagnosticsTemporaryContainersBuilt += diagnostics.diagnosticContainersBuilt;
+		mLastPerfShellTraceStats.asBlasStatic = diagnostics.asBlasStatic;
+		mLastPerfShellTraceStats.asStaticChunkOwnedBlas = diagnostics.asStaticChunkOwnedBlas;
+		mLastPerfShellTraceStats.asStaticUniqueGeometrySignatures = diagnostics.asStaticUniqueGeometrySignatures;
+		mLastPerfShellTraceStats.asStaticSegmentBlas = diagnostics.asStaticSegmentBlas;
+		mLastPerfShellTraceStats.asStaticSegmentCandidateChunks = diagnostics.asStaticSegmentCandidateChunks;
+		mLastPerfShellTraceStats.asStaticSegmentUniqueGeometrySignatures = diagnostics.asStaticSegmentUniqueGeometrySignatures;
+		mLastPerfShellTraceStats.asStaticSegmentDuplicateKeys = diagnostics.asStaticSegmentDuplicateKeys;
+		mLastPerfShellTraceStats.asStaticSegmentDuplicateRefs = diagnostics.asStaticSegmentDuplicateRefs;
+		mLastPerfShellTraceStats.asStaticSegmentPortalChunks = diagnostics.asStaticSegmentPortalChunks;
+		mLastPerfShellTraceStats.asStaticSegmentLocalSpaceChunks = diagnostics.asStaticSegmentLocalSpaceChunks;
+		mLastPerfShellTraceStats.asStaticSegmentAnimatedChunks = diagnostics.asStaticSegmentAnimatedChunks;
+		mLastPerfShellTraceStats.asStaticSegmentAtlasEligibleChunks = diagnostics.asStaticSegmentAtlasEligibleChunks;
+		mLastPerfShellTraceStats.asStaticSegmentRegistryMappedChunks = diagnostics.asStaticSegmentRegistryMappedChunks;
+		mLastPerfShellTraceStats.asStaticSegmentCandidateSurfaces = diagnostics.asStaticSegmentCandidateSurfaces;
+		mLastPerfShellTraceStats.asStaticSegmentWallCandidates = diagnostics.asStaticSegmentWallCandidates;
+		mLastPerfShellTraceStats.asStaticSegmentFloorCandidates = diagnostics.asStaticSegmentFloorCandidates;
+		mLastPerfShellTraceStats.asStaticSegmentCeilingCandidates = diagnostics.asStaticSegmentCeilingCandidates;
+		mLastPerfShellTraceStats.asStaticSegmentPortalCandidates = diagnostics.asStaticSegmentPortalCandidates;
+		mLastPerfShellTraceStats.asStaticSegmentLocalSpaceSurfaces = diagnostics.asStaticSegmentLocalSpaceSurfaces;
+		mLastPerfShellTraceStats.asStaticSegmentAnimatedSurfaces = diagnostics.asStaticSegmentAnimatedSurfaces;
+		mLastPerfShellTraceStats.asStaticSegmentMaterialRiskSurfaces = diagnostics.asStaticSegmentMaterialRiskSurfaces;
+		mLastPerfShellTraceStats.asStaticSegmentContiguousChunkSurfaces = diagnostics.asStaticSegmentContiguousChunkSurfaces;
+		mLastPerfShellTraceStats.asStaticSegmentCacheCandidates = diagnostics.asStaticSegmentCacheCandidates;
+		mLastPerfShellTraceStats.asStaticSegmentCacheEntries = diagnostics.asStaticSegmentCacheEntries;
+		mLastPerfShellTraceStats.asStaticSegmentCacheHits = diagnostics.asStaticSegmentCacheHits;
+		mLastPerfShellTraceStats.asStaticSegmentCacheMisses = diagnostics.asStaticSegmentCacheMisses;
+		mLastPerfShellTraceStats.asStaticSegmentCacheDuplicateRefs = diagnostics.asStaticSegmentCacheDuplicateRefs;
+		mLastPerfShellTraceStats.asStaticSegmentCacheResidentBlas = diagnostics.asStaticSegmentCacheResidentBlas;
+		mLastPerfShellTraceStats.asStaticSegmentCacheBuildsThisFrame = diagnostics.asStaticSegmentCacheBuildsThisFrame;
+		mLastPerfShellTraceStats.asStaticSegmentCacheBuildsLastRebuild = diagnostics.asStaticSegmentCacheBuildsLastRebuild;
+		mLastPerfShellTraceStats.asStaticSegmentCacheInvalidations = diagnostics.asStaticSegmentCacheInvalidations;
+		mLastPerfShellTraceStats.asStaticSegmentCacheResidentBytes = diagnostics.asStaticSegmentCacheResidentBytes;
+		mLastPerfShellTraceStats.asStaticSegmentCacheBlasBuildEnabled = diagnostics.asStaticSegmentCacheBlasBuildEnabled;
+		mLastPerfShellTraceStats.asStaticSegmentRouteRouted = diagnostics.asStaticSegmentRouteRouted;
+		mLastPerfShellTraceStats.asStaticSegmentRouteChunkFallback = diagnostics.asStaticSegmentRouteChunkFallback;
+		mLastPerfShellTraceStats.asStaticSegmentRouteRejectDisabled = diagnostics.asStaticSegmentRouteRejectDisabled;
+		mLastPerfShellTraceStats.asStaticSegmentRouteRejectMissingCache = diagnostics.asStaticSegmentRouteRejectMissingCache;
+		mLastPerfShellTraceStats.asStaticSegmentRouteRejectMissingBlas = diagnostics.asStaticSegmentRouteRejectMissingBlas;
+		mLastPerfShellTraceStats.asStaticSegmentRouteSegmentBlasRefs = diagnostics.asStaticSegmentRouteSegmentBlasRefs;
+		mLastPerfShellTraceStats.asStaticSegmentRouteChunkBlasRefs = diagnostics.asStaticSegmentRouteChunkBlasRefs;
 	}
 	mLastPerfShellTraceStats.asBlasBuiltThisFrame =
 		mLastPerfShellTraceStats.dynamicAsCreateCalls +
@@ -1000,18 +967,6 @@ void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInput
 	mLastPerfShellTraceStats.usedStaticMapScene = mUsedStaticMapSceneLastFrame;
 	mLastPerfShellTraceStats.usedDynamicOverlay = mGpuSceneHasDynamicOverlay;
 	mLastPerfShellTraceStats.usedPersistentDynamicEmissiveCache = inputs.usingPersistentDynamicEmissiveCache;
-	const double accountedMs =
-		mLastPerfShellTraceStats.initResourcesMs +
-		mLastPerfShellTraceStats.mapWorldMs +
-		mLastPerfShellTraceStats.updateStateMs +
-		mLastPerfShellTraceStats.sceneSelectMs +
-		mLastPerfShellTraceStats.sceneLightsMs +
-		mLastPerfShellTraceStats.residentLightRefreshMs +
-		mLastPerfShellTraceStats.emissiveUpdateMs +
-		mLastPerfShellTraceStats.emissiveTlasMs +
-		mLastPerfShellTraceStats.surfaceProbeMs +
-		mLastPerfShellTraceStats.frameGraphMs;
-	mLastPerfShellTraceStats.otherMs = std::max(0.0, mLastPerfShellTraceStats.totalMs - accountedMs);
 }
 
 void NRIRenderer::EmitRenderSceneTemporalTrace(uint32_t traceFrameIndex)
@@ -1109,6 +1064,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	}
 
 	ResetPerfTraceStats();
+	ScopedPtPerfAttributionFinalizer attributionFinalizer(mLastPerfShellTraceStats);
 	ScopedPtPerfTimer totalPerfTimer(mLastPerfShellTraceStats.totalMs);
 	Clocker totalClock(NriPTAll);
 
@@ -1137,6 +1093,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	}
 
 	RenderSceneFrameBuildInputs sceneFrameInputs = {};
+	const GameUpdateSnapshot gameUpdate = GetGameUpdateSnapshot();
+	sceneFrameInputs.simulationGeneration = gameUpdate.simulationGeneration;
+	sceneFrameInputs.engineUpdateGeneration = gameUpdate.engineUpdateGeneration;
+	sceneFrameInputs.presentationGeneration = gameUpdate.presentationGeneration;
+	sceneFrameInputs.ticksExecutedThisPresentation = gameUpdate.ticksExecutedThisPresentation;
 	sceneFrameInputs.bootstrapMode = bootstrapMode;
 	sceneFrameInputs.bootstrapCapturedView = bootstrapCapturedView;
 	sceneFrameInputs.bootstrapCapturedDiagnostics = bootstrapCapturedDiagnostics;

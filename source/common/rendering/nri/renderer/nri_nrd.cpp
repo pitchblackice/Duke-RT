@@ -63,7 +63,8 @@ namespace
 		// because current Raze gameplay still denoises a mixed direct+indirect signal.
 		settings.minMaterialForDiffuse = 1.0f;
 		settings.minMaterialForSpecular = 2.0f;
-		settings.usePrepassOnlyForSpecularMotionEstimation = settings.specularPrepassBlurRadius > 0.0f;
+		settings.usePrepassOnlyForSpecularMotionEstimation =
+			desc.indirectSamplingMode == 0u && settings.specularPrepassBlurRadius > 0.0f;
 
 		return settings;
 	}
@@ -186,7 +187,9 @@ bool NRINrdContext::EnsureReady(nri::Device& device, uint32_t width, uint32_t he
 	mHasReblurSettings = false;
 	mHasRelaxSettings = false;
 	mHasSigmaSettings = false;
+	mHasIndirectSamplingMode = false;
 	mLastDenoiserMode = NRINrdDenoiserMode::Reblur;
+	mLastIndirectSamplingMode = 0;
 	return true;
 }
 
@@ -214,6 +217,9 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 
 	const bool useRelax = UseRelax(desc.denoiserMode);
 	const bool denoiserChanged = desc.denoiserMode != mLastDenoiserMode;
+	const bool samplingPolicyChanged =
+		!mHasIndirectSamplingMode ||
+		desc.indirectSamplingMode != mLastIndirectSamplingMode;
 	bool settingsChanged = false;
 	nrd::Identifier activeDenoiser = useRelax ? mRelaxDenoiser : mReblurDenoiser;
 	bool sigmaSettingsChanged = false;
@@ -273,8 +279,6 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 		}
 	}
 
-	mLastDenoiserMode = desc.denoiserMode;
-
 	nrd::CommonSettings commonSettings = {};
 	std::memcpy(commonSettings.viewToClipMatrix, desc.viewToClipMatrix, sizeof(commonSettings.viewToClipMatrix));
 	std::memcpy(commonSettings.viewToClipMatrixPrev, desc.viewToClipMatrixPrev, sizeof(commonSettings.viewToClipMatrixPrev));
@@ -306,7 +310,7 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 	commonSettings.frameIndex = desc.frameIndex;
 	const float temporalFrameTimeMs = ResolveNrdTemporalFrameTimeMs(desc.observedFrameTimeMs);
 	commonSettings.timeDeltaBetweenFrames = temporalFrameTimeMs;
-	commonSettings.accumulationMode = (desc.resetHistory || denoiserChanged || settingsChanged || sigmaSettingsChanged) ? nrd::AccumulationMode::CLEAR_AND_RESTART : nrd::AccumulationMode::CONTINUE;
+	commonSettings.accumulationMode = (desc.resetHistory || denoiserChanged || settingsChanged || sigmaSettingsChanged || samplingPolicyChanged) ? nrd::AccumulationMode::CLEAR_AND_RESTART : nrd::AccumulationMode::CONTINUE;
 	// Camera motion is already represented by the matrices above, so motion vectors stay in screen space here.
 	commonSettings.isMotionVectorInWorldSpace = false;
 	// REBLUR can use base-color/metalness to patch motion vectors during stabilization.
@@ -320,9 +324,10 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 		const float frameRateScale = useRelax ?
 			std::clamp(16.66f / temporalFrameTimeMs, 0.25f, 4.0f) :
 			std::max(33.333f / temporalFrameTimeMs, 1.0f);
-		Printf("PERF pt nrd temporal NRI: frame=%u mode=%s observed_frame_ms=%.3f effective_frame_ms=%.3f frame_rate_scale=%.3f renderer_queued_frames=%u integration_queued_frames=%u accumulation=%s reset_explicit=%u reset_mode=%u reset_settings=%u reset_sigma=%u\n",
+		Printf("PERF pt nrd temporal NRI: frame=%u mode=%s indirect_mode=%u observed_frame_ms=%.3f effective_frame_ms=%.3f frame_rate_scale=%.3f renderer_queued_frames=%u integration_queued_frames=%u accumulation=%s reset_explicit=%u reset_mode=%u reset_settings=%u reset_sigma=%u reset_indirect=%u\n",
 			desc.frameIndex,
 			useRelax ? "relax" : "reblur",
+			desc.indirectSamplingMode,
 			desc.observedFrameTimeMs,
 			temporalFrameTimeMs,
 			frameRateScale,
@@ -332,13 +337,17 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 			desc.resetHistory ? 1u : 0u,
 			denoiserChanged ? 1u : 0u,
 			settingsChanged ? 1u : 0u,
-			sigmaSettingsChanged ? 1u : 0u);
+			sigmaSettingsChanged ? 1u : 0u,
+			samplingPolicyChanged ? 1u : 0u);
 	}
 
 	if (mIntegration.SetCommonSettings(commonSettings) != nrd::Result::SUCCESS)
 	{
 		return false;
 	}
+	mLastDenoiserMode = desc.denoiserMode;
+	mLastIndirectSamplingMode = desc.indirectSamplingMode;
+	mHasIndirectSamplingMode = true;
 
 	nrd::ResourceSnapshot resourceSnapshot = {};
 	resourceSnapshot.restoreInitialState = false;
@@ -396,5 +405,7 @@ void NRINrdContext::Shutdown()
 	mHasReblurSettings = false;
 	mHasRelaxSettings = false;
 	mHasSigmaSettings = false;
+	mHasIndirectSamplingMode = false;
 	mLastDenoiserMode = NRINrdDenoiserMode::Reblur;
+	mLastIndirectSamplingMode = 0;
 }

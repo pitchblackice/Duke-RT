@@ -110,11 +110,16 @@ NRITraceSettings BuildNRITraceSettingsFromCVars()
 	settings.lightBounceCount = ClampTraceBounceCount((int)nri_ptlightbounces, 4u);
 	settings.mirrorBounceCount = ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u);
 	settings.portalDepth = ClampTraceBounceCount((int)nri_ptportaldepth, 8u);
-	settings.emissiveSampleCount = std::max<uint32_t>(ClampTraceBounceCount((int)nri_ptemissivesamples, 4u), 1u);
+	settings.emissiveRequestedSampleCount = std::max<uint32_t>(ClampTraceBounceCount((int)nri_ptemissivesamples, 4u), 1u);
+	settings.emissivePrimarySampleBudget = (uint32_t)std::clamp((int)nri_ptemissiveprimarybudget, 0, 4);
+	settings.emissiveSampleCount = NRIResolvePrimaryEmissiveSampleCount(
+		settings.emissiveRequestedSampleCount,
+		settings.emissivePrimarySampleBudget);
+	settings.indirectSamplingMode = NRIResolveIndirectSamplingMode((int)nri_ptindirectsampling);
 	return settings;
 }
 
-NRIDenoiserSettings BuildNRIDenoiserSettingsFromCVars()
+NRIDenoiserSettings BuildNRIDenoiserSettingsFromCVars(uint32_t indirectSamplingMode)
 {
 	NRIDenoiserSettings settings = {};
 	settings.denoiserMode = (NRINrdDenoiserMode)std::clamp((int)nri_nrddenoiser, 0, 1);
@@ -127,6 +132,12 @@ NRIDenoiserSettings BuildNRIDenoiserSettingsFromCVars()
 	settings.fastHistoryClampingSigmaScale = ClampNrdFastHistorySigmaScale((float)nri_nrdfasthistorysigma);
 	settings.diffusePrepassBlurRadius = ClampNrdPrepassBlurRadius((float)nri_nrdprepassdiffuse);
 	settings.specularPrepassBlurRadius = ClampNrdPrepassBlurRadius((float)nri_nrdprepassspecular);
+	if (indirectSamplingMode != 0u)
+	{
+		settings.hitDistanceReconstructionMode = std::max(settings.hitDistanceReconstructionMode, 1u);
+		settings.diffusePrepassBlurRadius = std::max(settings.diffusePrepassBlurRadius, 3.45f);
+		settings.specularPrepassBlurRadius = std::max(settings.specularPrepassBlurRadius, 3.675f);
+	}
 	settings.minBlurRadius = ClampNrdBlurRadius((float)nri_nrdblurmin);
 	settings.maxBlurRadius = std::max(settings.minBlurRadius, ClampNrdBlurRadius((float)nri_nrdblurmax));
 	settings.sigmaPlaneDistanceSensitivity = ClampSigmaPlaneDistanceSensitivity((float)nri_nrdsigmaplanedistance);

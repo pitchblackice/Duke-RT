@@ -3,6 +3,7 @@
 
 #include "../system/nri_renderdevice.h"
 #include "c_cvars.h"
+#include "perf_capture.h"
 
 #include <chrono>
 
@@ -13,7 +14,7 @@ namespace
     {
         const bool perfLoopTraceActive = (int)perf_looptraceframes > 0;
         const bool temporalTraceActive = !!nri_pttemporaltrace && (int)nri_pttraceframes > 0;
-        return perfLoopTraceActive || temporalTraceActive || (bool)nri_ptslowdowntrace || (bool)nri_ptscenestats;
+		return perfLoopTraceActive || temporalTraceActive || (bool)nri_ptslowdowntrace || (bool)nri_ptscenestats || PerfCompactCaptureTimingActive();
     }
 
     static double RuntimeMutationDurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
@@ -460,6 +461,19 @@ NRIRuntimeMutationResidentSceneRefreshServices BuildNRIRuntimeMutationResidentSc
 	services.recoverFailure = [](void* user, const char* reason) -> bool
 	{
 		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		for (auto& chunk : renderer->mStaticMapScene.chunks)
+		{
+			if (chunk.fixedLayoutDeformerKey == 0)
+			{
+				continue;
+			}
+			renderer->mSE29FloorDeformerRoute.NoteApplyFailure(chunk.fixedLayoutDeformerKey);
+			chunk.fixedLayoutDeformerKey = 0;
+			chunk.fixedLayoutVertexSpanCount = 0;
+			chunk.fixedLayoutPrimitiveSpanCount = 0;
+			chunk.fixedLayoutVertexBytes = 0;
+			chunk.fixedLayoutPrimitiveBytes = 0;
+		}
 		renderer->DestroyStaticMapSceneCache(reason != nullptr ? reason : "runtime-mutation-resident-refresh-failed");
 		renderer->mStaticMapScene = {};
 		renderer->mStaticAccelerationBuildSerial = 0;

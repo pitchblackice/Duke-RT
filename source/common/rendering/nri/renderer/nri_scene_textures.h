@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../system/nri_local.h"
+#include "nri_scene_texture_slot_table.h"
 
 #include <cstdint>
 #include <unordered_map>
@@ -45,6 +46,12 @@ struct SceneTextureCacheDebugStats
 	double realizeMsLastBuild = 0.0;
 	double descriptorMsLastBuild = 0.0;
 	double transitionMsLastFrame = 0.0;
+	uint32_t descriptorWritesLastBuild = 0;
+	uint32_t descriptorSkipsLastBuild = 0;
+	uint32_t descriptorRowsWrittenLastBuild = 0;
+	uint32_t stableSlotModeLastBuild = 0;
+	uint32_t stableDescriptorHitsLastBuild = 0;
+	uint32_t stableDescriptorMissesLastBuild = 0;
 };
 
 struct SceneTextureResolveResult
@@ -143,6 +150,8 @@ public:
 	bool LimitLogPrinted() const { return mLimitLogPrinted; }
 
 	uint32_t CacheCount() const { return (uint32_t)mTextureCache.size(); }
+	NRISceneTextureSlotTable& SlotTable() { return mSlotTable; }
+	const NRISceneTextureSlotTable& SlotTable() const { return mSlotTable; }
 	uint32_t FindCacheIndex(uint64_t key) const;
 	uint32_t FindReadyCacheIndex(uint64_t key) const;
 	uint32_t AddCachedTexture(NRISceneCachedTexture&& texture);
@@ -155,6 +164,9 @@ public:
 	bool WarmMaterialTextures(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials, NRIMaterialTextureWarmupResult& outResult);
 	bool WarmMaterialTexturesBudgeted(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials, const NRIMaterialTextureWarmupOptions& options, NRIMaterialTextureWarmupCursor& cursor, NRIMaterialTextureWarmupResult& outResult);
 	bool ResolveTextureDescriptor(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, bool tracePerf, SceneTextureResolveResult& outResult);
+	nri::Descriptor* FindStableSlotDescriptor(uint64_t key, NRISceneTextureSlotHandle handle) const;
+	void StoreStableSlotDescriptor(uint64_t key, NRISceneTextureSlotHandle handle, nri::Descriptor* descriptor);
+	void PopulateStableSlotDescriptors(std::vector<nri::Descriptor*>& descriptors, uint32_t descriptorOffset) const;
 	uint32_t TransitionInputsForCompute(NRIRenderDevice& device);
 
 	void ClearLiveResources();
@@ -164,6 +176,12 @@ public:
 	void ClearCachedTextures();
 
 private:
+	struct StableSlotDescriptorCacheEntry
+	{
+		uint64_t key = 0;
+		NRISceneTextureSlotHandle handle = {};
+		nri::Descriptor* descriptor = nullptr;
+	};
 	enum class CachedTextureReadiness : uint8_t
 	{
 		Ready,
@@ -184,5 +202,7 @@ private:
 	std::vector<NRITextureResource*> mLiveResources;
 	SceneTextureOverflowDebugStats mOverflowStats = {};
 	SceneTextureCacheDebugStats mCacheStats = {};
+	NRISceneTextureSlotTable mSlotTable;
+	std::vector<StableSlotDescriptorCacheEntry> mStableSlotDescriptors;
 	bool mLimitLogPrinted = false;
 };

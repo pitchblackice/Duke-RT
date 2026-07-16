@@ -27,6 +27,7 @@ public:
 	bool ClearRuntimeDebugSpheres();
 	void PrintRuntimeDebugSpheres() const;
 	uint32_t GetRuntimeDebugSphereCount() const { return (uint32_t)mRuntimeDebugSpheres.size(); }
+	uint64_t ContentGeneration() const { return mContentGeneration; }
 	bool Empty() const { return mRuntimeDebugSpheres.empty(); }
 	void ResetRuntimeDebugSphereIds() { mNextRuntimeDebugSphereId = 1; }
 	void InvalidateRuntimeDebugSphereTessellation();
@@ -57,4 +58,5 @@ private:
 
 	std::vector<RuntimeDebugSphere> mRuntimeDebugSpheres;
 	uint32_t mNextRuntimeDebugSphereId = 1;
+	uint64_t mContentGeneration = 1;
 };

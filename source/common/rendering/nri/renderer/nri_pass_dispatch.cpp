@@ -8,8 +8,10 @@
 #include "nri_scene_upload.h"
 #include "nri_shader_contracts.h"
 #include "../system/nri_renderdevice.h"
+#include "../system/nri_gpu_timing.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
+#include "perf_capture.h"
 #include "printf.h"
 
 #include <algorithm>
@@ -33,7 +35,7 @@ namespace
 
 	static bool ShouldCollectPtPerfTiming()
 	{
-		return ShouldTracePtPerf() || (bool)nri_ptslowdowntrace;
+		return ShouldTracePtPerf() || (bool)nri_ptslowdowntrace || PerfCompactCaptureTimingActive();
 	}
 
 	static bool ShouldCollectTraceShaderStats()
@@ -95,6 +97,11 @@ namespace
 		return (value + 7u) / 8u;
 	}
 
+	static uint64_t AppendTraceWorkloadHash(uint64_t hash, uint64_t value)
+	{
+		return (hash ^ value) * 1099511628211ull;
+	}
+
 	static float Clamp01(float value)
 	{
 		return std::max(0.0f, std::min(value, 1.0f));
@@ -104,6 +111,11 @@ namespace
 	{
 		return nri_ptsmoke && (int)nri_ptsmokedlrrmode == 1 ?
 			NRIRenderer::FrameTextureSlot::RrVolumeInput : NRIRenderer::FrameTextureSlot::RrInput;
+	}
+
+	static uint32_t PackVoxelNormalBlend8(float value)
+	{
+		return (uint32_t)std::lround(Clamp01(value) * 255.0f) << NRI_VOXEL_NORMAL_BLEND_SHIFT;
 	}
 
 	static float GetBaseAmbient()
@@ -295,7 +307,8 @@ bool NRIPassDispatcher::DispatchBootstrapView(NRIPassDispatchContext& context)
 		NRI_FLAG_BOOTSTRAP_VIEW |
 		(context.mFrame.resetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 		(context.mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
-		(context.mDirectionalLightState.enabled && context.mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u);
+		(context.mDirectionalLightState.enabled && context.mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u) |
+		PackVoxelNormalBlend8(nri_ptvoxelnormalblend);
 	constants.StaticMaterialCount = context.mSceneStats.staticMaterialCount;
 	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.BootstrapMode = bootstrapMode;
@@ -371,6 +384,7 @@ bool NRIPassDispatcher::DispatchFrameGraph(NRIPassDispatchContext& context, HWDr
 
 bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWDrawInfo&, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials)
 {
+	NRIScopedGpuTiming gpuTiming(context.mResources.frameBuffer, NRIGpuTimingScope::Trace);
 	Clocker clock(NriPTTraceOpaque);
 	ScopedPtPerfTimer traceOpaqueTimer(context.mLastPerfShellTraceStats.traceOpaqueMs);
 	{
@@ -397,12 +411,20 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 
 	NRITraceSceneConstants constants = {};
 	const NRITraceSettings traceSettings = BuildNRITraceSettingsFromCVars();
-	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars();
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const NRIMainUpscalerKind resolvedMainUpscaler = context.mUpscalerService.ResolveMainUpscalerKind(false);
 	const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(resolvedMainUpscaler, context.mUpscalerService.GetSelectedUpscalerMode());
 	const uint32_t jitterPhaseCount = NRIGetTemporalJitterPhaseCount(resolvedMainUpscaler, resolvedUpscalerMode, context.mFrame.guiCaptureActive);
 	const bool directSceneTrace = (!nri_ptbootstrap && nri_ptdirectscene) || bootstrapMode == 11u || bootstrapMode == 12u;
+	context.mEffectiveIndirectSamplingMode =
+		traceSettings.indirectSamplingMode != 0u &&
+		context.mTraceIndirectDenoiserAvailable &&
+		!directSceneTrace &&
+		traceSettings.lightBounceCount > 0u ? 1u : 0u;
+	context.mActiveIndirectSamplingMode =
+		context.mEffectiveIndirectSamplingMode != 0u &&
+		!context.mFrame.resetHistory ? 1u : 0u;
+	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars(context.mEffectiveIndirectSamplingMode);
 	const bool useTemporalJitter =
 		!nri_ptbootstrap &&
 		!context.mFrame.guiCaptureActive &&
@@ -437,8 +459,10 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		(nri_ptemissivefastshadow ? NRI_FLAG_FAST_EMISSIVE_SHADOW : 0u) |
 		(nri_ptvisiblechunkgate ? NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS : 0u) |
 		(ShouldCollectTraceShaderStats() ? NRI_FLAG_TRACE_SHADER_STATS : 0u) |
+		(context.mActiveIndirectSamplingMode != 0u ? NRI_FLAG_PROBABILISTIC_INDIRECT : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u) |
-		NRIPackTemporalJitterPhaseCount(jitterPhaseCount);
+		NRIPackTemporalJitterPhaseCount(jitterPhaseCount) |
+		PackVoxelNormalBlend8(nri_ptvoxelnormalblend);
 	constants.StaticMaterialCount = context.mSceneStats.staticMaterialCount;
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = context.mSceneStats.dynamicMaterialCount;
@@ -510,12 +534,78 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	context.mLastPerfShellTraceStats.traceOpaqueDispatchX = dispatchX;
 	context.mLastPerfShellTraceStats.traceOpaqueDispatchY = dispatchY;
 	context.mLastPerfShellTraceStats.traceOpaqueDispatchZ = dispatchZ;
+	auto& tracePerf = context.mLastPerfShellTraceStats;
+	tracePerf.traceRendererFrame = context.mFrame.frameIndex;
+	tracePerf.traceRenderWidth = constants.RenderWidth;
+	tracePerf.traceRenderHeight = constants.RenderHeight;
+	tracePerf.traceOutputWidth = constants.DisplayWidth;
+	tracePerf.traceOutputHeight = constants.DisplayHeight;
+	tracePerf.traceLightBounceCount = traceSettings.lightBounceCount;
+	tracePerf.traceMirrorBounceCount = traceSettings.mirrorBounceCount;
+	tracePerf.tracePortalDepth = traceSettings.portalDepth;
+	tracePerf.traceEmissiveSampleCount = traceSettings.emissiveSampleCount;
+	tracePerf.traceEmissiveRequestedSampleCount = traceSettings.emissiveRequestedSampleCount;
+	tracePerf.traceEmissivePrimarySampleBudget = traceSettings.emissivePrimarySampleBudget;
+	tracePerf.traceIndirectSamplingRequestedMode = traceSettings.indirectSamplingMode;
+	tracePerf.traceIndirectSamplingEffectiveMode = context.mEffectiveIndirectSamplingMode;
+	tracePerf.traceIndirectSamplingActiveMode = context.mActiveIndirectSamplingMode;
+	tracePerf.traceHitDistanceReconstructionMode = denoiserSettings.hitDistanceReconstructionMode;
+	tracePerf.traceRuntimeLightCount = context.mSceneStats.runtimeLightCount;
+	tracePerf.traceRuntimeLightTileCountX = context.mSceneStats.runtimeLightTileCountX;
+	tracePerf.traceRuntimeLightTileCountY = context.mSceneStats.runtimeLightTileCountY;
+	tracePerf.traceRuntimeLightTileSize = context.mSceneStats.runtimeLightTileSize;
+	tracePerf.traceRuntimeLightTileIndexCount = context.mSceneStats.runtimeLightTileIndexCount;
+	tracePerf.traceRuntimeLightMaxTileOccupancy = context.mSceneStats.runtimeLightMaxTileOccupancy;
+	tracePerf.traceEmissivePrimitiveCount = context.mSceneStats.emissivePrimitiveCount;
+	tracePerf.traceEmissiveTotalPower = context.mSceneStats.emissiveTotalPower;
+	tracePerf.traceFlags = constants.Flags;
+	tracePerf.traceDebugMode = constants.DebugMode;
+	tracePerf.traceBootstrapMode = constants.BootstrapMode;
+	tracePerf.traceUpscalerKind = (uint32_t)resolvedMainUpscaler;
+	tracePerf.traceUpscalerMode = (uint32_t)resolvedUpscalerMode;
+	tracePerf.traceDenoiserMode = (uint32_t)denoiserSettings.denoiserMode;
+	tracePerf.traceDirectScene = directSceneTrace ? 1u : 0u;
+	tracePerf.traceDirectional = context.mDirectionalLightState.enabled ? 1u : 0u;
+	tracePerf.traceDirectionalShadow = context.mDirectionalLightState.enabled && context.mDirectionalLightState.shadow ? 1u : 0u;
+	tracePerf.traceSplitShadow = context.mUseSplitShadowDenoiser && !directSceneTrace ? 1u : 0u;
+	tracePerf.traceFastEmissiveShadow = nri_ptemissivefastshadow ? 1u : 0u;
+	tracePerf.traceVisibleChunkGate = nri_ptvisiblechunkgate ? 1u : 0u;
+	uint64_t settingsKey = 1469598103934665603ull;
+	const uint64_t settingsValues[] = {
+		constants.RenderWidth, constants.RenderHeight, constants.DisplayWidth, constants.DisplayHeight,
+		dispatchX, dispatchY, dispatchZ, constants.Flags & ~NRI_FLAG_RESET_HISTORY,
+		constants.DebugMode, constants.BootstrapMode, constants.BounceCounts, constants.PortalDepth,
+		constants.ReservedTrace1, traceSettings.emissiveRequestedSampleCount,
+		traceSettings.emissivePrimarySampleBudget, traceSettings.indirectSamplingMode,
+		context.mEffectiveIndirectSamplingMode, context.mActiveIndirectSamplingMode,
+		denoiserSettings.hitDistanceReconstructionMode,
+		(uint32_t)resolvedMainUpscaler, (uint32_t)resolvedUpscalerMode
+	};
+	for (uint64_t value : settingsValues) settingsKey = AppendTraceWorkloadHash(settingsKey, value);
+	tracePerf.traceSettingsKey = settingsKey;
+	uint64_t workloadKey = settingsKey;
+	const uint64_t workloadValues[] = {
+		constants.Flags, constants.ReservedTrace0,
+		constants.SceneInstanceCount, constants.StaticPrimitiveCount, constants.DynamicPrimitiveCount,
+		constants.StaticMaterialCount, constants.DynamicMaterialCount, constants.PortalCount,
+		constants.RuntimeLightCount, context.mSceneStats.runtimeLightTileSize,
+		context.mSceneStats.runtimeLightTileIndexCount, context.mSceneStats.runtimeLightMaxTileOccupancy,
+		context.mSceneStats.emissivePrimitiveCount, (uint32_t)resolvedMainUpscaler, (uint32_t)resolvedUpscalerMode
+	};
+	for (uint64_t value : workloadValues) workloadKey = AppendTraceWorkloadHash(workloadKey, value);
+	uint32_t emissivePowerBits = 0;
+	static_assert(sizeof(emissivePowerBits) == sizeof(context.mSceneStats.emissiveTotalPower));
+	std::memcpy(&emissivePowerBits, &context.mSceneStats.emissiveTotalPower, sizeof(emissivePowerBits));
+	tracePerf.traceWorkloadKey = AppendTraceWorkloadHash(workloadKey, emissivePowerBits);
 	{
 		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueCommandMs);
 		context.mTraceShaderStats.ResetBuffer(context.mResources.BuildResourceServices(), ShouldCollectTraceShaderStats());
 		context.mCommands.core->CmdBeginAnnotation(*context.mCommands.commandBuffer, "Raze.TraceOpaque.Dispatch", nri::BGRA_UNUSED);
 		context.mCommands.SetPipeline(context.mPipelines.Get(NRIRenderer::PipelineSlot::TraceOpaque));
-		context.mCommands.Dispatch(dispatchX, dispatchY, dispatchZ);
+		{
+			NRIScopedGpuTiming dispatchGpuTiming(context.mResources.frameBuffer, NRIGpuTimingScope::TraceDispatch);
+			context.mCommands.Dispatch(dispatchX, dispatchY, dispatchZ);
+		}
 		context.mCommands.core->CmdEndAnnotation(*context.mCommands.commandBuffer);
 	}
 	{
@@ -529,8 +619,9 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 
 bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 {
+	NRIScopedGpuTiming gpuTiming(context.mResources.frameBuffer, NRIGpuTimingScope::Denoise);
 	Clocker clock(NriPTDenoiser);
-	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars();
+	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars(context.mEffectiveIndirectSamplingMode);
 
 	if (!context.mNrd.EnsureReady(*context.mResources.device, context.mFrame.renderWidth, context.mFrame.renderHeight, context.mFrame.queuedFrameNum))
 	{
@@ -572,6 +663,7 @@ bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 	desc.maxFastAccumulatedFrameNum = denoiserSettings.maxFastAccumulatedFrameNum;
 	desc.maxStabilizedFrameNum = denoiserSettings.maxStabilizedFrameNum;
 	desc.hitDistanceReconstructionMode = denoiserSettings.hitDistanceReconstructionMode;
+	desc.indirectSamplingMode = context.mEffectiveIndirectSamplingMode;
 	desc.fastHistoryClampingSigmaScale = denoiserSettings.fastHistoryClampingSigmaScale;
 	desc.diffusePrepassBlurRadius = denoiserSettings.diffusePrepassBlurRadius;
 	desc.specularPrepassBlurRadius = denoiserSettings.specularPrepassBlurRadius;
@@ -595,6 +687,7 @@ bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 
 bool NRIPassDispatcher::DispatchComposition(NRIPassDispatchContext& context, NRIRenderer::FrameTextureSlot outputSlot)
 {
+	NRIScopedGpuTiming gpuTiming(context.mResources.frameBuffer, NRIGpuTimingScope::Composition);
 	Clocker clock(NriPTComposition);
 
 	NRITraceSceneConstants constants = {};
@@ -956,6 +1049,7 @@ bool NRIPassDispatcher::DispatchFinalPresent(NRIPassDispatchContext& context, NR
 
 bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 {
+	NRIScopedGpuTiming gpuTiming(context.mResources.frameBuffer, NRIGpuTimingScope::Upscale);
 	Clocker clock(NriPTUpscale);
 
 	const NRIMainUpscalerKind mainKind = context.mUpscalerService.ResolveMainUpscalerKind(true);
@@ -1191,6 +1285,7 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 
 bool NRIPassDispatcher::DispatchFinal(NRIPassDispatchContext& context)
 {
+	NRIScopedGpuTiming gpuTiming(context.mResources.frameBuffer, NRIGpuTimingScope::Final);
 	Clocker clock(NriPTFinal);
 
 	NRITraceSceneConstants constants = {};

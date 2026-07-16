@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <functional>
+#include <unordered_map>
 
 namespace
 {
@@ -65,6 +68,140 @@ namespace
 		outNormal[0] = nx / length;
 		outNormal[1] = ny / length;
 		outNormal[2] = nz / length;
+	}
+
+	struct VoxelVertexPosition
+	{
+		float x = 0.0f;
+		float y = 0.0f;
+		float z = 0.0f;
+
+		bool operator==(const VoxelVertexPosition& other) const
+		{
+			return x == other.x && y == other.y && z == other.z;
+		}
+	};
+
+	struct VoxelVertexPositionHash
+	{
+		size_t operator()(const VoxelVertexPosition& position) const
+		{
+			size_t hash = std::hash<float>{}(position.x);
+			hash ^= std::hash<float>{}(position.y) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
+			hash ^= std::hash<float>{}(position.z) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
+			return hash;
+		}
+	};
+
+	struct VoxelNormalSum
+	{
+		float x = 0.0f;
+		float y = 0.0f;
+		float z = 0.0f;
+	};
+
+	VoxelVertexPosition GetVoxelVertexPosition(const CapturedVertex& vertex)
+	{
+		return { vertex.position[0], vertex.position[1], vertex.position[2] };
+	}
+
+	uint32_t PackVoxelNormal(float x, float y, float z)
+	{
+		const float lengthSq = x * x + y * y + z * z;
+		if (lengthSq <= 1.0e-12f)
+		{
+			return 0;
+		}
+
+		const float invL1Length = 1.0f / (std::abs(x) + std::abs(y) + std::abs(z));
+		float octX = x * invL1Length;
+		float octY = y * invL1Length;
+		if (z < 0.0f)
+		{
+			const float oldX = octX;
+			octX = (1.0f - std::abs(octY)) * (oldX < 0.0f ? -1.0f : 1.0f);
+			octY = (1.0f - std::abs(oldX)) * (octY < 0.0f ? -1.0f : 1.0f);
+		}
+		const uint32_t packedX = (uint32_t)std::lround((std::clamp(octX, -1.0f, 1.0f) * 0.5f + 0.5f) * 255.0f);
+		const uint32_t packedY = (uint32_t)std::lround((std::clamp(octY, -1.0f, 1.0f) * 0.5f + 0.5f) * 255.0f);
+		return packedX | (packedY << 8u);
+	}
+
+	float VoxelCornerAngle(const CapturedVertex& center, const CapturedVertex& a, const CapturedVertex& b)
+	{
+		float ax = a.position[0] - center.position[0];
+		float ay = a.position[1] - center.position[1];
+		float az = a.position[2] - center.position[2];
+		float bx = b.position[0] - center.position[0];
+		float by = b.position[1] - center.position[1];
+		float bz = b.position[2] - center.position[2];
+		const float aLengthSq = ax * ax + ay * ay + az * az;
+		const float bLengthSq = bx * bx + by * by + bz * bz;
+		if (aLengthSq <= 1.0e-12f || bLengthSq <= 1.0e-12f)
+		{
+			return 0.0f;
+		}
+		const float invLengths = 1.0f / std::sqrt(aLengthSq * bLengthSq);
+		return std::acos(std::clamp((ax * bx + ay * by + az * bz) * invLengths, -1.0f, 1.0f));
+	}
+
+	void BuildVoxelSmoothNormals(const SurfaceRef& surface, std::vector<uint32_t>& outPackedNormals)
+	{
+		outPackedNormals.assign(surface.vertices.size(), 0u);
+		std::unordered_map<VoxelVertexPosition, VoxelNormalSum, VoxelVertexPositionHash> normalSums;
+		normalSums.reserve(surface.vertices.size());
+		for (uint32_t i = 0; i + 2u < surface.indices.size(); i += 3u)
+		{
+			const uint32_t indices[3] = { surface.indices[i], surface.indices[i + 1u], surface.indices[i + 2u] };
+			if (indices[0] >= surface.vertices.size() || indices[1] >= surface.vertices.size() || indices[2] >= surface.vertices.size())
+			{
+				continue;
+			}
+
+			const CapturedVertex& v0 = surface.vertices[indices[0]];
+			const CapturedVertex& v1 = surface.vertices[indices[1]];
+			const CapturedVertex& v2 = surface.vertices[indices[2]];
+			const float abx = v1.position[0] - v0.position[0];
+			const float aby = v1.position[1] - v0.position[1];
+			const float abz = v1.position[2] - v0.position[2];
+			const float acx = v2.position[0] - v0.position[0];
+			const float acy = v2.position[1] - v0.position[1];
+			const float acz = v2.position[2] - v0.position[2];
+			float nx = aby * acz - abz * acy;
+			float ny = abz * acx - abx * acz;
+			float nz = abx * acy - aby * acx;
+			const float normalLengthSq = nx * nx + ny * ny + nz * nz;
+			if (normalLengthSq <= 1.0e-12f)
+			{
+				continue;
+			}
+			const float invNormalLength = 1.0f / std::sqrt(normalLengthSq);
+			nx *= invNormalLength;
+			ny *= invNormalLength;
+			nz *= invNormalLength;
+
+			const float angles[3] = {
+				VoxelCornerAngle(v0, v1, v2),
+				VoxelCornerAngle(v1, v2, v0),
+				VoxelCornerAngle(v2, v0, v1)
+			};
+			for (uint32_t corner = 0; corner < 3u; ++corner)
+			{
+				VoxelNormalSum& sum = normalSums[GetVoxelVertexPosition(surface.vertices[indices[corner]])];
+				sum.x += nx * angles[corner];
+				sum.y += ny * angles[corner];
+				sum.z += nz * angles[corner];
+			}
+		}
+
+		for (uint32_t i = 0; i < surface.vertices.size(); ++i)
+		{
+			const auto found = normalSums.find(GetVoxelVertexPosition(surface.vertices[i]));
+			if (found != normalSums.end())
+			{
+				outPackedNormals[i] = PackVoxelNormal(found->second.x, found->second.y, found->second.z);
+			}
+		}
 	}
 
 	bool ShouldFlipFlatNormal(uint32_t flags, const SurfaceProvenance& provenance, const float normal[3])
@@ -149,6 +286,11 @@ namespace
 		{
 			outGeometry.vertices.push_back(MakeVertex(vertex));
 		}
+		std::vector<uint32_t> voxelSmoothNormals;
+		if (surface.provenance.sourceType == SurfaceSourceType::VoxelProxySprite)
+		{
+			BuildVoxelSmoothNormals(surface, voxelSmoothNormals);
+		}
 
 		if (traceStats != nullptr)
 		{
@@ -199,6 +341,15 @@ namespace
 				primitive.normal[0] = -primitive.normal[0];
 				primitive.normal[1] = -primitive.normal[1];
 				primitive.normal[2] = -primitive.normal[2];
+			}
+			if (!voxelSmoothNormals.empty())
+			{
+				const uint32_t faceNormal = PackVoxelNormal(primitive.normal[0], primitive.normal[1], primitive.normal[2]);
+				const uint32_t n0 = voxelSmoothNormals[i0] != 0u ? voxelSmoothNormals[i0] : faceNormal;
+				const uint32_t n1 = voxelSmoothNormals[i1] != 0u ? voxelSmoothNormals[i1] : faceNormal;
+				const uint32_t n2 = voxelSmoothNormals[i2] != 0u ? voxelSmoothNormals[i2] : faceNormal;
+				primitive.smoothNormals[0] = n0 | (n1 << 16u);
+				primitive.smoothNormals[1] = n2 | 0x80000000u;
 			}
 			outGeometry.primitives.push_back(primitive);
 			outGeometry.primitiveProvenance.push_back(surface.provenance);

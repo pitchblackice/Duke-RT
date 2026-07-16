@@ -7,6 +7,7 @@
 #include "nri_runtime_mutation_trace.h"
 #include "nri_scene_lights.h"
 #include "printf.h"
+#include "perf_capture.h"
 
 #include <algorithm>
 #include <chrono>
@@ -23,7 +24,7 @@ namespace
 
 	static bool ShouldCollectSceneDataTiming()
 	{
-		return (int)nri_pttraceframes > 0 || (int)perf_looptraceframes > 0 || (bool)nri_ptslowdowntrace;
+		return (int)nri_pttraceframes > 0 || (int)perf_looptraceframes > 0 || (bool)nri_ptslowdowntrace || PerfCompactCaptureTimingActive();
 	}
 
 	class ScopedPtPerfTimer

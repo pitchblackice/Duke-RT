@@ -1183,6 +1183,7 @@ public:
 		renderer.mLastPerfShellTraceStats.persistentVoxelOnboardingAdmittedBytes += batchStats.persistentVoxelOnboardingAdmittedBytes;
 		renderer.mLastPerfShellTraceStats.persistentVoxelOnboardingByteBudget = batchStats.persistentVoxelOnboardingByteBudget;
 		renderer.mLastPerfShellTraceStats.persistentVoxelInstanceTransformUpdates += batchStats.persistentVoxelInstanceTransformUpdates;
+		renderer.mLastPerfShellTraceStats.persistentVoxelBatchSerialFastPathCount += batchStats.persistentVoxelBatchSerialFastPathCount;
 		return result;
 	}
 

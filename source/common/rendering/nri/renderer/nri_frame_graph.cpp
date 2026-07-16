@@ -15,7 +15,8 @@ namespace
 		16u, 17u, 18u, 19u,
 		21u, 22u, 24u, 25u,
 		nri_diag::PtDebugAnalyticDirect, nri_diag::PtDebugEmissiveTags, nri_diag::PtDebugEmissiveDirect, nri_diag::PtDebugSectorAmbient,
-		nri_diag::PtDebugEmissiveSampleVisibility, nri_diag::PtDebugUpscalerTraceTransparent, nri_diag::PtDebugTaaPreExposedInput
+		nri_diag::PtDebugEmissiveSampleVisibility, nri_diag::PtDebugUpscalerTraceTransparent, nri_diag::PtDebugTaaPreExposedInput,
+		nri_diag::PtDebugIndirectLobeSelection
 	};
 
 	constexpr NRIPresentRouteInfo kBootstrapRawTraceRoute = {
@@ -212,7 +213,8 @@ bool IsNRIFrameGraphRawTraceDebugMode(uint32_t debugMode)
 		IsInRange(debugMode, 21u, 22u) ||
 		IsInRange(debugMode, 24u, 25u) ||
 		IsInRange(debugMode, nri_diag::PtDebugAnalyticDirect, nri_diag::PtDebugSectorAmbient) ||
-		debugMode == nri_diag::PtDebugEmissiveSampleVisibility;
+		debugMode == nri_diag::PtDebugEmissiveSampleVisibility ||
+		debugMode == nri_diag::PtDebugIndirectLobeSelection;
 }
 
 bool IsNRIFrameGraphFinalShaderDebugMode(uint32_t)
@@ -288,6 +290,14 @@ bool ExecuteNRIFrameGraph(
 	const bool useFinalDebugPresent = presentRoute.kind == NRIPresentRouteKind::FinalDebug || useShadowDebugPresent;
 	const bool rawTraceDirectPresent = presentRoute.kind == NRIPresentRouteKind::RawTraceDebug;
 	const bool useSplitShadowDebugProbe = rawTraceDirectPresent && ptDebugMode >= 21 && ptDebugMode <= 22;
+	const NRIMainUpscalerKind resolvedMainKind = context.mUpscalerService.ResolveMainUpscalerKind(false);
+	const bool compositionConsumesNrd = useCompositionPath && denoise && resolvedMainKind != NRIMainUpscalerKind::DLRR;
+	context.mTraceIndirectDenoiserAvailable =
+		useValidationPresent ||
+		useDenoisedDebugPresent ||
+		(useShadowDebugPresent && denoise) ||
+		compositionConsumesNrd ||
+		ptDebugMode == (int)nri_diag::PtDebugIndirectLobeSelection;
 	context.mHistoryInputSlot = (context.mFrame.frameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 	context.mHistoryOutputSlot = (context.mFrame.frameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 	context.mUpscaledInputSlot = FrameTextureSlot::PostSharpenOutput;
@@ -394,7 +404,6 @@ bool ExecuteNRIFrameGraph(
 
 	auto dispatchCompositionPath = [&]() -> bool
 	{
-		const NRIMainUpscalerKind resolvedMainKind = context.mUpscalerService.ResolveMainUpscalerKind(false);
 		const bool buildRrInput = resolvedMainKind == NRIMainUpscalerKind::DLRR;
 		const bool needStandardComposition =
 			!buildRrInput || useComposedDebugPresent || useUpscalerTraceTransparentProbe;
@@ -451,6 +460,10 @@ bool ExecuteNRIFrameGraph(
 
 			if (!NRIPassDispatcher::DispatchDenoiser(context))
 			{
+				if (context.mActiveIndirectSamplingMode != 0u)
+				{
+					return false;
+				}
 				if (!logState.phaseFDenoiserFallback)
 				{
 					Printf(TEXTCOLOR_ORANGE "NRD dispatch failed in the composition path; falling back to raw trace inputs for this frame.\n");

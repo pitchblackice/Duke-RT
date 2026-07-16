@@ -6,6 +6,7 @@
 #include "nri_shader_contracts.h"
 #include "../system/nri_renderdevice.h"
 #include "c_cvars.h"
+#include "perf_capture.h"
 #include "printf.h"
 
 #include <algorithm>
@@ -33,7 +34,7 @@ namespace
 
 	static bool ShouldCollectDescriptorTiming()
 	{
-		return (int)nri_pttraceframes > 0 || (int)perf_looptraceframes > 0 || (bool)nri_ptslowdowntrace;
+		return (int)nri_pttraceframes > 0 || (int)perf_looptraceframes > 0 || (bool)nri_ptslowdowntrace || PerfCompactCaptureTimingActive();
 	}
 
 	static double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
@@ -71,6 +72,8 @@ bool NRIDescriptorSetManager::AllocateDescriptorSets(NRIRenderer& renderer)
 {
 	const uint32_t queuedFrameCount = renderer.mFrameBuffer != nullptr ? std::max(1u, (uint32_t)renderer.mFrameBuffer->mQueuedFrames.size()) : 1u;
 	renderer.mSceneTextureSets.assign(queuedFrameCount, nullptr);
+	renderer.mSceneTextureSetHashes.assign(queuedFrameCount, 0);
+	renderer.mSceneTextureSetHashValid.assign(queuedFrameCount, 0);
 	renderer.mSceneDataSets.assign(queuedFrameCount, nullptr);
 	renderer.mSceneDataDescriptorsInitialized.assign(queuedFrameCount, 0u);
 	const uint32_t sceneDataSnapshotCount = std::max(8u, queuedFrameCount * 4u);

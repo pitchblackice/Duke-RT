@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nri_exposure.h"
+#include "nri_tlas_masks.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -12,14 +13,6 @@ constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 constexpr uint32_t NRI_TRACE_SHADER_STATS_DESCRIPTOR_NUM = 1;
 constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
-
-constexpr uint32_t NRI_TLAS_MASK_MAIN = 0x01u;
-constexpr uint32_t NRI_TLAS_MASK_SHADOW = 0x02u;
-constexpr uint32_t NRI_TLAS_MASK_REFLECTION = 0x04u;
-constexpr uint32_t NRI_TLAS_MASK_GI = 0x08u;
-constexpr uint32_t NRI_TLAS_MASK_EMISSIVE = 0x10u;
-constexpr uint32_t NRI_TLAS_MASK_DEBUG = 0x20u;
-constexpr uint32_t NRI_TLAS_MASK_ALL_WORKLOADS = 0xFFu;
 
 constexpr uint32_t NRI_FLAG_RESET_HISTORY = 0x1u;
 constexpr uint32_t NRI_FLAG_USE_UPSCALED = 0x2u;
@@ -33,6 +26,7 @@ constexpr uint32_t NRI_FLAG_FAST_EMISSIVE_SHADOW = 0x100u;
 constexpr uint32_t NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS = 0x200u;
 constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW = 0x400u;
 constexpr uint32_t NRI_FLAG_TRACE_SHADER_STATS = 0x800u;
+constexpr uint32_t NRI_FLAG_PROBABILISTIC_INDIRECT = 0x1000u;
 
 constexpr uint32_t NRI_PRESENT_FLAG_SPLIT_SHADOW_DENOISER = NRI_FLAG_SPLIT_SHADOW_DENOISER;
 constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_DISPLAY_INFO_AVAILABLE = 0x1u;
@@ -47,6 +41,7 @@ constexpr uint32_t NRI_TEMPORAL_FLAG_AUTO_EXPOSURE = 0x1000u;
 constexpr uint32_t NRI_TEMPORAL_FLAG_EXPOSURE_TEXTURE_VALID = 0x2000u;
 constexpr uint32_t NRI_TEMPORAL_FLAG_VOLUME_REACTIVE = 0x4000u;
 constexpr uint32_t NRI_JITTER_PHASE_SHIFT = 16u;
+constexpr uint32_t NRI_VOXEL_NORMAL_BLEND_SHIFT = 24u;
 constexpr uint32_t NRI_TAA_JITTER_PHASE_COUNT = 8u;
 
 constexpr uint32_t NRIPackTemporalJitterPhaseCount(uint32_t jitterPhaseCount)
@@ -390,6 +385,7 @@ struct NRIVoxelComputePrimitiveData
 	uint32_t Flags = 0;
 	uint32_t PortalIndex = UINT32_MAX;
 	uint32_t Reserved0 = UINT32_MAX;
+	uint32_t SmoothNormals[2] = {};
 };
 
 static_assert(sizeof(NRIVoxelComputeConstants) == 48, "NRIVoxelComputeConstants must match VoxelComputeConstants.hlsli.");
@@ -400,4 +396,4 @@ static_assert(sizeof(NRIVoxelComputeResult) == 48, "NRIVoxelComputeResult must m
 static_assert(sizeof(NRIVoxelComputeSlabScratch) == 16, "NRIVoxelComputeSlabScratch must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeFaceRecord) == 56, "NRIVoxelComputeFaceRecord must match VoxelComputeConstants.hlsli.");
 static_assert(sizeof(NRIVoxelComputeSceneVertex) == 32, "NRIVoxelComputeSceneVertex must match VoxelComputeConstants.hlsli.");
-static_assert(sizeof(NRIVoxelComputePrimitiveData) == 64, "NRIVoxelComputePrimitiveData must match VoxelComputeConstants.hlsli.");
+static_assert(sizeof(NRIVoxelComputePrimitiveData) == 72, "NRIVoxelComputePrimitiveData must match VoxelComputeConstants.hlsli.");

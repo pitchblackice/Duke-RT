@@ -679,6 +679,28 @@ void NRIRuntimeMutationSystem::ClearReplacementPayload(RuntimeMapMutationCache::
 	replacement.deferredMaterialFrame = 0;
 	replacement.deferredStructuralRebuild = false;
 	replacement.deferredStructuralFrame = 0;
+	replacement.fixedLayoutDeformer = false;
+	replacement.fixedLayoutDeformerKey = 0;
+	replacement.fixedLayoutVertexSpans.clear();
+	replacement.fixedLayoutPrimitiveSpans.clear();
+	replacement.certifiedResidentMaterialOnly = false;
+	replacement.certifiedMaterialBuildSerial = 0;
+	replacement.certifiedMaterialMapEpoch = 0;
+	replacement.certifiedMaterialOwnerStableId = UINT64_MAX;
+	replacement.certifiedMaterialLayoutKey = 0;
+	replacement.certifiedMaterialStateKey = 0;
+	replacement.certifiedExactGeometrySignature = 0;
+	replacement.certifiedGeometryTopologySignature = 0;
+	replacement.certifiedPrimitiveLayoutSignature = 0;
+	replacement.certifiedChunkListIndex = UINT32_MAX;
+	replacement.certifiedVertexOffset = 0;
+	replacement.certifiedVertexCount = 0;
+	replacement.certifiedIndexOffset = 0;
+	replacement.certifiedIndexCount = 0;
+	replacement.certifiedPrimitiveOffset = 0;
+	replacement.certifiedPrimitiveCount = 0;
+	replacement.certifiedMaterialOffset = 0;
+	replacement.certifiedMaterialCount = 0;
 	if (clearMaterialStateCache)
 	{
 		replacement.materialStateCache.clear();
@@ -1276,9 +1298,12 @@ RuntimeMutationResidentApplyMode NRIRuntimeMutationSystem::ClassifyResidentApply
 	mode.exclusiveMaterialOnlyReplacement =
 		mode.materialOnlyReplacement &&
 		RequiresExclusiveRuntimeMutationMaterialOnlyReasonMask(replacement.reasonMask);
+	mode.certifiedResidentMaterialOnlyUpdate =
+		mode.materialOnlyReplacement &&
+		replacement.certifiedResidentMaterialOnly;
 	mode.fastResidentMaterialOnlyUpdate =
 		mode.materialOnlyReplacement &&
-		!mode.exclusiveMaterialOnlyReplacement &&
+		(!mode.exclusiveMaterialOnlyReplacement || mode.certifiedResidentMaterialOnlyUpdate) &&
 		hasResidentChunk &&
 		replacement.valid &&
 		hasResolvedAtlasChunk &&
@@ -1300,6 +1325,10 @@ RuntimeMutationResidentApplyModeStats NRIRuntimeMutationSystem::BuildResidentApp
 		if (mode.fastResidentMaterialOnlyUpdate)
 		{
 			stats.fastMaterialOnlyCount++;
+			if (mode.certifiedResidentMaterialOnlyUpdate)
+			{
+				stats.certifiedMaterialOnlyCount++;
+			}
 		}
 		else
 		{

@@ -746,6 +746,7 @@ set( NOT_COMPILED_SOURCE_FILES
 	games/duke/src/premap_d.cpp
 	games/duke/src/premap_r.cpp
 	games/duke/src/render.cpp
+	games/duke/src/runtime_map_movers.cpp
 	games/duke/src/savegame.cpp
 	games/duke/src/sbar.cpp
 	games/duke/src/sectors.cpp
@@ -919,6 +920,8 @@ set (VULKAN_SOURCES
 
 set (NRI_SOURCES
 	common/rendering/nri/system/nri_renderdevice.cpp
+	common/rendering/nri/system/nri_perf_capture.cpp
+	common/rendering/nri/system/nri_gpu_timing.cpp
 	common/rendering/nri/system/nri_hwbuffer.cpp
 	common/rendering/nri/system/nri_hwtexture.cpp
 	common/rendering/nri/framegen/nri_framegen.cpp
@@ -936,14 +939,25 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_cvars.cpp
 	common/rendering/nri/renderer/nri_exposure.cpp
 	common/rendering/nri/renderer/nri_frame_graph.cpp
+	common/rendering/nri/renderer/nri_frame_diagnostics_policy.cpp
 	common/rendering/nri/renderer/nri_frame_output.cpp
 	common/rendering/nri/renderer/nri_frame_resources.cpp
 	common/rendering/nri/renderer/nri_map_chunk_diagnostics.cpp
 	common/rendering/nri/renderer/nri_map_chunk_status.cpp
+	common/rendering/nri/renderer/nri_map_movers.cpp
+	common/rendering/nri/renderer/nri_map_material_only_route.cpp
+	common/rendering/nri/renderer/nri_map_mover_rigid_route.cpp
+	common/rendering/nri/renderer/nri_map_mover_rigid_route_policy.cpp
+	common/rendering/nri/renderer/nri_se29_floor_deformer_policy.cpp
+	common/rendering/nri/renderer/nri_se29_floor_deformer_route.cpp
+	common/rendering/nri/renderer/nri_map_mover_shadow.cpp
+	common/rendering/nri/renderer/nri_map_mover_shadow_state.cpp
 	common/rendering/nri/renderer/nri_material_policy.cpp
 	common/rendering/nri/renderer/nri_material_warmup.cpp
 	common/rendering/nri/renderer/nri_nrd.cpp
 	common/rendering/nri/renderer/nri_persistent_voxel_material_closure.cpp
+	common/rendering/nri/renderer/nri_persistent_voxel_material_range_allocator.cpp
+	common/rendering/nri/renderer/nri_persistent_voxel_admission_index.cpp
 	common/rendering/nri/renderer/nri_persistent_voxel_blas_compaction.cpp
 	common/rendering/nri/renderer/nri_persistent_voxel_services.cpp
 	common/rendering/nri/renderer/nri_persistent_voxels.cpp
@@ -973,6 +987,10 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_scene_frame_state.cpp
 	common/rendering/nri/renderer/nri_scene_frame_diagnostics.cpp
 	common/rendering/nri/renderer/nri_scene_frame_builder.cpp
+	common/rendering/nri/renderer/nri_scene_material_frame_cache.cpp
+	common/rendering/nri/renderer/nri_scene_material_texture_slots.cpp
+	common/rendering/nri/renderer/nri_scene_texture_frame_cache.cpp
+	common/rendering/nri/renderer/nri_scene_texture_slot_table.cpp
 	common/rendering/nri/renderer/nri_scene_textures.cpp
 	common/rendering/nri/renderer/nri_sky_environment.cpp
 	common/rendering/nri/renderer/nri_static_scene_geometry.cpp
@@ -992,8 +1010,11 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_sector_lighting.cpp
 	common/rendering/nri/renderer/nri_scene_lights.cpp
 	common/rendering/nri/renderer/nri_scene_upload.cpp
+	common/rendering/nri/renderer/nri_scene_upload_identity.cpp
+	common/rendering/nri/renderer/nri_scene_upload_dirty_plan.cpp
 	common/rendering/nri/renderer/nri_scene_upload_ranges.cpp
 	common/rendering/nri/renderer/nri_static_scene.cpp
+	common/rendering/nri/renderer/nri_static_scene_diagnostics.cpp
 	common/rendering/nri/renderer/nri_static_scene_residency.cpp
 	common/rendering/nri/renderer/nri_surface_probe.cpp
 	common/rendering/nri/renderer/nri_surface_light_overlay.cpp
@@ -1004,12 +1025,22 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_voxel_admission_scheduler.cpp
 	common/rendering/nri/renderer/nri_voxel_compute_raw_archive.cpp
 	common/rendering/nri/renderer/nri_voxel_compute_meshing.cpp
+	common/rendering/nri/renderer/nri_world_tlas_slots.cpp
+	common/rendering/nri/renderer/nri_world_tlas_policy.cpp
 	common/rendering/nri/scene/nri_map_world.cpp
 	common/rendering/nri/scene/nri_map_builder.cpp
+	common/rendering/nri/scene/nri_map_mover_adapter.cpp
+	common/rendering/nri/scene/nri_map_mover_authored_topology.cpp
+	common/rendering/nri/scene/nri_map_mover_geometry.cpp
+	common/rendering/nri/scene/nri_map_deformer_layout.cpp
+	common/rendering/nri/scene/nri_map_material_layout.cpp
+	common/rendering/nri/scene/nri_map_material_state_variants.cpp
+	common/rendering/nri/scene/nri_map_material_variant_route.cpp
 	common/rendering/nri/scene/nri_scene_stats.cpp
 	common/rendering/nri/scene/nri_scene_texture_utils.cpp
 	common/rendering/nri/scene/nri_texture_signature.cpp
 	common/rendering/nri/scene/nri_voxel_geometry_hash.cpp
+	common/rendering/nri/scene/nri_voxel_actor_cache_maintenance.cpp
 	common/rendering/nri/scene/nri_scene_bridge.cpp
 	common/rendering/nri/scene/nri_portal_bridge.cpp
 	common/rendering/nri/scene/nri_geometry_bridge.cpp
@@ -1066,6 +1097,7 @@ set (PCH_SOURCES
 	core/thingdef_data.cpp
 	core/thingdef_properties.cpp
 	core/actorlist.cpp
+	core/actor_lifecycle_journal.cpp
 	core/automap.cpp
 	core/cheats.cpp
 	core/cheathandler.cpp
@@ -1264,6 +1296,7 @@ set (PCH_SOURCES
 	common/thirdparty/libsmackerdec/src/SmackerDecoder.cpp
 	common/engine/cycler.cpp
 	common/engine/d_event.cpp
+	common/engine/perf_capture.cpp
 	common/engine/date.cpp
 	common/engine/stats.cpp
 	common/engine/sc_man.cpp

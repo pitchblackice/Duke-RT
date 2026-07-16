@@ -132,6 +132,7 @@ struct NRIVoxelComputePrimitiveData
 	uint Flags;
 	uint PortalIndex;
 	uint Reserved0;
+	uint2 SmoothNormals;
 };
 
 NRI_ROOT_CONSTANTS(NRIVoxelComputeConstants, gVoxelComputeConstants, NRI_VOXEL_COMPUTE_ROOT_REGISTER, NRI_VOXEL_COMPUTE_SET_ROOT);

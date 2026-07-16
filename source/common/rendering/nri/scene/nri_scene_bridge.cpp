@@ -7,11 +7,14 @@
 #include "nri_scene_texture_utils.h"
 #include "nri_texture_signature.h"
 #include "nri_voxel_geometry_hash.h"
+#include "nri_voxel_actor_cache_maintenance.h"
 #include "../renderer/nri_voxel_compute_meshing.h"
 
+#include "actor_lifecycle_journal.h"
 #include "c_cvars.h"
 #include "coreactor.h"
 #include "coreplayer.h"
+#include "gameupdate.h"
 #include "filesystem.h"
 #include "files.h"
 #include "gamecontrol.h"
@@ -31,6 +34,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -136,6 +140,10 @@ namespace
 	uint32_t gVoxelActorCacheCaptureDepth = 0;
 	uint64_t gVoxelActorCacheSerial = 1;
 	bool gVoxelActorStartupTransientMode = false;
+	uint64_t gVoxelActorLifecycleCursor = 0;
+	bool gVoxelActorPendingRemoval = false;
+	NRIVoxelActorMaintenanceGate gVoxelActorMaintenanceGate;
+	std::vector<ActorLifecycleEvent> gVoxelActorLifecycleEvents;
 
 	struct VoxelMeshVariantKey
 	{
@@ -208,9 +216,11 @@ namespace
 		bool startupPending = false;
 		bool sharedVariantSurface = false;
 		bool hasLastActorScenePosition = false;
+		bool indirectOnly = false;
 		SurfaceRef lightSurface;
 		SurfaceRef desiredMaterialSurface;
 		bool hasDesiredMaterialSurface = false;
+		bool pendingRemoval = false;
 	};
 
 	struct VoxelActorCacheLookup;
@@ -435,6 +445,7 @@ namespace
 		float currentTransform[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 		float actorScenePosition[3] = {};
 		bool hasActorScenePosition = false;
+		bool indirectOnly = false;
 		VoxelActorCacheEntry* entry = nullptr;
 	};
 
@@ -2088,6 +2099,7 @@ namespace
 		}
 
 		lookup.actorIndex = actorIndex;
+		lookup.indirectOnly = IsLocalPlayerActor(sprite.Sprite->ownerActor);
 		lookup.actorPtr = (uintptr_t)sprite.Sprite->ownerActor;
 		lookup.voxelPtr = (uintptr_t)sprite.voxel;
 		lookup.voxelModelPtr = (uintptr_t)sprite.voxel->model;
@@ -2524,6 +2536,7 @@ namespace
 		entry.resolvedVoxelIndex = lookup.resolvedVoxelIndex;
 		entry.instanceKeyHash = lookup.instanceKeyHash;
 		entry.meshBakeSpace = lookup.meshBakeSpace;
+		entry.indirectOnly = lookup.indirectOnly;
 	}
 
 	void UpdateVoxelActorCacheEntryScenePosition(VoxelActorCacheEntry& entry, const VoxelActorCacheLookup& lookup)
@@ -3116,8 +3129,7 @@ namespace
 	{
 		if (actor == nullptr ||
 			!actor->exists() ||
-			(actor->ObjectFlags & OF_EuthanizeMe) != 0 ||
-			IsLocalPlayerActor(actor))
+			(actor->ObjectFlags & OF_EuthanizeMe) != 0)
 		{
 			return false;
 		}
@@ -4433,8 +4445,23 @@ namespace
 		std::unordered_set<uint64_t> basisSignatures;
 	};
 
+	bool ShouldCollectVoxelActorCacheDuplicationStats()
+	{
+		const GameUpdateSnapshot gameUpdate = GetGameUpdateSnapshot();
+		NRIVoxelActorDuplicationAuditInput input = {};
+		input.presentationGeneration = gameUpdate.presentationGeneration;
+		input.slowdownInterval = (uint32_t)(std::max)(1, (int)nri_ptslowdowntraceinterval);
+		input.slowdownTop = (int)nri_ptslowdowntop;
+		input.voxelStatsEnabled = (bool)nri_voxelstats;
+		input.slowdownTraceEnabled = (bool)nri_ptslowdowntrace;
+		return ShouldCollectNRIVoxelActorDuplicationAudit(input);
+	}
+
 	void CollectVoxelActorCacheDuplicationStats(SceneDebugStats& stats)
 	{
+		const auto start = std::chrono::steady_clock::now();
+		gDynamicCapturePerfStats.voxelDuplicationAuditCalls++;
+		gDynamicCapturePerfStats.voxelDuplicationAuditEntriesScanned += (uint32_t)gVoxelActorCache.size();
 		stats.voxelCachePrimitives = 0;
 		stats.voxelCacheActorSurfaces = 0;
 		stats.voxelCacheUniqueMeshKeys = 0;
@@ -4550,6 +4577,8 @@ namespace
 		stats.voxelCacheUniqueTransformBases = (unsigned int)basisSignatures.size();
 
 		std::vector<VoxelDuplicateVariantAggregate> aggregates;
+		gDynamicCapturePerfStats.voxelDuplicationAuditTemporaryContainersBuilt +=
+			5u + (uint32_t)meshAggregates.size();
 		aggregates.reserve(meshAggregates.size());
 		for (const auto& pair : meshAggregates)
 		{
@@ -4616,15 +4645,23 @@ namespace
 			top.totalDuplicatedPrimitives = aggregate.totalDuplicatedPrimitives;
 			top.duplicatedBytes = aggregate.duplicatedBytes;
 		}
+		gDynamicCapturePerfStats.voxelDuplicationAuditMs +=
+			DurationMs(start, std::chrono::steady_clock::now());
 	}
 
-	void PruneVoxelActorCache(SceneDebugStats& stats)
+	void PruneVoxelActorCacheLegacy(SceneDebugStats& stats)
 	{
+		const auto liveStart = std::chrono::steady_clock::now();
 		std::unordered_map<uint64_t, DCoreActor*> liveActors;
 		BuildLiveActorIdentityMap(liveActors);
+		gDynamicCapturePerfStats.voxelMaintenanceLiveActorsEnumerated += (uint32_t)liveActors.size();
+		gDynamicCapturePerfStats.voxelMaintenanceLiveEnumerationMs +=
+			DurationMs(liveStart, std::chrono::steady_clock::now());
 
+		const auto reconcileStart = std::chrono::steady_clock::now();
 		for (auto it = gVoxelActorCache.begin(); it != gVoxelActorCache.end(); )
 		{
+			gDynamicCapturePerfStats.voxelMaintenanceCacheEntriesScanned++;
 			auto liveActor = liveActors.find(it->first);
 			if (liveActor == liveActors.end())
 			{
@@ -4637,6 +4674,7 @@ namespace
 				EmitVoxelActorStateTrace(nullptr, nullptr, &it->second, "remove", VoxelActorPendingReason::ActorNotLive);
 				it = gVoxelActorCache.erase(it);
 				stats.voxelCacheSurfaceRemoves++;
+				gDynamicCapturePerfStats.voxelMaintenanceRemovals++;
 				++gVoxelActorCacheSerial;
 				continue;
 			}
@@ -4645,16 +4683,234 @@ namespace
 				if (SyncRetainedVoxelActorTransform(it->second, liveActor->second))
 				{
 					++gVoxelActorCacheSerial;
+					gDynamicCapturePerfStats.voxelMaintenanceTransformSyncs++;
 					EmitVoxelActorStateTrace(nullptr, nullptr, &it->second, "retained-transform-sync", VoxelActorPendingReason::None);
 				}
 				stats.voxelCacheNotCaptured++;
 				EmitVoxelActorStateTrace(nullptr, nullptr, &it->second, "retained-not-captured", VoxelActorPendingReason::None);
 			}
+			it->second.pendingRemoval = false;
 			++it;
+		}
+		gDynamicCapturePerfStats.voxelMaintenanceReconcileMs +=
+			DurationMs(reconcileStart, std::chrono::steady_clock::now());
+		gVoxelActorPendingRemoval = false;
+	}
+
+	void ReconcileVoxelActorCacheEntries(SceneDebugStats& stats)
+	{
+		const auto start = std::chrono::steady_clock::now();
+		gVoxelActorPendingRemoval = false;
+		for (auto it = gVoxelActorCache.begin(); it != gVoxelActorCache.end(); )
+		{
+			gDynamicCapturePerfStats.voxelMaintenanceCacheEntriesScanned++;
+			VoxelActorCacheEntry& entry = it->second;
+			// Removal events are authoritative and may outlive the actor object.
+			// Never inspect actorPtr after such an event; GetIndex() is the actor's
+			// spawn-unique identity, so a later allocation at the same address owns
+			// a different cache key.
+			const NRIVoxelActorPendingRemovalAction pendingRemovalAction =
+				ResolveNRIVoxelActorPendingRemoval(
+					entry.pendingRemoval,
+					entry.lastSeenFrame,
+					gVoxelActorCacheFrame);
+			if (pendingRemovalAction == NRIVoxelActorPendingRemovalAction::RetainCurrentFrame)
+			{
+				gVoxelActorPendingRemoval = true;
+				++it;
+				continue;
+			}
+			if (pendingRemovalAction == NRIVoxelActorPendingRemovalAction::Erase)
+			{
+				EmitVoxelActorStateTrace(nullptr, nullptr, &entry, "remove-lifecycle", VoxelActorPendingReason::ActorNotLive);
+				it = gVoxelActorCache.erase(it);
+				stats.voxelCacheSurfaceRemoves++;
+				gDynamicCapturePerfStats.voxelMaintenanceRemovals++;
+				++gVoxelActorCacheSerial;
+				continue;
+			}
+			DCoreActor* actor = reinterpret_cast<DCoreActor*>(entry.actorPtr);
+			const bool identityMatches = actor != nullptr &&
+				entry.actorIndex >= 0 &&
+				actor->GetIndex() == entry.actorIndex &&
+				BuildVoxelInstanceKeyHash(BuildVoxelInstanceKey(entry.actorIndex, actor)) == it->first;
+			const bool live = identityMatches && IsLiveActorVoxelCacheOwner(actor);
+			if (!live)
+			{
+				if (entry.lastSeenFrame == gVoxelActorCacheFrame)
+				{
+					entry.pendingRemoval = true;
+					gVoxelActorPendingRemoval = true;
+					EmitVoxelActorStateTrace(nullptr, nullptr, &entry, "retained-actor-not-live-current-frame", VoxelActorPendingReason::ActorNotLive);
+					++it;
+					continue;
+				}
+				EmitVoxelActorStateTrace(nullptr, nullptr, &entry, "remove-lifecycle", VoxelActorPendingReason::ActorNotLive);
+				it = gVoxelActorCache.erase(it);
+				stats.voxelCacheSurfaceRemoves++;
+				gDynamicCapturePerfStats.voxelMaintenanceRemovals++;
+				++gVoxelActorCacheSerial;
+				continue;
+			}
+
+			entry.pendingRemoval = false;
+			if (entry.hasSurface && entry.lastSeenFrame != gVoxelActorCacheFrame)
+			{
+				if (SyncRetainedVoxelActorTransform(entry, actor))
+				{
+					++gVoxelActorCacheSerial;
+					gDynamicCapturePerfStats.voxelMaintenanceTransformSyncs++;
+					EmitVoxelActorStateTrace(nullptr, nullptr, &entry, "retained-transform-sync", VoxelActorPendingReason::None);
+				}
+				stats.voxelCacheNotCaptured++;
+			}
+			++it;
+		}
+		gDynamicCapturePerfStats.voxelMaintenanceReconcileMs +=
+			DurationMs(start, std::chrono::steady_clock::now());
+	}
+
+	struct VoxelActorLifecycleApplyResult
+	{
+		bool forceReconcile = false;
+		bool forceLegacyReconcile = false;
+	};
+
+	VoxelActorLifecycleApplyResult ApplyVoxelActorLifecycleEvents()
+	{
+		const auto start = std::chrono::steady_clock::now();
+		const ActorLifecycleReadResult read =
+			GetActorLifecycleJournal().ReadAfter(gVoxelActorLifecycleCursor, gVoxelActorLifecycleEvents);
+		const bool resetSeen = std::any_of(
+			gVoxelActorLifecycleEvents.begin(),
+			gVoxelActorLifecycleEvents.end(),
+			[](const ActorLifecycleEvent& event)
+			{
+				return event.type == ActorLifecycleEventType::Reset;
+			});
+		NRIVoxelActorLifecycleJournalInput journalInput = {};
+		journalInput.lifecycleModeEnabled = true;
+		journalInput.overflowed = read.overflowed;
+		journalInput.resetSeen = resetSeen;
+		const NRIVoxelActorLifecycleJournalDecision journalDecision =
+			ResolveNRIVoxelActorLifecycleJournal(journalInput);
+		if (journalDecision.advanceCursor)
+		{
+			gVoxelActorLifecycleCursor = read.latestSerial;
+		}
+		gDynamicCapturePerfStats.voxelLifecycleOverflows += read.overflowed ? 1u : 0u;
+		VoxelActorLifecycleApplyResult result = {};
+		result.forceLegacyReconcile = journalDecision.forceLegacyReconcile;
+		if (!journalDecision.applyEvents)
+		{
+			// The retained tail is not a coherent history. In particular, applying
+			// a tail Reset before reconciling current state can discard valid
+			// post-reset entries. Skip it and fail closed to the exact live map.
+			gDynamicCapturePerfStats.voxelLifecycleEventsDiscarded +=
+				(uint32_t)gVoxelActorLifecycleEvents.size();
+			gVoxelActorLifecycleEvents.clear();
+			result.forceReconcile = true;
+			gDynamicCapturePerfStats.voxelLifecycleMs +=
+				DurationMs(start, std::chrono::steady_clock::now());
+			return result;
+		}
+
+		gDynamicCapturePerfStats.voxelLifecycleEventsApplied += (uint32_t)gVoxelActorLifecycleEvents.size();
+
+		for (const ActorLifecycleEvent& event : gVoxelActorLifecycleEvents)
+		{
+			switch (event.type)
+			{
+			case ActorLifecycleEventType::Inserted:
+				gDynamicCapturePerfStats.voxelLifecycleInsertEvents++;
+				break;
+			case ActorLifecycleEventType::Removed:
+			{
+				gDynamicCapturePerfStats.voxelLifecycleRemoveEvents++;
+				const uint64_t key = BuildVoxelInstanceKeyHash(
+					BuildVoxelInstanceKey(event.actorIndex, reinterpret_cast<DCoreActor*>(event.actorAddress)));
+				auto found = gVoxelActorCache.find(key);
+				if (found != gVoxelActorCache.end())
+				{
+					found->second.pendingRemoval = true;
+					gVoxelActorPendingRemoval = true;
+					gDynamicCapturePerfStats.voxelLifecycleRemovalEntriesMarked++;
+				}
+				result.forceReconcile = true;
+				break;
+			}
+			case ActorLifecycleEventType::StatChanged:
+				gDynamicCapturePerfStats.voxelLifecycleStatEvents++;
+				result.forceReconcile = true;
+				break;
+			case ActorLifecycleEventType::Reset:
+				gDynamicCapturePerfStats.voxelLifecycleResetEvents++;
+				// Reset may be consumed after current-level actors have already been
+				// captured (notably a same-map save reload). Reconcile against the
+				// live map instead of clearing the mixed pre/post-reset cache here.
+				gVoxelActorMaintenanceGate.Reset();
+				result.forceReconcile = true;
+				break;
+			}
+		}
+		gDynamicCapturePerfStats.voxelLifecycleMs +=
+			DurationMs(start, std::chrono::steady_clock::now());
+		return result;
+	}
+
+	void PruneVoxelActorCache(SceneDebugStats& stats)
+	{
+		gDynamicCapturePerfStats.voxelMaintenanceCalls++;
+		const bool lifecycleMode = (bool)nri_ptvoxelactorlifecycle;
+		VoxelActorLifecycleApplyResult lifecycle = {};
+		if (lifecycleMode)
+		{
+			lifecycle = ApplyVoxelActorLifecycleEvents();
+		}
+		else
+		{
+			// Legacy reconciliation already observes current state. Keep its
+			// journal cursor current so a later mode change cannot replay stale
+			// removals or resets into the delta path.
+			NRIVoxelActorLifecycleJournalInput journalInput = {};
+			journalInput.lifecycleModeEnabled = false;
+			const NRIVoxelActorLifecycleJournalDecision journalDecision =
+				ResolveNRIVoxelActorLifecycleJournal(journalInput);
+			if (journalDecision.advanceCursor)
+			{
+				gVoxelActorLifecycleCursor = GetActorLifecycleJournal().LatestSerial();
+			}
+			gVoxelActorLifecycleEvents.clear();
+		}
+		const GameUpdateSnapshot gameUpdate = GetGameUpdateSnapshot();
+		NRIVoxelActorMaintenanceInput input = {};
+		input.simulationGeneration = gameUpdate.simulationGeneration;
+		input.lifecycleModeEnabled = lifecycleMode;
+		input.voxelsEnabled = (bool)r_voxels;
+		input.forceReconcile = lifecycle.forceReconcile || gVoxelActorPendingRemoval;
+		const NRIVoxelActorMaintenanceDecision decision = gVoxelActorMaintenanceGate.Evaluate(input);
+		gDynamicCapturePerfStats.voxelMaintenanceReasonMask |= decision.reasonMask;
+
+		if (decision.legacyEnumeration || lifecycle.forceLegacyReconcile)
+		{
+			gDynamicCapturePerfStats.voxelMaintenanceLegacyReconciles++;
+			PruneVoxelActorCacheLegacy(stats);
+		}
+		else if (decision.reconcileCacheEntries)
+		{
+			gDynamicCapturePerfStats.voxelMaintenanceDeltaReconciles++;
+			ReconcileVoxelActorCacheEntries(stats);
+		}
+		else
+		{
+			gDynamicCapturePerfStats.voxelMaintenanceSimulationSkips++;
 		}
 
 		stats.voxelCacheEntries = (unsigned int)gVoxelActorCache.size();
-		CollectVoxelActorCacheDuplicationStats(stats);
+		if (ShouldCollectVoxelActorCacheDuplicationStats())
+		{
+			CollectVoxelActorCacheDuplicationStats(stats);
+		}
 	}
 
 	void EndVoxelActorCacheFrame(SceneDebugStats& stats, bool rootCapture)
@@ -5268,6 +5524,10 @@ namespace
 
 		FGameTexture* emissiveSourceTexture = GetVoxelReplacementEmissiveSourceTexture(sprite);
 		const MaterialRef voxelMaterial = MakeVoxelPaletteMaterialRef(voxelTexture, emissiveSourceTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite);
+		const bool authoringIndirectOnlyActor =
+			captureMode == DynamicVoxelCaptureMode::Authoritative &&
+			sprite.Sprite != nullptr &&
+			IsLocalPlayerActor(sprite.Sprite->ownerActor);
 		const bool forceTransientVoxel = ShouldUseTransientVoxelActorCapture(sprite);
 		if (forceTransientVoxel)
 		{
@@ -5417,7 +5677,7 @@ namespace
 				return deferDesiredVariant(VoxelActorPendingReason::MeshDeferred);
 			}
 
-			if (!forceTransientVoxel)
+			if (!forceTransientVoxel && !authoringIndirectOnlyActor)
 			{
 				CaptureVoxelProxySprite(sprite, drawListType, voxelTexture, outSprites);
 			}
@@ -5473,7 +5733,7 @@ namespace
 				return deferDesiredVariant(VoxelActorPendingReason::TriangleBudget);
 			}
 
-			if (!forceTransientVoxel)
+			if (!forceTransientVoxel && !authoringIndirectOnlyActor)
 			{
 				CaptureVoxelProxySprite(sprite, drawListType, voxelTexture, outSprites);
 			}
@@ -5533,7 +5793,10 @@ namespace
 					cacheLookup.identityKey == 0 ? DynamicVoxelEscapeReason::NotCacheable :
 					GetDynamicVoxelEscapeReasonForPending(pendingReason);
 				RecordDynamicVoxelEscape(stats, sprite, cacheLookup, exactSurface, escapeReason);
-				outSprites.push_back(std::move(exactSurface));
+				if (!authoringIndirectOnlyActor)
+				{
+					outSprites.push_back(std::move(exactSurface));
+				}
 			}
 			return true;
 		}
@@ -5544,7 +5807,10 @@ namespace
 			cacheLookup.identityKey == 0 ? DynamicVoxelEscapeReason::NotCacheable :
 			DynamicVoxelEscapeReason::Unknown;
 		RecordDynamicVoxelEscape(stats, sprite, cacheLookup, exactSurface, escapeReason);
-		outSprites.push_back(std::move(exactSurface));
+		if (!authoringIndirectOnlyActor)
+		{
+			outSprites.push_back(std::move(exactSurface));
+		}
 		return true;
 	}
 
@@ -5633,9 +5899,17 @@ namespace
 		finish();
 	}
 
-	void CaptureActorModelSprites(HWDrawList& list, uint32_t drawListType, int32_t actorIndex, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
+	bool CaptureActorModelSprites(
+		HWDrawList& list,
+		uint32_t drawListType,
+		int32_t actorIndex,
+		bool captureTransient,
+		std::vector<SurfaceRef>& outSprites,
+		SceneDebugStats& stats)
 	{
 		const bool rootMeshCapture = BeginVoxelMeshCacheFrame();
+		bool currentVoxel = false;
+		std::vector<SurfaceRef> authoritativeSurfaces;
 		VoxelCaptureBudget budget = MakeVoxelCaptureBudget();
 		for (auto* sprite : list.sprites)
 		{
@@ -5657,12 +5931,36 @@ namespace
 				continue;
 			}
 
-			if (CaptureVoxelMeshSprite(nullptr, *sprite, drawListType, budget, outSprites, stats, DynamicVoxelCaptureMode::Transient))
+			currentVoxel = true;
+			authoritativeSurfaces.clear();
+			(void)CaptureVoxelMeshSprite(nullptr, *sprite, drawListType, budget, authoritativeSurfaces, stats, DynamicVoxelCaptureMode::Authoritative);
+			if (captureTransient && CaptureVoxelMeshSprite(nullptr, *sprite, drawListType, budget, outSprites, stats, DynamicVoxelCaptureMode::Transient))
 			{
 				stats.voxelProxyDrawItems++;
 			}
 		}
 		EndVoxelMeshCacheFrame(rootMeshCapture);
+		return currentVoxel;
+	}
+
+	void DiscardIndirectOnlyVoxelActorCacheEntry(int32_t actorIndex)
+	{
+		if (actorIndex < 0)
+		{
+			return;
+		}
+
+		for (auto it = gVoxelActorCache.begin(); it != gVoxelActorCache.end();)
+		{
+			if (it->second.actorIndex != actorIndex || !it->second.indirectOnly)
+			{
+				++it;
+				continue;
+			}
+			EmitVoxelActorStateTrace(nullptr, nullptr, &it->second, "remove-indirect-representation-change", VoxelActorPendingReason::ActorNotLive);
+			it = gVoxelActorCache.erase(it);
+			++gVoxelActorCacheSerial;
+		}
 	}
 }
 
@@ -6322,12 +6620,35 @@ bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView, DynamicVoxelCapture
 	return !outView.opaqueWalls.empty() || !outView.opaqueFlats.empty() || !outView.opaqueSprites.empty();
 }
 
-bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outView)
+ActorSpriteSceneCaptureResult CaptureActorSpriteScene(
+	HWDrawInfo& di,
+	int32_t actorIndex,
+	bool residentVoxelReady,
+	SceneView& outView)
 {
+	ActorSpriteSceneCaptureResult result = {};
 	outView = {};
 	outView.drawInfo = &di;
-	CaptureActorFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, actorIndex, outView.opaqueSprites);
-	CaptureActorModelSprites(di.drawlists[GLDL_MODELS], GLDL_MODELS, actorIndex, outView.opaqueSprites, outView.stats);
+	std::vector<SurfaceRef> modelSprites;
+	result.currentVoxel = CaptureActorModelSprites(
+		di.drawlists[GLDL_MODELS],
+		GLDL_MODELS,
+		actorIndex,
+		!residentVoxelReady,
+		modelSprites,
+		outView.stats);
+	if (!result.currentVoxel)
+	{
+		DiscardIndirectOnlyVoxelActorCacheEntry(actorIndex);
+	}
+	if (!result.currentVoxel || !residentVoxelReady)
+	{
+		CaptureActorFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, actorIndex, outView.opaqueSprites);
+		outView.opaqueSprites.insert(
+			outView.opaqueSprites.end(),
+			std::make_move_iterator(modelSprites.begin()),
+			std::make_move_iterator(modelSprites.end()));
+	}
 
 	outView.stats.spriteDrawItems = (uint32_t)outView.opaqueSprites.size();
 	outView.stats.totalDrawItems = outView.stats.spriteDrawItems;
@@ -6341,7 +6662,59 @@ bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outV
 		}
 	}
 
-	return !outView.opaqueSprites.empty();
+	result.capturedFallbackScene = !outView.opaqueSprites.empty();
+	return result;
+}
+
+ActorSpriteSceneCaptureResult CaptureActorVoxelSprite(
+	HWDrawInfo& di,
+	HWSprite& sprite,
+	bool residentVoxelReady,
+	SceneView& outView)
+{
+	ActorSpriteSceneCaptureResult result = {};
+	outView = {};
+	outView.drawInfo = &di;
+	if (sprite.modelframe >= 0 || sprite.voxel == nullptr || sprite.voxel->model == nullptr)
+	{
+		return result;
+	}
+
+	result.currentVoxel = true;
+	const bool rootMeshCapture = BeginVoxelMeshCacheFrame();
+	VoxelCaptureBudget budget = MakeVoxelCaptureBudget();
+	std::vector<SurfaceRef> authoritativeSurfaces;
+	(void)CaptureVoxelMeshSprite(
+		nullptr,
+		sprite,
+		GLDL_MODELS,
+		budget,
+		authoritativeSurfaces,
+		outView.stats,
+		DynamicVoxelCaptureMode::Authoritative);
+	if (!residentVoxelReady && CaptureVoxelMeshSprite(
+		nullptr,
+		sprite,
+		GLDL_MODELS,
+		budget,
+		outView.opaqueSprites,
+		outView.stats,
+		DynamicVoxelCaptureMode::Transient))
+	{
+		outView.stats.voxelProxyDrawItems++;
+	}
+	EndVoxelMeshCacheFrame(rootMeshCapture);
+
+	outView.stats.modelDrawItems = 1;
+	outView.stats.spriteDrawItems = (uint32_t)outView.opaqueSprites.size();
+	outView.stats.totalDrawItems = outView.stats.spriteDrawItems;
+	for (const SurfaceRef& surface : outView.opaqueSprites)
+	{
+		outView.stats.triangleEstimate += CountFanTriangles(surface);
+		outView.stats.materialRefs++;
+	}
+	result.capturedFallbackScene = !outView.opaqueSprites.empty();
+	return result;
 }
 
 uint64_t GetPersistentVoxelCacheSerial()
@@ -6358,6 +6731,10 @@ void ResetPersistentVoxelActorCache(const char* reason)
 		++gVoxelActorCacheSerial;
 	}
 	gVoxelActorCacheCaptureDepth = 0;
+	gVoxelActorLifecycleCursor = GetActorLifecycleJournal().LatestSerial();
+	gVoxelActorLifecycleEvents.clear();
+	gVoxelActorPendingRemoval = false;
+	gVoxelActorMaintenanceGate.Reset();
 	if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
 	{
 		Printf("NRI PT voxel actor cache reset: reason=%s entries=%u serial=%llu frame=%llu\n",
@@ -6558,6 +6935,7 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.primitiveCount = desiredDirectPending ? entry.second->desiredPrimitiveCount : entry.second->primitiveCount;
 		view.lastSeenFrame = entry.second->lastSeenFrame;
 		view.capturedThisFrame = entry.second->lastSeenFrame == gVoxelActorCacheFrame;
+		view.indirectOnly = entry.second->indirectOnly;
 		view.retainedFrameAge = entry.second->lastSeenFrame != 0 && gVoxelActorCacheFrame >= entry.second->lastSeenFrame ?
 			gVoxelActorCacheFrame - entry.second->lastSeenFrame :
 			0;

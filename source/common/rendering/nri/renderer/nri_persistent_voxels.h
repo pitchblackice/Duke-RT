@@ -2,13 +2,16 @@
 
 #include "nri_voxel_admission_scheduler.h"
 
+#include "nri_persistent_voxel_admission_index.h"
 #include "nri_persistent_voxel_material_closure.h"
+#include "nri_persistent_voxel_material_range_allocator.h"
 #include "nri_frame_resources.h"
 #include "nri_persistent_voxel_shared_blas.h"
 #include "nri_renderer_settings.h"
 #include "nri_resources.h"
 #include "nri_runtime_mutation.h"
 #include "nri_scene_lights.h"
+#include "nri_scene_instance_visibility.h"
 #include "nri_voxel_compute_meshing.h"
 
 #include "../scene/nri_geometry_bridge.h"
@@ -44,6 +47,7 @@ struct PersistentVoxelBatch
 		uint32_t worldTlasInstanceIndex = UINT32_MAX;
 		uint32_t worldTlasOccurrenceGeneration = 0;
 		bool capturedThisFrame = false;
+		bool indirectOnly = false;
 		bool inWorldTlasThisFrame = false;
 		bool active = true;
 		uint32_t primitiveOffset = 0;
@@ -52,6 +56,7 @@ struct PersistentVoxelBatch
 		uint32_t indexCount = 0;
 		uint32_t materialOffset = 0;
 		uint32_t materialCount = 0;
+		uint64_t materialSlotGeneration = 0;
 		std::array<float, 12> instanceTransform = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 		std::array<float, 12> previousInstanceTransform = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 		nri_scene::MaterialBridgeData materialBridge;
@@ -62,6 +67,7 @@ struct PersistentVoxelBatch
 	uint64_t sourceSerial = 0;
 	uint32_t surfaceCount = 0;
 	uint32_t primitiveCount = 0;
+	uint32_t indexCount = 0;
 	uint32_t materialCount = 0;
 	uint32_t activeActorCount = 0;
 	uint32_t rebuildCount = 0;
@@ -133,6 +139,7 @@ struct PersistentVoxelMaterialVariantResource
 	uint32_t materialOffset = 0;
 	uint32_t materialCount = 0;
 	uint32_t materialCapacity = 0;
+	uint64_t materialSlotGeneration = 0;
 	uint32_t lastDesiredMapGeneration = 0;
 	uint32_t lastUsedMapGeneration = 0;
 	uint32_t lastUsedFrame = 0;
@@ -641,6 +648,33 @@ struct NRIPersistentVoxelOverlayStats
 	uint64_t byteCount = 0;
 };
 
+struct NRIPersistentVoxelMaintenanceStats
+{
+	uint32_t registryEntries = 0;
+	uint32_t activeEntries = 0;
+	uint32_t requiredReadyEntries = 0;
+	uint32_t optionalReadyEntries = 0;
+	uint32_t failedEntries = 0;
+	uint32_t entriesScannedLastPump = 0;
+	uint32_t pressureEntriesScannedLast = 0;
+	uint32_t pressureResourceRowsScannedLast = 0;
+	bool pumpFastReturnLast = false;
+	bool pressureEvaluatedLast = false;
+	bool pressureSkippedLast = false;
+	uint64_t pumpCalls = 0;
+	uint64_t pumpFastReturns = 0;
+	uint64_t entriesScanned = 0;
+	uint64_t pressureEntriesScanned = 0;
+	uint64_t pressureResourceRowsScanned = 0;
+	uint64_t pressureEvaluations = 0;
+	uint64_t pressureNoops = 0;
+	uint64_t pressureSkips = 0;
+	uint64_t memorySnapshotRebuilds = 0;
+	uint64_t memorySnapshotHits = 0;
+	uint64_t resourceStatusRebuilds = 0;
+	uint64_t resourceStatusHits = 0;
+};
+
 struct NRIPersistentVoxelMaterialWarmupStats
 {
 	uint32_t textureRequests = 0;
@@ -761,6 +795,7 @@ struct NRIPersistentVoxelBatchStats
 	uint64_t persistentVoxelOnboardingAdmittedBytes = 0;
 	uint64_t persistentVoxelOnboardingByteBudget = 0;
 	uint32_t persistentVoxelInstanceTransformUpdates = 0;
+	uint32_t persistentVoxelBatchSerialFastPathCount = 0;
 };
 
 struct NRIPersistentVoxelBatchServices
@@ -877,6 +912,7 @@ class NRIPersistentVoxelResidency
 public:
 	void Reset(const char* reason, bool clearSharedResources, bool traceReset, const NRIPersistentVoxelResetServices& services);
 	void ResetLevelSchedulingState(const char* reason, bool traceReset, const NRIPersistentVoxelResetServices& services);
+	bool CompactMaterialRangesForQuiescentLevelTransition(const char* reason, bool traceEnabled);
 	bool SyncMapGeneration(uint64_t buildSerial, const char* reason, bool traceEnabled, const NRIPersistentVoxelResetServices& services);
 	void ReconcileResidency(
 		const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
@@ -1010,11 +1046,16 @@ public:
 	void FillResourceStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const;
 	void FillBatchStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const;
 	NRIPersistentVoxelOverlayStats BuildOverlayStats() const;
+	const NRIPersistentVoxelMaintenanceStats& GetMaintenanceStats() const { return maintenanceStats; }
 	bool HasValidBatch() const;
 	bool HasRenderableOverlay() const;
+	bool HasResidentIndirectOnlyActor(int32_t actorIndex) const;
 	bool HasPreloadPending() const;
 	NRIPersistentVoxelPreloadStatus BuildPreloadStatusSnapshot() const;
 	uint32_t OverlayMaterialCount() const;
+	const nri_scene::MaterialBridgeData& MaterialBridge() const { return batch.materialBridge; }
+	uint64_t MaterialResourceGeneration() const { return batchMaterialResourceGeneration; }
+	const NRIPersistentVoxelMaterialRangeStats& MaterialRangeStats() const { return materialRangeAllocator.Stats(); }
 	uint32_t EstimatePrimitiveCountForInstanceOffset(uint32_t primitiveOffset) const;
 	nri_scene::SceneDebugStats BuildOverlayDebugStats() const;
 	uint64_t BuildSceneGenerationHash() const;
@@ -1023,6 +1064,7 @@ public:
 		PersistentVoxelMaterialVariantResource& candidate,
 		bool& outReused);
 	void RecomputeBatchState(PersistentVoxelBatch& targetBatch) const;
+	void RefreshActiveResourceReferences(uint32_t frameIndex);
 	void ClearActorInstances(const NRIPersistentVoxelResetServices& services);
 	bool ValidateActorGeometry(
 		uint64_t identityKey,
@@ -1046,6 +1088,7 @@ public:
 		std::vector<SceneInstanceData>& sceneInstances,
 		uint32_t frameIndex,
 		const NRIPersistentVoxelSettings& settings,
+		const NRISceneInstanceVisibilityContext& visibilityContext,
 		bool voxelStatsEnabled,
 		const NRIPersistentVoxelTlasServices& services,
 		NRIPersistentVoxelTlasBuildStats& outStats);
@@ -1055,6 +1098,9 @@ public:
 	bool AppendMaterialTextureKeys(uint64_t materialKeyHash, std::vector<uint64_t>& outKeys) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsRequiredAdmission(const PersistentVoxelAdmissionEntry& entry) const;
+	NRIPersistentVoxelAdmissionBucket GetAdmissionBucket(const PersistentVoxelAdmissionEntry& entry) const;
+	void RebuildAdmissionIndex(bool reactivateStaleReady);
+	void MarkMaintenanceMutation();
 	void CountAdmissionWork(uint32_t& requiredPending, uint32_t& requiredReady, uint32_t& optionalPending, uint32_t& failed) const;
 	void TraceReadiness(
 		const char* event,
@@ -1077,6 +1123,20 @@ public:
 	std::unordered_map<uint64_t, PersistentVoxelInstanceRecord> instances;
 	std::unordered_map<uint64_t, uint64_t> actorRejectedSignatures;
 	std::unordered_map<uint64_t, PersistentVoxelAdmissionEntry> admissionQueue;
+	std::unordered_map<uint64_t, uint32_t> activeMeshReferences;
+	std::unordered_map<uint64_t, uint32_t> activeMaterialReferences;
+	NRIPersistentVoxelAdmissionIndex admissionIndex;
+	uint64_t maintenanceMutationGeneration = 1;
+	mutable uint64_t cachedMemoryUsageGeneration = 0;
+	mutable NRIPersistentVoxelMemoryUsage cachedMemoryUsage = {};
+	mutable uint64_t cachedResourceStatusGeneration = 0;
+	mutable NRIPersistentVoxelStatusSnapshot cachedResourceStatus = {};
+	uint64_t pressureEvaluationGeneration = 0;
+	uint64_t pressureSettingsSignature = 0;
+	uint64_t pressureAdapterBudget = 0;
+	uint32_t pressureEvaluationFrame = 0;
+	bool pressureEvaluationValid = false;
+	mutable NRIPersistentVoxelMaintenanceStats maintenanceStats = {};
 	std::unordered_set<uint64_t> publishedMeshKeys;
 	std::unordered_set<uint64_t> publishedMaterialKeys;
 	std::unordered_set<uint64_t> dirtyMaterialResourceKeys;
@@ -1085,11 +1145,13 @@ public:
 	uint32_t arenaVertexCursor = 0;
 	uint32_t arenaIndexCursor = 0;
 	uint32_t arenaPrimitiveCursor = 0;
-	uint32_t arenaMaterialCursor = 0;
+	NRIPersistentVoxelMaterialRangeAllocator materialRangeAllocator;
 	uint64_t arenaPresizeBuildSerial = 0;
 	uint64_t blasPolicyTraceBuildSerial = 0;
 	uint64_t materialResourceGeneration = 1;
 	uint64_t batchMaterialResourceGeneration = 0;
+	uint64_t materialRangeCompactions = 0;
+	uint64_t materialRangeCompactedRows = 0;
 	uint64_t uploadedMaterialResourceGeneration = 0;
 	uint32_t committedWorldTlasFrameIndex = UINT32_MAX;
 	uint32_t pendingMaterialLayoutInvalidatedResources = 0;

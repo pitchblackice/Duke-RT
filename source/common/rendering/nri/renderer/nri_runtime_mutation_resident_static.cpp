@@ -5,6 +5,7 @@
 #include "nri_scene_upload.h"
 #include "../system/nri_renderdevice.h"
 #include "c_cvars.h"
+#include "perf_capture.h"
 #include "printf.h"
 
 #include <chrono>
@@ -22,7 +23,7 @@ namespace
 
     static bool ShouldCollectResidentStaticPerfTiming()
     {
-        return ShouldTraceResidentStaticPerf() || (bool)nri_ptslowdowntrace || (bool)nri_ptscenestats;
+		return ShouldTraceResidentStaticPerf() || (bool)nri_ptslowdowntrace || (bool)nri_ptscenestats || PerfCompactCaptureTimingActive();
     }
 
     static double ResidentStaticDurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
@@ -254,6 +255,15 @@ namespace
             nri::AccelerationStructureBits::ALLOW_UPDATE;
     }
 
+    static bool IsStaticMapChunkBlasUpdateCompatible(const NRIAccelerationStructureResource& resource)
+    {
+        return
+            resource.buildTypeValid &&
+            resource.buildType == nri::AccelerationStructureType::BOTTOM_LEVEL &&
+            ((uint32_t)resource.buildFlags & (uint32_t)nri::AccelerationStructureBits::ALLOW_UPDATE) != 0 &&
+            !resource.compacted;
+    }
+
 }
 
 
@@ -337,6 +347,8 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 	}
 
 	bool textureTableGrew = false;
+	const bool staticMaterialsUseStableTextureSlots =
+		mStaticMapScene.gpuMaterialsUseStableTextureSlots;
 	for (uint32_t chunkListIndex : chunkListIndices)
 	{
 		if (chunkListIndex >= mStaticMapScene.chunks.size() ||
@@ -444,6 +456,8 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 				cacheEntry.materialCount != atlasChunk.materialCount ||
 				cacheEntry.actorOverrideHash != actorOverrideHash ||
 				cacheEntry.emissiveOverrideHash != emissiveOverrideHash ||
+				cacheEntry.stableTextureSlots != staticMaterialsUseStableTextureSlots ||
+				cacheEntry.textureSlotRevision != (staticMaterialsUseStableTextureSlots ? mSceneTextures.SlotTable().MappingRevision() : 0) ||
 				cacheEntry.gpuMaterials.size() != atlasChunk.materialCount)
 			{
 				continue;
@@ -494,12 +508,33 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 			remappedGpuMaterials = remappedChunkBridge.materials;
 			ApplyEmissiveMaterialOverrides(remappedChunkBridge, remappedGpuMaterials);
 			ApplyActorShadowMaterialOverrides(remappedChunkBridge, remappedGpuMaterials);
+			if (staticMaterialsUseStableTextureSlots && !textureTableGrew)
+			{
+				NRISceneMaterialTextureSlotResolveStats resolveStats = {};
+				NRIResolveSceneMaterialTextureSlots(
+					mSceneTextures.SlotTable(),
+					mStaticMapScene.materialBridge,
+					remappedGpuMaterials,
+					&resolveStats);
+				if (resolveStats.requiredFallbacks != 0 || resolveStats.optionalFallbacks != 0)
+				{
+					if (nri_ptscenestats)
+					{
+						Printf("NRI PT static scene trace: event=resident_material_refresh_failed reason=stable-slot-resolution chunk=%u chunk_list_index=%u required_fallbacks=%u optional_fallbacks=%u\n",
+							chunkCache.chunkIndex,
+							chunkListIndex,
+							resolveStats.requiredFallbacks,
+							resolveStats.optionalFallbacks);
+					}
+					return false;
+				}
+			}
 		}
 		std::copy_n(
 			remappedGpuMaterials.data(),
 			atlasChunk.materialCount,
 			mStaticMapScene.gpuMaterials.data() + atlasChunk.materialOffset);
-		if (!reusedCachedRemap || !reusedCachedGpuPayload)
+		if (!textureTableGrew && (!reusedCachedRemap || !reusedCachedGpuPayload))
 		{
 			StaticMapSceneCache::ChunkCache::ResidentMaterialSliceCacheEntry cacheEntry = {};
 			cacheEntry.animatedGeometrySignature = chunkCache.animatedGeometrySignature;
@@ -507,6 +542,9 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 			cacheEntry.materialBridgeHash = materialBridgeHash;
 			cacheEntry.actorOverrideHash = actorOverrideHash;
 			cacheEntry.emissiveOverrideHash = emissiveOverrideHash;
+			cacheEntry.textureSlotRevision = staticMaterialsUseStableTextureSlots ?
+				mSceneTextures.SlotTable().MappingRevision() : 0;
+			cacheEntry.stableTextureSlots = staticMaterialsUseStableTextureSlots;
 			cacheEntry.materialCount = atlasChunk.materialCount;
 			cacheEntry.remappedMaterialBridge = remappedChunkBridge;
 			cacheEntry.gpuMaterials = remappedGpuMaterials;
@@ -549,6 +587,11 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 			mLastPerfResourceTraceStats.residentChunkBatchMaterialBytes +=
 				(uint64_t)atlasChunk.materialCount * sizeof(nri_scene::MaterialData);
 		}
+	}
+	++mStaticMapScene.materialGeneration;
+	if (mStaticMapScene.materialGeneration == 0)
+	{
+		mStaticMapScene.materialGeneration = 1;
 	}
 
 	if (!textureTableGrew)
@@ -659,10 +702,19 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 			auto& chunk = mStaticMapScene.chunks[chunkListIndex];
 			const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
 			const bool hadAccelerationStructure = chunk.accelerationStructure.accelerationStructure != nullptr;
+			const uint64_t expectedIndexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
+			const bool geometryDescMatches =
+				chunk.residentBlasVertexBuffer == mStaticVertexBuffer.buffer &&
+				chunk.residentBlasIndexBuffer == mStaticIndexBuffer.buffer &&
+				chunk.residentBlasVertexNum == mStaticMapChunkAtlas.vertexCount &&
+				chunk.residentBlasIndexOffset == expectedIndexOffset &&
+				chunk.residentBlasIndexNum == atlasChunk.indexCount;
 
 			const bool canUpdateResidentBlas =
 				chunk.blasUpdateEligible &&
-				hadAccelerationStructure;
+				hadAccelerationStructure &&
+				IsStaticMapChunkBlasUpdateCompatible(chunk.accelerationStructure) &&
+				geometryDescMatches;
 			chunk.blasUpdateEligible = canUpdateResidentBlas;
 			auto* accelerationStructure = chunk.accelerationStructure.accelerationStructure;
 			if (chunk.residentBlasScratchSizeCacheKey != accelerationStructure)
@@ -749,6 +801,11 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 					chunk.residentBlasScratchSizeCacheKey = nullptr;
 					chunk.residentBlasBuildScratchSize = 0;
 					chunk.residentBlasUpdateScratchSize = 0;
+					chunk.residentBlasVertexBuffer = nullptr;
+					chunk.residentBlasIndexBuffer = nullptr;
+					chunk.residentBlasVertexNum = 0;
+					chunk.residentBlasIndexOffset = 0;
+					chunk.residentBlasIndexNum = 0;
 
 					nri::BottomLevelGeometryDesc geometryDesc = {};
 					geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
@@ -777,6 +834,11 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 					mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*chunk.accelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
 					chunk.accelerationStructure.memorySize = memoryDesc.size;
 					chunk.accelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
+					chunk.accelerationStructure.buildFlags = blasDesc.flags;
+					chunk.accelerationStructure.buildType = blasDesc.type;
+					chunk.accelerationStructure.buildTypeValid = true;
+					chunk.accelerationStructure.uncompactedMemorySize = memoryDesc.size;
+					chunk.accelerationStructure.compacted = false;
 				}
 
 				{
@@ -788,6 +850,11 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 					chunk.residentBlasScratchSizeCacheKey = chunk.accelerationStructure.accelerationStructure;
 					chunk.residentBlasBuildScratchSize = scratchSize;
 					chunk.residentBlasUpdateScratchSize = 0;
+					chunk.residentBlasVertexBuffer = mStaticVertexBuffer.buffer;
+					chunk.residentBlasIndexBuffer = mStaticIndexBuffer.buffer;
+					chunk.residentBlasVertexNum = mStaticMapChunkAtlas.vertexCount;
+					chunk.residentBlasIndexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
+					chunk.residentBlasIndexNum = atlasChunk.indexCount;
 					maxScratchSize = std::max(maxScratchSize, scratchSize);
 				}
 			}
@@ -815,6 +882,29 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 	blasBarriers.clear();
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBuildMs);
+		std::vector<nri::BufferBarrierDesc> beforeUpdateBarriers;
+		beforeUpdateBarriers.reserve(activeChunkListIndices.size());
+		for (uint32_t chunkListIndex : activeChunkListIndices)
+		{
+			const auto& chunk = mStaticMapScene.chunks[chunkListIndex];
+			if (!chunk.blasUpdateEligible)
+			{
+				continue;
+			}
+			nri::BufferBarrierDesc barrier = {};
+			barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*chunk.accelerationStructure.accelerationStructure);
+			barrier.before = NRIResourceAccelerationStructureReadAccess();
+			barrier.after = NRIResourceAccelerationStructureReadWriteAccess();
+			beforeUpdateBarriers.push_back(barrier);
+		}
+		if (!beforeUpdateBarriers.empty())
+		{
+			ScopedPtPerfTimer barrierPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBarrierMs);
+			nri::BarrierDesc barrierDesc = {};
+			barrierDesc.buffers = beforeUpdateBarriers.data();
+			barrierDesc.bufferNum = (uint32_t)beforeUpdateBarriers.size();
+			mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
+		}
 		blasBarriers.reserve(activeChunkListIndices.size());
 		for (size_t i = 0; i < activeChunkListIndices.size(); ++i)
 		{
@@ -843,7 +933,30 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 			build.scratchBuffer = mResidentStaticBlasScratchBuffer.buffer;
 			build.scratchOffset = 0;
 			mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &build, 1);
+			NoteWorldBlasContentChanged();
 			mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasBuildCommandCount++;
+			if (chunk.fixedLayoutDeformerKey != 0)
+			{
+				mSE29FloorDeformerRoute.NotePartialUpload(
+					chunk.fixedLayoutDeformerKey,
+					chunk.fixedLayoutVertexSpanCount,
+					chunk.fixedLayoutPrimitiveSpanCount,
+					chunk.fixedLayoutVertexBytes,
+					chunk.fixedLayoutPrimitiveBytes);
+				if (chunk.blasUpdateEligible)
+				{
+					mSE29FloorDeformerRoute.NoteBlasUpdated(chunk.fixedLayoutDeformerKey);
+				}
+				else
+				{
+					mSE29FloorDeformerRoute.NoteBlasRecreated(chunk.fixedLayoutDeformerKey);
+				}
+				chunk.fixedLayoutDeformerKey = 0;
+				chunk.fixedLayoutVertexSpanCount = 0;
+				chunk.fixedLayoutPrimitiveSpanCount = 0;
+				chunk.fixedLayoutVertexBytes = 0;
+				chunk.fixedLayoutPrimitiveBytes = 0;
+			}
 
 			if (i + 1 < activeChunkListIndices.size())
 			{

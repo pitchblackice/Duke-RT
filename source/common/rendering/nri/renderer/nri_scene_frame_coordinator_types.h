@@ -64,6 +64,10 @@ struct RenderSceneCompletionInputs
 
 struct RenderSceneFrameBuildInputs
 {
+	uint64_t simulationGeneration = 0;
+	uint64_t engineUpdateGeneration = 0;
+	uint64_t presentationGeneration = 0;
+	uint32_t ticksExecutedThisPresentation = 0;
 	uint32_t bootstrapMode = 0;
 	bool bootstrapCapturedView = false;
 	bool bootstrapCapturedDiagnostics = false;

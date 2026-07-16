@@ -1,11 +1,8 @@
 #include "nri_scene_frame_overlay.h"
 
-#include "nri_scene_frame_mirrors.h"
-#include "nri_upload_hash.h"
 #include "../scene/nri_hash.h"
 
 #include <chrono>
-#include <cstring>
 
 namespace
 {
@@ -35,31 +32,6 @@ namespace
 		std::chrono::steady_clock::time_point mStart = {};
 	};
 
-	struct SceneViewUploadStampBuildResult
-	{
-		uint64_t vertexPayloadStamp = 0;
-		uint64_t indexPayloadStamp = 0;
-		uint64_t primitivePayloadStamp = 0;
-		uint64_t primitiveProvenanceStamp = 0;
-		uint64_t materialPayloadStamp = 0;
-	};
-
-	uint32_t CoherencyFloatBits(float value)
-	{
-		static_assert(sizeof(uint32_t) == sizeof(float), "unexpected float size");
-		uint32_t bits = 0;
-		std::memcpy(&bits, &value, sizeof(bits));
-		return bits;
-	}
-
-	uint64_t HashMaterialPayloadData(const nri_scene::MaterialBridgeData& materialBridge)
-	{
-		const uint64_t materialSize = (uint64_t)materialBridge.materials.size() * sizeof(nri_scene::MaterialData);
-		return NRIHashUploadPayloadBytes(
-			materialBridge.materials.empty() ? nullptr : materialBridge.materials.data(),
-			materialSize);
-	}
-
 	uint64_t HashSurfaceProvenanceStamp(uint64_t hash, const nri_scene::SurfaceProvenance& provenance)
 	{
 		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
@@ -75,32 +47,6 @@ namespace
 		return hash;
 	}
 
-	uint64_t HashCapturedVertexStamp(uint64_t hash, const nri_scene::CapturedVertex& vertex)
-	{
-		for (int i = 0; i < 3; ++i)
-		{
-			hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.position[i]));
-		}
-		for (int i = 0; i < 3; ++i)
-		{
-			hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.prevPosition[i]));
-		}
-		hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.uv[0]));
-		hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.uv[1]));
-		return hash;
-	}
-
-	uint64_t HashMaterialRefStamp(uint64_t hash, const nri_scene::MaterialRef& material)
-	{
-		hash = nri_scene::HashCombine64(hash, material.texture != nullptr ? (uint64_t)(uint32_t)material.texture->GetID().GetIndex() + 1ull : 0ull);
-		hash = nri_scene::HashCombine64(hash, material.emissiveSourceTexture != nullptr ? (uint64_t)(uint32_t)material.emissiveSourceTexture->GetID().GetIndex() + 1ull : 0ull);
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(material.palette + 1));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(material.shade + 1));
-		hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(material.alpha));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)material.flags);
-		return hash;
-	}
-
 	uint32_t CountStampedSurfacePrimitives(const nri_scene::SurfaceRef& surface, bool triangleList)
 	{
 		if (!surface.indices.empty())
@@ -112,117 +58,6 @@ namespace
 			return (uint32_t)(surface.vertices.size() / 3u);
 		}
 		return surface.vertices.size() >= 3 ? (uint32_t)surface.vertices.size() - 2u : 0u;
-	}
-
-	SceneViewUploadStampBuildResult BuildSceneViewUploadProducerStamp(const nri_scene::SceneView& sceneView, uint64_t mapWorldBuildSerial)
-	{
-		SceneViewUploadStampBuildResult result = {};
-		result.vertexPayloadStamp = 1469598103934665603ull;
-		result.indexPayloadStamp = 1469598103934665603ull;
-		result.primitivePayloadStamp = 1469598103934665603ull;
-		result.primitiveProvenanceStamp = 1469598103934665603ull;
-		result.materialPayloadStamp = 1469598103934665603ull;
-		auto appendSurface =
-			[&](const nri_scene::SurfaceRef& surface, uint32_t surfaceKind, bool triangleList, uint32_t materialIndex)
-		{
-			const uint32_t primitiveCount = CountStampedSurfacePrimitives(surface, triangleList);
-			const uint64_t surfaceHeader =
-				nri_scene::HashCombine64(
-					nri_scene::HashCombine64(
-						nri_scene::HashCombine64(1469598103934665603ull, (uint64_t)surfaceKind),
-						(uint64_t)materialIndex),
-					(uint64_t)primitiveCount);
-			result.vertexPayloadStamp = nri_scene::HashCombine64(result.vertexPayloadStamp, surfaceHeader);
-			result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, surfaceHeader);
-			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, surfaceHeader);
-			result.primitiveProvenanceStamp = nri_scene::HashCombine64(result.primitiveProvenanceStamp, surfaceHeader);
-			result.materialPayloadStamp = nri_scene::HashCombine64(result.materialPayloadStamp, surfaceHeader);
-			result.vertexPayloadStamp = nri_scene::HashCombine64(result.vertexPayloadStamp, (uint64_t)surface.vertices.size());
-			result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, (uint64_t)surface.indices.size());
-			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)sceneView.primitiveFlags);
-			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)surface.material.flags);
-			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, mapWorldBuildSerial);
-			result.primitiveProvenanceStamp = HashSurfaceProvenanceStamp(result.primitiveProvenanceStamp, surface.provenance);
-			result.materialPayloadStamp = HashMaterialRefStamp(result.materialPayloadStamp, surface.material);
-			for (const nri_scene::CapturedVertex& vertex : surface.vertices)
-			{
-				result.vertexPayloadStamp = HashCapturedVertexStamp(result.vertexPayloadStamp, vertex);
-				result.primitivePayloadStamp = HashCapturedVertexStamp(result.primitivePayloadStamp, vertex);
-			}
-			for (uint32_t index : surface.indices)
-			{
-				result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, (uint64_t)index);
-				result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)index);
-			}
-		};
-
-		uint32_t materialIndex = 0;
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueWalls)
-		{
-			appendSurface(surface, 0u, false, materialIndex++);
-		}
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueFlats)
-		{
-			appendSurface(surface, 1u, true, materialIndex++);
-		}
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueSprites)
-		{
-			appendSurface(surface, 2u, false, materialIndex++);
-		}
-		result.vertexPayloadStamp = nri_scene::HashCombine64(result.vertexPayloadStamp, (uint64_t)materialIndex);
-		result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, (uint64_t)materialIndex);
-		result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)materialIndex);
-		result.primitiveProvenanceStamp = nri_scene::HashCombine64(result.primitiveProvenanceStamp, (uint64_t)materialIndex);
-		result.materialPayloadStamp = nri_scene::HashCombine64(result.materialPayloadStamp, (uint64_t)materialIndex);
-		result.vertexPayloadStamp = result.vertexPayloadStamp != 0 ? result.vertexPayloadStamp : 1;
-		result.indexPayloadStamp = result.indexPayloadStamp != 0 ? result.indexPayloadStamp : 1;
-		result.primitivePayloadStamp = result.primitivePayloadStamp != 0 ? result.primitivePayloadStamp : 1;
-		result.primitiveProvenanceStamp = result.primitiveProvenanceStamp != 0 ? result.primitiveProvenanceStamp : 1;
-		result.materialPayloadStamp = result.materialPayloadStamp != 0 ? result.materialPayloadStamp : 1;
-		return result;
-	}
-
-	NRIRenderer::SceneBufferUploadProducerStamp ToProducerStamp(const SceneViewUploadStampBuildResult& built)
-	{
-		NRIRenderer::SceneBufferUploadProducerStamp stamp = {};
-		stamp.vertexPayloadStamp = built.vertexPayloadStamp;
-		stamp.indexPayloadStamp = built.indexPayloadStamp;
-		stamp.primitivePayloadStamp = built.primitivePayloadStamp;
-		stamp.primitiveProvenanceStamp = built.primitiveProvenanceStamp;
-		stamp.materialPayloadStamp = built.materialPayloadStamp;
-		return stamp;
-	}
-
-	NRIRenderer::SceneBufferUploadProducerStamp ToProducerStamp(const NRILocalPlayerReflectionUploadStamp& built)
-	{
-		NRIRenderer::SceneBufferUploadProducerStamp stamp = {};
-		stamp.vertexPayloadStamp = built.vertexPayloadStamp;
-		stamp.indexPayloadStamp = built.indexPayloadStamp;
-		stamp.primitivePayloadStamp = built.primitivePayloadStamp;
-		stamp.primitiveProvenanceStamp = built.primitiveProvenanceStamp;
-		stamp.materialPayloadStamp = built.materialPayloadStamp;
-		return stamp;
-	}
-
-	NRIRenderer::SceneBufferUploadProducerStamp BuildSceneViewProducerStamp(
-		const NRISceneFrameOverlayBuildInputs& inputs,
-		const nri_scene::SceneView& sceneView,
-		double* timerMs)
-	{
-		ScopedOverlayTimer aggregateTimer(inputs.collectTiming, &inputs.stats->overlayAppendProducerStampMs);
-		ScopedOverlayTimer sourceTimer(inputs.collectTiming, timerMs);
-		return ToProducerStamp(BuildSceneViewUploadProducerStamp(sceneView, inputs.mapWorldBuildSerial));
-	}
-
-	NRIRenderer::SceneBufferUploadProducerStamp BuildLocalPlayerReflectionProducerStamp(const NRISceneFrameOverlayBuildInputs& inputs)
-	{
-		ScopedOverlayTimer aggregateTimer(inputs.collectTiming, &inputs.stats->overlayAppendProducerStampMs);
-		ScopedOverlayTimer sourceTimer(inputs.collectTiming, &inputs.stats->overlayAppendLocalPlayerReflectionStampMs);
-		return ToProducerStamp(BuildNRILocalPlayerReflectionUploadProducerStamp(
-			*inputs.localPlayerReflectionGeometry,
-			*inputs.localPlayerReflectionMaterials,
-			inputs.frameIndex,
-			inputs.mapWorldBuildSerial));
 	}
 
 	void AddOverlayReserve(
@@ -262,6 +97,38 @@ namespace
 	}
 }
 
+uint64_t BuildNRISceneViewUploadLayoutKey(const nri_scene::SceneView& sceneView, uint64_t mapWorldBuildSerial)
+{
+	uint64_t hash = 1469598103934665603ull;
+	hash = nri_scene::HashCombine64(hash, mapWorldBuildSerial);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)sceneView.primitiveFlags);
+	auto appendSurfaces = [&](const std::vector<nri_scene::SurfaceRef>& surfaces, uint64_t kind, bool triangleList)
+	{
+		hash = nri_scene::HashCombine64(hash, kind);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)surfaces.size());
+		for (const nri_scene::SurfaceRef& surface : surfaces)
+		{
+			hash = nri_scene::HashCombine64(hash, (uint64_t)surface.vertices.size());
+			hash = nri_scene::HashCombine64(hash, (uint64_t)surface.indices.size());
+			hash = nri_scene::HashCombine64(hash, (uint64_t)CountStampedSurfacePrimitives(surface, triangleList));
+			for (uint32_t index : surface.indices)
+			{
+				hash = nri_scene::HashCombine64(hash, (uint64_t)index);
+			}
+			hash = HashSurfaceProvenanceStamp(hash, surface.provenance);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)surface.provenance.actorOverlayRuleCount);
+			for (uint32_t ruleId : surface.provenance.actorOverlayRuleIds)
+			{
+				hash = nri_scene::HashCombine64(hash, (uint64_t)ruleId);
+			}
+		}
+	};
+	appendSurfaces(sceneView.opaqueWalls, 1u, false);
+	appendSurfaces(sceneView.opaqueFlats, 2u, true);
+	appendSurfaces(sceneView.opaqueSprites, 3u, false);
+	return hash != 0 ? hash : 1;
+}
+
 void BuildNRISceneFrameOverlay(
 	const NRISceneFrameOverlayBuildInputs& inputs,
 	const NRISceneFrameOverlayBuildOutputs& outputs)
@@ -289,15 +156,6 @@ void BuildNRISceneFrameOverlay(
 
 	{
 		ScopedOverlayTimer sourceAggregateTimer(inputs.collectTiming, &stats.overlayAppendSourcesMs);
-		const NRIRenderer::SceneBufferUploadProducerStamp dynamicStamp =
-			inputs.hasActiveDynamicOverlay && inputs.activeDynamicSceneView != nullptr ?
-				BuildSceneViewProducerStamp(inputs, *inputs.activeDynamicSceneView, &stats.overlayAppendDynamicStampMs) :
-				NRIRenderer::SceneBufferUploadProducerStamp {};
-		const NRIRenderer::SceneBufferUploadProducerStamp localPlayerReflectionStamp =
-			inputs.hasLocalPlayerReflectionOverlay && inputs.localPlayerReflectionGeometry != nullptr && inputs.localPlayerReflectionMaterials != nullptr ?
-				BuildLocalPlayerReflectionProducerStamp(inputs) :
-				NRIRenderer::SceneBufferUploadProducerStamp {};
-
 		NRISceneContributionReserve overlayReserve = {};
 		if (inputs.hasRuntimeSpaceLinkOverlay)
 		{
@@ -329,7 +187,7 @@ void BuildNRISceneFrameOverlay(
 		{
 			AppendOverlaySource(
 				inputs.runtimeSpaceLinkGeometry,
-				nullptr,
+				&inputs.runtimeSpaceLinkStamp,
 				inputs.runtimeSpaceLinkMaterials,
 				inputs.runtimeSpaceLinkTelemetry,
 				NRIRenderer::SceneBufferUploadDomain::RuntimeSpaceLink,
@@ -341,7 +199,7 @@ void BuildNRISceneFrameOverlay(
 		{
 			AppendOverlaySource(
 				inputs.runtimeMutationGeometry,
-				nullptr,
+				&inputs.runtimeMutationStamp,
 				inputs.runtimeMutationMaterials,
 				inputs.runtimeMutationTelemetry,
 				NRIRenderer::SceneBufferUploadDomain::RuntimeMutation,
@@ -353,7 +211,7 @@ void BuildNRISceneFrameOverlay(
 		{
 			AppendOverlaySource(
 				inputs.activeDynamicGeometry,
-				&dynamicStamp,
+				&inputs.activeDynamicStamp,
 				inputs.activeDynamicMaterials,
 				inputs.activeDynamicTelemetry,
 				NRIRenderer::SceneBufferUploadDomain::Dynamic,
@@ -365,7 +223,7 @@ void BuildNRISceneFrameOverlay(
 		{
 			AppendOverlaySource(
 				inputs.localPlayerReflectionGeometry,
-				&localPlayerReflectionStamp,
+				&inputs.localPlayerReflectionStamp,
 				inputs.localPlayerReflectionMaterials,
 				inputs.localPlayerReflectionTelemetry,
 				NRIRenderer::SceneBufferUploadDomain::LocalPlayerReflection,
@@ -377,7 +235,7 @@ void BuildNRISceneFrameOverlay(
 		{
 			AppendOverlaySource(
 				inputs.runtimeDebugSphereGeometry,
-				nullptr,
+				&inputs.runtimeDebugSphereStamp,
 				inputs.runtimeDebugSphereMaterials,
 				inputs.runtimeDebugSphereTelemetry,
 				NRIRenderer::SceneBufferUploadDomain::RuntimeDebugSphere,
@@ -389,7 +247,7 @@ void BuildNRISceneFrameOverlay(
 		{
 			AppendOverlaySource(
 				inputs.surfaceLightGeometry,
-				nullptr,
+				&inputs.surfaceLightStamp,
 				inputs.surfaceLightMaterials,
 				inputs.surfaceLightTelemetry,
 				NRIRenderer::SceneBufferUploadDomain::SurfaceLightOverlay,

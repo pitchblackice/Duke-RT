@@ -33,6 +33,7 @@ Prepared for public release: 03/21/2003 - Charlie Wiederhold, 3D Realms
 #include "dukeactor.h"
 #include "savegamehelp.h"
 #include "gamevar.h"
+#include "runtime_map_movers.h"
 
 //==========================================================================
 //
@@ -370,6 +371,9 @@ void GameInterface::SerializeGameState(FSerializer& arc)
 {
 	if (arc.isReading())
 	{
+		// Reset before restoring durable terminal mover records. Resetting after
+		// deserialization would erase one-shot SE12 authority from the save.
+		ResetRuntimeMapMoverAuthority();
 		memset(geosectorwarp, -1, sizeof(geosectorwarp));
 		memset(geosectorwarp2, -1, sizeof(geosectorwarp2));
 	}
@@ -451,8 +455,11 @@ void GameInterface::SerializeGameState(FSerializer& arc)
 			("fogactive", ud.fogactive)
 			("thunder_brightness", thunder_brightness)
 			.Array("po", po, ud.multimode)
-			("rrcdtrack", g_cdTrack)
-			.EndObject();
+			("rrcdtrack", g_cdTrack);
+
+		SerializeRuntimeMapMoverAuthority(arc);
+		if (arc.isReading()) RestoreRuntimeMapMoverActorIdentityAllocator();
+		arc.EndObject();
 
 		lava_serialize(arc);
 		SerializeGameVars(arc);

@@ -46,6 +46,7 @@
 #include "texinfo.h"
 #include "texturemanager.h"
 #include "d_eventbase.h"
+#include "perf_capture.h"
 #include "v_video.h"
 
 #ifndef NOMINMAX
@@ -271,161 +272,10 @@ namespace
 		entry.emissiveTextureCount += counts.emissiveTextureCount;
 	}
 
-	static uint32_t CoherencyFloatBits(float value)
-	{
-		static_assert(sizeof(uint32_t) == sizeof(float), "unexpected float size");
-		uint32_t bits = 0;
-		std::memcpy(&bits, &value, sizeof(bits));
-		return bits;
-	}
-
 	static uint64_t HashUploadPayloadBytes(const void* data, uint64_t size)
 	{
 		return NRIHashUploadPayloadBytes(data, size);
 	}
-
-	static uint64_t HashMaterialPayloadData(const nri_scene::MaterialBridgeData& materialBridge)
-	{
-		const uint64_t materialSize = (uint64_t)materialBridge.materials.size() * sizeof(nri_scene::MaterialData);
-		return HashUploadPayloadBytes(
-			materialBridge.materials.empty() ? nullptr : materialBridge.materials.data(),
-			materialSize);
-	}
-
-	struct SceneViewUploadStampBuildResult
-	{
-		uint64_t vertexPayloadStamp = 0;
-		uint64_t indexPayloadStamp = 0;
-		uint64_t primitivePayloadStamp = 0;
-		uint64_t primitiveProvenanceStamp = 0;
-		uint64_t materialPayloadStamp = 0;
-	};
-
-	static uint64_t HashSurfaceProvenanceStamp(uint64_t hash, const nri_scene::SurfaceProvenance& provenance)
-	{
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectorIndex + 1));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.wallIndex + 1));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectionIndex + 1));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.mapChunkIndex + 1));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.nextSectorIndex + 1));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.actorIndex + 1));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)provenance.drawListType);
-		hash = nri_scene::HashCombine64(hash, (uint64_t)provenance.cstat);
-		hash = nri_scene::HashCombine64(hash, (uint64_t)provenance.materialFlags);
-		return hash;
-	}
-
-	static uint64_t HashCapturedVertexStamp(uint64_t hash, const nri_scene::CapturedVertex& vertex)
-	{
-		for (int i = 0; i < 3; ++i)
-		{
-			hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.position[i]));
-		}
-		for (int i = 0; i < 3; ++i)
-		{
-			hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.prevPosition[i]));
-		}
-		hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.uv[0]));
-		hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.uv[1]));
-		return hash;
-	}
-
-	static uint64_t HashMaterialRefStamp(uint64_t hash, const nri_scene::MaterialRef& material)
-	{
-		hash = nri_scene::HashCombine64(hash, material.texture != nullptr ? (uint64_t)(uint32_t)material.texture->GetID().GetIndex() + 1ull : 0ull);
-		hash = nri_scene::HashCombine64(hash, material.emissiveSourceTexture != nullptr ? (uint64_t)(uint32_t)material.emissiveSourceTexture->GetID().GetIndex() + 1ull : 0ull);
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(material.palette + 1));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(material.shade + 1));
-		hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(material.alpha));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)material.flags);
-		return hash;
-	}
-
-	static uint32_t CountStampedSurfacePrimitives(const nri_scene::SurfaceRef& surface, bool triangleList)
-	{
-		if (!surface.indices.empty())
-		{
-			return (uint32_t)(surface.indices.size() / 3u);
-		}
-		if (triangleList)
-		{
-			return (uint32_t)(surface.vertices.size() / 3u);
-		}
-		return surface.vertices.size() >= 3 ? (uint32_t)surface.vertices.size() - 2u : 0u;
-	}
-
-	static SceneViewUploadStampBuildResult BuildSceneViewUploadProducerStamp(const nri_scene::SceneView& sceneView, uint64_t mapWorldBuildSerial)
-	{
-		SceneViewUploadStampBuildResult result = {};
-		result.vertexPayloadStamp = 1469598103934665603ull;
-		result.indexPayloadStamp = 1469598103934665603ull;
-		result.primitivePayloadStamp = 1469598103934665603ull;
-		result.primitiveProvenanceStamp = 1469598103934665603ull;
-		result.materialPayloadStamp = 1469598103934665603ull;
-		auto appendSurface =
-			[&](const nri_scene::SurfaceRef& surface, uint32_t surfaceKind, bool triangleList, uint32_t materialIndex)
-		{
-			const uint32_t primitiveCount = CountStampedSurfacePrimitives(surface, triangleList);
-			const uint64_t surfaceHeader =
-				nri_scene::HashCombine64(
-					nri_scene::HashCombine64(
-						nri_scene::HashCombine64(1469598103934665603ull, (uint64_t)surfaceKind),
-						(uint64_t)materialIndex),
-					(uint64_t)primitiveCount);
-			result.vertexPayloadStamp = nri_scene::HashCombine64(result.vertexPayloadStamp, surfaceHeader);
-			result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, surfaceHeader);
-			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, surfaceHeader);
-			result.primitiveProvenanceStamp = nri_scene::HashCombine64(result.primitiveProvenanceStamp, surfaceHeader);
-			result.materialPayloadStamp = nri_scene::HashCombine64(result.materialPayloadStamp, surfaceHeader);
-			result.vertexPayloadStamp = nri_scene::HashCombine64(result.vertexPayloadStamp, (uint64_t)surface.vertices.size());
-			result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, (uint64_t)surface.indices.size());
-			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)sceneView.primitiveFlags);
-			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)surface.material.flags);
-			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, mapWorldBuildSerial);
-			result.primitiveProvenanceStamp = HashSurfaceProvenanceStamp(result.primitiveProvenanceStamp, surface.provenance);
-			result.materialPayloadStamp = HashMaterialRefStamp(result.materialPayloadStamp, surface.material);
-			for (const nri_scene::CapturedVertex& vertex : surface.vertices)
-			{
-				result.vertexPayloadStamp = HashCapturedVertexStamp(result.vertexPayloadStamp, vertex);
-				result.primitivePayloadStamp = HashCapturedVertexStamp(result.primitivePayloadStamp, vertex);
-			}
-			for (uint32_t index : surface.indices)
-			{
-				result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, (uint64_t)index);
-				result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)index);
-			}
-		};
-
-		uint32_t materialIndex = 0;
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueWalls)
-		{
-			appendSurface(surface, 0u, false, materialIndex++);
-		}
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueFlats)
-		{
-			appendSurface(surface, 1u, true, materialIndex++);
-		}
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueSprites)
-		{
-			appendSurface(surface, 2u, false, materialIndex++);
-		}
-		result.vertexPayloadStamp = nri_scene::HashCombine64(result.vertexPayloadStamp, (uint64_t)materialIndex);
-		result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, (uint64_t)materialIndex);
-		result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)materialIndex);
-		result.primitiveProvenanceStamp = nri_scene::HashCombine64(result.primitiveProvenanceStamp, (uint64_t)materialIndex);
-		result.materialPayloadStamp = nri_scene::HashCombine64(result.materialPayloadStamp, (uint64_t)materialIndex);
-		result.vertexPayloadStamp = result.vertexPayloadStamp != 0 ? result.vertexPayloadStamp : 1;
-		result.indexPayloadStamp = result.indexPayloadStamp != 0 ? result.indexPayloadStamp : 1;
-		result.primitivePayloadStamp = result.primitivePayloadStamp != 0 ? result.primitivePayloadStamp : 1;
-		result.primitiveProvenanceStamp = result.primitiveProvenanceStamp != 0 ? result.primitiveProvenanceStamp : 1;
-		result.materialPayloadStamp = result.materialPayloadStamp != 0 ? result.materialPayloadStamp : 1;
-		return result;
-	}
-
-
-
-
 	static void FilterMaterialOnlyReplacementSceneView(nri_scene::SceneView& sceneView, uint32_t reasonMask)
 	{
 		static constexpr float kMaterialOnlyReplacementDepthNudge = 0.01f;
@@ -590,7 +440,7 @@ namespace
 
 	bool ShouldCollectPtPerfTiming()
 	{
-		return ShouldTracePtPerf() || (bool)nri_ptslowdowntrace;
+		return ShouldTracePtPerf() || (bool)nri_ptslowdowntrace || PerfCompactCaptureTimingActive();
 	}
 
 	bool ShouldCollectTraceShaderStats()
@@ -959,7 +809,7 @@ namespace
 
 	static uint32_t GetEffectivePtDebugMode()
 	{
-		if (nri_ptdebug < 0 || nri_ptdebug > (int)nri_diag::PtDebugTaaPreExposedInput)
+		if (nri_ptdebug < 0 || nri_ptdebug > (int)nri_diag::PtDebugIndirectLobeSelection)
 		{
 			return 0u;
 		}
@@ -1967,6 +1817,8 @@ void NRIRenderer::Shutdown()
 
 	mSamplerSet = nullptr;
 	mSceneTextureSets.clear();
+	mSceneTextureSetHashes.clear();
+	mSceneTextureSetHashValid.clear();
 	mSceneDataSets.clear();
 	mSceneDataSnapshots.clear();
 	mActiveSceneDataSet = nullptr;
@@ -2007,6 +1859,9 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 			"level-unload",
 			(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats,
 			BuildNRIPersistentVoxelResetServices(*this));
+		mPersistentVoxels.CompactMaterialRangesForQuiescentLevelTransition(
+			"level-unload",
+			(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats);
 	}
 
 	DestroyStaticMapSceneCache("level-unload");
@@ -2016,6 +1871,10 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 
 	mMapWorld = {};
 	mObservedMapWorldBuildSerial = 0;
+	mMapMoverShadow.Reset();
+	mMapMoverRigidRoute.Reset();
+	mSE29FloorDeformerRoute.Reset();
+	mMapMaterialOnlyRoute.Reset();
 
 	DestroyCachedTextures();
 	ResetPersistentDynamicEmissiveCache();
@@ -2161,6 +2020,10 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 
 	mMapWorld = {};
 	mObservedMapWorldBuildSerial = 0;
+	mMapMoverShadow.Reset();
+	mMapMoverRigidRoute.Reset();
+	mSE29FloorDeformerRoute.Reset();
+	mMapMaterialOnlyRoute.Reset();
 	mAllowStartupMapWorldCorrection = false;
 	mAllowStartupMutationRebaseline = false;
 	mPendingStartupMutationRebaseline = false;
@@ -2283,7 +2146,7 @@ NRIRenderer::LevelTransitionSnapshot NRIRenderer::BuildLevelTransitionSnapshot()
 	snapshot.visibleFlatBufferBytes = mVisibleFlatPlaneBuffer.memorySize;
 	snapshot.reprojectionBufferBytes = mReprojectionBuffer.memorySize;
 	snapshot.dynamicScratchBufferBytes = mScratchBuffer.memorySize;
-	snapshot.worldTlasScratchBufferBytes = mTopLevelScratchBuffer.memorySize;
+	snapshot.worldTlasScratchBufferBytes = mWorldTlasFrameSlots.GetMemoryUsage().scratchBufferBytes;
 	return snapshot;
 }
 
@@ -2685,10 +2548,11 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	const NRIPersistentVoxelMemoryUsage persistentVoxelMemory = mPersistentVoxels.GetMemoryUsage();
 	telemetry.sceneBufferBytes += persistentVoxelMemory.sceneBufferBytes;
 	telemetry.accelerationStructureBytes += persistentVoxelMemory.accelerationStructureBytes;
-	accumulateBuffer(mTlasInstanceBuffer, telemetry.sceneBufferBytes);
-	for (const NRIBufferResource& tlasInstanceBuffer : mTlasInstanceBufferRing)
+	for (const NRIWorldTlasFrameSlot& frameSlot : mWorldTlasFrameSlots.Slots())
 	{
-		accumulateBuffer(tlasInstanceBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(frameSlot.instanceBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(frameSlot.scratchBuffer, telemetry.sceneBufferBytes);
+		accumulateAs(frameSlot.accelerationStructure, telemetry.accelerationStructureBytes);
 	}
 	accumulateBuffer(mSceneInstanceBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mPortalBuffer, telemetry.sceneBufferBytes);
@@ -2724,10 +2588,8 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	}
 	accumulateBuffer(mScratchBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mResidentStaticBlasScratchBuffer, telemetry.sceneBufferBytes);
-	accumulateBuffer(mTopLevelScratchBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mEmissiveTopLevelScratchBuffer, telemetry.sceneBufferBytes);
 
-	accumulateAs(mTopLevelAS, telemetry.accelerationStructureBytes);
 	accumulateAs(mEmissiveTopLevelAS, telemetry.accelerationStructureBytes);
 	for (const auto& chunk : mStaticMapScene.chunks)
 	{
@@ -3404,6 +3266,10 @@ void NRIRenderer::RefreshMapWorld()
 		}
 		mMapWorld.Reset();
 		mMapWorld.level = currentLevel;
+		mMapMoverShadow.Reset();
+		mMapMoverRigidRoute.Reset();
+		mSE29FloorDeformerRoute.Reset();
+		mMapMaterialOnlyRoute.Reset();
 		mObservedMapWorldBuildSerial = pendingBuildSerial;
 		mPendingStartupVisibleChunkValidation.clear();
 		mRuntimeMutation.ResetForMapWorldBuildFailure();
@@ -3498,9 +3364,10 @@ void NRIRenderer::ReadbackAutoExposureStats()
 
 void NRIRenderer::BindSceneRootDescriptors()
 {
-	if (mTopLevelAS.descriptor != nullptr)
+	const NRIWorldTlasFrameSlot& frameSlot = GetCurrentWorldTlasFrameSlot();
+	if (frameSlot.accelerationStructure.descriptor != nullptr)
 	{
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
+		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, frameSlot.accelerationStructure.descriptor, 0, nri::BindPoint::COMPUTE });
 	}
 }
 
@@ -3537,4 +3404,19 @@ uint32_t NRIRenderer::GetCurrentQueuedFrameIndex() const
 	}
 
 	return std::min<uint32_t>(mFrameBuffer->mCurrentQueuedFrameIndex, (uint32_t)mFrameBuffer->mQueuedFrames.size() - 1u);
+}
+
+NRISE29FloorDeformerRouteFrameStats NRIRenderer::GetSE29FloorDeformerRouteFrameStats() const
+{
+	return mSE29FloorDeformerRoute.GetFrameStats();
+}
+
+NRIMapMaterialOnlyRouteFrameStats NRIRenderer::GetMapMaterialOnlyRouteFrameStats() const
+{
+	return mMapMaterialOnlyRoute.GetFrameStats();
+}
+
+nri_scene::PTMapMaterialStateVariantStats NRIRenderer::GetMapMaterialVariantStats() const
+{
+	return mMapMaterialOnlyRoute.GetVariantStats();
 }

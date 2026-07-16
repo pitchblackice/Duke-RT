@@ -10,8 +10,11 @@
 #include "gamecontrol.h"
 #include "gamestruct.h"
 #include "hw_voxels.h"
+#include "models/modeldata.h"
 #include "printf.h"
+#include "texinfo.h"
 
+#include <chrono>
 #include <cstring>
 
 namespace
@@ -21,12 +24,18 @@ namespace
 		return (uint32_t)(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
 	}
 
+	static double LocalPlayerCaptureDurationMs(std::chrono::steady_clock::time_point start)
+	{
+		return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+	}
+
 	static bool localPlayerReflectionCaptureStatsDiffer(const NRILocalPlayerReflectionCaptureStats& a, const NRILocalPlayerReflectionCaptureStats& b)
 	{
 		return
 			a.viewpointActorIndex != b.viewpointActorIndex ||
 			a.localPlayerActorIndex != b.localPlayerActorIndex ||
 			a.viewpointMatchesLocalPlayer != b.viewpointMatchesLocalPlayer ||
+			a.primaryVisible != b.primaryVisible ||
 			a.capturedScene != b.capturedScene ||
 			a.rawFacingSprites != b.rawFacingSprites ||
 			a.rawVoxelSprites != b.rawVoxelSprites ||
@@ -62,6 +71,61 @@ namespace
 			}
 		}
 		return count;
+	}
+
+	static bool PrepareLocalPlayerVoxelSprite(HWDrawInfo& di, DCoreActor* localPlayerActor, HWSprite& outSprite)
+	{
+		for (unsigned int i = 0; i < di.tsprites.Size(); ++i)
+		{
+			tspritetype* sprite = di.tsprites.get(i);
+			if (sprite == nullptr || sprite->ownerActor != localPlayerActor ||
+				sprite->scale.X == 0.0 || sprite->scale.Y == 0.0)
+			{
+				continue;
+			}
+
+			FTextureID textureId = sprite->spritetexture();
+			if (!textureId.isValid())
+			{
+				continue;
+			}
+			if ((sprite->cstat2 & CSTAT2_SPRITE_NOANIMATE) == 0)
+			{
+				tileUpdatePicnum(textureId, localPlayerActor->GetIndex() & 16383);
+			}
+			if ((sprite->cstat2 & CSTAT2_SPRITE_FULLBRIGHT) != 0)
+			{
+				sprite->shade = -127;
+			}
+			sprite->setspritetexture(textureId);
+
+			if ((localPlayerActor->sprext.renderflags & SPREXT_NOTMD) != 0 ||
+				(sprite->cstat2 & CSTAT2_SPRITE_NOMODEL) != 0)
+			{
+				return false;
+			}
+			const auto* modelFrame = modelManager.GetModel(textureId, sprite->pal);
+			if (hw_models && modelFrame != nullptr && modelFrame->modelid >= 0 && modelFrame->framenum >= 0)
+			{
+				return false;
+			}
+			if (!r_voxels)
+			{
+				return false;
+			}
+			const int voxelIndex = GetExtInfo(textureId).tiletovox;
+			if (voxelIndex < 0 || voxmodels[voxelIndex] == nullptr)
+			{
+				return false;
+			}
+			return outSprite.PrepareVoxel(
+				&di,
+				voxmodels[voxelIndex],
+				sprite,
+				sprite->sectp,
+				voxrotate[voxelIndex]);
+		}
+		return false;
 	}
 
 	static void AccumulateSceneViewActorSurfaceStats(
@@ -111,10 +175,11 @@ namespace
 			return;
 		}
 
-		Printf("NRI PT local player reflection capture: view_actor=%d local_actor=%d camera_match=%s raw_facing=%u raw_voxels=%u captured=%s surfaces=%u match=%u other=%u actorless=%u filtered=%u\n",
+		Printf("NRI PT local player reflection capture: view_actor=%d local_actor=%d camera_match=%s primary_visible=%s raw_facing=%u raw_voxels=%u captured=%s surfaces=%u match=%u other=%u actorless=%u filtered=%u\n",
 			stats.viewpointActorIndex,
 			stats.localPlayerActorIndex,
 			stats.viewpointMatchesLocalPlayer ? "yes" : "no",
+			stats.primaryVisible ? "yes" : "no",
 			stats.rawFacingSprites,
 			stats.rawVoxelSprites,
 			stats.capturedScene ? "yes" : "no",
@@ -167,10 +232,17 @@ public:
 	static bool CaptureLocalPlayerReflectionDynamicScene(
 		HWDrawInfo& di,
 		nri_scene::SceneView& outView,
+		bool residentVoxelReady,
+		bool localPlayerPrimaryVisible,
 		NRIMirrorRebuildSceneViewStatsFn rebuildSceneViewStats,
+		bool* outCurrentVoxel,
 		NRILocalPlayerReflectionCaptureStats* outStats = nullptr)
 	{
 		outView = {};
+		if (outCurrentVoxel != nullptr)
+		{
+			*outCurrentVoxel = false;
+		}
 		NRILocalPlayerReflectionCaptureStats captureStats = {};
 		captureStats.viewpointActorIndex = di.Viewpoint.CameraActor != nullptr ? (int32_t)di.Viewpoint.CameraActor->GetIndex() : -1;
 		const auto publishStats = [&]()
@@ -200,19 +272,50 @@ public:
 		const int32_t actorIndex = (int32_t)localPlayerActor->GetIndex();
 		captureStats.localPlayerActorIndex = actorIndex;
 		captureStats.viewpointMatchesLocalPlayer = di.Viewpoint.CameraActor == localPlayerActor;
+		captureStats.primaryVisible = localPlayerPrimaryVisible;
+		auto stageStart = std::chrono::steady_clock::now();
 		HWDrawInfo* captureDi = HWDrawInfo::StartDrawInfo(&di, di.Viewpoint, &di.VPUniforms);
 		captureDi->visibility = di.visibility;
 		captureDi->rellight = di.rellight;
+		// CreateScene normally owns this reset. This focused path deliberately skips
+		// CreateScene, while HWDrawInfo pooling retains tsprite array contents.
+		captureDi->tsprites.clear();
+		captureStats.drawInfoSetupMs = LocalPlayerCaptureDurationMs(stageStart);
 
 		const ScopedLocalPlayerReflectionVisibilityCaptureOverride reflectionCaptureOverride(true);
-		captureDi->CreateScene(false);
-		captureStats.rawFacingSprites = CountDrawListActorSprites(captureDi->drawlists[GLDL_TRANSLUCENT], actorIndex, false);
-		captureStats.rawVoxelSprites = CountDrawListActorSprites(captureDi->drawlists[GLDL_MODELS], actorIndex, true);
+		renderAddTsprite(captureDi->tsprites, localPlayerActor);
+		stageStart = std::chrono::steady_clock::now();
+		gi->processSprites(
+			captureDi->tsprites,
+			DVector3(di.Viewpoint.Pos.X, -di.Viewpoint.Pos.Y, -di.Viewpoint.Pos.Z),
+			DAngle::fromBam(di.Viewpoint.RotAngle),
+			di.Viewpoint.TicFrac);
+		captureStats.processSpritesMs = LocalPlayerCaptureDurationMs(stageStart);
+		stageStart = std::chrono::steady_clock::now();
+		HWSprite localPlayerVoxelSprite = {};
+		const bool preparedVoxel = PrepareLocalPlayerVoxelSprite(*captureDi, localPlayerActor, localPlayerVoxelSprite);
+		if (!preparedVoxel)
+		{
+			captureDi->DispatchSprites();
+		}
+		captureStats.dispatchSpritesMs = LocalPlayerCaptureDurationMs(stageStart);
+		captureStats.rawFacingSprites = preparedVoxel ? 0u : CountDrawListActorSprites(captureDi->drawlists[GLDL_TRANSLUCENT], actorIndex, false);
+		captureStats.rawVoxelSprites = preparedVoxel ? 1u : CountDrawListActorSprites(captureDi->drawlists[GLDL_MODELS], actorIndex, true);
 
 		nri_scene::SceneView capturedView;
-		const bool hasCapture = nri_scene::CaptureActorSpriteScene(*captureDi, actorIndex, capturedView);
+		stageStart = std::chrono::steady_clock::now();
+		const nri_scene::ActorSpriteSceneCaptureResult sceneCapture = preparedVoxel ?
+			nri_scene::CaptureActorVoxelSprite(*captureDi, localPlayerVoxelSprite, residentVoxelReady, capturedView) :
+			nri_scene::CaptureActorSpriteScene(*captureDi, actorIndex, residentVoxelReady, capturedView);
+		captureStats.cacheCaptureMs = LocalPlayerCaptureDurationMs(stageStart);
+		if (outCurrentVoxel != nullptr)
+		{
+			*outCurrentVoxel = sceneCapture.currentVoxel;
+		}
+		stageStart = std::chrono::steady_clock::now();
 		captureDi->EndDrawInfo();
-		if (!hasCapture || !AppendLocalPlayerReflectionSurfaces(capturedView, outView))
+		captureStats.drawInfoReleaseMs = LocalPlayerCaptureDurationMs(stageStart);
+		if (!sceneCapture.capturedFallbackScene || !AppendLocalPlayerReflectionSurfaces(capturedView, outView))
 		{
 			publishStats();
 			outView = {};
@@ -233,7 +336,11 @@ public:
 			captureStats.capturedOtherActorSurfaces,
 			captureStats.capturedActorlessSurfaces);
 
-		outView.primitiveFlags = nri_scene::PrimitiveFlag_ReflectionOnly;
+		// The ordinary dynamic scene owns primary-visible model/facing sprites in
+		// external views. Only a voxel awaiting residency needs this direct fallback.
+		outView.primitiveFlags = sceneCapture.currentVoxel && localPlayerPrimaryVisible ?
+			nri_scene::PrimitiveFlag_None :
+			nri_scene::PrimitiveFlag_ReflectionOnly;
 		captureStats.filteredSurfaceCount = captureStats.capturedSurfaceCount;
 		publishStats();
 		return true;
@@ -282,6 +389,17 @@ public:
 	}
 }
 
+int32_t ResolveNRILocalPlayerActorIndex()
+{
+	if (gi == nullptr || myconnectindex < 0 || myconnectindex >= MAXPLAYERS)
+	{
+		return -1;
+	}
+	DCorePlayer* localPlayer = PlayerArray[myconnectindex];
+	DCoreActor* localPlayerActor = localPlayer != nullptr ? localPlayer->GetActor() : nullptr;
+	return localPlayerActor != nullptr ? (int32_t)localPlayerActor->GetIndex() : -1;
+}
+
 NRILocalPlayerReflectionCaptureResult CaptureNRILocalPlayerReflectionDynamicScene(const NRILocalPlayerReflectionCaptureRequest& request, nri_scene::SceneView& outView)
 {
 	NRILocalPlayerReflectionCaptureResult result = {};
@@ -293,7 +411,10 @@ NRILocalPlayerReflectionCaptureResult CaptureNRILocalPlayerReflectionDynamicScen
 	result.captured = CaptureLocalPlayerReflectionDynamicScene(
 		*request.drawInfo,
 		outView,
+		request.residentVoxelReady,
+		request.localPlayerPrimaryVisible,
 		request.rebuildSceneViewStats,
+		&result.currentVoxel,
 		&result.stats);
 	return result;
 }

@@ -326,6 +326,11 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext(bool mainViewEligib
 	init.sceneStats.runtimeLightCount = mBoundRuntimeLightCount;
 	init.sceneStats.runtimeLightTileCountX = mBoundRuntimeLightTileCountX;
 	init.sceneStats.runtimeLightTileCountY = mBoundRuntimeLightTileCountY;
+	init.sceneStats.runtimeLightTileSize = mBoundRuntimeLightTileSize;
+	init.sceneStats.runtimeLightTileIndexCount = mBoundRuntimeLightTileIndexCount;
+	init.sceneStats.runtimeLightMaxTileOccupancy = mBoundRuntimeLightMaxTileOccupancy;
+	init.sceneStats.emissivePrimitiveCount = mBoundEmissivePrimitiveCount;
+	init.sceneStats.emissiveTotalPower = mBoundEmissiveTotalPower;
 	init.hasAutoExposureSettingsState = &mHasAutoExposureSettingsState;
 	init.useUpscaledInFinal = &mUseUpscaledInFinal;
 	init.useDenoisedCompositionInputs = &mUseDenoisedCompositionInputs;

@@ -216,6 +216,26 @@ struct DynamicCapturePerfStats
 	uint32_t voxelCanonicalSurfaceBuilds = 0;
 	uint32_t voxelCanonicalSurfaceHits = 0;
 	uint32_t voxelCanonicalSurfaceInvalid = 0;
+	uint32_t voxelDuplicationAuditCalls = 0;
+	uint32_t voxelDuplicationAuditEntriesScanned = 0;
+	uint32_t voxelDuplicationAuditTemporaryContainersBuilt = 0;
+	uint32_t voxelMaintenanceCalls = 0;
+	uint32_t voxelMaintenanceSimulationSkips = 0;
+	uint32_t voxelMaintenanceLegacyReconciles = 0;
+	uint32_t voxelMaintenanceDeltaReconciles = 0;
+	uint32_t voxelMaintenanceReasonMask = 0;
+	uint32_t voxelMaintenanceLiveActorsEnumerated = 0;
+	uint32_t voxelMaintenanceCacheEntriesScanned = 0;
+	uint32_t voxelMaintenanceRemovals = 0;
+	uint32_t voxelMaintenanceTransformSyncs = 0;
+	uint32_t voxelLifecycleEventsApplied = 0;
+	uint32_t voxelLifecycleEventsDiscarded = 0;
+	uint32_t voxelLifecycleInsertEvents = 0;
+	uint32_t voxelLifecycleRemoveEvents = 0;
+	uint32_t voxelLifecycleStatEvents = 0;
+	uint32_t voxelLifecycleResetEvents = 0;
+	uint32_t voxelLifecycleOverflows = 0;
+	uint32_t voxelLifecycleRemovalEntriesMarked = 0;
 	uint32_t modelActorCandidates = 0;
 	uint32_t modelActorSorted = 0;
 	uint32_t modelActorSortSkipped = 0;
@@ -236,6 +256,10 @@ struct DynamicCapturePerfStats
 	double modelSortMs = 0.0;
 	double modelStoreMs = 0.0;
 	double voxelFrameMs = 0.0;
+	double voxelLifecycleMs = 0.0;
+	double voxelMaintenanceLiveEnumerationMs = 0.0;
+	double voxelMaintenanceReconcileMs = 0.0;
+	double voxelDuplicationAuditMs = 0.0;
 	double statsMs = 0.0;
 };
 
@@ -295,6 +319,7 @@ struct PersistentVoxelCacheEntryView
 	uint64_t lastSeenFrame = 0;
 	uint64_t retainedFrameAge = 0;
 	bool capturedThisFrame = false;
+	bool indirectOnly = false;
 	float instanceTransform[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 	float currentTranslation[3] = {};
 	float bakedTranslation[3] = {};
@@ -396,6 +421,12 @@ enum class DynamicVoxelCaptureMode : uint8_t
 	Transient,
 };
 
+struct ActorSpriteSceneCaptureResult
+{
+	bool capturedFallbackScene = false;
+	bool currentVoxel = false;
+};
+
 SceneDebugStats CollectDebugStats(HWDrawInfo& di);
 MaterialRef MakeMaterialRef(FGameTexture* texture, int palette, int shade, float alpha, uint32_t extraFlags);
 void UpdateSceneSky(SceneView& outView, FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType);
@@ -403,7 +434,16 @@ void ResetSkyPerfStats();
 SkyPerfStats ConsumeSkyPerfStats();
 DynamicCapturePerfStats ConsumeDynamicCapturePerfStats();
 bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView, DynamicVoxelCaptureMode voxelCaptureMode = DynamicVoxelCaptureMode::Authoritative);
-bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outView);
+ActorSpriteSceneCaptureResult CaptureActorSpriteScene(
+	HWDrawInfo& di,
+	int32_t actorIndex,
+	bool residentVoxelReady,
+	SceneView& outView);
+ActorSpriteSceneCaptureResult CaptureActorVoxelSprite(
+	HWDrawInfo& di,
+	HWSprite& sprite,
+	bool residentVoxelReady,
+	SceneView& outView);
 bool CaptureScene(HWDrawInfo& di, SceneView& outView);
 bool BuildPersistentVoxelCacheSceneView(SceneView& outView);
 bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>& outEntries);

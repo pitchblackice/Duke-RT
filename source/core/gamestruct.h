@@ -9,6 +9,7 @@ bool System_WantGuiCapture();	// During playing this tells us whether the game m
 #include "serializer.h"
 #include "inputstate.h"
 #include "maptypes.h"
+#include "runtime_map_mover.h"
 
 class FSerializer;
 struct FRenderViewpoint;
@@ -150,6 +151,8 @@ struct GameInterface
 	virtual bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) { return false; }
 	virtual bool GetNightVisionState(RuntimeNightVisionState* state) { return false; }
 	virtual bool GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo* info) { return false; }
+	virtual RuntimeMapMoverAuthorityState GetRuntimeMapMoverAuthorityState() const { return {}; }
+	virtual void CaptureRuntimeMapMovers(TArray<RuntimeMapMoverSnapshot>& out) const { out.Clear(); }
 	virtual int Voxelize(int sprnum) { return -1; }
 	virtual void AddExcludedEpisode(const FString& episode) {}
 	virtual int GetCurrentSkill() { return -1; }

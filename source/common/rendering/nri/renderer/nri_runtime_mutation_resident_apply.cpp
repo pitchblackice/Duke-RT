@@ -133,6 +133,41 @@ namespace
 		if ((entry.rejectMask & RuntimeResidentBlasRefitReject_ZeroPrimitiveCount) != 0) score += 1u << 16;
 		return score;
 	}
+
+	class ScopedStaticDiagnosticsChunkMutation
+	{
+	public:
+		ScopedStaticDiagnosticsChunkMutation(
+			NRIStaticSceneDiagnosticsCache& cache,
+			const NRIStaticSceneDiagnosticsInput& input,
+			uint32_t chunkListIndex,
+			bool enabled)
+			: mCache(cache),
+			  mInput(input),
+			  mChunkListIndex(chunkListIndex),
+			  mEnabled(enabled)
+		{
+			if (mEnabled)
+			{
+				mBefore = NRIStaticSceneDiagnosticsCache::CaptureChunkState(mInput, mChunkListIndex);
+			}
+		}
+
+		~ScopedStaticDiagnosticsChunkMutation()
+		{
+			if (mEnabled)
+			{
+				mCache.NotifyChunkMutation(mInput, mChunkListIndex, mBefore);
+			}
+		}
+
+	private:
+		NRIStaticSceneDiagnosticsCache& mCache;
+		NRIStaticSceneDiagnosticsInput mInput;
+		uint32_t mChunkListIndex = UINT32_MAX;
+		bool mEnabled = false;
+		NRIStaticSceneDiagnosticsChunkState mBefore = {};
+	};
 }
 
 // Runtime mutation resident-apply renderer-service implementation.
@@ -175,6 +210,16 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	const bool hasChunkSlot =
 		resolvedChunkListIndex < mStaticMapScene.chunks.size() &&
 		resolvedChunkListIndex < mStaticMapChunkAtlas.chunks.size();
+	NRIStaticSceneDiagnosticsInput staticDiagnosticsInput = {};
+	staticDiagnosticsInput.mapWorld = &mMapWorld;
+	staticDiagnosticsInput.staticScene = &mStaticMapScene;
+	staticDiagnosticsInput.atlas = &mStaticMapChunkAtlas;
+	staticDiagnosticsInput.registry = &mStaticSceneResidency.Registry();
+	ScopedStaticDiagnosticsChunkMutation staticDiagnosticsMutation(
+		mStaticSceneDiagnostics,
+		staticDiagnosticsInput,
+		resolvedChunkListIndex,
+		ShouldTracePtPerf() && nri_ptscenestats && mStaticSceneDiagnostics.HasCachedStructuralSnapshot());
 	if (hasChunkSlot)
 	{
 		entry.staticSceneChunkListIndex = resolvedChunkListIndex;
@@ -183,12 +228,70 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	const bool hasResolvedAtlasChunk = resolvedChunkListIndex < mStaticMapChunkAtlas.chunks.size();
 	const uint32_t resolvedAtlasMaterialCount =
 		hasResolvedAtlasChunk ? mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].materialCount : 0u;
+	if (replacement.certifiedResidentMaterialOnly)
+	{
+		const auto& certifiedAtlas = hasResolvedAtlasChunk ?
+			mStaticMapChunkAtlas.chunks[resolvedChunkListIndex] : StaticMapChunkAtlas::ChunkEntry{};
+		const StaticMapSceneCache::ChunkCache* certifiedChunk =
+			resolvedChunkListIndex < mStaticMapScene.chunks.size() ?
+			&mStaticMapScene.chunks[resolvedChunkListIndex] : nullptr;
+		const bool certificateMatchesResident =
+			hasResidentChunk &&
+			hasResolvedAtlasChunk &&
+			certifiedAtlas.valid &&
+			certifiedAtlas.chunkIndex == mapChunk.chunkIndex &&
+			certifiedAtlas.staticSceneChunkListIndex == resolvedChunkListIndex &&
+			certifiedChunk != nullptr &&
+			certifiedChunk->chunkIndex == mapChunk.chunkIndex &&
+			mStaticMapScene.buildSerial == mMapWorld.buildSerial &&
+			mStaticMapChunkAtlas.buildSerial == mMapWorld.buildSerial &&
+			mStaticSceneResidency.Registry().buildSerial == mMapWorld.buildSerial &&
+			replacement.certifiedMaterialBuildSerial == mMapWorld.buildSerial &&
+			replacement.certifiedMaterialBuildSerial == mMapMovers.GetBuildSerial() &&
+			replacement.certifiedMaterialMapEpoch != 0 &&
+			replacement.certifiedMaterialMapEpoch == mMapMovers.GetMapEpoch() &&
+			replacement.certifiedMaterialOwnerStableId != UINT64_MAX &&
+			replacement.certifiedMaterialLayoutKey != 0 &&
+			replacement.certifiedMaterialStateKey != 0 &&
+			replacement.certifiedExactGeometrySignature != 0 &&
+			replacement.certifiedExactGeometrySignature == certifiedChunk->exactGeometrySignature &&
+			replacement.certifiedGeometryTopologySignature == certifiedChunk->geometryTopologySignature &&
+			replacement.certifiedPrimitiveLayoutSignature == certifiedChunk->primitiveLayoutSignature &&
+			certifiedChunk->canonicalMaterialLayout.valid &&
+			certifiedChunk->canonicalMaterialLayout.layoutKey == replacement.certifiedMaterialLayoutKey &&
+			replacement.certifiedChunkListIndex == resolvedChunkListIndex &&
+			replacement.certifiedVertexOffset == certifiedAtlas.vertexOffset &&
+			replacement.certifiedVertexCount == certifiedAtlas.vertexCount &&
+			replacement.certifiedIndexOffset == certifiedAtlas.indexOffset &&
+			replacement.certifiedIndexCount == certifiedAtlas.indexCount &&
+			replacement.certifiedPrimitiveOffset == certifiedAtlas.primitiveOffset &&
+			replacement.certifiedPrimitiveCount == certifiedAtlas.primitiveCount &&
+			replacement.certifiedMaterialOffset == certifiedAtlas.materialOffset &&
+			replacement.certifiedMaterialCount == certifiedAtlas.materialCount &&
+			replacement.materialBridge.materials.size() == certifiedAtlas.materialCount &&
+			replacement.materialBridge.lightMetadata.size() == certifiedAtlas.materialCount &&
+			entry.staticSceneChunkListIndex == resolvedChunkListIndex &&
+			entry.vertexOffset == certifiedAtlas.vertexOffset &&
+			entry.vertexCount == certifiedAtlas.vertexCount &&
+			entry.indexOffset == certifiedAtlas.indexOffset &&
+			entry.indexCount == certifiedAtlas.indexCount &&
+			entry.primitiveOffset == certifiedAtlas.primitiveOffset &&
+			entry.primitiveCount == certifiedAtlas.primitiveCount &&
+			entry.materialOffset == certifiedAtlas.materialOffset &&
+			entry.materialCount == certifiedAtlas.materialCount &&
+			certifiedChunk->accelerationStructure.accelerationStructure != nullptr;
+		if (!certificateMatchesResident)
+		{
+			replacement.certifiedResidentMaterialOnly = false;
+		}
+	}
 	const RuntimeMutationResidentApplyMode applyMode =
 		mRuntimeMutation.ClassifyResidentApplyMode(replacement, hasResidentChunk, hasResolvedAtlasChunk, resolvedAtlasMaterialCount);
 	const RuntimeMutationResidentApplyModeStats applyModeStats =
 		mRuntimeMutation.BuildResidentApplyModeStats(applyMode, replacement, hasResidentChunk, hasResolvedAtlasChunk, resolvedAtlasMaterialCount);
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyCount += applyModeStats.materialOnlyCount;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyFastMaterialOnlyCount += applyModeStats.fastMaterialOnlyCount;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyCertifiedMaterialOnlyCount += applyModeStats.certifiedMaterialOnlyCount;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplySlowMaterialOnlyCount += applyModeStats.slowMaterialOnlyCount;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyExclusiveCount += applyModeStats.materialOnlyExclusiveCount;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyNoResidentChunkCount += applyModeStats.materialOnlyNoResidentChunkCount;
@@ -198,6 +301,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	const bool materialOnlyReplacement = applyMode.materialOnlyReplacement;
 	const bool exclusiveMaterialOnlyReplacement = applyMode.exclusiveMaterialOnlyReplacement;
 	const bool fastResidentMaterialOnlyUpdate = applyMode.fastResidentMaterialOnlyUpdate;
+	const bool appliedCertifiedResidentMaterialOnly = applyMode.certifiedResidentMaterialOnlyUpdate;
 
 	nri_scene::SceneView residentSceneView;
 	nri_scene::GeometryData residentGeometry;
@@ -274,14 +378,22 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		appliedBaseline = replacement.replacementBaseline;
 	}
 	outResult.surfaceCount = CountSceneViewSurfaces(residentSceneView);
-	outResult.triangleCount = (uint32_t)residentGeometry.primitives.size();
+	outResult.triangleCount = fastResidentMaterialOnlyUpdate && hasResolvedAtlasChunk ?
+		mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].primitiveCount :
+		(uint32_t)residentGeometry.primitives.size();
 	outResult.materialCount = (uint32_t)residentMaterials.materials.size();
 
 	const uint32_t appliedReasonMask = replacement.reasonMask;
 	const bool appliedStaticAnimatedReplacement = replacement.staticAnimatedReplacement;
 	const bool appliedAnimationOnlyRefreshed = replacement.animationOnlyRefreshed;
-	uint64_t residentGeometryTopologySignature = nri_static_scene_geometry::ComputeGeometryTopologySignature(residentGeometry);
-	uint64_t residentPrimitiveLayoutSignature = nri_static_scene_geometry::ComputePrimitiveLayoutSignature(residentGeometry);
+	uint64_t residentGeometryTopologySignature =
+		fastResidentMaterialOnlyUpdate && hasResidentChunk ?
+			mStaticMapScene.chunks[resolvedChunkListIndex].geometryTopologySignature :
+			nri_static_scene_geometry::ComputeGeometryTopologySignature(residentGeometry);
+	uint64_t residentPrimitiveLayoutSignature =
+		fastResidentMaterialOnlyUpdate && hasResidentChunk ?
+			mStaticMapScene.chunks[resolvedChunkListIndex].primitiveLayoutSignature :
+			nri_static_scene_geometry::ComputePrimitiveLayoutSignature(residentGeometry);
 	const uint32_t materialReasonMask =
 		nri_scene::PTMapChunkMutationReason_SectorMaterial |
 		nri_scene::PTMapChunkMutationReason_WallMaterial;
@@ -493,6 +605,16 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			mutableChunk.residentBlasScratchSizeCacheKey = nullptr;
 			mutableChunk.residentBlasBuildScratchSize = 0;
 			mutableChunk.residentBlasUpdateScratchSize = 0;
+			mutableChunk.residentBlasVertexBuffer = nullptr;
+			mutableChunk.residentBlasIndexBuffer = nullptr;
+			mutableChunk.residentBlasVertexNum = 0;
+			mutableChunk.residentBlasIndexOffset = 0;
+			mutableChunk.residentBlasIndexNum = 0;
+			mutableChunk.fixedLayoutDeformerKey = 0;
+			mutableChunk.fixedLayoutVertexSpanCount = 0;
+			mutableChunk.fixedLayoutPrimitiveSpanCount = 0;
+			mutableChunk.fixedLayoutVertexBytes = 0;
+			mutableChunk.fixedLayoutPrimitiveBytes = 0;
 			mutableChunk.vertexCount = 0;
 			mutableChunk.indexCount = 0;
 			mutableChunk.primitiveCount = 0;
@@ -583,6 +705,28 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		bool preserveResidentIndexSlice = false;
 		bool preserveResidentPrimitiveSlice = false;
 		bool preserveResidentBlasRefitOnly = false;
+		bool useFixedLayoutVertexSpans = false;
+		bool useFixedLayoutPrimitiveSpans = false;
+		const auto fixedLayoutSpansValid = [](
+			const std::vector<RuntimeMutationResidentElementSpan>& spans,
+			uint32_t elementCapacity)
+		{
+			for (const RuntimeMutationResidentElementSpan& span : spans)
+			{
+				if (span.elementCount == 0 || span.firstElement >= elementCapacity ||
+					span.elementCount > elementCapacity - span.firstElement)
+				{
+					return false;
+				}
+			}
+			return true;
+		};
+		const bool fixedLayoutVertexSpansValid =
+			!replacement.fixedLayoutDeformer ||
+			fixedLayoutSpansValid(replacement.fixedLayoutVertexSpans, effectiveResidentVertexCount);
+		const bool fixedLayoutPrimitiveSpansValid =
+			!replacement.fixedLayoutDeformer ||
+			fixedLayoutSpansValid(replacement.fixedLayoutPrimitiveSpans, effectiveResidentPrimitiveCount);
 		{
 			ScopedPtPerfTimer detailPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyAtlasBookkeepingMs);
 			sourceChunk.vertexOffset = 0;
@@ -875,6 +1019,18 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			{
 				mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitOnlyCount++;
 			}
+			useFixedLayoutVertexSpans =
+				replacement.fixedLayoutDeformer &&
+				fixedLayoutVertexSpansValid &&
+				keptGeometrySlices &&
+				preserveResidentIndexSlice;
+			useFixedLayoutPrimitiveSpans =
+				replacement.fixedLayoutDeformer &&
+				fixedLayoutPrimitiveSpansValid &&
+				keptGeometrySlices &&
+				preserveResidentIndexSlice &&
+				keptMaterialSlice &&
+				!preserveResidentPrimitiveSlice;
 
 			mStaticMapChunkAtlas = std::move(nextAtlasState);
 			mStaticMapChunkAtlas.chunks[chunkListIndex] = nextAtlasChunk;
@@ -903,14 +1059,33 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 							nextAtlasChunk,
 							mStaticMapScene.geometry.vertices);
 					}
-					const uint64_t vertexBytes = (uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex);
-					if (!mRuntimeMutation.QueueResidentGeometryUploadRange(
-							ResidentUploadKind_Vertex,
-							(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
-							vertexBytes,
-							NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
+					if (useFixedLayoutVertexSpans)
 					{
-						return false;
+						for (const RuntimeMutationResidentElementSpan& span : replacement.fixedLayoutVertexSpans)
+						{
+							if (span.elementCount == 0 || span.firstElement >= nextAtlasChunk.vertexCount ||
+								span.elementCount > nextAtlasChunk.vertexCount - span.firstElement ||
+								!mRuntimeMutation.QueueResidentGeometryUploadRange(
+									ResidentUploadKind_Vertex,
+									(uint64_t)(nextAtlasChunk.vertexOffset + span.firstElement) * sizeof(nri_scene::SceneVertex),
+									(uint64_t)span.elementCount * sizeof(nri_scene::SceneVertex),
+									NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
+							{
+								return false;
+							}
+						}
+					}
+					else
+					{
+						const uint64_t vertexBytes = (uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex);
+						if (!mRuntimeMutation.QueueResidentGeometryUploadRange(
+								ResidentUploadKind_Vertex,
+								(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
+								vertexBytes,
+								NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
+						{
+							return false;
+						}
 					}
 				}
 				else
@@ -974,25 +1149,63 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 								mStaticMapScene.geometry.primitiveProvenance.data() + nextAtlasChunk.primitiveOffset);
 						}
 					}
-					const uint64_t primitiveBytes = (uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData);
-					if (!mRuntimeMutation.QueueResidentGeometryUploadRange(
-							ResidentUploadKind_Primitive,
-							(uint64_t)nextAtlasChunk.primitiveOffset * sizeof(nri_scene::PrimitiveData),
-							primitiveBytes,
-							NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
+					if (useFixedLayoutPrimitiveSpans)
 					{
-						return false;
+						for (const RuntimeMutationResidentElementSpan& span : replacement.fixedLayoutPrimitiveSpans)
+						{
+							if (span.elementCount == 0 || span.firstElement >= nextAtlasChunk.primitiveCount ||
+								span.elementCount > nextAtlasChunk.primitiveCount - span.firstElement ||
+								!mRuntimeMutation.QueueResidentGeometryUploadRange(
+									ResidentUploadKind_Primitive,
+									(uint64_t)(nextAtlasChunk.primitiveOffset + span.firstElement) * sizeof(nri_scene::PrimitiveData),
+									(uint64_t)span.elementCount * sizeof(nri_scene::PrimitiveData),
+									NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
+							{
+								return false;
+							}
+						}
+					}
+					else
+					{
+						const uint64_t primitiveBytes = (uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData);
+						if (!mRuntimeMutation.QueueResidentGeometryUploadRange(
+								ResidentUploadKind_Primitive,
+								(uint64_t)nextAtlasChunk.primitiveOffset * sizeof(nri_scene::PrimitiveData),
+								primitiveBytes,
+								NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
+						{
+							return false;
+						}
 					}
 				}
 			}
-			mLastPerfResourceTraceStats.residentChunkBatchVertexBytes +=
-				(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex);
+			if (useFixedLayoutVertexSpans)
+			{
+				for (const RuntimeMutationResidentElementSpan& span : replacement.fixedLayoutVertexSpans)
+				{
+					mLastPerfResourceTraceStats.residentChunkBatchVertexBytes +=
+						(uint64_t)span.elementCount * sizeof(nri_scene::SceneVertex);
+				}
+			}
+			else
+			{
+				mLastPerfResourceTraceStats.residentChunkBatchVertexBytes +=
+					(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex);
+			}
 			if (!preserveResidentIndexSlice)
 			{
 				mLastPerfResourceTraceStats.residentChunkBatchIndexBytes +=
 					(uint64_t)nextAtlasChunk.indexCount * sizeof(uint32_t);
 			}
-			if (!preserveResidentPrimitiveSlice)
+			if (useFixedLayoutPrimitiveSpans)
+			{
+				for (const RuntimeMutationResidentElementSpan& span : replacement.fixedLayoutPrimitiveSpans)
+				{
+					mLastPerfResourceTraceStats.residentChunkBatchPrimitiveBytes +=
+						(uint64_t)span.elementCount * sizeof(nri_scene::PrimitiveData);
+				}
+			}
+			else if (!preserveResidentPrimitiveSlice)
 			{
 				mLastPerfResourceTraceStats.residentChunkBatchPrimitiveBytes +=
 					(uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData);
@@ -1010,24 +1223,55 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mutableChunk.materialOffset = nextAtlasChunk.materialOffset;
 		mutableChunk.materialCount = nextAtlasChunk.materialCount;
 		mutableChunk.active = true;
-		mutableChunk.blasUpdateEligible = preserveResidentIndexSlice || preserveResidentBlasRefitOnly;
-		mutableChunk.lastResidentBlasReasonMask = appliedReasonMask;
-		mutableChunk.lastResidentBlasSurfaceCount = outResult.surfaceCount;
-		mutableChunk.lastResidentBlasTriangleCount = outResult.triangleCount;
-		mutableChunk.lastResidentBlasMaterialCount = outResult.materialCount;
-		mutableChunk.lastResidentBlasForceTopology = appliedForceTopology;
-		mutableChunk.lastResidentBlasRecoveredEmpty = outResult.recoveredEmpty;
-		mutableChunk.lastResidentBlasKeptGeometrySlice = keptGeometrySlices;
-		mutableChunk.lastResidentBlasTopologyChanged =
-			hasResidentChunk &&
-			previousGeometryTopologySignature != residentGeometryTopologySignature;
+		if (!fastResidentMaterialOnlyUpdate)
+		{
+			mutableChunk.canonicalMaterialLayout = {};
+			mutableChunk.blasUpdateEligible = preserveResidentIndexSlice || preserveResidentBlasRefitOnly;
+			mutableChunk.lastResidentBlasReasonMask = appliedReasonMask;
+			mutableChunk.lastResidentBlasSurfaceCount = outResult.surfaceCount;
+			mutableChunk.lastResidentBlasTriangleCount = outResult.triangleCount;
+			mutableChunk.lastResidentBlasMaterialCount = outResult.materialCount;
+			mutableChunk.lastResidentBlasForceTopology = appliedForceTopology;
+			mutableChunk.lastResidentBlasRecoveredEmpty = outResult.recoveredEmpty;
+			mutableChunk.lastResidentBlasKeptGeometrySlice = keptGeometrySlices;
+			mutableChunk.lastResidentBlasTopologyChanged =
+				hasResidentChunk &&
+				previousGeometryTopologySignature != residentGeometryTopologySignature;
+			mutableChunk.fixedLayoutDeformerKey =
+				replacement.fixedLayoutDeformer ? replacement.fixedLayoutDeformerKey : 0;
+			mutableChunk.fixedLayoutVertexSpanCount =
+				useFixedLayoutVertexSpans ? (uint32_t)replacement.fixedLayoutVertexSpans.size() : 0;
+			mutableChunk.fixedLayoutPrimitiveSpanCount =
+				useFixedLayoutPrimitiveSpans ? (uint32_t)replacement.fixedLayoutPrimitiveSpans.size() : 0;
+			mutableChunk.fixedLayoutVertexBytes = 0;
+			mutableChunk.fixedLayoutPrimitiveBytes = 0;
+			if (useFixedLayoutVertexSpans)
+			{
+				for (const RuntimeMutationResidentElementSpan& span : replacement.fixedLayoutVertexSpans)
+				{
+					mutableChunk.fixedLayoutVertexBytes +=
+						(uint64_t)span.elementCount * sizeof(nri_scene::SceneVertex);
+				}
+			}
+			if (useFixedLayoutPrimitiveSpans)
+			{
+				for (const RuntimeMutationResidentElementSpan& span : replacement.fixedLayoutPrimitiveSpans)
+				{
+					mutableChunk.fixedLayoutPrimitiveBytes +=
+						(uint64_t)span.elementCount * sizeof(nri_scene::PrimitiveData);
+				}
+			}
+		}
 		if (!preserveResidentMaterialSlice)
 		{
 			mutableChunk.materialBridge = residentMaterials;
 		}
 		mutableChunk.geometryTopologySignature = residentGeometryTopologySignature;
 		mutableChunk.primitiveLayoutSignature = residentPrimitiveLayoutSignature;
-		mutableChunk.exactGeometrySignature = ComputeExactGeometrySignature(residentSceneView);
+		if (!fastResidentMaterialOnlyUpdate)
+		{
+			mutableChunk.exactGeometrySignature = ComputeExactGeometrySignature(residentSceneView);
+		}
 		if (!residentGeometryPayloadHashSkip &&
 			!fastResidentMaterialOnlyUpdate &&
 			!preserveResidentGeometryForMaterialOnlyUpdate)
@@ -1093,7 +1337,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	replacement.animatedMaterialSignature = ComputeAnimatedMaterialSignature(residentSceneView);
 	replacement.surfaceCount = 0;
 	replacement.triangleCount = 0;
-	mRuntimeMutation.ClearReplacementPayload(replacement, true);
+	mRuntimeMutation.ClearReplacementPayload(replacement, !appliedCertifiedResidentMaterialOnly);
 
 	mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].appliedBaseline = appliedBaseline;
 	mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].baselineSignature = appliedBaseline.signature;
@@ -1105,6 +1349,14 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		!chunkBecomesEmpty ? mStaticMapScene.chunks[chunkListIndex].exactGeometrySignature : 0;
 	mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].geometryTopologySignature =
 		!chunkBecomesEmpty ? mStaticMapScene.chunks[chunkListIndex].geometryTopologySignature : 0;
+	mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].animatedGeometrySignature =
+		!chunkBecomesEmpty ? mStaticMapScene.chunks[chunkListIndex].animatedGeometrySignature : 0;
+	mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].animatedMaterialSignature =
+		!chunkBecomesEmpty ? mStaticMapScene.chunks[chunkListIndex].animatedMaterialSignature : 0;
+	mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].hasAnimatedTextureCandidates =
+		!chunkBecomesEmpty && mStaticMapScene.chunks[chunkListIndex].hasAnimatedTextureCandidates;
+	mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].animatedRefreshSuppressed =
+		!chunkBecomesEmpty && mStaticMapScene.chunks[chunkListIndex].animatedRefreshSuppressed;
 	if (!chunkBecomesEmpty)
 	{
 		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].vertexOffset = mStaticMapChunkAtlas.chunks[chunkListIndex].vertexOffset;

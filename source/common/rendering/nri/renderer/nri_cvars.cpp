@@ -80,6 +80,14 @@ namespace
 		}
 	}
 
+	void NotifyActiveVoxelNormalBlendChange()
+	{
+		if (NRIRenderDevice* frameBuffer = GetActiveNriRenderDeviceForCVar())
+		{
+			frameBuffer->NotifyPathTracingCameraCut("voxel-normal-blend-change");
+		}
+	}
+
 	void NotifyActiveAnalyticLightSettingsChange()
 	{
 		if (NRIRenderDevice* frameBuffer = GetActiveNriRenderDeviceForCVar())
@@ -305,6 +313,8 @@ CUSTOM_CVAR(Int, nri_ptscenedataringmaxbytes, 0, 0)
 CVAR(Bool, nri_voxelstats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, nri_ptvoxelactorstatetrace, false, 0)
+
+CVAR(Bool, nri_ptvoxelactorlifecycle, true, 0)
 
 CVAR(Int, nri_ptvoxelactorstatetracelimit, 12000, 0)
 
@@ -860,6 +870,9 @@ CUSTOM_CVAR(Int, nri_ptmutationworklistvalidate, 0, 0)
 	}
 }
 
+CVAR(Bool, nri_ptzerotickreuse, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptzerotickreusevalidate, false, 0)
+
 CUSTOM_CVAR(Int, nri_ptscenebufferdirtyrangegap, 256, 0)
 {
 	if (self < 0)
@@ -885,6 +898,14 @@ CUSTOM_CVAR(Int, nri_ptscenebufferrangeuploadmaxpercent, 75, 0)
 	else if (self > 100)
 	{
 		self = 100;
+	}
+}
+
+CUSTOM_CVAR(Int, nri_ptsceneuploadvalidateinterval, 0, 0)
+{
+	if (self < 0)
+	{
+		self = 0;
 	}
 }
 
@@ -1291,6 +1312,12 @@ CVAR(Int, nri_ptmutationtracechunk, 66, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptmutationtracesector, 198, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+CVAR(Int, nri_ptmapmovertrace, 0, 0)
+
+CVAR(Int, nri_ptmapmovershadow, 0, 0)
+
+CVAR(Int, nri_ptmapmovermode, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
 CVAR(Bool, nri_ptruntimelinktrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Float, nri_ptemissiveminpower, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -1350,6 +1377,19 @@ CUSTOM_CVAR(Float, nri_voxelemissionboost, 3.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG
 	NotifyActiveMaterialLightingCalibrationChange();
 }
 
+CUSTOM_CVAR(Float, nri_ptvoxelnormalblend, 0.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	else if (self > 1.0f)
+	{
+		self = 1.0f;
+	}
+	NotifyActiveVoxelNormalBlendChange();
+}
+
 CUSTOM_CVAR(Float, nri_ptfullbrightboost, 1.50781f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.50f)
@@ -1392,6 +1432,24 @@ CVAR(Bool, nri_ptemissivetlas, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissivefastshadow, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptemissivesamples, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+// Session-only experiment: 0 preserves the requested count; 1..4 cap only the primary direct loop.
+CUSTOM_CVAR(Int, nri_ptemissiveprimarybudget, 0, 0)
+{
+	if (self < 0 || self > 4)
+	{
+		self = std::clamp((int)self, 0, 4);
+	}
+}
+
+// Session-only experiment: 0 preserves dual indirect paths; 1 requests probabilistic single-lobe sampling.
+CUSTOM_CVAR(Int, nri_ptindirectsampling, 0, 0)
+{
+	if (self < 0 || self > 1)
+	{
+		self = std::clamp((int)self, 0, 1);
+	}
+}
 
 CVAR(Bool, nri_ptsectorlighting, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 

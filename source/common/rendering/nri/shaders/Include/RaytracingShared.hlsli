@@ -416,10 +416,118 @@ float3 SampleMaterialNormalMap(MaterialData material, float2 uv, float3 geometri
 	return mappedNormal;
 }
 
-float3 ResolveHitNormal(uint materialIndex, uint dataSource, uint primitiveIndex, float3 geometricNormal, float2 uv)
+float3 UnpackVoxelNormal(uint packedNormal)
+{
+	const float2 oct = float2(packedNormal & 255u, (packedNormal >> 8u) & 255u) * (2.0f / 255.0f) - 1.0f;
+	float3 normal = float3(oct, 1.0f - abs(oct.x) - abs(oct.y));
+	if (normal.z < 0.0f)
+	{
+		normal.xy = (1.0f - abs(normal.yx)) * float2(normal.x < 0.0f ? -1.0f : 1.0f, normal.y < 0.0f ? -1.0f : 1.0f);
+	}
+	return normalize(normal);
+}
+
+bool TryResolveSmoothVertexNormal(PrimitiveData primitive, float3 weights, float3 geometricNormal, out float3 smoothNormal)
+{
+	if ((primitive.smoothNormals.y & 0x80000000u) == 0u)
+	{
+		smoothNormal = geometricNormal;
+		return false;
+	}
+
+	const float3 interpolated =
+		UnpackVoxelNormal(primitive.smoothNormals.x & 0xffffu) * weights.x +
+		UnpackVoxelNormal(primitive.smoothNormals.x >> 16u) * weights.y +
+		UnpackVoxelNormal(primitive.smoothNormals.y & 0xffffu) * weights.z;
+	const float lengthSq = dot(interpolated, interpolated);
+	if (lengthSq <= 1.0e-8f)
+	{
+		smoothNormal = geometricNormal;
+		return false;
+	}
+
+	smoothNormal = interpolated * rsqrt(lengthSq);
+	return dot(smoothNormal, geometricNormal) > 1.0e-4f;
+}
+
+float ResolveVoxelBevelMask(uint dataSource, PrimitiveData primitive, float3 weights, float3 geometricNormal, float3 smoothNormal)
+{
+	const float3 p0 = GetVertexData(dataSource, primitive.indices.x).position;
+	const float3 p1 = GetVertexData(dataSource, primitive.indices.y).position;
+	const float3 p2 = GetVertexData(dataSource, primitive.indices.z).position;
+	const float3 edge01 = p1 - p0;
+	const float3 edge12 = p2 - p1;
+	const float3 edge20 = p0 - p2;
+	const float edge01LengthSq = dot(edge01, edge01);
+	const float edge12LengthSq = dot(edge12, edge12);
+	const float edge20LengthSq = dot(edge20, edge20);
+
+	float3 axisU;
+	float3 axisV;
+	float u;
+	float v;
+	if (edge12LengthSq >= edge20LengthSq && edge12LengthSq >= edge01LengthSq)
+	{
+		axisU = edge01;
+		axisV = -edge20;
+		u = weights.y;
+		v = weights.z;
+	}
+	else if (edge20LengthSq >= edge01LengthSq)
+	{
+		axisU = -edge01;
+		axisV = edge12;
+		u = weights.x;
+		v = weights.z;
+	}
+	else
+	{
+		axisU = edge20;
+		axisV = -edge12;
+		u = weights.x;
+		v = weights.y;
+	}
+
+	const float axisULengthSq = dot(axisU, axisU);
+	const float axisVLengthSq = dot(axisV, axisV);
+	const float axisDot = dot(axisU, axisV);
+	const float areaSq = axisULengthSq * axisVLengthSq - axisDot * axisDot;
+	if (axisULengthSq <= 1.0e-12f || axisVLengthSq <= 1.0e-12f ||
+		areaSq <= 1.0e-8f * axisULengthSq * axisVLengthSq)
+	{
+		return 0.0f;
+	}
+
+	const float uSpan = sqrt(areaSq / axisVLengthSq);
+	const float vSpan = sqrt(areaSq / axisULengthSq);
+	const float shortSpan = min(uSpan, vSpan);
+	if (shortSpan <= 1.0e-6f)
+	{
+		return 0.0f;
+	}
+
+	u = saturate(u);
+	v = saturate(v);
+	const float uDistance = min(u, 1.0f - u) * uSpan;
+	const float vDistance = min(v, 1.0f - v) * vSpan;
+	const float normalizedEdgeDistance = min(uDistance, vDistance) / shortSpan;
+	const float perimeterMask = 1.0f - smoothstep(0.0f, 0.16f, normalizedEdgeDistance);
+	const float angularDelta = 1.0f - saturate(dot(geometricNormal, smoothNormal));
+	const float angularEvidence = smoothstep(0.01f, 0.20f, angularDelta);
+	return perimeterMask * angularEvidence;
+}
+
+float3 ResolveHitNormal(uint materialIndex, uint dataSource, uint primitiveIndex, PrimitiveData primitive, float2 uv, float3 weights)
 {
 	const MaterialData material = GetMaterialData(materialIndex, dataSource);
-	float3 resolvedNormal = normalize(geometricNormal);
+	float3 resolvedNormal = normalize(primitive.normal);
+	float3 smoothNormal = resolvedNormal;
+	const float blend = (float)((gTraceConstants.Flags >> NRI_VOXEL_NORMAL_BLEND_SHIFT) & 0xffu) * (1.0f / 255.0f);
+	if (blend > 0.0f && TryResolveSmoothVertexNormal(primitive, weights, resolvedNormal, smoothNormal))
+	{
+		const float bevelMask = ResolveVoxelBevelMask(dataSource, primitive, weights, resolvedNormal, smoothNormal);
+		resolvedNormal = normalize(lerp(resolvedNormal, smoothNormal, blend * bevelMask));
+	}
 	if (material.normalTextureIndex == 0xffffffffu)
 	{
 		return resolvedNormal;
@@ -882,7 +990,7 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction, bool allowReflec
 		bestHit.distance = hitT;
 		bestHit.position = origin + direction * hitT;
 		bestHit.uv = uv;
-		bestHit.normal = ResolveHitNormal(primitive.materialIndex, SCENE_DATA_SOURCE_DYNAMIC, primitiveIndex, primitive.normal, uv);
+		bestHit.normal = ResolveHitNormal(primitive.materialIndex, SCENE_DATA_SOURCE_DYNAMIC, primitiveIndex, primitive, uv, barycentrics);
 		bestHit.materialIndex = primitive.materialIndex;
 	}
 
@@ -894,7 +1002,7 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction)
 	return TraceBootstrapGeometry(origin, direction, false);
 }
 
-bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance, bool gateVisibleChunks, bool ignoreNoShadowCast, bool allowReflectionOnlySurfaces, uint statsKind, out HitData hitData)
+bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance, uint traceMask, bool gateVisibleChunks, bool ignoreNoShadowCast, bool allowReflectionOnlySurfaces, uint statsKind, out HitData hitData)
 {
 	hitData = MakeEmptyHitData();
 	float accumulatedDistance = 0.0;
@@ -919,7 +1027,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 
 		RayQuery<RAY_FLAG_FORCE_OPAQUE> rayQuery;
 		RayDesc ray = { startOrigin, traceMinDistance, direction, maxDistance };
-		rayQuery.TraceRayInline(gWorldTlas, RAY_FLAG_FORCE_OPAQUE, NRI_TLAS_MASK_ALL_WORKLOADS, ray);
+		rayQuery.TraceRayInline(gWorldTlas, RAY_FLAG_FORCE_OPAQUE, traceMask, ray);
 
 		while (rayQuery.Proceed()) {}
 
@@ -1013,7 +1121,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		hitData.distance = hitDistance;
 		hitData.position = startOrigin + direction * hitDistance;
 		hitData.uv = uv;
-		hitData.normal = TransformSceneInstanceNormal(instanceData, ResolveHitNormal(materialIndex, instanceData.dataSource, primitiveIndex, primitive.normal, uv), false);
+		hitData.normal = TransformSceneInstanceNormal(instanceData, ResolveHitNormal(materialIndex, instanceData.dataSource, primitiveIndex, primitive, uv, weights), false);
 		hitData.materialIndex = materialIndex;
 		TraceShaderStatSource(TRACE_STAT_ACCEPT_STATIC, TRACE_STAT_ACCEPT_DYNAMIC, TRACE_STAT_ACCEPT_VOXEL, instanceData.dataSource);
 		TraceShaderStatInstance(TRACE_STAT_INSTANCE_ACCEPTED_BASE, TRACE_STAT_INSTANCE_ACCEPTED_OVERFLOW, committedInstanceId);
@@ -1024,7 +1132,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 	return false;
 }
 
-bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance, uint mirrorBudget, uint portalBudget, bool gateVisibleChunks, bool ignoreNoShadowCast, bool allowReflectionOnlySurfaces, uint statsKind, out HitData hitData, out float3 exitDirection)
+bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance, uint traceMask, uint mirrorBudget, uint portalBudget, bool gateVisibleChunks, bool ignoreNoShadowCast, bool allowReflectionOnlySurfaces, uint statsKind, out HitData hitData, out float3 exitDirection)
 {
 	hitData = MakeEmptyHitData();
 	exitDirection = startDirection;
@@ -1035,7 +1143,7 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 	[loop]
 	for (uint continuationStep = 0u; continuationStep < 32u; ++continuationStep)
 	{
-		if (!TraceClosestSurface(origin, direction, remainingDistance, gateVisibleChunks, ignoreNoShadowCast, allowReflectionOnlySurfaces, statsKind, hitData))
+		if (!TraceClosestSurface(origin, direction, remainingDistance, traceMask, gateVisibleChunks, ignoreNoShadowCast, allowReflectionOnlySurfaces, statsKind, hitData))
 		{
 			exitDirection = direction;
 			return false;
@@ -1053,6 +1161,7 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 			direction = reflect(direction, hitData.normal);
 			exitDirection = direction;
 			allowReflectionOnlySurfaces = true;
+			traceMask = NRI_TLAS_MASK_REFLECTION;
 			gateVisibleChunks = false;
 			mirrorBudget--;
 			continue;
@@ -1078,14 +1187,14 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 
 bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance, uint mirrorBudget, uint portalBudget, out HitData hitData, out float3 exitDirection)
 {
-	return TraceScenePath(startOrigin, startDirection, maxDistance, mirrorBudget, portalBudget, false, false, false, TRACE_STATS_KIND_UNGATED, hitData, exitDirection);
+	return TraceScenePath(startOrigin, startDirection, maxDistance, NRI_TLAS_MASK_MAIN, mirrorBudget, portalBudget, false, false, false, TRACE_STATS_KIND_UNGATED, hitData, exitDirection);
 }
 
 HitData TracePrimary(float3 origin, float3 direction, bool gateVisibleChunks, out float3 exitDirection)
 {
 	HitData hitData = MakeEmptyHitData();
 	const uint mirrorBudget = max(1u, (gTraceConstants.BounceCounts >> 4u) & 0xfu);
-	TraceScenePath(origin, direction, 100000.0, mirrorBudget, GetPortalTraversalDepth(), gateVisibleChunks, false, false, TRACE_STATS_KIND_PRIMARY, hitData, exitDirection);
+	TraceScenePath(origin, direction, 100000.0, NRI_TLAS_MASK_MAIN, mirrorBudget, GetPortalTraversalDepth(), gateVisibleChunks, false, false, TRACE_STATS_KIND_PRIMARY, hitData, exitDirection);
 	return hitData;
 }
 
@@ -1098,7 +1207,7 @@ HitData TracePrimaryUngated(float3 origin, float3 direction, out float3 exitDire
 {
 	HitData hitData = MakeEmptyHitData();
 	const uint mirrorBudget = max(1u, (gTraceConstants.BounceCounts >> 4u) & 0xfu);
-	TraceScenePath(origin, direction, 100000.0, mirrorBudget, GetPortalTraversalDepth(), false, false, true, TRACE_STATS_KIND_UNGATED, hitData, exitDirection);
+	TraceScenePath(origin, direction, 100000.0, NRI_TLAS_MASK_REFLECTION, mirrorBudget, GetPortalTraversalDepth(), false, false, true, TRACE_STATS_KIND_UNGATED, hitData, exitDirection);
 	return hitData;
 }
 
@@ -1106,7 +1215,15 @@ HitData TraceIndirectUngated(float3 origin, float3 direction, out float3 exitDir
 {
 	HitData hitData = MakeEmptyHitData();
 	const uint mirrorBudget = max(1u, (gTraceConstants.BounceCounts >> 4u) & 0xfu);
-	TraceScenePath(origin, direction, 100000.0, mirrorBudget, GetPortalTraversalDepth(), false, false, false, TRACE_STATS_KIND_UNGATED, hitData, exitDirection);
+	TraceScenePath(origin, direction, 100000.0, NRI_TLAS_MASK_GI, mirrorBudget, GetPortalTraversalDepth(), false, false, false, TRACE_STATS_KIND_UNGATED, hitData, exitDirection);
+	return hitData;
+}
+
+HitData TraceReflectionUngated(float3 origin, float3 direction, out float3 exitDirection)
+{
+	HitData hitData = MakeEmptyHitData();
+	const uint mirrorBudget = max(1u, (gTraceConstants.BounceCounts >> 4u) & 0xfu);
+	TraceScenePath(origin, direction, 100000.0, NRI_TLAS_MASK_REFLECTION, mirrorBudget, GetPortalTraversalDepth(), false, false, true, TRACE_STATS_KIND_UNGATED, hitData, exitDirection);
 	return hitData;
 }
 
@@ -1121,7 +1238,7 @@ float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection, ou
 	TraceShaderStatAdd(TRACE_STAT_SUN_SHADOW_CALLS, 1u);
 	HitData shadowHit = MakeEmptyHitData();
 	float3 ignoredDirection = lightDirection;
-	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, 100000.0, 0u, GetPortalTraversalDepth(), false, true, false, TRACE_STATS_KIND_SUN, shadowHit, ignoredDirection);
+	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, 100000.0, NRI_TLAS_MASK_SHADOW, 0u, GetPortalTraversalDepth(), false, true, false, TRACE_STATS_KIND_SUN, shadowHit, ignoredDirection);
 	shadowHitDistance = blocked ? shadowHit.distance : NRD_FP16_MAX;
 	return blocked ? 0.0 : 1.0;
 }
@@ -1143,7 +1260,7 @@ float ComputePointLightShadowTagged(float3 position, float3 normal, float3 light
 	HitData shadowHit = MakeEmptyHitData();
 	float3 ignoredDirection = lightDirection;
 	const float maxDistance = max(lightDistance - 0.05, 0.001);
-	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, maxDistance, 0u, GetPortalTraversalDepth(), false, true, false, statsKind, shadowHit, ignoredDirection);
+	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, maxDistance, NRI_TLAS_MASK_SHADOW, 0u, GetPortalTraversalDepth(), false, true, false, statsKind, shadowHit, ignoredDirection);
 	return blocked ? 0.0 : 1.0;
 }
 
@@ -1154,7 +1271,7 @@ float ComputePointLightShadow(float3 position, float3 normal, float3 lightDirect
 
 bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance, out HitData hitData)
 {
-	return TraceClosestSurface(startOrigin, direction, maxDistance, false, false, false, TRACE_STATS_KIND_UNGATED, hitData);
+	return TraceClosestSurface(startOrigin, direction, maxDistance, NRI_TLAS_MASK_MAIN, false, false, false, TRACE_STATS_KIND_UNGATED, hitData);
 }
 
 float ComputeFastPointLightShadow(float3 position, float3 normal, float3 lightDirection, float lightDistance)
@@ -1167,7 +1284,7 @@ float ComputeFastPointLightShadow(float3 position, float3 normal, float3 lightDi
 	TraceShaderStatAdd(TRACE_STAT_FAST_EMISSIVE_SHADOW_CALLS, 1u);
 	HitData shadowHit = MakeEmptyHitData();
 	const float maxDistance = max(lightDistance - 0.05, 0.001);
-	const bool blocked = TraceClosestSurface(position + normal * 0.05, lightDirection, maxDistance, false, true, false, TRACE_STATS_KIND_FAST_EMISSIVE, shadowHit);
+	const bool blocked = TraceClosestSurface(position + normal * 0.05, lightDirection, maxDistance, NRI_TLAS_MASK_SHADOW, false, true, false, TRACE_STATS_KIND_FAST_EMISSIVE, shadowHit);
 	return blocked ? 0.0 : 1.0;
 }
 

@@ -35,6 +35,7 @@ Modifications for JonoF's port by Jonathon Fowler (jf@jonof.id.au)
 #include "mapinfo.h"
 #include "texturemanager.h"
 #include "interpolate.h"
+#include "runtime_map_movers.h"
 
 BEGIN_DUKE_NS
 
@@ -92,6 +93,8 @@ void GameInterface::Ticker()
 
 		if (isRR() && ud.recstat == 0 && ud.multimode < 2)
 			dotorch();
+
+		UpdateRuntimeMapMoverAuthority();
 
 		r_NoInterpolate = false;
 		PlayClock+= 4;		// This must be at the end of this block so that the first tic receives a value of 0!
@@ -157,4 +160,3 @@ void GameInterface::LevelCompleted(MapRecord* map, int skill)
 }
 
 END_DUKE_NS
-

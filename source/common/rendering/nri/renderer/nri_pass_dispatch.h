@@ -274,6 +274,11 @@ public:
 		uint32_t runtimeLightCount = 0;
 		uint32_t runtimeLightTileCountX = 0;
 		uint32_t runtimeLightTileCountY = 0;
+		uint32_t runtimeLightTileSize = 0;
+		uint32_t runtimeLightTileIndexCount = 0;
+		uint32_t runtimeLightMaxTileOccupancy = 0;
+		uint32_t emissivePrimitiveCount = 0;
+		float emissiveTotalPower = 0.0f;
 	};
 
 	struct Init
@@ -384,6 +389,9 @@ public:
 	FrameTextureSlot& mHistoryInputSlot;
 	FrameTextureSlot& mHistoryOutputSlot;
 	FrameTextureSlot& mUpscaledInputSlot;
+	bool mTraceIndirectDenoiserAvailable = false;
+	uint32_t mEffectiveIndirectSamplingMode = 0;
+	uint32_t mActiveIndirectSamplingMode = 0;
 };
 
 class NRIPassDispatcher

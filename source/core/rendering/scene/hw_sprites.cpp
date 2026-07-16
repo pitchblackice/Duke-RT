@@ -453,7 +453,7 @@ void HWSprite::Process(HWDrawInfo* di, tspritetype* spr, sectortype* sector, int
 //
 //==========================================================================
 
-bool HWSprite::ProcessVoxel(HWDrawInfo* di, voxmodel_t* vox, tspritetype* spr, sectortype* sector, bool rotate)
+bool HWSprite::PrepareVoxel(HWDrawInfo* di, voxmodel_t* vox, tspritetype* spr, sectortype* sector, bool rotate)
 {
 	Sprite = spr;
 	auto ownerActor = spr->ownerActor;
@@ -542,6 +542,15 @@ bool HWSprite::ProcessVoxel(HWDrawInfo* di, voxmodel_t* vox, tspritetype* spr, s
 
 	auto vp = di->Viewpoint;
 	depth = (float)((x - vp.Pos.X) * vp.TanCos + (y - vp.Pos.Y) * vp.TanSin);
+	return true;
+}
+
+bool HWSprite::ProcessVoxel(HWDrawInfo* di, voxmodel_t* vox, tspritetype* spr, sectortype* sector, bool rotate)
+{
+	if (!PrepareVoxel(di, vox, spr, sector, rotate))
+	{
+		return false;
+	}
 	PutSprite(di, spriteHasTranslucency(Sprite));
 	return true;
 }

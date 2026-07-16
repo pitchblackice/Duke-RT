@@ -29,6 +29,8 @@ class NRIExposurePassAccess;
 class NRIAccelerationStructureManager;
 class NRISceneTextureResidency;
 class NRIUpscalerContext;
+class NRIGpuTiming;
+enum class NRIGpuTimingScope : uint8_t;
 
 #ifdef _WIN32
 struct ID3D12Device;
@@ -182,6 +184,8 @@ public:
 	NRIAdapterMemoryTelemetry GetAdapterMemoryTelemetry() const;
 	uint64_t GetAdapterNonLocalBudgetBytes() const { return mAdapterNonLocalBudgetBytes; }
 	NRIBackendCapabilities BuildBackendCapabilities() const;
+	uint32_t BeginGpuTimingScope(NRIGpuTimingScope scope);
+	void EndGpuTimingScope(uint32_t markerIndex);
 
 private:
 	static constexpr uint32_t FrameSequenceHistorySize = NRIFrameShell::FrameSequenceHistorySize;
@@ -342,6 +346,8 @@ private:
 	uint32_t ClearPendingPathTracingWeaponLightEvents();
 	void LogLevelTransitionSnapshot(const char* phase, const LevelTransitionInfo& info, bool preloadPending, uint32_t clearedWeaponLightEvents) const;
 	void TraceVoxelPreloadLifecycle(const char* stage, const LevelTransitionInfo& info) const;
+	void CaptureCompactPerfRendererStats(bool rendered);
+	void CaptureCompactPerfFrameBoundary(bool presentOk);
 
 	friend class NRIHardwareTexture;
 	friend class NRIRenderState;
@@ -358,6 +364,7 @@ private:
 
 	std::unique_ptr<NRIRenderState> mRenderState;
 	std::unique_ptr<NRIRenderer> mRenderer;
+	std::unique_ptr<NRIGpuTiming> mGpuTiming;
 	void* mNriModule = nullptr;
 	PFN_nriEnumerateAdapters mEnumerateAdapters = nullptr;
 	PFN_nriCreateDevice mCreateDeviceFn = nullptr;

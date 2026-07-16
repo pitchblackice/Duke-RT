@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../scene/nri_map_material_layout.h"
+
 #include "nri_frame_resources.h"
 #include "nri_resources.h"
 #include "nri_runtime_mutation.h"
@@ -116,6 +118,8 @@ struct StaticMapSceneCache
 			uint64_t materialBridgeHash = 0;
 			uint64_t actorOverrideHash = 0;
 			uint64_t emissiveOverrideHash = 0;
+			uint64_t textureSlotRevision = 0;
+			bool stableTextureSlots = false;
 			uint32_t materialCount = 0;
 			nri_scene::MaterialBridgeData remappedMaterialBridge;
 			std::vector<nri_scene::MaterialData> gpuMaterials;
@@ -149,8 +153,19 @@ struct StaticMapSceneCache
 		nri::AccelerationStructure* residentBlasScratchSizeCacheKey = nullptr;
 		uint64_t residentBlasBuildScratchSize = 0;
 		uint64_t residentBlasUpdateScratchSize = 0;
+		nri::Buffer* residentBlasVertexBuffer = nullptr;
+		nri::Buffer* residentBlasIndexBuffer = nullptr;
+		uint32_t residentBlasVertexNum = 0;
+		uint64_t residentBlasIndexOffset = 0;
+		uint32_t residentBlasIndexNum = 0;
+		uint64_t fixedLayoutDeformerKey = 0;
+		uint32_t fixedLayoutVertexSpanCount = 0;
+		uint32_t fixedLayoutPrimitiveSpanCount = 0;
+		uint64_t fixedLayoutVertexBytes = 0;
+		uint64_t fixedLayoutPrimitiveBytes = 0;
 		bool hasAnimatedTextureCandidates = false;
 		bool animatedRefreshSuppressed = false;
+		nri_scene::CanonicalPTMapMaterialLayout canonicalMaterialLayout;
 		nri_scene::MaterialBridgeData materialBridge;
 		std::vector<ResidentMaterialSliceCacheEntry> residentMaterialSliceCache;
 		NRIAccelerationStructureResource accelerationStructure;
@@ -161,6 +176,8 @@ struct StaticMapSceneCache
 	bool buffersResident = false;
 	bool accelerationResident = false;
 	uint64_t buildSerial = 0;
+	uint64_t materialGeneration = 0;
+	bool gpuMaterialsUseStableTextureSlots = false;
 	uint32_t sceneBuildCount = 0;
 	uint32_t gpuUploadCount = 0;
 	uint32_t accelerationBuildCount = 0;
@@ -344,14 +361,12 @@ struct NRIStaticSceneLiveAccelerationBuildInput
 	NRIBufferResource* staticIndexBuffer = nullptr;
 	NRIBufferResource* staticPrimitiveBuffer = nullptr;
 	NRIBufferResource* staticMaterialBuffer = nullptr;
-	NRIBufferResource* tlasInstanceBuffer = nullptr;
 	NRIBufferResource* emissiveTlasInstanceBuffer = nullptr;
 	NRIBufferResource* sceneInstanceBuffer = nullptr;
 	NRIBufferResource* scratchBuffer = nullptr;
-	NRIBufferResource* topLevelScratchBuffer = nullptr;
 	NRIBufferResource* emissiveTopLevelScratchBuffer = nullptr;
-	NRIAccelerationStructureResource* topLevelAS = nullptr;
 	NRIAccelerationStructureResource* emissiveTopLevelAS = nullptr;
+	bool hasWorldTlasFrameSlotResources = false;
 	uint64_t* staticAccelerationBuildSerial = nullptr;
 };
 
@@ -364,6 +379,7 @@ struct NRIStaticSceneLiveAccelerationBuildServices
 	void (*destroyBufferResource)(void* user, NRIBufferResource& resource) = nullptr;
 	void (*destroyAccelerationStructureResource)(void* user, NRIAccelerationStructureResource& resource) = nullptr;
 	void (*destroyDynamicBottomLevelAccelerationStructures)(void* user) = nullptr;
+	void (*destroyWorldTlasFrameSlots)(void* user) = nullptr;
 	void (*resetPersistentVoxelsForStaticAccelerationRebuild)(void* user) = nullptr;
 	bool (*createBottomLevelAccelerationStructure)(void* user, const nri::AccelerationStructureDesc& desc, NRIAccelerationStructureResource& outAccelerationStructure) = nullptr;
 	uint64_t (*getAccelerationStructureBuildScratchBufferSize)(void* user, const NRIAccelerationStructureResource& accelerationStructure) = nullptr;

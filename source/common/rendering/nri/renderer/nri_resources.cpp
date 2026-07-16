@@ -8,6 +8,7 @@
 #include "nri_static_scene_geometry.h"
 #include "../system/nri_renderdevice.h"
 #include "c_cvars.h"
+#include "perf_capture.h"
 
 #include <algorithm>
 #include <chrono>
@@ -19,7 +20,7 @@ namespace
 {
 	bool ShouldTraceResourcePerf()
 	{
-		return PerfLoopTraceActive() || ShouldEmitRendererTemporalTraceLogs();
+		return PerfLoopTraceActive() || ShouldEmitRendererTemporalTraceLogs() || PerfCompactCaptureTimingActive();
 	}
 
 	double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
@@ -194,10 +195,17 @@ void NRIRenderer::DestroyCachedTextures()
 		mFrameBuffer->DestroyTextureResource(texture.resource);
 	}
 	mSceneTextures.ClearCachedTextures();
+	mSceneTextures.SlotTable().Reset();
+	mSceneMaterialFrameCache.Reset();
+	mSceneTextureFrameCache.Reset();
+	std::fill(mSceneTextureSetHashValid.begin(), mSceneTextureSetHashValid.end(), 0);
 }
 
 void NRIRenderer::DestroySceneBuffers()
 {
+	mSceneUploadProducerGenerations.Reset();
+	mSceneUploadIdentityValidator.Reset();
+	mPrimitiveVisibilityIdentityCache = {};
 	ResetPersistentVoxelBlasCompaction();
 	mStaticMapScene.buffersResident = false;
 	nri_static_scene_geometry::ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
@@ -262,7 +270,6 @@ void NRIRenderer::DestroySceneBuffers()
 	mSceneDataFrameRingSlotWaitCount = 0;
 	mSceneDataFrameRingDisabledFrameIndex = UINT32_MAX;
 	mSceneDataFrameRingOverCapFrameIndex = UINT32_MAX;
-	DestroyBufferResource(mTlasInstanceBuffer);
 	DestroyBufferResource(mEmissiveTlasInstanceBuffer);
 	DestroyBufferResource(mSceneInstanceBuffer);
 	DestroyBufferResource(mPortalBuffer);
@@ -281,13 +288,7 @@ void NRIRenderer::DestroySceneBuffers()
 	mTraceShaderStats.Destroy(BuildResourceServices());
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mResidentStaticBlasScratchBuffer);
-	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
-	for (NRIBufferResource& tlasInstanceBuffer : mTlasInstanceBufferRing)
-	{
-		DestroyBufferResource(tlasInstanceBuffer);
-	}
-	mTlasInstanceBufferRing.clear();
 	for (auto& frameScratch : mResidentUploadScratchFrames)
 	{
 		DestroyBufferResource(frameScratch.vertex.buffer);
@@ -421,6 +422,7 @@ void NRIRenderer::DestroyAccelerationStructureResource(NRIAccelerationStructureR
 
 	resource.memorySize = 0;
 	resource.buildScratchSize = 0;
+	resource.updateScratchSize = 0;
 	resource.buildVertexBuffer = nullptr;
 	resource.buildIndexBuffer = nullptr;
 	resource.buildVertexOffset = 0;
@@ -429,6 +431,8 @@ void NRIRenderer::DestroyAccelerationStructureResource(NRIAccelerationStructureR
 	resource.buildIndexCount = 0;
 	resource.buildPrimitiveCount = 0;
 	resource.buildFlags = nri::AccelerationStructureBits::NONE;
+	resource.buildType = nri::AccelerationStructureType::TOP_LEVEL;
+	resource.buildTypeValid = false;
 	resource.uncompactedMemorySize = 0;
 	resource.compacted = false;
 	resource.memoryLocation = nri::MemoryLocation::DEVICE;

@@ -58,6 +58,7 @@ struct NRIAccelerationStructureResource
 	nri::Descriptor* descriptor = nullptr;
 	uint64_t memorySize = 0;
 	uint64_t buildScratchSize = 0;
+	uint64_t updateScratchSize = 0;
 	nri::Buffer* buildVertexBuffer = nullptr;
 	nri::Buffer* buildIndexBuffer = nullptr;
 	uint32_t buildVertexOffset = 0;
@@ -66,6 +67,8 @@ struct NRIAccelerationStructureResource
 	uint32_t buildIndexCount = 0;
 	uint32_t buildPrimitiveCount = 0;
 	nri::AccelerationStructureBits buildFlags = nri::AccelerationStructureBits::NONE;
+	nri::AccelerationStructureType buildType = nri::AccelerationStructureType::TOP_LEVEL;
+	bool buildTypeValid = false;
 	uint64_t uncompactedMemorySize = 0;
 	bool compacted = false;
 	nri::MemoryLocation memoryLocation = nri::MemoryLocation::DEVICE;
@@ -106,6 +109,16 @@ inline nri::AccessStage NRIResourceAccelerationStructureBuildInputAccess()
 inline nri::AccessStage NRIResourceAccelerationStructureWriteAccess()
 {
 	return { nri::AccessBits::ACCELERATION_STRUCTURE_WRITE, nri::StageBits::ACCELERATION_STRUCTURE };
+}
+
+inline nri::AccessStage NRIResourceAccelerationStructureReadWriteAccess()
+{
+	return {
+		NRIResourceFlags(
+			nri::AccessBits::ACCELERATION_STRUCTURE_READ,
+			nri::AccessBits::ACCELERATION_STRUCTURE_WRITE),
+		nri::StageBits::ACCELERATION_STRUCTURE
+	};
 }
 
 inline nri::AccessStage NRIResourceAccelerationStructureScratchAccess()

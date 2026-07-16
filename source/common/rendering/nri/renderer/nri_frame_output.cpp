@@ -8,6 +8,7 @@
 #include "nri_sky_environment.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
+#include "perf_capture.h"
 #include "printf.h"
 #include "v_video.h"
 
@@ -43,7 +44,7 @@ namespace
 	{
 	public:
 		explicit ScopedFrameOutputPerfTimer(double& targetMs)
-			: mTarget((PerfLoopTraceActive() || ShouldEmitRendererTemporalTraceLogs()) ? &targetMs : nullptr)
+			: mTarget((PerfLoopTraceActive() || ShouldEmitRendererTemporalTraceLogs() || PerfCompactCaptureTimingActive()) ? &targetMs : nullptr)
 		{
 			if (mTarget != nullptr)
 			{
@@ -141,16 +142,18 @@ void NRIRenderer::UpdateFrameGenerationHistoryPolicy(int debugMode, const NRIFra
 	const NRIMainUpscalerKind resolvedMainUpscaler = ResolveMainUpscalerKind(false);
 	const NRIPostSharpenKind resolvedPostSharpen = ResolvePostSharpenKind(false);
 	const bool runAppTaa = NRIShouldRunAppTaa(resolvedMainUpscaler);
+	const bool denoiseEnabled = !!nri_denoise;
 	if (!nri_ptbootstrap &&
 		(debugMode != mLastDebugMode ||
 		 resolvedMainUpscaler != mLastTemporalHistoryMainUpscaler ||
 		 resolvedPostSharpen != mLastTemporalPostSharpen ||
-		 runAppTaa != mLastTemporalAppTaaEnabled))
+		 runAppTaa != mLastTemporalAppTaaEnabled ||
+		 denoiseEnabled != mLastTemporalDenoiseEnabled))
 	{
 		ArmTemporalTraceBudget("mode-change");
 		if (ShouldEmitRendererTemporalTraceLogs())
 		{
-			Printf("NRI PT temporal reset: reason=mode-change frame=%u debug=%d->%d main=%s->%s post=%s->%s app_taa=%s->%s\n",
+			Printf("NRI PT temporal reset: reason=mode-change frame=%u debug=%d->%d main=%s->%s post=%s->%s app_taa=%s->%s denoise=%s->%s\n",
 				mFrameIndex,
 				mLastDebugMode,
 				debugMode,
@@ -159,7 +162,9 @@ void NRIRenderer::UpdateFrameGenerationHistoryPolicy(int debugMode, const NRIFra
 				NRIGetPostSharpenName(mLastTemporalPostSharpen),
 				NRIGetPostSharpenName(resolvedPostSharpen),
 				mLastTemporalAppTaaEnabled ? "yes" : "no",
-				runAppTaa ? "yes" : "no");
+				runAppTaa ? "yes" : "no",
+				mLastTemporalDenoiseEnabled ? "yes" : "no",
+				denoiseEnabled ? "yes" : "no");
 		}
 		RequestHistoryReset("mode-change");
 	}
@@ -167,6 +172,7 @@ void NRIRenderer::UpdateFrameGenerationHistoryPolicy(int debugMode, const NRIFra
 	mLastTemporalHistoryMainUpscaler = resolvedMainUpscaler;
 	mLastTemporalPostSharpen = resolvedPostSharpen;
 	mLastTemporalAppTaaEnabled = runAppTaa;
+	mLastTemporalDenoiseEnabled = denoiseEnabled;
 
 	if (!mHasFrameGenerationConfigState)
 	{

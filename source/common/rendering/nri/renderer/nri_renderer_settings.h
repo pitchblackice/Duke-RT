@@ -11,7 +11,32 @@ struct NRITraceSettings
 	uint32_t mirrorBounceCount = 8;
 	uint32_t portalDepth = 8;
 	uint32_t emissiveSampleCount = 4;
+	uint32_t emissiveRequestedSampleCount = 4;
+	uint32_t emissivePrimarySampleBudget = 0;
+	uint32_t indirectSamplingMode = 0;
 };
+
+constexpr uint32_t NRIResolveIndirectSamplingMode(int32_t requested)
+{
+	return requested > 0 ? 1u : 0u;
+}
+
+static_assert(NRIResolveIndirectSamplingMode(0) == 0u);
+static_assert(NRIResolveIndirectSamplingMode(1) == 1u);
+static_assert(NRIResolveIndirectSamplingMode(7) == 1u);
+static_assert(NRIResolveIndirectSamplingMode(-1) == 0u);
+
+constexpr uint32_t NRIResolvePrimaryEmissiveSampleCount(uint32_t requested, uint32_t budget)
+{
+	requested = requested < 1u ? 1u : (requested > 4u ? 4u : requested);
+	budget = budget > 4u ? 4u : budget;
+	return budget == 0u || budget >= requested ? requested : budget;
+}
+
+static_assert(NRIResolvePrimaryEmissiveSampleCount(4u, 0u) == 4u);
+static_assert(NRIResolvePrimaryEmissiveSampleCount(4u, 2u) == 2u);
+static_assert(NRIResolvePrimaryEmissiveSampleCount(4u, 1u) == 1u);
+static_assert(NRIResolvePrimaryEmissiveSampleCount(2u, 4u) == 2u);
 
 struct NRIDenoiserSettings
 {
@@ -146,7 +171,7 @@ struct NRISmokeSettings
 };
 
 NRITraceSettings BuildNRITraceSettingsFromCVars();
-NRIDenoiserSettings BuildNRIDenoiserSettingsFromCVars();
+NRIDenoiserSettings BuildNRIDenoiserSettingsFromCVars(uint32_t indirectSamplingMode = 0);
 NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars();
 NRIRuntimeMutationSettings BuildNRIRuntimeMutationSettingsFromCVars();
 NRISmokeSettings BuildNRISmokeSettingsFromCVars();

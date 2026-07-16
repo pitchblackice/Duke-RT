@@ -38,6 +38,7 @@ struct PrimitiveData
 	uint flags;
 	uint portalIndex;
 	uint reserved0;
+	uint2 smoothNormals;
 };
 
 struct MaterialData

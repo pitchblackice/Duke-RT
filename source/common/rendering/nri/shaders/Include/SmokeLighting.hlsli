@@ -112,7 +112,7 @@ SmokeIndirectHit SmokeTraceIndirectClosest(float3 origin, float3 direction, floa
 	result.instanceSectorIndex = 0xffffffffu;
 	RayDesc ray = { origin + direction * 0.05, 0.001, direction, max(maximumDistance - 0.051, 0.001) };
 	RayQuery<RAY_FLAG_FORCE_OPAQUE> query;
-	query.TraceRayInline(gSmokeWorldTlas, RAY_FLAG_FORCE_OPAQUE, NRI_TLAS_MASK_ALL_WORKLOADS, ray);
+	query.TraceRayInline(gSmokeWorldTlas, RAY_FLAG_FORCE_OPAQUE, NRI_TLAS_MASK_GI, ray);
 	while (query.Proceed()) {}
 	if (query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
 		return result;
@@ -312,7 +312,7 @@ bool SmokePointLightVisibleFiltered(float3 receiverPosition, float3 lightDirecti
 			}
 			RayDesc ray = { origin, tMin, lightDirection, remainingDistance };
 			RayQuery<RAY_FLAG_FORCE_OPAQUE> query;
-			query.TraceRayInline(gSmokeWorldTlas, RAY_FLAG_FORCE_OPAQUE, NRI_TLAS_MASK_ALL_WORKLOADS, ray);
+			query.TraceRayInline(gSmokeWorldTlas, RAY_FLAG_FORCE_OPAQUE, NRI_TLAS_MASK_SHADOW, ray);
 			while (query.Proceed()) {}
 			if (query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
 			{
@@ -419,7 +419,7 @@ bool SmokePointLightVisible(float3 receiverPosition, float3 lightDirection, floa
 	ray.TMax = max(lightDistance - 0.051, 0.001);
 	const uint rayFlags = RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
 	RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
-	query.TraceRayInline(gSmokeWorldTlas, rayFlags, NRI_TLAS_MASK_ALL_WORKLOADS, ray);
+	query.TraceRayInline(gSmokeWorldTlas, rayFlags, NRI_TLAS_MASK_SHADOW, ray);
 	while (query.Proceed()) {}
 	return query.CommittedStatus() != COMMITTED_TRIANGLE_HIT;
 }

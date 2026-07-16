@@ -12,20 +12,30 @@
 #include "nri_pipeline_state.h"
 #include "nri_renderer_context.h"
 #include "nri_resources.h"
+#include "nri_map_movers.h"
+#include "nri_map_material_only_route.h"
+#include "nri_map_mover_rigid_route.h"
+#include "nri_map_mover_shadow.h"
+#include "nri_se29_floor_deformer_route.h"
 #include "nri_runtime_mutation.h"
 #include "nri_runtime_space_link_state.h"
 #include "nri_scene_data_frame_ring.h"
 #include "nri_scene_frame_geometry.h"
+#include "nri_surface_light_overlay.h"
+#include "nri_scene_material_frame_cache.h"
+#include "nri_scene_texture_frame_cache.h"
 #include "nri_scene_textures.h"
 #include "nri_sky_environment.h"
 #include "nri_scene_lights.h"
 #include "nri_surface_probe.h"
 #include "nri_material_policy.h"
 #include "nri_static_scene.h"
+#include "nri_static_scene_diagnostics.h"
 #include "nri_static_scene_geometry_upload.h"
 #include "nri_trace_stats.h"
 #include "nri_upscaler.h"
 #include "nri_weapon_event_batch.h"
+#include "nri_world_tlas_slots.h"
 #include "../framegen/nri_framegen.h"
 
 #include "../scene/nri_map_builder.h"
@@ -107,41 +117,9 @@ public:
 		Count,
 	};
 
-	enum class SceneBufferUploadDomain : uint32_t
-	{
-		StaticOverlay = 0,
-		RuntimeSpaceLink,
-		RuntimeMutation,
-		Dynamic,
-		LocalPlayerReflection,
-		RuntimeDebugSphere,
-		SurfaceLightOverlay,
-		PersistentVoxelMaterial,
-		Count,
-	};
-
-	struct SceneBufferUploadProducerStamp
-	{
-		uint64_t vertexPayloadStamp = 0;
-		uint64_t indexPayloadStamp = 0;
-		uint64_t primitivePayloadStamp = 0;
-		uint64_t primitiveProvenanceStamp = 0;
-		uint64_t materialPayloadStamp = 0;
-	};
-
-	struct SceneBufferUploadDomainSpan
-	{
-		SceneBufferUploadDomain domain = SceneBufferUploadDomain::StaticOverlay;
-		uint32_t vertexOffset = 0;
-		uint32_t vertexCount = 0;
-		uint32_t indexOffset = 0;
-		uint32_t indexCount = 0;
-		uint32_t primitiveOffset = 0;
-		uint32_t primitiveCount = 0;
-		uint32_t materialOffset = 0;
-		uint32_t materialCount = 0;
-		SceneBufferUploadProducerStamp stamp = {};
-	};
+	using SceneBufferUploadDomain = NRISceneBufferUploadDomain;
+	using SceneBufferUploadProducerStamp = NRISceneBufferUploadProducerStamp;
+	using SceneBufferUploadDomainSpan = NRISceneBufferUploadDomainSpan;
 
 	struct StateCommitDomainGenerations
 	{
@@ -481,6 +459,8 @@ public:
 		double traceOpaqueReadbackMs = 0.0;
 		double traceOpaqueCommandMs = 0.0;
 		double traceOpaqueStatsCopyMs = 0.0;
+		double postFrameDiagnosticsMs = 0.0;
+		double unattributedMs = 0.0;
 		double otherMs = 0.0;
 		double staticSceneMs = 0.0;
 		double runtimeMutationMs = 0.0;
@@ -599,6 +579,12 @@ public:
 		double sceneSelectLightMergeMs = 0.0;
 		double sceneSelectStaticInstancesMs = 0.0;
 		double sceneSelectMaterialBridgeMs = 0.0;
+		uint32_t sceneMaterialResidentRebuilds = 0;
+		uint32_t sceneMaterialResidentHits = 0;
+		uint32_t sceneMaterialStaticRowsCopied = 0;
+		uint32_t sceneMaterialPersistentRowsAppended = 0;
+		uint32_t sceneMaterialOverlayRowsAppended = 0;
+		uint32_t sceneMaterialResidentRowsReused = 0;
 		double sceneSelectPaletteMs = 0.0;
 		double sceneSelectTexturesMs = 0.0;
 		double sceneSelectMaterialSplitMs = 0.0;
@@ -665,6 +651,14 @@ public:
 		uint32_t sceneSelectBufferUploadProducerStampIndexUses = 0;
 		uint32_t sceneSelectBufferUploadProducerStampPrimitiveUses = 0;
 		uint32_t sceneSelectBufferUploadProducerStampMaterialUses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampFallbackSpans = 0;
+		uint32_t sceneSelectBufferUploadProducerStampCoverageRejects = 0;
+		uint32_t sceneSelectBufferUploadIdentityValidationChecks = 0;
+		uint32_t sceneSelectBufferUploadIdentityValidationMismatches = 0;
+		uint32_t sceneSelectBufferUploadVisibilityIdentityCacheHits = 0;
+		uint32_t sceneSelectBufferUploadVisibilityIdentityCacheBuilds = 0;
+		uint32_t sceneSelectBufferUploadVisibilityIdentityValidationChecks = 0;
+		uint32_t sceneSelectBufferUploadVisibilityIdentityValidationMismatches = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeChecks = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeSkips = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeForcedFull = 0;
@@ -686,6 +680,8 @@ public:
 		uint32_t sceneSelectBufferUploadRangeFallbackLarge = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRangeUploads = 0;
 		uint32_t sceneSelectBufferUploadMaterialRangeUploads = 0;
+		uint32_t sceneSelectBufferUploadVertexRangeUploads = 0;
+		uint32_t sceneSelectBufferUploadIndexRangeUploads = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheChecks = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheHits = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheMisses = 0;
@@ -726,9 +722,12 @@ public:
 		uint64_t sceneSelectBufferUploadPrimitiveDirtyUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadMaterialDirtyUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadRangeUploadedBytes = 0;
+		uint64_t sceneSelectBufferUploadProducerStampStampedBytes = 0;
+		uint64_t sceneSelectBufferUploadProducerStampFallbackBytes = 0;
 		std::array<SceneBufferUploadDomainTraceEntry, SceneBufferUploadDomainCount> sceneSelectBufferUploadDomains = {};
 		double sceneSelectInstanceHandlesMs = 0.0;
 		double sceneSelectTexturePrepMs = 0.0;
+		double sceneSelectSurfaceLightMs = 0.0;
 		double sceneSelectStateCommitMs = 0.0;
 		double sceneSelectStateCommitFlagsMs = 0.0;
 		double sceneSelectStateCommitDynamicStateMs = 0.0;
@@ -771,6 +770,30 @@ public:
 		uint32_t sceneSelectStateCommitChangedTlasInstances = 0;
 		uint32_t sceneSelectStateCommitChangedSceneConstants = 0;
 		uint32_t sceneSelectStateCommitChangedDomainCount = 0;
+		uint64_t sceneReusePresentationGeneration = 0;
+		uint64_t sceneReuseSimulationGeneration = 0;
+		uint64_t sceneReuseEngineGeneration = 0;
+		uint64_t sceneReuseMapBuildSerial = 0;
+		uint32_t sceneReuseTicksExecuted = 0;
+		uint32_t sceneReuseZeroTickCandidate = 0;
+		uint32_t sceneReuseSurfaceLightCalled = 0;
+		uint32_t sceneReuseSurfaceLightHit = 0;
+		uint32_t sceneReuseSurfaceLightCandidateHit = 0;
+		uint32_t sceneReuseSurfaceLightBuild = 0;
+		uint32_t sceneReuseSurfaceLightReject = 0;
+		uint32_t sceneReuseSurfaceLightValidationChecked = 0;
+		uint32_t sceneReuseSurfaceLightValidationMismatch = 0;
+		uint64_t sceneReuseSurfaceLightKey = 0;
+		uint32_t sceneReuseTextureCalled = 0;
+		uint32_t sceneReuseTextureHit = 0;
+		uint32_t sceneReuseTextureCandidateHit = 0;
+		uint32_t sceneReuseTextureBuild = 0;
+		uint32_t sceneReuseTextureReject = 0;
+		uint32_t sceneReuseTextureValidationChecked = 0;
+		uint32_t sceneReuseTextureValidationMismatch = 0;
+		uint32_t sceneReuseTextureDynamicCount = 0;
+		uint32_t sceneReuseTextureMissReasonMask = 0;
+		uint64_t sceneReuseTextureKey = 0;
 		double dynamicCaptureCountMs = 0.0;
 		double dynamicCaptureWallsMs = 0.0;
 		double dynamicCaptureFlatsMs = 0.0;
@@ -783,6 +806,10 @@ public:
 		double dynamicCaptureModelSortMs = 0.0;
 		double dynamicCaptureModelStoreMs = 0.0;
 		double dynamicCaptureVoxelFrameMs = 0.0;
+		double dynamicCaptureVoxelLifecycleMs = 0.0;
+		double dynamicCaptureVoxelLiveEnumerationMs = 0.0;
+		double dynamicCaptureVoxelReconcileMs = 0.0;
+		double dynamicCaptureVoxelDuplicationAuditMs = 0.0;
 		double dynamicCaptureStatsMs = 0.0;
 		double persistentDynamicMs = 0.0;
 		double dynamicAsMs = 0.0;
@@ -871,6 +898,17 @@ public:
 		double sceneTextureLookupMs = 0.0;
 		double sceneTextureRealizeMs = 0.0;
 		double sceneTextureDescriptorMs = 0.0;
+		uint32_t sceneTextureDescriptorWrites = 0;
+		uint32_t sceneTextureDescriptorSkips = 0;
+		uint32_t sceneTextureDescriptorRowsWritten = 0;
+		uint32_t sceneTextureStableSlotMode = 0;
+		uint32_t sceneTextureSlotsLive = 0;
+		uint32_t sceneTextureSlotsQuarantined = 0;
+		uint32_t sceneTextureSlotsFree = 0;
+		uint64_t sceneTextureSlotReuses = 0;
+		uint64_t sceneTextureSlotExhaustions = 0;
+		uint32_t sceneTextureStableDescriptorHits = 0;
+		uint32_t sceneTextureStableDescriptorMisses = 0;
 		double sceneTextureTransitionMs = 0.0;
 		double actorOverrideMapBuildMs = 0.0;
 		double materialBuildMs = 0.0;
@@ -1035,6 +1073,7 @@ public:
 		uint32_t runtimeMutationResidentApplyMaterialOnlyCount = 0;
 		uint32_t runtimeMutationResidentApplyStructuralCount = 0;
 		uint32_t runtimeMutationResidentApplyFastMaterialOnlyCount = 0;
+		uint32_t runtimeMutationResidentApplyCertifiedMaterialOnlyCount = 0;
 		uint32_t runtimeMutationResidentApplySlowMaterialOnlyCount = 0;
 		uint32_t runtimeMutationResidentApplyMaterialOnlyExclusiveCount = 0;
 		uint32_t runtimeMutationResidentApplyMaterialOnlyNoResidentChunkCount = 0;
@@ -1240,6 +1279,26 @@ public:
 		uint32_t dynamicCaptureVoxelCanonicalSurfaceBuilds = 0;
 		uint32_t dynamicCaptureVoxelCanonicalSurfaceHits = 0;
 		uint32_t dynamicCaptureVoxelCanonicalSurfaceInvalid = 0;
+		uint32_t dynamicCaptureVoxelDuplicationAuditCalls = 0;
+		uint32_t dynamicCaptureVoxelDuplicationAuditEntriesScanned = 0;
+		uint32_t dynamicCaptureVoxelDuplicationAuditTemporaryContainersBuilt = 0;
+		uint32_t dynamicCaptureVoxelMaintenanceCalls = 0;
+		uint32_t dynamicCaptureVoxelMaintenanceSimulationSkips = 0;
+		uint32_t dynamicCaptureVoxelMaintenanceLegacyReconciles = 0;
+		uint32_t dynamicCaptureVoxelMaintenanceDeltaReconciles = 0;
+		uint32_t dynamicCaptureVoxelMaintenanceReasonMask = 0;
+		uint32_t dynamicCaptureVoxelMaintenanceLiveActorsEnumerated = 0;
+		uint32_t dynamicCaptureVoxelMaintenanceCacheEntriesScanned = 0;
+		uint32_t dynamicCaptureVoxelMaintenanceRemovals = 0;
+		uint32_t dynamicCaptureVoxelMaintenanceTransformSyncs = 0;
+		uint32_t dynamicCaptureVoxelLifecycleEventsApplied = 0;
+		uint32_t dynamicCaptureVoxelLifecycleEventsDiscarded = 0;
+		uint32_t dynamicCaptureVoxelLifecycleInsertEvents = 0;
+		uint32_t dynamicCaptureVoxelLifecycleRemoveEvents = 0;
+		uint32_t dynamicCaptureVoxelLifecycleStatEvents = 0;
+		uint32_t dynamicCaptureVoxelLifecycleResetEvents = 0;
+		uint32_t dynamicCaptureVoxelLifecycleOverflows = 0;
+		uint32_t dynamicCaptureVoxelLifecycleRemovalEntriesMarked = 0;
 		uint32_t dynamicCaptureModelActorCandidates = 0;
 		uint32_t dynamicCaptureModelActorSorted = 0;
 		uint32_t dynamicCaptureModelActorSortSkipped = 0;
@@ -1316,6 +1375,7 @@ public:
 		uint32_t persistentVoxelSharedMeshResources = 0;
 		uint32_t persistentVoxelTlasInstances = 0;
 		uint32_t persistentVoxelInstanceTransformUpdates = 0;
+		uint32_t persistentVoxelBatchSerialFastPathCount = 0;
 		uint32_t persistentVoxelBakedFallbackInstances = 0;
 		uint32_t persistentVoxelBatchActorCount = 0;
 		uint32_t persistentVoxelInstanceRecordCount = 0;
@@ -1327,6 +1387,26 @@ public:
 		uint64_t persistentVoxelResidentResourceBytes = 0;
 		uint64_t persistentVoxelZeroRefResourceBytes = 0;
 		uint32_t worldTlasBuildCalls = 0;
+		uint32_t worldTlasExactReuseCalls = 0;
+		uint32_t worldTlasUpdateCalls = 0;
+		uint32_t worldTlasUpdateReasonMask = 0;
+		uint32_t worldTlasUpdateDirtyRangeCount = 0;
+		uint32_t worldTlasUpdateDirtyInstanceCount = 0;
+		uint64_t worldTlasUpdateDirtyBytes = 0;
+		uint32_t worldTlasBlasOverrideUpdateCalls = 0;
+		uint32_t worldTlasFullBuildCalls = 0;
+		uint32_t worldTlasFullBuildReasonMask = 0;
+		uint32_t worldTlasFullBuildChangeReasonMask = 0;
+		uint32_t worldTlasFullBuildUpdateRejectReasonMask = 0;
+		uint32_t worldTlasFullBuildUpdateGateReasonMask = 0;
+		uint32_t worldTlasFullBuildDestinationReuseCalls = 0;
+		uint32_t worldTlasFullBuildDestinationCreateCalls = 0;
+		uint32_t worldTlasFullBuildGrowthCalls = 0;
+		uint32_t worldTlasFullBuildGrowthReasonMask = 0;
+		uint32_t worldTlasFullBuildReuseRejectReasonMask = 0;
+		uint32_t worldTlasFullBuildReuseRuntimeFallbacks = 0;
+		uint32_t worldTlasSameCommandResourceRotations = 0;
+		uint64_t worldTlasBlasContentGeneration = 0;
 		uint32_t worldTlasInstanceCount = 0;
 		double worldTlasRetireMs = 0.0;
 		double worldTlasInstanceUploadMs = 0.0;
@@ -1335,6 +1415,7 @@ public:
 		double worldTlasScratchMs = 0.0;
 		double worldTlasDescriptorMs = 0.0;
 		double worldTlasBuildMs = 0.0;
+		double worldTlasUpdateMs = 0.0;
 		double worldTlasBarrierMs = 0.0;
 		uint32_t worldTlasCreateCalls = 0;
 		uint32_t worldTlasScratchQueries = 0;
@@ -1347,11 +1428,19 @@ public:
 		uint32_t worldTlasPreGrowInstanceCount = 0;
 		uint32_t worldTlasPreGrowInstanceGrowCount = 0;
 		uint32_t worldTlasPreGrowScratchGrowCount = 0;
+		uint32_t worldTlasPreGrowDeferredAsSlots = 0;
+		uint32_t worldTlasPreGrowDeferredInstanceSlots = 0;
+		uint32_t worldTlasPreGrowDeferredScratchSlots = 0;
 		uint64_t worldTlasPreGrowInstanceRequestedBytes = 0;
 		uint64_t worldTlasPreGrowInstanceAllocatedBytes = 0;
 		uint64_t worldTlasPreGrowScratchRequestedBytes = 0;
+		uint64_t worldTlasPreGrowBuildScratchRequestedBytes = 0;
+		uint64_t worldTlasPreGrowUpdateScratchRequestedBytes = 0;
 		uint64_t worldTlasPreGrowScratchAllocatedBytes = 0;
 		uint64_t worldTlasScratchRequestedBytes = 0;
+		uint64_t worldTlasBuildScratchRequestedBytes = 0;
+		uint64_t worldTlasUpdateScratchRequestedBytes = 0;
+		uint64_t worldTlasScratchAllocatedBytes = 0;
 		uint64_t worldTlasMemoryBytes = 0;
 		uint32_t asWorldTlasObjects = 0;
 		uint32_t asWorldTlasEntries = 0;
@@ -1409,6 +1498,21 @@ public:
 		uint32_t asStaticSegmentRouteRejectMissingBlas = 0;
 		uint32_t asStaticSegmentRouteSegmentBlasRefs = 0;
 		uint32_t asStaticSegmentRouteChunkBlasRefs = 0;
+		bool successDiagnosticsBasicCollected = false;
+		bool successDiagnosticsInstanceCompositionCollected = false;
+		bool successDiagnosticsPersistentVoxelStatusCollected = false;
+		bool successDiagnosticsAsSummaryCollected = false;
+		bool successDiagnosticsDeepSceneAuditCollected = false;
+		uint32_t successDiagnosticsDeepSceneAuditCacheHits = 0;
+		uint32_t successDiagnosticsDeepSceneAuditRebuilds = 0;
+		uint32_t successDiagnosticsInstanceRowsScanned = 0;
+		uint32_t successDiagnosticsPersistentStatusCalls = 0;
+		uint32_t successDiagnosticsStaticChunkRowsScanned = 0;
+		uint32_t successDiagnosticsStaticChunkRowsIncrementallyUpdated = 0;
+		uint32_t successDiagnosticsStaticSurfaceRowsScanned = 0;
+		uint32_t successDiagnosticsStaticSurfaceRowsIncrementallyUpdated = 0;
+		uint32_t successDiagnosticsRegistryRowsScanned = 0;
+		uint32_t successDiagnosticsTemporaryContainersBuilt = 0;
 		uint32_t emissiveAsRecords = 0;
 		bool emissiveAsEnabled = false;
 		uint32_t emissiveAsRecordsStatic = 0;
@@ -1594,6 +1698,43 @@ public:
 		uint32_t traceOpaqueDispatchX = 0;
 		uint32_t traceOpaqueDispatchY = 0;
 		uint32_t traceOpaqueDispatchZ = 0;
+		uint64_t traceRendererFrame = 0;
+		uint64_t traceSettingsKey = 0;
+		uint64_t traceWorkloadKey = 0;
+		uint32_t traceRenderWidth = 0;
+		uint32_t traceRenderHeight = 0;
+		uint32_t traceOutputWidth = 0;
+		uint32_t traceOutputHeight = 0;
+		uint32_t traceLightBounceCount = 0;
+		uint32_t traceMirrorBounceCount = 0;
+		uint32_t tracePortalDepth = 0;
+		uint32_t traceEmissiveSampleCount = 0;
+		uint32_t traceEmissiveRequestedSampleCount = 0;
+		uint32_t traceEmissivePrimarySampleBudget = 0;
+		uint32_t traceIndirectSamplingRequestedMode = 0;
+		uint32_t traceIndirectSamplingEffectiveMode = 0;
+		uint32_t traceIndirectSamplingActiveMode = 0;
+		uint32_t traceHitDistanceReconstructionMode = 0;
+		uint32_t traceRuntimeLightCount = 0;
+		uint32_t traceRuntimeLightTileCountX = 0;
+		uint32_t traceRuntimeLightTileCountY = 0;
+		uint32_t traceRuntimeLightTileSize = 0;
+		uint32_t traceRuntimeLightTileIndexCount = 0;
+		uint32_t traceRuntimeLightMaxTileOccupancy = 0;
+		uint32_t traceEmissivePrimitiveCount = 0;
+		double traceEmissiveTotalPower = 0.0;
+		uint32_t traceFlags = 0;
+		uint32_t traceDebugMode = 0;
+		uint32_t traceBootstrapMode = 0;
+		uint32_t traceUpscalerKind = 0;
+		uint32_t traceUpscalerMode = 0;
+		uint32_t traceDenoiserMode = 0;
+		uint32_t traceDirectScene = 0;
+		uint32_t traceDirectional = 0;
+		uint32_t traceDirectionalShadow = 0;
+		uint32_t traceSplitShadow = 0;
+		uint32_t traceFastEmissiveShadow = 0;
+		uint32_t traceVisibleChunkGate = 0;
 		uint32_t activePrimitiveCount = 0;
 		uint32_t dynamicPrimitiveCount = 0;
 		uint32_t activeMaterialCount = 0;
@@ -1879,6 +2020,9 @@ public:
 	const PerfShellTraceStats& GetLastPerfShellTraceStats() const { return mLastPerfShellTraceStats; }
 	const PerfResourceTraceStats& GetLastPerfResourceTraceStats() const { return mLastPerfResourceTraceStats; }
 	const PerfTraceShaderStats& GetLastPerfTraceShaderStats() const { return mLastPerfTraceShaderStats; }
+	NRISE29FloorDeformerRouteFrameStats GetSE29FloorDeformerRouteFrameStats() const;
+	NRIMapMaterialOnlyRouteFrameStats GetMapMaterialOnlyRouteFrameStats() const;
+	nri_scene::PTMapMaterialStateVariantStats GetMapMaterialVariantStats() const;
 	MemoryTelemetry GetMemoryTelemetry() const;
 	static const char* GetMaterialBuildTraceSlotName(MaterialBuildTraceSlot slot);
 	enum class FrameTextureSlot : uint32_t
@@ -2058,6 +2202,16 @@ private:
 		std::vector<nri_scene::PrimitiveData> primitives;
 	};
 
+	struct PrimitiveVisibilityIdentityCache
+	{
+		bool valid = false;
+		bool mapValid = false;
+		uint64_t mapBuildSerial = 0;
+		uint32_t chunkCount = 0;
+		uint32_t statsChunkCount = 0;
+		uint64_t identity = 0;
+	};
+
 	struct DynamicOverlayBlasAsset
 	{
 		uint64_t key = 0;
@@ -2216,7 +2370,8 @@ private:
 	bool EnsurePaletteTexture(const nri_scene::MaterialBridgeData& materials);
 	uint32_t FindSceneTextureCacheIndex(uint64_t key) const;
 	bool EnsureSceneTextureCacheEntry(const nri_scene::TextureUpload& upload, double* outRealizeMs = nullptr);
-	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason = nullptr);
+	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason = nullptr, const NRISceneTextureFrameReuseInputs* reuseInputs = nullptr);
+	void ResolveSceneMaterialTextureSlots(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& gpuMaterials) const;
 	bool EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky);
 	bool EnsureStaticMapScene();
 	void ResetResidentMapChunkRegistry();
@@ -2284,6 +2439,7 @@ private:
 		bool updateDynamicPerfStats,
 		NRIBufferResource* buildScratchBuffer = nullptr,
 		nri::AccelerationStructureBits buildFlags = nri::AccelerationStructureBits::PREFER_FAST_BUILD);
+	void NoteWorldBlasContentChanged();
 	bool PreloadStaticMapResources();
 	bool PreloadPersistentVoxelResources();
 	bool PreloadMaterialResources();
@@ -2322,14 +2478,16 @@ private:
 	NRIBufferResource& GetCurrentDynamicMaterialBuffer();
 	NRIAccelerationStructureResource& GetCurrentDynamicBottomLevelAS();
 	NRIBufferResource& GetCurrentTlasInstanceBuffer();
+	NRIWorldTlasFrameSlot& GetCurrentWorldTlasFrameSlot();
 	const NRIBufferResource& GetCurrentDynamicVertexBuffer() const;
 	const NRIBufferResource& GetCurrentDynamicIndexBuffer() const;
 	const NRIBufferResource& GetCurrentDynamicPrimitiveBuffer() const;
 	const NRIBufferResource& GetCurrentDynamicMaterialBuffer() const;
 	const NRIAccelerationStructureResource* GetCurrentDynamicBottomLevelAS() const;
-	const NRIBufferResource& GetCurrentTlasInstanceBuffer() const;
+	const NRIWorldTlasFrameSlot* GetCurrentWorldTlasFrameSlot() const;
 	bool HasAnyDynamicBottomLevelAS() const;
 	void DestroyDynamicBottomLevelAccelerationStructures();
+	void DestroyWorldTlasFrameSlots();
 	ResidentUploadScratchFrame& GetResidentUploadScratchFrame();
 	void ResetResidentUploadScratchFrame(const char* reason);
 	nri::DescriptorSet* GetCurrentSceneTextureSet() const;
@@ -2370,7 +2528,12 @@ private:
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging);
 	NRISurfaceProbeEmissiveDiagnostics BuildSurfaceProbeEmissiveDiagnostics(const NRISurfaceProbeResult& probe) const;
-	bool BuildSurfaceLightOverlay(nri_scene::SceneView& outSceneView, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
+	bool BuildSurfaceLightOverlay(
+		nri_scene::SceneView& outSceneView,
+		nri_scene::GeometryData& outGeometry,
+		nri_scene::MaterialBridgeData& outMaterials,
+		bool allowReuse,
+		bool validateReuse);
 	void RefreshSceneLightSystem(
 		bool usedStaticMapScene,
 		const nri_scene::SceneView* capturedSceneView,
@@ -2478,6 +2641,10 @@ private:
 	std::array<nri::Pipeline*, (size_t)PipelineSlot::Count> mPipelines = {};
 	nri::DescriptorSet* mSamplerSet = nullptr;
 	std::vector<nri::DescriptorSet*> mSceneTextureSets;
+	std::vector<uint64_t> mSceneTextureKeyScratch;
+	std::vector<uint64_t> mSceneTextureSetHashes;
+	std::vector<uint8_t> mSceneTextureSetHashValid;
+	bool mSceneTextureStableSlotsActive = false;
 	std::vector<nri::DescriptorSet*> mSceneDataSets;
 	std::vector<SceneDataDescriptorSnapshot> mSceneDataSnapshots;
 	nri::DescriptorSet* mActiveSceneDataSet = nullptr;
@@ -2507,6 +2674,7 @@ private:
 	const NRITextureResource* GetActiveSkyTexture() const { return mSkyEnvironment.ActiveTexture(); }
 
 	NRISceneTextureResidency mSceneTextures;
+	NRISceneTextureFrameCache mSceneTextureFrameCache;
 	NRIMaterialTextureWarmupCursor mStaticPreloadMaterialCursor = {};
 	NRIMaterialTextureWarmupCursor mVoxelPreloadMaterialCursor = {};
 	PreloadMaterialStatus mPreloadMaterialStatus = {};
@@ -2521,8 +2689,7 @@ private:
 	NRIBufferResource mStaticIndexBuffer;
 	NRIBufferResource mStaticPrimitiveBuffer;
 	NRIBufferResource mStaticMaterialBuffer;
-	NRIBufferResource mTlasInstanceBuffer;
-	std::vector<NRIBufferResource> mTlasInstanceBufferRing;
+	NRIWorldTlasFrameSlots mWorldTlasFrameSlots;
 	NRIBufferResource mSceneInstanceBuffer;
 	NRIBufferResource mPortalBuffer;
 	NRIBufferResource mRuntimeLightBuffer;
@@ -2541,9 +2708,11 @@ private:
 	NRITraceShaderStats mTraceShaderStats;
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mResidentStaticBlasScratchBuffer;
-	NRIBufferResource mTopLevelScratchBuffer;
 	NRIBufferResource mEmissiveTopLevelScratchBuffer;
 	SelectPrimitiveRewriteCache mSelectPrimitiveRewriteCache = {};
+	PrimitiveVisibilityIdentityCache mPrimitiveVisibilityIdentityCache = {};
+	NRISceneUploadProducerGenerations mSceneUploadProducerGenerations;
+	NRISceneUploadIdentityValidator mSceneUploadIdentityValidator;
 	std::vector<nri_scene::MaterialData> mSelectCapturedGpuMaterialScratch;
 	std::vector<nri_scene::MaterialData> mSelectDynamicGpuMaterialScratch;
 	std::vector<nri_scene::MaterialData> mSelectPersistentVoxelGpuMaterialScratch;
@@ -2552,6 +2721,7 @@ private:
 	nri_scene::GeometryData mSelectLocalPlayerReflectionGeometryScratch;
 	nri_scene::GeometryData mSelectOverlayGeometryScratch;
 	nri_scene::MaterialBridgeData mSelectOverlayMaterialBridgeScratch;
+	NRISceneMaterialFrameCache mSceneMaterialFrameCache;
 	NRISceneFrameGeometry mSceneFrameGeometry;
 	std::vector<nri::TopLevelInstance> mSelectTopLevelInstanceScratch;
 	std::vector<SceneInstanceData> mSelectSceneInstanceScratch;
@@ -2567,6 +2737,8 @@ private:
 	uint32_t mSceneDataFrameRingOverCapFrameIndex = UINT32_MAX;
 	std::vector<SceneUploadDirtyRange> mSceneUploadPrimitiveDirtyRangeScratch;
 	std::vector<SceneUploadDirtyRange> mSceneUploadMaterialDirtyRangeScratch;
+	std::vector<SceneUploadDirtyRange> mSceneUploadVertexDirtyRangeScratch;
+	std::vector<SceneUploadDirtyRange> mSceneUploadIndexDirtyRangeScratch;
 	std::vector<DynamicOverlayBlasAsset> mDynamicOverlayBlasAssets;
 	std::vector<nri_scene::SceneVertex> mDynamicOverlayBlasVertexScratch;
 	std::vector<uint32_t> mDynamicOverlayBlasIndexScratch;
@@ -2597,7 +2769,6 @@ private:
 	PerfTraceShaderStats mLastPerfTraceShaderStats = {};
 	uint64_t mPendingAutoExposureStatsFrame = 0;
 
-	NRIAccelerationStructureResource mTopLevelAS;
 	NRIAccelerationStructureResource mEmissiveTopLevelAS;
 
 	NRISkyEnvironment mSkyEnvironment;
@@ -2607,7 +2778,14 @@ private:
 	StaticMapSceneCache mStaticMapScene;
 	StaticMapChunkAtlas mStaticMapChunkAtlas = {};
 	NRIStaticSceneResidency mStaticSceneResidency;
+	NRIStaticSceneDiagnosticsCache mStaticSceneDiagnostics;
+	NRIMapMoverSystem mMapMovers;
+	NRIMapMoverShadow mMapMoverShadow;
+	NRIMapMoverRigidRoute mMapMoverRigidRoute;
+	NRISE29FloorDeformerRoute mSE29FloorDeformerRoute;
+	NRIMapMaterialOnlyRoute mMapMaterialOnlyRoute;
 	NRIRuntimeMutationSystem mRuntimeMutation;
+	NRISurfaceLightOverlayCache mSurfaceLightOverlayCache;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	NRIPersistentVoxelResidency mPersistentVoxels;
 	StateCommitDomainGenerations mLastStateCommitDomainGenerations = {};
@@ -2710,6 +2888,7 @@ private:
 	NRIFrameGenerationUiMode mLastFrameGenerationResolvedUiMode = NRIFrameGenerationUiMode::Auto;
 	bool mUseUpscaledInFinal = false;
 	bool mLastTemporalAppTaaEnabled = false;
+	bool mLastTemporalDenoiseEnabled = false;
 	bool mHasTemporalExposureState = false;
 	bool mHasAutoExposureSettingsState = false;
 	bool mUseDenoisedCompositionInputs = false;
@@ -2772,6 +2951,7 @@ private:
 	uint64_t mLastWorldTlasSceneInstancePayloadHash = 0;
 	uint64_t mLastWorldTlasInstanceFrameIndex = UINT64_MAX;
 	uint32_t mLastWorldTlasInstanceCount = 0;
+	uint64_t mWorldBlasContentGeneration = 1;
 	uint32_t mBoundEmissivePrimitiveCount = 0;
 	uint32_t mBoundEmissiveDominantPrimitive = UINT32_MAX;
 	uint32_t mBoundEmissiveDominantTile = 0;

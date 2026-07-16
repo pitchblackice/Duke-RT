@@ -38,6 +38,7 @@ Prepared for public release: 03/21/2003 - Charlie Wiederhold, 3D Realms
 #include "precache.h"
 #include "render.h"
 #include "screenjob_.h"
+#include "runtime_map_movers.h"
 #include "../../../common/rendering/nri/scene/nri_map_builder.h"
 
 BEGIN_DUKE_NS  
@@ -392,6 +393,7 @@ void resetprestat(DDukePlayer* const p, int g)
 	paused             = 0;
 	ud.cameraactor =nullptr;
 	mspos.Clear();
+	ResetRuntimeMapMoverAuthority();
 	animates.Clear();
 	camsprite               =nullptr;
 	ud.earthquaketime          = 0;
