@@ -2366,7 +2366,7 @@ private:
 	bool EnsurePaletteTexture(const nri_scene::MaterialBridgeData& materials);
 	uint32_t FindSceneTextureCacheIndex(uint64_t key) const;
 	bool EnsureSceneTextureCacheEntry(const nri_scene::TextureUpload& upload, double* outRealizeMs = nullptr);
-	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason = nullptr, const NRISceneTextureFrameReuseInputs* reuseInputs = nullptr);
+	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason = nullptr, const NRISceneTextureFrameReuseInputs* reuseInputs = nullptr, NRISceneTextureMissPolicy missPolicy = NRISceneTextureMissPolicy::Synchronous);
 	void ResolveSceneMaterialTextureSlots(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& gpuMaterials) const;
 	bool EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky);
 	bool EnsureStaticMapScene();
@@ -2441,7 +2441,9 @@ private:
 	bool PreloadMaterialResources();
 	bool PreGrowLevelSceneResourcesForLoading();
 	bool EnsurePersistentVoxelBatch();
-	bool UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials);
+	bool UploadPersistentVoxelArenaMaterialBuffers(
+		const std::vector<nri_scene::MaterialData>& materials,
+		bool validateActiveMaterialPayloads = false);
 	void InvalidateRuntimeLightSceneData();
 	bool RefreshResidentStaticSceneDataSet();
 	void NoteResidentStaticAtlasGrow();

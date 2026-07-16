@@ -1085,6 +1085,7 @@ public:
 		const std::vector<nri_scene::MaterialData>& materials,
 		const NRIPersistentVoxelMaterialUploadServices& services,
 		uint32_t frameIndex,
+		bool validateActiveMaterialPayloads,
 		bool voxelStatsEnabled,
 		NRIPersistentVoxelMaterialUploadStats& outStats);
 	bool AppendTlasInstances(

@@ -3042,7 +3042,9 @@ void NRIRenderer::PrintResidentMapChunkRegistryStatus() const
 	PrintNRIResidentMapChunkRegistryStatusSnapshot(snapshot);
 }
 
-bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials)
+bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(
+	const std::vector<nri_scene::MaterialData>& materials,
+	bool validateActiveMaterialPayloads)
 {
 	if (!mPersistentVoxels.HasValidBatch())
 	{
@@ -3095,6 +3097,7 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 		materials,
 		services,
 		mFrameIndex,
+		validateActiveMaterialPayloads,
 		(bool)nri_voxelstats,
 		uploadStats);
 

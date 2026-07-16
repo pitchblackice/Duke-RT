@@ -1071,7 +1071,12 @@ bool NRIPersistentVoxelResidency::PublishCanonicalMaterialResource(
 
 void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge(PersistentVoxelBatch& targetBatch)
 {
-	targetBatch.materialBridge = {};
+	nri_scene::ClearMaterialBridgeRetainingCapacity(targetBatch.materialBridge);
+	const uint32_t materialCursor = materialRangeAllocator.Stats().cursorRows;
+	targetBatch.materialBridge.materials.reserve(materialCursor);
+	targetBatch.materialBridge.lightMetadata.reserve(materialCursor);
+	std::unordered_map<uint64_t, uint32_t> textureLookup;
+	textureLookup.reserve(targetBatch.materialBridge.textures.capacity() + materialVariantResources.size());
 	std::vector<PersistentVoxelMaterialVariantResource*> materialResources;
 	materialResources.reserve(materialVariantResources.size());
 	for (auto& pair : materialVariantResources)
@@ -1099,9 +1104,11 @@ void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge(PersistentVoxelBatc
 			targetBatch.materialBridge.materials.resize(resource->materialOffset);
 			targetBatch.materialBridge.lightMetadata.resize(resource->materialOffset);
 		}
-		nri_scene::AppendMaterialBridge(resource->materialBridge, targetBatch.materialBridge);
+		nri_scene::AppendMaterialBridge(resource->materialBridge, targetBatch.materialBridge, textureLookup);
 		const uint64_t materialSize = (uint64_t)resource->materialCount * sizeof(nri_scene::MaterialData);
-		if (resource->materialOffset <= targetBatch.materialBridge.materials.size() &&
+		if ((resource->materialPayloadHash == 0 ||
+			dirtyMaterialResourceKeys.find(resource->materialKeyHash) != dirtyMaterialResourceKeys.end()) &&
+			resource->materialOffset <= targetBatch.materialBridge.materials.size() &&
 			resource->materialCount <= targetBatch.materialBridge.materials.size() - resource->materialOffset)
 		{
 			resource->materialPayloadHash = NRIHashUploadPayloadBytes(
@@ -1455,6 +1462,7 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 	const std::vector<nri_scene::MaterialData>& materials,
 	const NRIPersistentVoxelMaterialUploadServices& services,
 	uint32_t frameIndex,
+	bool validateActiveMaterialPayloads,
 	bool voxelStatsEnabled,
 	NRIPersistentVoxelMaterialUploadStats& outStats)
 {
@@ -1476,9 +1484,20 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 		}
 		activeMaterialKeys.insert(actor.materialKeyHash);
 	}
-	for (uint64_t materialKey : activeMaterialKeys)
+	if (validateActiveMaterialPayloads)
 	{
-		dirtyMaterialResourceKeys.insert(materialKey);
+		dirtyMaterialResourceKeys.insert(activeMaterialKeys.begin(), activeMaterialKeys.end());
+	}
+	if (dirtyMaterialResourceKeys.empty() &&
+		(materialBuffer.buffer == nullptr || uploadedMaterialResourceGeneration != materialResourceGeneration))
+	{
+		for (const auto& pair : materialVariantResources)
+		{
+			if (pair.second.materialCount != 0)
+			{
+				dirtyMaterialResourceKeys.insert(pair.first);
+			}
+		}
 	}
 	outStats.activeValidatedResources = (uint32_t)activeMaterialKeys.size();
 	if (uploadedMaterialResourceGeneration == materialResourceGeneration && materialBuffer.buffer != nullptr)
@@ -5052,9 +5071,18 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				closure);
 			if (!reusedClosure)
 			{
+				if (closure.state == NRIPersistentVoxelMaterialClosureState::Pending)
+				{
+					outInProgress = true;
+					entry.lastReason = "material-closure-pending";
+					return true;
+				}
 				services.BuildMaterials(variantSceneView, builtMaterials, "persistent_voxel_admission_variant");
-				if (builtMaterials.materials.empty() ||
-					!services.materialClosure.Register(
+				if (builtMaterials.materials.empty())
+				{
+					return rollbackAdmission("material-build-failed", "materials");
+				}
+				if (!services.materialClosure.Register(
 						residencyLastBuildSerial,
 						variant.materialKeyHash,
 						validatedMaterialSignature,
@@ -5062,6 +5090,12 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 						NRIPersistentVoxelMaterialClosureSource::RuntimeUnknown,
 						closure))
 				{
+					if (closure.state == NRIPersistentVoxelMaterialClosureState::Pending)
+					{
+						outInProgress = true;
+						entry.lastReason = "material-closure-pending";
+						return true;
+					}
 					return rollbackAdmission("material-build-failed", "materials");
 				}
 			}
@@ -6300,6 +6334,18 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 					closure);
 				if (!reusedClosure)
 				{
+					if (closure.state == NRIPersistentVoxelMaterialClosureState::Pending)
+					{
+						if (existingActor != nullptr)
+						{
+							existingActor->active = true;
+						}
+						if (outDeferredReason != nullptr)
+						{
+							*outDeferredReason = PersistentVoxelActorDeferredReason::TexturePrewarm;
+						}
+						return true;
+					}
 					Clocker materialClock(NriPTMaterialBuild);
 					const nri_scene::SurfaceRef* materialSurface =
 						cacheEntry.lightSurface != nullptr ? cacheEntry.lightSurface :
@@ -6330,6 +6376,13 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				}
 				if (!reusedClosure && !prewarmPersistentVoxelActorTextures(builtMaterials))
 				{
+					batchServices.materialClosure.Register(
+						residencyLastBuildSerial,
+						cacheEntry.materialKeyHash,
+						validatedMaterialSignature,
+						builtMaterials,
+						NRIPersistentVoxelMaterialClosureSource::RuntimeUnknown,
+						closure);
 					if (voxelStatsEnabled)
 					{
 						Printf("PERF pt voxel material variant NRI: frame=%u action=defer reason=texture-prewarm actor_key=0x%llx mat_key=0x%llx ref_count=%u material_offset=%u material_count=%u material_capacity=%u upload_hash=0x%llx ready=0\n",

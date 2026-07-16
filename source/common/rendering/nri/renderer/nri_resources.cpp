@@ -194,7 +194,7 @@ void NRIRenderer::DestroyCachedTextures()
 	{
 		mFrameBuffer->DestroyTextureResource(texture.resource);
 	}
-	mSceneTextures.ClearCachedTextures();
+	mSceneTextures.ClearCachedTextures(mFrameBuffer);
 	mSceneTextures.SlotTable().Reset();
 	mSceneMaterialFrameCache.Reset();
 	mSceneTextureFrameCache.Reset();

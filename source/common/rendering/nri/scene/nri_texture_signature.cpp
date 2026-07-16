@@ -150,11 +150,6 @@ bool IsTexturePersistentSignatureEligible(FGameTexture* texture)
 
 bool CanBuildTextureSignatureFromMetadata(const TextureSignatureRequest& request)
 {
-	if (request.contentKind != TextureSignatureContentKind::ProcessedBGRA)
-	{
-		return false;
-	}
-
 	if ((request.flags & TextureSignatureRequestFlag_Upscale) != 0)
 	{
 		return false;

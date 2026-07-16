@@ -157,6 +157,7 @@ struct NRIPersistentVoxelMaterialClosureRegistryStats
 	uint32_t seedRegistrations = 0;
 	uint32_t seedDeduplications = 0;
 	uint32_t readySeeds = 0;
+	uint32_t pendingSeeds = 0;
 	uint32_t deferredSeeds = 0;
 	uint32_t failedSeeds = 0;
 	uint32_t lookups = 0;
@@ -183,11 +184,20 @@ class NRIPersistentVoxelMaterialClosureRegistry
 public:
 	void Reset(uint64_t buildSerial);
 	bool Register(NRIPersistentVoxelMaterialSeed seed, NRIPersistentVoxelMaterialClosureResult& outResult);
+	const NRIPersistentVoxelMaterialSeed* Find(
+		uint64_t buildSerial,
+		uint64_t materialKey,
+		uint64_t validatedSignature,
+		NRIPersistentVoxelMaterialClosureResult& outResult);
 	const NRIPersistentVoxelMaterialSeed* FindReady(
 		uint64_t buildSerial,
 		uint64_t materialKey,
 		uint64_t validatedSignature,
 		NRIPersistentVoxelMaterialClosureResult& outResult);
+	// Texture dependency failure invalidates the shared payload and every binding
+	// that references it. Keeping sibling bindings would allow a stale seed to be
+	// rediscovered after the failing binding rebuilds.
+	void Invalidate(uint64_t materialKey, uint64_t validatedSignature);
 	const NRIPersistentVoxelMaterialClosureRegistryStats& Stats() const { return mStats; }
 
 private:

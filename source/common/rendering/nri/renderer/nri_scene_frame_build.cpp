@@ -1226,7 +1226,8 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						combinedGpuMaterials,
 						false,
 						"static_map_overlay_combined",
-						&textureReuseInputs);
+						&textureReuseInputs,
+						NRISceneTextureMissPolicy::RuntimeAsyncDeferOverlay);
 				}();
 				dynamicGpuMaterials.clear();
 				persistentVoxelGpuMaterials.clear();
@@ -1610,6 +1611,17 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			else
 			{
 				LogFallback("PT runtime/dynamic overlay update failed; tracing the resident static world only.");
+				if (nri_ptdebug > 0)
+				{
+					Printf("NRI PT overlay fallback detail: frame=%u palette=%u textures=%u buffers=%u acceleration=%u primitives=%u persistent=%u\n",
+						mFrameIndex,
+						paletteReady ? 1u : 0u,
+						texturesReady ? 1u : 0u,
+						buffersReady ? 1u : 0u,
+						accelerationReady ? 1u : 0u,
+						(uint32_t)overlayGeometry.primitives.size(),
+						hasPersistentVoxelOverlay ? 1u : 0u);
+				}
 				if (mGpuSceneHasDynamicOverlay)
 				{
 					RestoreStaticTopLevelScene();
@@ -1842,7 +1854,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				combinedGpuMaterials.begin() + staticMaterialCount + persistentVoxelMaterialCount,
 				combinedGpuMaterials.end());
 			if (!UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials) ||
-				(persistentVoxelMaterialCount != 0 && !UploadPersistentVoxelArenaMaterialBuffers(persistentVoxelGpuMaterials)) ||
+				(persistentVoxelMaterialCount != 0 && !UploadPersistentVoxelArenaMaterialBuffers(persistentVoxelGpuMaterials, true)) ||
 				!NRISceneUploadManager::UpdateSceneDataSet(*this,
 					mStaticVertexBuffer,
 					mStaticIndexBuffer,

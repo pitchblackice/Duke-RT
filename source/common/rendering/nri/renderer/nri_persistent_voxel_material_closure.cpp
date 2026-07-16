@@ -250,28 +250,60 @@ bool NRIPersistentVoxelMaterialClosureRegistry::Register(
 		mStats.failedSeeds++;
 		return false;
 	}
-	if (outResult.state != NRIPersistentVoxelMaterialClosureState::Ready)
+	if (outResult.state == NRIPersistentVoxelMaterialClosureState::Deferred)
 	{
 		mStats.deferredSeeds++;
 		return false;
 	}
+	if (outResult.state != NRIPersistentVoxelMaterialClosureState::Ready &&
+		outResult.state != NRIPersistentVoxelMaterialClosureState::Pending)
+	{
+		mStats.failedSeeds++;
+		return false;
+	}
 
-	const auto existing = mSeedsByPayload.find(seed.payloadSignature);
+	auto existing = mSeedsByPayload.find(seed.payloadSignature);
 	if (existing == mSeedsByPayload.end())
 	{
 		mSeedsByPayload.emplace(seed.payloadSignature, seed);
+		if (outResult.state == NRIPersistentVoxelMaterialClosureState::Ready)
+		{
+			mStats.readySeeds++;
+		}
+		else
+		{
+			mStats.pendingSeeds++;
+		}
 	}
 	else
 	{
 		mStats.seedDeduplications++;
 		outResult.reusedSeed = true;
+		const NRIPersistentVoxelMaterialClosureResult existingResult =
+			BuildNRIPersistentVoxelMaterialClosureResult(existing->second, true);
+		if (existingResult.state == NRIPersistentVoxelMaterialClosureState::Ready &&
+			outResult.state == NRIPersistentVoxelMaterialClosureState::Pending)
+		{
+			outResult = existingResult;
+			outResult.materialKey = seed.materialKey;
+			outResult.validatedSignature = seed.validatedSignature;
+		}
+		if (existingResult.state == NRIPersistentVoxelMaterialClosureState::Pending &&
+			outResult.state == NRIPersistentVoxelMaterialClosureState::Ready)
+		{
+			existing->second = seed;
+			if (mStats.pendingSeeds != 0)
+			{
+				mStats.pendingSeeds--;
+			}
+			mStats.readySeeds++;
+		}
 	}
 	mBindings[{ seed.materialKey, seed.validatedSignature }] = seed.payloadSignature;
-	mStats.readySeeds = (uint32_t)mSeedsByPayload.size();
-	return true;
+	return outResult.state == NRIPersistentVoxelMaterialClosureState::Ready;
 }
 
-const NRIPersistentVoxelMaterialSeed* NRIPersistentVoxelMaterialClosureRegistry::FindReady(
+const NRIPersistentVoxelMaterialSeed* NRIPersistentVoxelMaterialClosureRegistry::Find(
 	uint64_t buildSerial,
 	uint64_t materialKey,
 	uint64_t validatedSignature,
@@ -302,11 +334,56 @@ const NRIPersistentVoxelMaterialSeed* NRIPersistentVoxelMaterialClosureRegistry:
 	}
 
 	outResult = BuildNRIPersistentVoxelMaterialClosureResult(seed->second, true);
-	if (outResult.state != NRIPersistentVoxelMaterialClosureState::Ready)
-	{
-		mStats.lookupMisses++;
-		return nullptr;
-	}
 	mStats.lookupHits++;
 	return &seed->second;
+}
+
+const NRIPersistentVoxelMaterialSeed* NRIPersistentVoxelMaterialClosureRegistry::FindReady(
+	uint64_t buildSerial,
+	uint64_t materialKey,
+	uint64_t validatedSignature,
+	NRIPersistentVoxelMaterialClosureResult& outResult)
+{
+	const NRIPersistentVoxelMaterialSeed* seed =
+		Find(buildSerial, materialKey, validatedSignature, outResult);
+	return seed != nullptr && outResult.state == NRIPersistentVoxelMaterialClosureState::Ready ? seed : nullptr;
+}
+
+void NRIPersistentVoxelMaterialClosureRegistry::Invalidate(
+	uint64_t materialKey,
+	uint64_t validatedSignature)
+{
+	const auto binding = mBindings.find({ materialKey, validatedSignature });
+	if (binding == mBindings.end())
+	{
+		return;
+	}
+	const uint64_t payloadSignature = binding->second;
+	for (auto it = mBindings.begin(); it != mBindings.end();)
+	{
+		if (it->second == payloadSignature)
+		{
+			it = mBindings.erase(it);
+		}
+		else
+		{
+			++it;
+		}
+	}
+	const auto seed = mSeedsByPayload.find(payloadSignature);
+	if (seed == mSeedsByPayload.end())
+	{
+		return;
+	}
+	const NRIPersistentVoxelMaterialClosureResult result =
+		BuildNRIPersistentVoxelMaterialClosureResult(seed->second);
+	if (result.state == NRIPersistentVoxelMaterialClosureState::Ready && mStats.readySeeds != 0)
+	{
+		mStats.readySeeds--;
+	}
+	else if (result.state == NRIPersistentVoxelMaterialClosureState::Pending && mStats.pendingSeeds != 0)
+	{
+		mStats.pendingSeeds--;
+	}
+	mSeedsByPayload.erase(seed);
 }
