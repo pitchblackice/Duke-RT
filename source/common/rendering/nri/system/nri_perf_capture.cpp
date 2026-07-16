@@ -34,6 +34,16 @@ void NRIRenderDevice::CaptureCompactPerfRendererStats(bool rendered)
 	stats.mutationCommitMs = shell.runtimeMutationCommitMs;
 	stats.dynamicCaptureMs = shell.dynamicCaptureMs;
 	stats.persistentBatchMs = shell.sceneSelectPersistentVoxelBatchMs;
+	stats.voxelAdmissionPumpMs = shell.sceneSelectPersistentVoxelAdmissionPumpMs;
+	stats.voxelBatchCacheEntryMs = shell.persistentVoxelBatchCacheEntryMs;
+	stats.voxelBatchSortMs = shell.persistentVoxelBatchSortMs;
+	stats.voxelBatchInstanceSyncMs = shell.persistentVoxelBatchInstanceSyncMs;
+	stats.voxelBatchExistingActorMapMs = shell.persistentVoxelBatchExistingActorMapMs;
+	stats.voxelBatchActorLoopMs = shell.persistentVoxelBatchActorLoopMs;
+	stats.voxelBatchMaterialVariantMs = shell.persistentVoxelBatchMaterialVariantMs;
+	stats.voxelBatchMeshAdmissionMs = shell.persistentVoxelBatchMeshAdmissionMs;
+	stats.voxelBatchMaterialBridgeMs = shell.persistentVoxelBatchMaterialBridgeMs;
+	stats.voxelBatchStateMs = shell.persistentVoxelBatchStateMs;
 	stats.materialBridgeMs = shell.sceneSelectMaterialBridgeMs;
 	stats.texturesMs = shell.sceneSelectTexturesMs;
 	stats.bufferUploadMs = shell.sceneSelectBufferUploadMs;
@@ -77,6 +87,10 @@ void NRIRenderDevice::CaptureCompactPerfRendererStats(bool rendered)
 		stats.mutationStructuralReason[index] = entry.reasonMask;
 		stats.mutationStructuralTrigger[index] = entry.triggerMask;
 	}
+	stats.voxelPressureReason = shell.persistentVoxelPressureReason;
+	stats.voxelPressureEntries = shell.persistentVoxelPressureAdmissionRows;
+	stats.voxelPressureResources = shell.persistentVoxelPressureResourceRows;
+	stats.voxelPressureFlags = shell.persistentVoxelPressureFlags;
 	stats.traceRenderWidth = shell.traceRenderWidth;
 	stats.traceRenderHeight = shell.traceRenderHeight;
 	stats.traceOutputWidth = shell.traceOutputWidth;

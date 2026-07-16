@@ -1,4 +1,5 @@
 #include "nri_persistent_voxels.h"
+#include "nri_persistent_voxel_pressure_policy.h"
 #include "nri_scene_instance_visibility.h"
 
 #include "../scene/nri_hash.h"
@@ -1217,6 +1218,7 @@ void NRIPersistentVoxelResidency::RefreshActiveResourceReferences(uint32_t frame
 	{
 		return;
 	}
+	maintenanceStats.pressureMembershipChanges++;
 
 	const bool updateCachedStatus = cachedResourceStatusGeneration == maintenanceMutationGeneration;
 	for (const auto& pair : activeMeshReferences)
@@ -1289,7 +1291,11 @@ void NRIPersistentVoxelResidency::RefreshActiveResourceReferences(uint32_t frame
 			resource->second.cold = false;
 		}
 	}
-	pressureEvaluationValid = false;
+	if (ShouldInvalidateNRIPersistentVoxelPressureForMembershipChange(pressureProtectionBlocked))
+	{
+		pressureEvaluationValid = false;
+		maintenanceStats.pressureMembershipInvalidations++;
+	}
 }
 
 void NRIPersistentVoxelResidency::ClearActorInstances(const NRIPersistentVoxelResetServices& services)
@@ -3146,6 +3152,8 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 {
 	maintenanceStats.pressureEvaluatedLast = false;
 	maintenanceStats.pressureSkippedLast = false;
+	maintenanceStats.pressureProtectionBlockedLast = pressureProtectionBlocked;
+	maintenanceStats.pressureEvaluationReasonMaskLast = NRIPersistentVoxelPressureEvaluationReason_None;
 	maintenanceStats.pressureEntriesScannedLast = 0;
 	maintenanceStats.pressureResourceRowsScannedLast = 0;
 	const bool loadingPhase = phase != nullptr && std::strcmp(phase, "loading") == 0;
@@ -3157,16 +3165,23 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 		settings.residentMaxBytes == 0 &&
 		adapterLocalBudget > settings.residentMinHeadroomBytes &&
 		totalTrackedBytes > adapterLocalBudget - settings.residentMinHeadroomBytes;
-	const bool maintenanceCadenceDue =
-		!pressureEvaluationValid ||
-		frameIndex - pressureEvaluationFrame >= 64u;
-	if (!traceEnabled &&
-		pressureEvaluationValid &&
-		pressureEvaluationGeneration == maintenanceMutationGeneration &&
-		pressureSettingsSignature == settingsSignature &&
-		pressureAdapterBudget == adapterLocalBudget &&
-		!externalPressure &&
-		!maintenanceCadenceDue)
+	NRIPersistentVoxelPressureEvaluationInput pressureEvaluationInput = {};
+	pressureEvaluationInput.traceEnabled = traceEnabled;
+	pressureEvaluationInput.evaluationValid = pressureEvaluationValid;
+	pressureEvaluationInput.externalPressure = externalPressure;
+	pressureEvaluationInput.evaluationGeneration = pressureEvaluationGeneration;
+	pressureEvaluationInput.maintenanceGeneration = maintenanceMutationGeneration;
+	pressureEvaluationInput.evaluationSettingsSignature = pressureSettingsSignature;
+	pressureEvaluationInput.settingsSignature = settingsSignature;
+	pressureEvaluationInput.evaluationAdapterBudget = pressureAdapterBudget;
+	pressureEvaluationInput.adapterBudget = adapterLocalBudget;
+	pressureEvaluationInput.evaluationFrame = pressureEvaluationFrame;
+	pressureEvaluationInput.frameIndex = frameIndex;
+	pressureEvaluationInput.safetyAuditFrames = settings.pressureSafetyAuditFrames;
+	const NRIPersistentVoxelPressureEvaluationDecision pressureEvaluationDecision =
+		DecideNRIPersistentVoxelPressureEvaluation(pressureEvaluationInput);
+	maintenanceStats.pressureEvaluationReasonMaskLast = pressureEvaluationDecision.reasonMask;
+	if (!pressureEvaluationDecision.evaluate)
 	{
 		maintenanceStats.pressureSkippedLast = true;
 		maintenanceStats.pressureSkips++;
@@ -3174,8 +3189,14 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 	}
 	maintenanceStats.pressureEvaluatedLast = true;
 	maintenanceStats.pressureEvaluations++;
+	if ((pressureEvaluationDecision.reasonMask & NRIPersistentVoxelPressureEvaluationReason_SafetyAudit) != 0)
+	{
+		maintenanceStats.pressureSafetyAudits++;
+	}
 	if (meshVariantResources.empty() && materialVariantResources.empty())
 	{
+		pressureProtectionBlocked = false;
+		maintenanceStats.pressureProtectionBlockedLast = false;
 		pressureEvaluationGeneration = maintenanceMutationGeneration;
 		pressureSettingsSignature = settingsSignature;
 		pressureAdapterBudget = adapterLocalBudget;
@@ -3459,6 +3480,12 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 	{
 		maintenanceStats.pressureNoops++;
 	}
+	pressureProtectionBlocked = pressureBytes != 0 && evictedBytes < pressureBytes;
+	maintenanceStats.pressureProtectionBlockedLast = pressureProtectionBlocked;
+	if (pressureProtectionBlocked)
+	{
+		maintenanceStats.pressureProtectionBlockedEvaluations++;
+	}
 	pressureEvaluationGeneration = maintenanceMutationGeneration;
 	pressureSettingsSignature = settingsSignature;
 	pressureAdapterBudget = adapterLocalBudget;
@@ -3498,7 +3525,7 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		if ((int)perf_looptraceframes > 0 || voxelStatsEnabled)
 		{
 			const NRIPersistentVoxelMaterialRangeStats& rangeStats = materialRangeAllocator.Stats();
-			Printf("PERF pt voxel maintenance NRI: frame=%u phase=%s registry=%u active=%u required_ready=%u optional_ready=%u failed=%u entries_scanned=%u pressure_entries_scanned=%u pressure_resource_rows=%u pump_fast_return=%u pressure_evaluated=%u pressure_skipped=%u pump_calls=%llu pump_fast_returns=%llu entries_scanned_total=%llu pressure_entries_scanned_total=%llu pressure_resource_rows_total=%llu pressure_evaluations=%llu pressure_noops=%llu pressure_skips=%llu memory_rebuilds=%llu memory_hits=%llu status_rebuilds=%llu status_hits=%llu mutation_generation=%llu material_cursor_rows=%llu material_live_rows=%llu material_hole_rows=%llu material_high_water_rows=%llu material_allocations=%llu material_releases=%llu material_reuse_allocations=%llu material_reused_rows=%llu material_compactions=%llu material_compacted_rows=%llu\n",
+			Printf("PERF pt voxel maintenance NRI: frame=%u phase=%s registry=%u active=%u required_ready=%u optional_ready=%u failed=%u entries_scanned=%u pressure_entries_scanned=%u pressure_resource_rows=%u pump_fast_return=%u pressure_evaluated=%u pressure_skipped=%u pressure_reason=0x%x pressure_blocked=%u pressure_audit_frames=%u membership_changes=%llu membership_invalidations=%llu safety_audits=%llu blocked_evaluations=%llu pump_calls=%llu pump_fast_returns=%llu entries_scanned_total=%llu pressure_entries_scanned_total=%llu pressure_resource_rows_total=%llu pressure_evaluations=%llu pressure_noops=%llu pressure_skips=%llu memory_rebuilds=%llu memory_hits=%llu status_rebuilds=%llu status_hits=%llu mutation_generation=%llu material_cursor_rows=%llu material_live_rows=%llu material_hole_rows=%llu material_high_water_rows=%llu material_allocations=%llu material_releases=%llu material_reuse_allocations=%llu material_reused_rows=%llu material_compactions=%llu material_compacted_rows=%llu\n",
 				frameIndex,
 				phase != nullptr ? phase : "unknown",
 				maintenanceStats.registryEntries,
@@ -3512,6 +3539,13 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 				maintenanceStats.pumpFastReturnLast ? 1u : 0u,
 				maintenanceStats.pressureEvaluatedLast ? 1u : 0u,
 				maintenanceStats.pressureSkippedLast ? 1u : 0u,
+				maintenanceStats.pressureEvaluationReasonMaskLast,
+				maintenanceStats.pressureProtectionBlockedLast ? 1u : 0u,
+				settings.pressureSafetyAuditFrames,
+				(unsigned long long)maintenanceStats.pressureMembershipChanges,
+				(unsigned long long)maintenanceStats.pressureMembershipInvalidations,
+				(unsigned long long)maintenanceStats.pressureSafetyAudits,
+				(unsigned long long)maintenanceStats.pressureProtectionBlockedEvaluations,
 				(unsigned long long)maintenanceStats.pumpCalls,
 				(unsigned long long)maintenanceStats.pumpFastReturns,
 				(unsigned long long)maintenanceStats.entriesScanned,
@@ -5822,6 +5856,12 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				serialFastPathValid = false;
 				break;
 			}
+			meshIt->second.lastUsedFrame = frameIndex;
+			meshIt->second.lastUsedMapGeneration = residencyMapGeneration;
+			meshIt->second.cold = false;
+			materialIt->second.lastUsedFrame = frameIndex;
+			materialIt->second.lastUsedMapGeneration = residencyMapGeneration;
+			materialIt->second.cold = false;
 			std::array<float, 12> expectedTransform = {};
 			FillPersistentVoxelActorInstanceTransform(cacheEntry, meshIt->second, expectedTransform);
 			if (!SamePersistentVoxelInstanceTransform(actor.instanceTransform, expectedTransform.data()) ||
@@ -5849,7 +5889,6 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				actor.capturedThisFrame = cacheEntry.capturedThisFrame;
 			}
 			outStats.persistentVoxelBatchSerialFastPathCount++;
-			RefreshActiveResourceReferences(frameIndex);
 			return true;
 		}
 	}

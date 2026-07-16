@@ -568,6 +568,10 @@ public:
 		double persistentVoxelBatchMeshAdmissionMs = 0.0;
 		double persistentVoxelBatchMaterialBridgeMs = 0.0;
 		double persistentVoxelBatchStateMs = 0.0;
+		uint32_t persistentVoxelPressureReason = 0;
+		uint32_t persistentVoxelPressureFlags = 0;
+		uint32_t persistentVoxelPressureAdmissionRows = 0;
+		uint32_t persistentVoxelPressureResourceRows = 0;
 		double sceneSelectPersistentEmissiveMs = 0.0;
 		double sceneSelectDynamicMergeMs = 0.0;
 		double sceneSelectDynamicMergeCopyMs = 0.0;

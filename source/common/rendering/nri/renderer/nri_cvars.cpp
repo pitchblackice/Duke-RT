@@ -1558,6 +1558,8 @@ CVAR(Int, nri_ptvoxelresidentminheadroombytes, 512 * 1024 * 1024, CVAR_ARCHIVE |
 
 CVAR(Int, nri_ptvoxelresidentmaxcoldmaps, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+CVAR(Int, nri_ptvoxelpressureauditframes, 0, 0)
+
 CVAR(Bool, nri_ptvoxeltrimcoldloading, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, nri_ptvoxeltransformkeyed, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

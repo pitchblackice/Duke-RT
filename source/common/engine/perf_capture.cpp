@@ -103,6 +103,18 @@ namespace
 			nri.mutationStructuralChunk[3], nri.mutationStructuralReason[3], nri.mutationStructuralTrigger[3],
 			(unsigned long long)nri.sceneUploadBytes, (unsigned long long)gCapture.epoch,
 			record.eligibleIndex);
+		Printf("PERF pt voxel pressure compact NRI: frame=%llu nri_frame=%llu reason=0x%x flags=0x%x admission_rows=%u resource_rows=%u compact=1 epoch=%llu sample=%u\n",
+			(unsigned long long)outer.traceFrame, (unsigned long long)nri.frame,
+			nri.voxelPressureReason, nri.voxelPressureFlags, nri.voxelPressureEntries,
+			nri.voxelPressureResources,
+			(unsigned long long)gCapture.epoch, record.eligibleIndex);
+		Printf("PERF pt voxel batch compact NRI: frame=%llu nri_frame=%llu total=%.3f pump=%.3f cache_entries=%.3f sort=%.3f instance_sync=%.3f existing_actors=%.3f actor_loop=%.3f material_variant=%.3f mesh_admission=%.3f material_bridge=%.3f state=%.3f compact=1 epoch=%llu sample=%u\n",
+			(unsigned long long)outer.traceFrame, (unsigned long long)nri.frame,
+			nri.persistentBatchMs, nri.voxelAdmissionPumpMs, nri.voxelBatchCacheEntryMs,
+			nri.voxelBatchSortMs, nri.voxelBatchInstanceSyncMs, nri.voxelBatchExistingActorMapMs,
+			nri.voxelBatchActorLoopMs, nri.voxelBatchMaterialVariantMs,
+			nri.voxelBatchMeshAdmissionMs, nri.voxelBatchMaterialBridgeMs, nri.voxelBatchStateMs,
+			(unsigned long long)gCapture.epoch, record.eligibleIndex);
 		Printf("PERF pt resource waits NRI: frame=%llu nri_frame=%llu total=%u/%.3f compact=1 epoch=%llu sample=%u\n",
 			(unsigned long long)outer.traceFrame, (unsigned long long)nri.frame,
 			nri.resourceWaitCalls, nri.resourceWaitMs,

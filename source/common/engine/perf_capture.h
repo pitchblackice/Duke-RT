@@ -23,6 +23,10 @@ struct PerfCompactNriStats
 	double mutationAnalyzeMs = 0.0, mutationStructuralMs = 0.0, mutationMaterialMs = 0.0;
 	double mutationResidentMs = 0.0, mutationCommitMs = 0.0;
 	double dynamicCaptureMs = 0.0, persistentBatchMs = 0.0;
+	double voxelAdmissionPumpMs = 0.0, voxelBatchCacheEntryMs = 0.0, voxelBatchSortMs = 0.0;
+	double voxelBatchInstanceSyncMs = 0.0, voxelBatchExistingActorMapMs = 0.0, voxelBatchActorLoopMs = 0.0;
+	double voxelBatchMaterialVariantMs = 0.0, voxelBatchMeshAdmissionMs = 0.0;
+	double voxelBatchMaterialBridgeMs = 0.0, voxelBatchStateMs = 0.0;
 	double materialBridgeMs = 0.0, texturesMs = 0.0, bufferUploadMs = 0.0;
 	double persistentVoxelAsMs = 0.0, dynamicAsMs = 0.0, worldTlasMs = 0.0;
 	double sceneDataMs = 0.0, stateCommitMs = 0.0, resourceWaitMs = 0.0;
@@ -40,6 +44,8 @@ struct PerfCompactNriStats
 	uint32_t mutationStructuralChunk[4] = { UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX };
 	uint32_t mutationStructuralReason[4] = {};
 	uint32_t mutationStructuralTrigger[4] = {};
+	uint32_t voxelPressureReason = 0, voxelPressureEntries = 0, voxelPressureResources = 0;
+	uint32_t voxelPressureFlags = 0;
 	uint32_t traceRenderWidth = 0, traceRenderHeight = 0, traceOutputWidth = 0, traceOutputHeight = 0;
 	uint32_t traceDispatchX = 0, traceDispatchY = 0, traceDispatchZ = 0;
 	uint32_t traceLightBounces = 0, traceMirrorBounces = 0, tracePortalDepth = 0, traceEmissiveSamples = 0;
