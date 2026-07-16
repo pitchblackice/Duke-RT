@@ -529,7 +529,9 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	context.mLastPerfShellTraceStats.traceOpaqueDispatchY = dispatchY;
 	context.mLastPerfShellTraceStats.traceOpaqueDispatchZ = dispatchZ;
 	auto& tracePerf = context.mLastPerfShellTraceStats;
-	tracePerf.traceRendererFrame = context.mFrame.frameIndex;
+	// frameIndex is zero-based; the compact capture contract uses zero as the
+	// unresolved identity sentinel, so publish it as a one-based frame serial.
+	tracePerf.traceRendererFrame = (uint64_t)context.mFrame.frameIndex + 1ull;
 	tracePerf.traceRenderWidth = constants.RenderWidth;
 	tracePerf.traceRenderHeight = constants.RenderHeight;
 	tracePerf.traceOutputWidth = constants.DisplayWidth;
