@@ -461,7 +461,10 @@ public:
 		double otherMs = 0.0;
 		double staticSceneMs = 0.0;
 		double runtimeMutationMs = 0.0;
+		double runtimeMutationDiscoveryMs = 0.0;
+		double runtimeMutationBudgetMs = 0.0;
 		double runtimeMutationAnalyzeMs = 0.0;
+		double runtimeMutationCommitMs = 0.0;
 		uint32_t runtimeMutationCandidateChunks = 0;
 		uint32_t runtimeMutationAnalyzedChunks = 0;
 		uint32_t runtimeMutationBackgroundSweepChunks = 0;
@@ -951,6 +954,7 @@ public:
 		uint32_t runtimeMutationCandidateDraggedChunks = 0;
 		uint32_t runtimeMutationCandidateSignatureWatchChunks = 0;
 		uint32_t runtimeMutationCandidateBackgroundSweepSourceChunks = 0;
+		uint32_t runtimeMutationCandidateDeferredMaterialChunks = 0;
 		uint32_t runtimeMutationCandidateDeferredStructuralChunks = 0;
 		uint32_t runtimeMutationDirtyVisibleChunks = 0;
 		uint32_t runtimeMutationDirtyInvisibleChunks = 0;

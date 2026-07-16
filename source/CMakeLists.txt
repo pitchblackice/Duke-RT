@@ -990,6 +990,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_static_scene_geometry.cpp
 	common/rendering/nri/renderer/nri_static_scene_geometry_upload.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation.cpp
+	common/rendering/nri/renderer/nri_runtime_mutation_worklist.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_overlay.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_resident_apply.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_resident_static.cpp
