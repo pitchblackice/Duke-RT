@@ -15,7 +15,8 @@ namespace
 		16u, 17u, 18u, 19u,
 		21u, 22u, 24u, 25u,
 		nri_diag::PtDebugAnalyticDirect, nri_diag::PtDebugEmissiveTags, nri_diag::PtDebugEmissiveDirect, nri_diag::PtDebugSectorAmbient,
-		nri_diag::PtDebugEmissiveSampleVisibility, nri_diag::PtDebugUpscalerTraceTransparent, nri_diag::PtDebugTaaPreExposedInput
+		nri_diag::PtDebugEmissiveSampleVisibility, nri_diag::PtDebugUpscalerTraceTransparent, nri_diag::PtDebugTaaPreExposedInput,
+		nri_diag::PtDebugIndirectLobeSelection
 	};
 
 	constexpr NRIPresentRouteInfo kBootstrapRawTraceRoute = {
@@ -212,7 +213,8 @@ bool IsNRIFrameGraphRawTraceDebugMode(uint32_t debugMode)
 		IsInRange(debugMode, 21u, 22u) ||
 		IsInRange(debugMode, 24u, 25u) ||
 		IsInRange(debugMode, nri_diag::PtDebugAnalyticDirect, nri_diag::PtDebugSectorAmbient) ||
-		debugMode == nri_diag::PtDebugEmissiveSampleVisibility;
+		debugMode == nri_diag::PtDebugEmissiveSampleVisibility ||
+		debugMode == nri_diag::PtDebugIndirectLobeSelection;
 }
 
 bool IsNRIFrameGraphFinalShaderDebugMode(uint32_t)

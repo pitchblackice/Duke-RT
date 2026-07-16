@@ -1708,6 +1708,7 @@ public:
 		uint32_t traceEmissiveSampleCount = 0;
 		uint32_t traceEmissiveRequestedSampleCount = 0;
 		uint32_t traceEmissivePrimarySampleBudget = 0;
+		uint32_t traceIndirectSamplingRequestedMode = 0;
 		uint32_t traceRuntimeLightCount = 0;
 		uint32_t traceRuntimeLightTileCountX = 0;
 		uint32_t traceRuntimeLightTileCountY = 0;

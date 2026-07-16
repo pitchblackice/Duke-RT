@@ -445,6 +445,7 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		(nri_ptemissivefastshadow ? NRI_FLAG_FAST_EMISSIVE_SHADOW : 0u) |
 		(nri_ptvisiblechunkgate ? NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS : 0u) |
 		(ShouldCollectTraceShaderStats() ? NRI_FLAG_TRACE_SHADER_STATS : 0u) |
+		(traceSettings.indirectSamplingMode != 0u ? NRI_FLAG_PROBABILISTIC_INDIRECT : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u) |
 		NRIPackTemporalJitterPhaseCount(jitterPhaseCount) |
 		PackVoxelNormalBlend8(nri_ptvoxelnormalblend);
@@ -531,6 +532,7 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	tracePerf.traceEmissiveSampleCount = traceSettings.emissiveSampleCount;
 	tracePerf.traceEmissiveRequestedSampleCount = traceSettings.emissiveRequestedSampleCount;
 	tracePerf.traceEmissivePrimarySampleBudget = traceSettings.emissivePrimarySampleBudget;
+	tracePerf.traceIndirectSamplingRequestedMode = traceSettings.indirectSamplingMode;
 	tracePerf.traceRuntimeLightCount = context.mSceneStats.runtimeLightCount;
 	tracePerf.traceRuntimeLightTileCountX = context.mSceneStats.runtimeLightTileCountX;
 	tracePerf.traceRuntimeLightTileCountY = context.mSceneStats.runtimeLightTileCountY;
@@ -557,7 +559,8 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		dispatchX, dispatchY, dispatchZ, constants.Flags & ~NRI_FLAG_RESET_HISTORY,
 		constants.DebugMode, constants.BootstrapMode, constants.BounceCounts, constants.PortalDepth,
 		constants.ReservedTrace1, traceSettings.emissiveRequestedSampleCount,
-		traceSettings.emissivePrimarySampleBudget, (uint32_t)resolvedMainUpscaler, (uint32_t)resolvedUpscalerMode
+		traceSettings.emissivePrimarySampleBudget, traceSettings.indirectSamplingMode,
+		(uint32_t)resolvedMainUpscaler, (uint32_t)resolvedUpscalerMode
 	};
 	for (uint64_t value : settingsValues) settingsKey = AppendTraceWorkloadHash(settingsKey, value);
 	tracePerf.traceSettingsKey = settingsKey;

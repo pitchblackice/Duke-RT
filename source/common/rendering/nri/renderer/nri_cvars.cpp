@@ -1382,6 +1382,15 @@ CUSTOM_CVAR(Int, nri_ptemissiveprimarybudget, 0, 0)
 	}
 }
 
+// Session-only experiment: 0 preserves dual indirect paths; 1 requests probabilistic single-lobe sampling.
+CUSTOM_CVAR(Int, nri_ptindirectsampling, 0, 0)
+{
+	if (self < 0 || self > 1)
+	{
+		self = std::clamp((int)self, 0, 1);
+	}
+}
+
 CVAR(Bool, nri_ptsectorlighting, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CUSTOM_CVAR(Float, nri_ptsectorlightmultiplier, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

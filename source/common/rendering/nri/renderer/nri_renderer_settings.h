@@ -13,7 +13,18 @@ struct NRITraceSettings
 	uint32_t emissiveSampleCount = 4;
 	uint32_t emissiveRequestedSampleCount = 4;
 	uint32_t emissivePrimarySampleBudget = 0;
+	uint32_t indirectSamplingMode = 0;
 };
+
+constexpr uint32_t NRIResolveIndirectSamplingMode(int32_t requested)
+{
+	return requested > 0 ? 1u : 0u;
+}
+
+static_assert(NRIResolveIndirectSamplingMode(0) == 0u);
+static_assert(NRIResolveIndirectSamplingMode(1) == 1u);
+static_assert(NRIResolveIndirectSamplingMode(7) == 1u);
+static_assert(NRIResolveIndirectSamplingMode(-1) == 0u);
 
 constexpr uint32_t NRIResolvePrimaryEmissiveSampleCount(uint32_t requested, uint32_t budget)
 {

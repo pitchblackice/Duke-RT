@@ -17,6 +17,7 @@ namespace nri_diag
 	constexpr uint32_t PtDebugEmissiveSampleVisibility = 33u;
 	constexpr uint32_t PtDebugUpscalerTraceTransparent = 34u;
 	constexpr uint32_t PtDebugTaaPreExposedInput = 45u;
+	constexpr uint32_t PtDebugIndirectLobeSelection = 46u;
 
 	constexpr uint32_t SceneDataSourceStatic = 0u;
 	constexpr uint32_t SceneDataSourceDynamic = 1u;

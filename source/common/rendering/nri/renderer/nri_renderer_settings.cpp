@@ -115,6 +115,7 @@ NRITraceSettings BuildNRITraceSettingsFromCVars()
 	settings.emissiveSampleCount = NRIResolvePrimaryEmissiveSampleCount(
 		settings.emissiveRequestedSampleCount,
 		settings.emissivePrimarySampleBudget);
+	settings.indirectSamplingMode = NRIResolveIndirectSamplingMode((int)nri_ptindirectsampling);
 	return settings;
 }
 
