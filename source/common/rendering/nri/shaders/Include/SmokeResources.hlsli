@@ -160,8 +160,12 @@ struct SmokeControl
 	uint FineMaximumCellReferences;
 	uint WideMaximumCellReferences;
 	uint GlobalMaximumCellReferences;
-	uint3 ReferenceDiagnosticsPadding0;
-	uint3 ReferenceDiagnosticsPadding1;
+	uint EmissiveInnerRisSets;
+	uint EmissiveInnerPointProposals;
+	uint EmissiveInnerZeroProposals;
+	uint EmissiveInnerRisRejects;
+	uint EmissiveInnerSelections;
+	uint EmissiveInnerVisibilityRays;
 	uint MaximumDepthSpan;
 	uint DepthSpanOne;
 	uint DepthSpanTwoToFour;

@@ -149,6 +149,12 @@ struct NRISmokeStatusSnapshot
 	uint32_t emissiveReferenceSamples = 0;
 	uint32_t emissiveReferenceRays = 0;
 	uint32_t emissiveIdentityRejects = 0;
+	uint32_t emissiveInnerRisSets = 0;
+	uint32_t emissiveInnerPointProposals = 0;
+	uint32_t emissiveInnerZeroProposals = 0;
+	uint32_t emissiveInnerRisRejects = 0;
+	uint32_t emissiveInnerSelections = 0;
+	uint32_t emissiveInnerVisibilityRays = 0;
 	uint32_t indirectFroxelsProcessed = 0;
 	uint32_t indirectLocalityRays = 0;
 	uint32_t indirectLocalityAgreement = 0;

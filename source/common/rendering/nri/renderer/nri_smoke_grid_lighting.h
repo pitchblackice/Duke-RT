@@ -84,6 +84,7 @@ private:
 	uint32_t mFieldPing = 0;
 	uint32_t mLastRecordedFrame = UINT32_MAX;
 	uint32_t mSimulationEpoch = 0;
+	uint32_t mLastEmissiveEstimatorKey = 0;
 	bool mNeedsClear = true;
 	bool mResourcesInitialized = false;
 	std::array<const nri::Descriptor*, NRISmokeGrid::EvaluationDescriptorCount> mGridDescriptors = {};

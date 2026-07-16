@@ -45,9 +45,22 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	{
 		if (clearWorld)
 		{
+			const bool preserveInnerRis = (gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_WORLD_ENABLED) != 0u;
+			const uint innerRisSets = preserveInnerRis ? gSmokeControl[0].EmissiveInnerRisSets : 0u;
+			const uint innerPointProposals = preserveInnerRis ? gSmokeControl[0].EmissiveInnerPointProposals : 0u;
+			const uint innerZeroProposals = preserveInnerRis ? gSmokeControl[0].EmissiveInnerZeroProposals : 0u;
+			const uint innerRisRejects = preserveInnerRis ? gSmokeControl[0].EmissiveInnerRisRejects : 0u;
+			const uint innerSelections = preserveInnerRis ? gSmokeControl[0].EmissiveInnerSelections : 0u;
+			const uint innerVisibilityRays = preserveInnerRis ? gSmokeControl[0].EmissiveInnerVisibilityRays : 0u;
 			SmokeControl control = (SmokeControl)0;
 			control.Epoch = gSmokeConstants.SimulationEpoch;
 			control.MaximumCandidatesPerFroxel = 0u;
+			control.EmissiveInnerRisSets = innerRisSets;
+			control.EmissiveInnerPointProposals = innerPointProposals;
+			control.EmissiveInnerZeroProposals = innerZeroProposals;
+			control.EmissiveInnerRisRejects = innerRisRejects;
+			control.EmissiveInnerSelections = innerSelections;
+			control.EmissiveInnerVisibilityRays = innerVisibilityRays;
 			gSmokeControl[0] = control;
 		}
 		else

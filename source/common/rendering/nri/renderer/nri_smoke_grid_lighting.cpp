@@ -217,12 +217,17 @@ bool NRISmokeGridLighting::EnsureResources(const NRISmokeGridServices& services,
 bool NRISmokeGridLighting::PrepareFrame(const NRISmokeGridServices& services, const NRISmokeSettings& settings,
 	uint32_t cellCapacity, uint32_t frameIndex, uint32_t simulationEpoch)
 {
+	const uint32_t requestedPointCandidates = std::clamp(settings.emissivePointCandidates, 1u, 8u);
+	const uint32_t effectivePointCandidates = settings.emissiveReference ? 1u : requestedPointCandidates;
+	const uint32_t estimatorKey = effectivePointCandidates | (settings.emissiveReference ? 0x100u : 0u);
 	mStatus.requested = settings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy ||
 		settings.multipleScatter || settings.selfShadow;
 	mStatus.requestedBackend = settings.emissiveBackend;
 	mStatus.filterRequested = settings.emissiveWorldFilter;
 	mStatus.filterDecision = settings.emissiveWorldFilter ? "requested" : "disabled/variance-gate-not-accepted";
 	mStatus.proposalDecision = settings.emissiveLocalProposals ? "brick-top16/uniform75+global25" : "global-cdf/manual-disable";
+	mStatus.emissivePointCandidatesRequested = requestedPointCandidates;
+	mStatus.emissivePointCandidatesEffective = effectivePointCandidates;
 	mStatus.multipleScatterRequested = settings.multipleScatter;
 	mStatus.scatterDecision = !settings.multipleScatter ? "disabled" : "gpu-probe4x4x4/boundary-aware";
 	mStatus.selfShadowRequested = settings.selfShadow;
@@ -242,6 +247,14 @@ bool NRISmokeGridLighting::PrepareFrame(const NRISmokeGridServices& services, co
 		Reset(simulationEpoch, "simulation-epoch");
 	if (!EnsureResources(services, cellCapacity, settings.emissiveWorldFilter, settings.multipleScatter, settings.selfShadow))
 		return false;
+	if (mLastEmissiveEstimatorKey != 0u && mLastEmissiveEstimatorKey != estimatorKey)
+	{
+		// The point estimator changed, so discard only derived world-lighting
+		// history. Density, temperature, and velocity remain authoritative.
+		mFieldPing = 0u;
+		mNeedsClear = true;
+	}
+	mLastEmissiveEstimatorKey = estimatorKey;
 	mStatus.multipleScatterEffective = settings.multipleScatter && mStatus.multipleScatterAllocated;
 	if (settings.multipleScatter && !mStatus.multipleScatterAllocated)
 		mStatus.scatterDecision = "allocation-failed/direct-only";
@@ -438,6 +451,7 @@ void NRISmokeGridLighting::Reset(uint32_t simulationEpoch, const char* reason)
 	mSimulationEpoch = simulationEpoch;
 	mFieldPing = 0u;
 	mLastRecordedFrame = UINT32_MAX;
+	mLastEmissiveEstimatorKey = 0u;
 	mNeedsClear = true;
 	mStatus.simulationEpoch = simulationEpoch;
 	mGridDescriptors.fill(nullptr);

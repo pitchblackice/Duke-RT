@@ -783,6 +783,12 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 				mStatus.emissiveReferenceSamples = control.emissiveReferenceSamples;
 				mStatus.emissiveReferenceRays = control.emissiveReferenceRays;
 				mStatus.emissiveIdentityRejects = control.emissiveIdentityRejects;
+				mStatus.emissiveInnerRisSets = control.emissiveInnerRisSets;
+				mStatus.emissiveInnerPointProposals = control.emissiveInnerPointProposals;
+				mStatus.emissiveInnerZeroProposals = control.emissiveInnerZeroProposals;
+				mStatus.emissiveInnerRisRejects = control.emissiveInnerRisRejects;
+				mStatus.emissiveInnerSelections = control.emissiveInnerSelections;
+				mStatus.emissiveInnerVisibilityRays = control.emissiveInnerVisibilityRays;
 				mStatus.indirectFroxelsProcessed = control.indirectFroxelsProcessed;
 				mStatus.indirectLocalityRays = control.indirectLocalityRays;
 				mStatus.indirectLocalityAgreement = control.indirectLocalityAgreement;
@@ -1455,11 +1461,16 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	if (mSettings.indirect && indirectResourcesReady)
 		constants.lightSourceFlags |= 0x10u;
 	const bool filteredVisibilityEffective = constants.lightMode >= 2u && mSettings.filteredVisibility && filteredResourcesReady && shadowReady;
+	const uint32_t requestedEmissivePointCandidates = std::clamp(mSettings.emissivePointCandidates, 1u, 8u);
+	const uint32_t effectiveEmissivePointCandidates = mSettings.emissiveReference ? 1u : requestedEmissivePointCandidates;
+	const uint32_t effectiveEmissiveEstimatorKey = effectiveEmissivePointCandidates |
+		(mSettings.emissiveReference ? 0x100u : 0u);
 	constants.filteredVisibilityEnabled =
 		(filteredVisibilityEffective ? 1u : 0u) |
 		(filteredResourcesReady ? 2u : 0u) |
 		(shadowReady ? 4u : 0u) |
 		(mSettings.filteredVisibility ? 8u : 0u) |
+		(effectiveEmissivePointCandidates << 4u) |
 		(std::min(BuildNRITraceSettingsFromCVars().portalDepth, 8u) << 8u);
 	mStatus.requestedLightMode = mSettings.lightMode;
 	mStatus.effectiveLightMode = constants.lightMode;
@@ -1577,8 +1588,10 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	// evaluation and the volume neighborhood clamp. Resetting the final
 	// volume layer for every animated/dynamic emissive would prevent history
 	// from ever accumulating in a live scene.
-	const uint64_t volumeLightingHash = renderer.mSectorLightingPayloadHash ^
+	uint64_t volumeLightingHash = renderer.mSectorLightingPayloadHash ^
 		(renderer.mSkyEnvironment.ActiveKey() * 0x9e3779b97f4a7c15ull);
+	volumeLightingHash = HashCombine64(volumeLightingHash,
+		worldEmissiveRequested ? effectiveEmissiveEstimatorKey : 0u);
 	const bool volumeHistoryCompatible = mSettings.volumeHistory && mVolumeHistoryValid && mLastVolumeHistoryEnabled &&
 		!renderer.mResetHistory && mLastVolumeFrame + 1u == renderer.mFrameIndex &&
 		mLastVolumeWidth == route.width && mLastVolumeHeight == route.height &&
@@ -1671,6 +1684,20 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		mStatus.authorityPreparation = "failed-retained";
 		mStatus.authorityOperational = false;
 		return false;
+	}
+	if ((worldEmissiveReady || multipleScatterReady) && mControl.buffer != nullptr)
+	{
+		// Grid-lighting diagnostics reuse six words in the established smoke
+		// control buffer. Order those GPU writes before SmokeClear preserves the
+		// current-frame values; no additional readback resource is introduced.
+		nri::BufferBarrierDesc controlBarrier = {};
+		controlBarrier.buffer = mControl.buffer;
+		controlBarrier.before = StorageAccess();
+		controlBarrier.after = StorageAccess();
+		nri::BarrierDesc barrier = {};
+		barrier.buffers = &controlBarrier;
+		barrier.bufferNum = 1u;
+		renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, barrier);
 	}
 	const uint64_t froxelCount = (uint64_t)mResourceFroxelWidth * mResourceFroxelHeight * mResourceFroxelDepth;
 	const NRISmokeAuthorityMode authorityMode = mAuthority.GetSnapshot().mode;
@@ -1943,6 +1970,12 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.emissiveReferenceSamples = 0;
 	mStatus.emissiveReferenceRays = 0;
 	mStatus.emissiveIdentityRejects = 0;
+	mStatus.emissiveInnerRisSets = 0;
+	mStatus.emissiveInnerPointProposals = 0;
+	mStatus.emissiveInnerZeroProposals = 0;
+	mStatus.emissiveInnerRisRejects = 0;
+	mStatus.emissiveInnerSelections = 0;
+	mStatus.emissiveInnerVisibilityRays = 0;
 	mStatus.indirectFroxelsProcessed = 0;
 	mStatus.indirectLocalityRays = 0;
 	mStatus.indirectLocalityAgreement = 0;
@@ -2114,9 +2147,10 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.particleCommandsRouted, mStatus.gridCommandsRouted);
 	mGrid.PrintStatus();
 	const NRISmokeGridLightingStatusSnapshot& world = mGridLighting.GetStatusSnapshot();
-	Printf("NRI PT smoke grid emissive: requested_backend=%u effective_backend=%u authority=%s ready=%s cells=%u ping=%u field_mib=%.2f work_mib=%.2f links_mib=%.2f proposal_mib=%.3f filter=%s filter_mib=%.2f total_mib=%.2f proposal=%s field_readback=0\n",
+	Printf("NRI PT smoke grid emissive: requested_backend=%u effective_backend=%u authority=%s ready=%s cells=%u ping=%u inner_ris_points=%u/%u field_mib=%.2f work_mib=%.2f links_mib=%.2f proposal_mib=%.3f filter=%s filter_mib=%.2f total_mib=%.2f proposal=%s field_readback=0\n",
 		world.requestedBackend, world.effectiveBackend, world.authority, world.resourcesReady ? "yes" : "no",
-		world.cellCapacity, world.fieldPing, (double)world.fieldBytes / (1024.0 * 1024.0),
+		world.cellCapacity, world.fieldPing, world.emissivePointCandidatesRequested, world.emissivePointCandidatesEffective,
+		(double)world.fieldBytes / (1024.0 * 1024.0),
 		(double)world.workBytes / (1024.0 * 1024.0), (double)world.linkBytes / (1024.0 * 1024.0),
 		(double)world.proposalBytes / (1024.0 * 1024.0),
 		world.filterDecision, (double)world.filterBytes / (1024.0 * 1024.0),
@@ -2171,14 +2205,16 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.directSpatialAccepted, mStatus.directSpatialRejected,
 		mStatus.directHistoryMaximumAge, mStatus.directHistoryResolved,
 		mStatus.directHistoryClamps, mStatus.directNanRejects);
-	Printf("NRI PT smoke emissive reservoir: reuse_requested=%u reuse_effective=%u lanes=%u reference=%s history=%s reservoir_mib=%.2f initialized=%u invalid=%u temporal=%u/%u spatial=%u/%u final=%u source_clamps=%u removed_energy=%u maximum_age=%u identity_rejects=%u reference_samples=%u reference_rays=%u field_readback=0\n",
+	Printf("NRI PT smoke emissive reservoir: reuse_requested=%u reuse_effective=%u lanes=%u reference=%s history=%s reservoir_mib=%.2f initialized=%u invalid=%u temporal=%u/%u spatial=%u/%u final=%u source_clamps=%u removed_energy=%u maximum_age=%u identity_rejects=%u reference_samples=%u reference_rays=%u inner_sets=%u inner_points=%u inner_zeros=%u inner_rejects=%u inner_selections=%u inner_visibility_rays=%u field_readback=0\n",
 		mStatus.emissiveReuseModeRequested, mStatus.emissiveReuseModeEffective, mStatus.emissiveLaneCount, mStatus.emissiveReference ? "yes" : "no",
 		mStatus.emissiveHistoryValid ? "valid" : "invalid", (double)mStatus.emissiveReservoirBytes / (1024.0 * 1024.0),
 		mStatus.emissiveReservoirInitial, mStatus.emissiveReservoirInvalid,
 		mStatus.emissiveTemporalAccepted, mStatus.emissiveTemporalRejected,
 		mStatus.emissiveSpatialAccepted, mStatus.emissiveSpatialRejected,
 		mStatus.emissiveFinalEvaluations, mStatus.emissiveSourceClamps, mStatus.emissiveRemovedEnergy, mStatus.emissiveMaximumAge,
-		mStatus.emissiveIdentityRejects, mStatus.emissiveReferenceSamples, mStatus.emissiveReferenceRays);
+		mStatus.emissiveIdentityRejects, mStatus.emissiveReferenceSamples, mStatus.emissiveReferenceRays,
+		mStatus.emissiveInnerRisSets, mStatus.emissiveInnerPointProposals, mStatus.emissiveInnerZeroProposals,
+		mStatus.emissiveInnerRisRejects, mStatus.emissiveInnerSelections, mStatus.emissiveInnerVisibilityRays);
 	Printf("NRI PT smoke indirect status: enabled=%s scale=%.3f cache_mode_requested=%u cache_mode_effective=%u samples=%u history=%s cache_mib=%.2f froxels=%u locality_rays=%u agreement=%u one_sided=%u mismatch=%u invalid=%u reference_rays=%u hits=%u misses=%u sector=%u sky=%u emission=%u clamps=%u nan=%u temporal=%u/%u spatial=%u/%u cache_age=%u cache_clamps=%u resolved=%u field_readback=0\n",
 		mSettings.indirect ? "yes" : "no", mSettings.indirectScale, mStatus.indirectCacheModeRequested, mStatus.indirectCacheModeEffective, 1u << std::min(mSettings.quality, 2u),
 		mIndirectHistoryValid ? "valid" : "invalid", (double)mStatus.indirectCacheBytes / (1024.0 * 1024.0), mStatus.indirectFroxelsProcessed,

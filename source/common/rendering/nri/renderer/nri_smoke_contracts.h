@@ -124,8 +124,12 @@ struct NRISmokeControlGpu
 	uint32_t fineMaximumCellReferences = 0;
 	uint32_t wideMaximumCellReferences = 0;
 	uint32_t globalMaximumCellReferences = 0;
-	uint32_t referenceDiagnosticsPadding0[3] = {};
-	uint32_t referenceDiagnosticsPadding1[3] = {};
+	uint32_t emissiveInnerRisSets = 0;
+	uint32_t emissiveInnerPointProposals = 0;
+	uint32_t emissiveInnerZeroProposals = 0;
+	uint32_t emissiveInnerRisRejects = 0;
+	uint32_t emissiveInnerSelections = 0;
+	uint32_t emissiveInnerVisibilityRays = 0;
 	uint32_t maximumDepthSpan = 0;
 	uint32_t depthSpanOne = 0;
 	uint32_t depthSpanTwoToFour = 0;
@@ -294,6 +298,7 @@ struct NRISmokeConstants
 	uint32_t lightSourceFlags = 1;
 	// bit 0: filtered visibility effective, bit 1: filtered resources ready,
 	// bit 2: TLAS ready, bit 3: filtered visibility requested,
+	// bits 4..7: smoke-world emissive point-candidate count,
 	// bits 8..15: portal traversal depth.
 	uint32_t filteredVisibilityEnabled = 0;
 

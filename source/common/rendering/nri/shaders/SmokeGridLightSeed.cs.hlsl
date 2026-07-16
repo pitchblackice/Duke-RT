@@ -66,7 +66,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float cellSize = max(asfloat(gSmokeRenderGridControl[0].CellSizeBits), 0.0001);
 	const int3 cell = SmokeGridCellCoordinate(brick.Coordinate, local);
 	const float3 receiverPosition = SmokeGridLightCellCenter(cell, cellSize);
-	const uint sampleCount = (gSmokeConstants.Flags & NRI_SMOKE_EMISSIVE_REFERENCE) != 0u ? 32u : 1u;
+	const bool referenceSampling = (gSmokeConstants.Flags & NRI_SMOKE_EMISSIVE_REFERENCE) != 0u;
+	const uint sampleCount = referenceSampling ? 32u : 1u;
+	const uint pointCandidateCount = SmokeEmissivePointCandidateCount();
+	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;
+	const bool innerRisDiagnostics = diagnostics && !referenceSampling;
 	const bool localRequested = (gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_LOCAL_PROPOSALS) != 0u;
 	const SmokeGridLightProposal proposal = gSmokeGridLightProposals[brickIndex];
 	const bool localReady = localRequested && SmokeGridLightProposalValid(proposal, brick);
@@ -134,16 +138,50 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		record.Generation = gSmokeConstants.CommandCount;
 		float3 incident, lightDirection;
 		float lightDistance;
-		if (!SmokeEvaluateWorldEmissiveIncident(record, receiverPosition, false, incident, lightDirection, lightDistance))
+		uint innerPointProposals, innerZeroProposals, innerRisRejects;
+		if (innerRisDiagnostics)
+			InterlockedAdd(gSmokeControl[0].EmissiveInnerRisSets, 1u);
+		bool incidentValid = false;
+		if (referenceSampling)
 		{
+			// Keep the frozen 32-sample reference independent from the RIS
+			// implementation so it remains a useful energy/variance oracle.
+			innerPointProposals = 1u;
+			incidentValid = SmokeEvaluateWorldEmissiveIncident(record, receiverPosition, false,
+				incident, lightDirection, lightDistance);
+			innerZeroProposals = incidentValid ? 0u : 1u;
+			innerRisRejects = 0u;
+		}
+		else
+			incidentValid = SmokeEvaluateWorldEmissiveIncidentRis(record, receiverPosition, false, pointCandidateCount,
+				incident, lightDirection, lightDistance, innerPointProposals, innerZeroProposals, innerRisRejects);
+		if (!incidentValid)
+		{
+			if (innerRisDiagnostics)
+			{
+				InterlockedAdd(gSmokeControl[0].EmissiveInnerPointProposals, innerPointProposals);
+				InterlockedAdd(gSmokeControl[0].EmissiveInnerZeroProposals, innerZeroProposals);
+				InterlockedAdd(gSmokeControl[0].EmissiveInnerRisRejects, innerRisRejects);
+			}
 			physicalZero++;
 			continue;
 		}
+		if (innerRisDiagnostics)
+		{
+			InterlockedAdd(gSmokeControl[0].EmissiveInnerPointProposals, innerPointProposals);
+			InterlockedAdd(gSmokeControl[0].EmissiveInnerZeroProposals, innerZeroProposals);
+			InterlockedAdd(gSmokeControl[0].EmissiveInnerRisRejects, innerRisRejects);
+			InterlockedAdd(gSmokeControl[0].EmissiveInnerSelections, 1u);
+		}
 		bool isVisible = true;
 		if (gSmokeConstants.LightMode >= 2u)
+		{
+			if (innerRisDiagnostics)
+				InterlockedAdd(gSmokeControl[0].EmissiveInnerVisibilityRays, 1u);
 			isVisible = SmokeFilteredVisibilityEffective() ?
 				SmokePointLightVisibleFiltered(receiverPosition, lightDirection, lightDistance, false) :
 				SmokePointLightVisible(receiverPosition, lightDirection, lightDistance, false);
+		}
 		float mediumTransmittance = 1.0;
 		if (SmokeSelfShadowEnabled(gSmokeConstants.DebugMode))
 		{
