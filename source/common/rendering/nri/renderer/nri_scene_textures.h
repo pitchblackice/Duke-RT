@@ -11,9 +11,19 @@ class NRIRenderDevice;
 
 namespace nri_scene
 {
+	struct MaterialData;
 	struct MaterialBridgeData;
 	struct TextureUpload;
 }
+
+// Runtime texture misses deliberately publish a fail-closed material row until
+// the upload fence completes.  A later same-frame material refresh must preserve
+// that row instead of rebuilding a live material against the placeholder
+// descriptor.
+uint32_t NRIPreservePendingTextureMaterialProxies(
+	const std::vector<nri_scene::MaterialData>& publishedMaterials,
+	std::vector<nri_scene::MaterialData>& refreshedMaterials,
+	const std::vector<uint32_t>& deferredMaterialIndices);
 
 struct NRISceneCachedTexture
 {

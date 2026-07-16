@@ -59,8 +59,8 @@ namespace
 	void MakePendingTextureMaterialTransparent(nri_scene::MaterialData& material)
 	{
 		// A white descriptor is not a safe fallback for an alpha-tested actor: it
-		// turns the cutout into an opaque ray occluder.  Make only the affected
-		// material row reject every ray until its upload fence completes.  The
+		// turns the cutout into an opaque ray occluder. Make only the affected
+		// material row reject every ray until its upload fence completes. The
 		// original row is rebuilt from the immutable bridge on the next frame.
 		material.textureIndex = UINT32_MAX;
 		material.normalTextureIndex = UINT32_MAX;
@@ -204,6 +204,26 @@ namespace
 		return counts;
 	}
 
+}
+
+uint32_t NRIPreservePendingTextureMaterialProxies(
+	const std::vector<nri_scene::MaterialData>& publishedMaterials,
+	std::vector<nri_scene::MaterialData>& refreshedMaterials,
+	const std::vector<uint32_t>& deferredMaterialIndices)
+{
+	const size_t materialCount = std::min(publishedMaterials.size(), refreshedMaterials.size());
+	uint32_t preservedCount = 0;
+	for (uint32_t materialIndex : deferredMaterialIndices)
+	{
+		if (materialIndex >= materialCount)
+		{
+			continue;
+		}
+
+		refreshedMaterials[materialIndex] = publishedMaterials[materialIndex];
+		preservedCount++;
+	}
+	return preservedCount;
 }
 
 bool NRISceneTextureResidency::EnsurePaletteTexture(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials)
@@ -1078,7 +1098,8 @@ bool NRIRenderer::EnsureSceneTextures(
 	bool preserveExistingSky,
 	const char* reason,
 	const NRISceneTextureFrameReuseInputs* reuseInputs,
-	NRISceneTextureMissPolicy missPolicy)
+	NRISceneTextureMissPolicy missPolicy,
+	std::vector<uint32_t>* outDeferredMaterialIndices)
 {
 	Clocker clock(NriPTSceneTextures);
 	static bool sLoggedActiveCanvasTextureReuse = false;
@@ -1109,6 +1130,10 @@ bool NRIRenderer::EnsureSceneTextures(
 	mSceneTextures.CacheStats().stableSlotModeLastBuild = 0;
 	mSceneTextures.CacheStats().stableDescriptorHitsLastBuild = 0;
 	mSceneTextures.CacheStats().stableDescriptorMissesLastBuild = 0;
+	if (outDeferredMaterialIndices != nullptr)
+	{
+		outDeferredMaterialIndices->clear();
+	}
 	mSceneTextures.ClearLiveResources();
 	mLastPerfShellTraceStats.sceneTextureCacheCount = mSceneTextures.CacheCount();
 	mLastPerfShellTraceStats.sceneTextureCacheMisses = 0;
@@ -1472,13 +1497,18 @@ bool NRIRenderer::EnsureSceneTextures(
 	uint32_t deferredMaterialCount = 0;
 	if (!pendingTextureSlots.empty())
 	{
-		for (nri_scene::MaterialData& material : outGpuMaterials)
+		for (uint32_t materialIndex = 0; materialIndex < (uint32_t)outGpuMaterials.size(); ++materialIndex)
 		{
+			nri_scene::MaterialData& material = outGpuMaterials[materialIndex];
 			if (!MaterialReferencesTextureSlot(material, pendingTextureSlots))
 			{
 				continue;
 			}
 			MakePendingTextureMaterialTransparent(material);
+			if (outDeferredMaterialIndices != nullptr)
+			{
+				outDeferredMaterialIndices->push_back(materialIndex);
+			}
 			deferredMaterialCount++;
 		}
 		if (nri_ptscenestats || ShouldTraceSceneTexturePerf())
@@ -1507,7 +1537,7 @@ bool NRIRenderer::EnsureSceneTextures(
 		bool metallicClamped = false;
 		bool roughnessClamped = false;
 		bool emissiveClamped = false;
-		if (material.textureIndex >= NRI_MAX_SCENE_TEXTURES)
+		if (material.textureIndex != UINT32_MAX && material.textureIndex >= NRI_MAX_SCENE_TEXTURES)
 		{
 			mSceneTextures.OverflowStats().baseTextureClampCountLastBuild++;
 			material.textureIndex = 0;

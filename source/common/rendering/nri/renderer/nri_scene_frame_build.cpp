@@ -481,11 +481,13 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	auto& persistentVoxelGpuMaterials = mSelectPersistentVoxelGpuMaterialScratch;
 	auto& combinedGpuMaterials = mSelectCombinedGpuMaterialScratch;
 	auto& refreshedCombinedGpuMaterials = mSelectRefreshedCombinedGpuMaterialScratch;
+	auto& deferredTextureMaterialIndices = mSelectDeferredTextureMaterialIndexScratch;
 	capturedGpuMaterials.clear();
 	dynamicGpuMaterials.clear();
 	persistentVoxelGpuMaterials.clear();
 	combinedGpuMaterials.clear();
 	refreshedCombinedGpuMaterials.clear();
+	deferredTextureMaterialIndices.clear();
 	nri_scene::ClearGeometryRetainingCapacity(mSelectLocalPlayerReflectionGeometryScratch);
 	nri_scene::ClearGeometryRetainingCapacity(mSelectOverlayGeometryScratch);
 	nri_scene::ClearMaterialBridgeRetainingCapacity(mSelectOverlayMaterialBridgeScratch);
@@ -1227,7 +1229,8 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						false,
 						"static_map_overlay_combined",
 						&textureReuseInputs,
-						NRISceneTextureMissPolicy::RuntimeAsyncDeferOverlay);
+						NRISceneTextureMissPolicy::RuntimeAsyncDeferOverlay,
+						&deferredTextureMaterialIndices);
 				}();
 				dynamicGpuMaterials.clear();
 				persistentVoxelGpuMaterials.clear();
@@ -1832,6 +1835,17 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		refreshedCombinedGpuMaterials = refreshedMaterialSource.materials;
 		ApplyEmissiveMaterialOverrides(refreshedMaterialSource, refreshedCombinedGpuMaterials);
 		ApplyActorShadowMaterialOverrides(refreshedMaterialSource, refreshedCombinedGpuMaterials);
+		const uint32_t preservedPendingTextureMaterialCount = NRIPreservePendingTextureMaterialProxies(
+			combinedGpuMaterials,
+			refreshedCombinedGpuMaterials,
+			deferredTextureMaterialIndices);
+		if (preservedPendingTextureMaterialCount > 0 && nri_ptscenestats)
+		{
+			Printf(
+				"NRI PT scene textures: event=runtime_pending_preserve deferred_materials=%u preserved_materials=%u action=preserve-transparent-material-proxy\n",
+				(uint32_t)deferredTextureMaterialIndices.size(),
+				preservedPendingTextureMaterialCount);
+		}
 		if (!nri_material_policy::MaterialDataVectorEqual(refreshedCombinedGpuMaterials, combinedGpuMaterials))
 		{
 			const size_t staticMaterialCount = mStaticMapScene.gpuMaterials.size();
