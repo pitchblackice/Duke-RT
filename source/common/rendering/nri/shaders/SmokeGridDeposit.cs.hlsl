@@ -77,7 +77,7 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 		const float3 expansionVelocity = expansionDirection *
 			SmokeSourceFinite(style.ExpansionVelocity, 0.0);
 		const float3 riseVelocity = float3(0.0,
-			-SmokeSourceFinite(style.RiseVelocity, 0.0), 0.0);
+			SmokeSourceFinite(style.RiseVelocity, 0.0), 0.0);
 		const float3 injectionVelocity = SmokeSourceLimitVelocity(inheritedVelocity +
 			stochasticVelocity + expansionVelocity + riseVelocity, gSmokeGridConstants.MaxVelocity);
 		const float3 momentum = injectionVelocity * mass;
