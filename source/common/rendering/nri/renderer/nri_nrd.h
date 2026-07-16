@@ -50,6 +50,7 @@ struct NRINrdDispatchDesc
 	uint32_t maxStabilizedFrameNum = 31;
 	uint32_t sigmaMaxStabilizedFrameNum = 2;
 	uint32_t hitDistanceReconstructionMode = 0;
+	uint32_t indirectSamplingMode = 0;
 	bool resetHistory = false;
 	bool enableAntiFirefly = true;
 	bool enableValidation = false;
@@ -83,5 +84,7 @@ private:
 	bool mHasReblurSettings = false;
 	bool mHasRelaxSettings = false;
 	bool mHasSigmaSettings = false;
+	bool mHasIndirectSamplingMode = false;
 	NRINrdDenoiserMode mLastDenoiserMode = NRINrdDenoiserMode::Reblur;
+	uint32_t mLastIndirectSamplingMode = 0;
 };

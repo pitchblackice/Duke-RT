@@ -350,6 +350,9 @@ public:
 	FrameTextureSlot& mHistoryInputSlot;
 	FrameTextureSlot& mHistoryOutputSlot;
 	FrameTextureSlot& mUpscaledInputSlot;
+	bool mTraceIndirectDenoiserAvailable = false;
+	uint32_t mEffectiveIndirectSamplingMode = 0;
+	uint32_t mActiveIndirectSamplingMode = 0;
 };
 
 class NRIPassDispatcher

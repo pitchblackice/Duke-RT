@@ -110,6 +110,6 @@ struct NRIRuntimeMutationSettings
 };
 
 NRITraceSettings BuildNRITraceSettingsFromCVars();
-NRIDenoiserSettings BuildNRIDenoiserSettingsFromCVars();
+NRIDenoiserSettings BuildNRIDenoiserSettingsFromCVars(uint32_t indirectSamplingMode = 0);
 NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars();
 NRIRuntimeMutationSettings BuildNRIRuntimeMutationSettingsFromCVars();

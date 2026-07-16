@@ -405,12 +405,20 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 
 	NRITraceSceneConstants constants = {};
 	const NRITraceSettings traceSettings = BuildNRITraceSettingsFromCVars();
-	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars();
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const NRIMainUpscalerKind resolvedMainUpscaler = context.mUpscalerService.ResolveMainUpscalerKind(false);
 	const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(resolvedMainUpscaler, context.mUpscalerService.GetSelectedUpscalerMode());
 	const uint32_t jitterPhaseCount = NRIGetTemporalJitterPhaseCount(resolvedMainUpscaler, resolvedUpscalerMode, context.mFrame.guiCaptureActive);
 	const bool directSceneTrace = (!nri_ptbootstrap && nri_ptdirectscene) || bootstrapMode == 11u || bootstrapMode == 12u;
+	context.mEffectiveIndirectSamplingMode =
+		traceSettings.indirectSamplingMode != 0u &&
+		context.mTraceIndirectDenoiserAvailable &&
+		!directSceneTrace &&
+		traceSettings.lightBounceCount > 0u ? 1u : 0u;
+	context.mActiveIndirectSamplingMode =
+		context.mEffectiveIndirectSamplingMode != 0u &&
+		!context.mFrame.resetHistory ? 1u : 0u;
+	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars(context.mEffectiveIndirectSamplingMode);
 	const bool useTemporalJitter =
 		!nri_ptbootstrap &&
 		!context.mFrame.guiCaptureActive &&
@@ -445,7 +453,7 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		(nri_ptemissivefastshadow ? NRI_FLAG_FAST_EMISSIVE_SHADOW : 0u) |
 		(nri_ptvisiblechunkgate ? NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS : 0u) |
 		(ShouldCollectTraceShaderStats() ? NRI_FLAG_TRACE_SHADER_STATS : 0u) |
-		(traceSettings.indirectSamplingMode != 0u ? NRI_FLAG_PROBABILISTIC_INDIRECT : 0u) |
+		(context.mActiveIndirectSamplingMode != 0u ? NRI_FLAG_PROBABILISTIC_INDIRECT : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u) |
 		NRIPackTemporalJitterPhaseCount(jitterPhaseCount) |
 		PackVoxelNormalBlend8(nri_ptvoxelnormalblend);
@@ -533,6 +541,9 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	tracePerf.traceEmissiveRequestedSampleCount = traceSettings.emissiveRequestedSampleCount;
 	tracePerf.traceEmissivePrimarySampleBudget = traceSettings.emissivePrimarySampleBudget;
 	tracePerf.traceIndirectSamplingRequestedMode = traceSettings.indirectSamplingMode;
+	tracePerf.traceIndirectSamplingEffectiveMode = context.mEffectiveIndirectSamplingMode;
+	tracePerf.traceIndirectSamplingActiveMode = context.mActiveIndirectSamplingMode;
+	tracePerf.traceHitDistanceReconstructionMode = denoiserSettings.hitDistanceReconstructionMode;
 	tracePerf.traceRuntimeLightCount = context.mSceneStats.runtimeLightCount;
 	tracePerf.traceRuntimeLightTileCountX = context.mSceneStats.runtimeLightTileCountX;
 	tracePerf.traceRuntimeLightTileCountY = context.mSceneStats.runtimeLightTileCountY;
@@ -560,6 +571,8 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		constants.DebugMode, constants.BootstrapMode, constants.BounceCounts, constants.PortalDepth,
 		constants.ReservedTrace1, traceSettings.emissiveRequestedSampleCount,
 		traceSettings.emissivePrimarySampleBudget, traceSettings.indirectSamplingMode,
+		context.mEffectiveIndirectSamplingMode, context.mActiveIndirectSamplingMode,
+		denoiserSettings.hitDistanceReconstructionMode,
 		(uint32_t)resolvedMainUpscaler, (uint32_t)resolvedUpscalerMode
 	};
 	for (uint64_t value : settingsValues) settingsKey = AppendTraceWorkloadHash(settingsKey, value);
@@ -602,7 +615,7 @@ bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 {
 	NRIScopedGpuTiming gpuTiming(context.mResources.frameBuffer, NRIGpuTimingScope::Denoise);
 	Clocker clock(NriPTDenoiser);
-	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars();
+	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars(context.mEffectiveIndirectSamplingMode);
 
 	if (!context.mNrd.EnsureReady(*context.mResources.device, context.mFrame.renderWidth, context.mFrame.renderHeight, context.mFrame.queuedFrameNum))
 	{
@@ -644,6 +657,7 @@ bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 	desc.maxFastAccumulatedFrameNum = denoiserSettings.maxFastAccumulatedFrameNum;
 	desc.maxStabilizedFrameNum = denoiserSettings.maxStabilizedFrameNum;
 	desc.hitDistanceReconstructionMode = denoiserSettings.hitDistanceReconstructionMode;
+	desc.indirectSamplingMode = context.mEffectiveIndirectSamplingMode;
 	desc.fastHistoryClampingSigmaScale = denoiserSettings.fastHistoryClampingSigmaScale;
 	desc.diffusePrepassBlurRadius = denoiserSettings.diffusePrepassBlurRadius;
 	desc.specularPrepassBlurRadius = denoiserSettings.specularPrepassBlurRadius;

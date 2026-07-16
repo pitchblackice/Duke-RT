@@ -59,6 +59,9 @@ void NRIRenderDevice::CaptureCompactPerfRendererStats(bool rendered)
 	stats.traceEmissiveRequestedSamples = shell.traceEmissiveRequestedSampleCount;
 	stats.traceEmissivePrimaryBudget = shell.traceEmissivePrimarySampleBudget;
 	stats.traceIndirectSamplingRequestedMode = shell.traceIndirectSamplingRequestedMode;
+	stats.traceIndirectSamplingEffectiveMode = shell.traceIndirectSamplingEffectiveMode;
+	stats.traceIndirectSamplingActiveMode = shell.traceIndirectSamplingActiveMode;
+	stats.traceHitDistanceReconstructionMode = shell.traceHitDistanceReconstructionMode;
 	stats.traceRuntimeLights = shell.traceRuntimeLightCount;
 	stats.traceRuntimeLightTilesX = shell.traceRuntimeLightTileCountX;
 	stats.traceRuntimeLightTilesY = shell.traceRuntimeLightTileCountY;

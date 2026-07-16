@@ -1709,6 +1709,9 @@ public:
 		uint32_t traceEmissiveRequestedSampleCount = 0;
 		uint32_t traceEmissivePrimarySampleBudget = 0;
 		uint32_t traceIndirectSamplingRequestedMode = 0;
+		uint32_t traceIndirectSamplingEffectiveMode = 0;
+		uint32_t traceIndirectSamplingActiveMode = 0;
+		uint32_t traceHitDistanceReconstructionMode = 0;
 		uint32_t traceRuntimeLightCount = 0;
 		uint32_t traceRuntimeLightTileCountX = 0;
 		uint32_t traceRuntimeLightTileCountY = 0;
@@ -2863,6 +2866,7 @@ private:
 	NRIFrameGenerationUiMode mLastFrameGenerationResolvedUiMode = NRIFrameGenerationUiMode::Auto;
 	bool mUseUpscaledInFinal = false;
 	bool mLastTemporalAppTaaEnabled = false;
+	bool mLastTemporalDenoiseEnabled = false;
 	bool mHasTemporalExposureState = false;
 	bool mHasAutoExposureSettingsState = false;
 	bool mUseDenoisedCompositionInputs = false;

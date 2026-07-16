@@ -1191,7 +1191,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				float3 nrdDiffuseFactor = 1.0;
 				float3 nrdSpecularFactor = 1.0;
 				GetNrdPrimaryMaterialFactors(guideNormal, nrdViewDir, albedo.rgb, metalness, roughness, nrdDiffuseFactor, nrdSpecularFactor);
-				if (UseProbabilisticIndirectSampling())
+				const bool useProbabilisticIndirect = UseProbabilisticIndirectSampling() && !plainMirrorPrimaryReplacement;
+				if (useProbabilisticIndirect)
 				{
 					indirectDiffuseSelectionProbability = GetDiffuseIndirectSelectionProbability(nrdDiffuseFactor, nrdSpecularFactor);
 					indirectDiffuseSelected = SelectDiffuseIndirectLobe(pixelPos, gTraceConstants.FrameIndex, indirectDiffuseSelectionProbability);
@@ -1374,12 +1375,34 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const uint lightBounceCount = GetLightBounceCount();
 				if (!directSceneTrace && lightBounceCount > 0u)
 				{
-					indirectTransportDiffuse = TraceIndirectDiffuse(hit, diffuseAlbedo, pixelPos, gTraceConstants.FrameIndex, lightBounceCount, diffuseHitDistance) / nrdDiffuseFactor;
-					indirectTransportSpecular = TraceIndirectSpecular(hit, albedo, viewDir, pixelPos, gTraceConstants.FrameIndex, roughness, metalness, lightBounceCount, specularHitDistance) / nrdSpecularFactor;
+					if (!useProbabilisticIndirect || indirectDiffuseSelected)
+					{
+						indirectTransportDiffuse = TraceIndirectDiffuse(hit, diffuseAlbedo, pixelPos, gTraceConstants.FrameIndex, lightBounceCount, diffuseHitDistance) / nrdDiffuseFactor;
+					}
+					if (!useProbabilisticIndirect || indirectSpecularSelected)
+					{
+						indirectTransportSpecular = TraceIndirectSpecular(hit, albedo, viewDir, pixelPos, gTraceConstants.FrameIndex, roughness, metalness, lightBounceCount, specularHitDistance) / nrdSpecularFactor;
+					}
 				}
 
-				diffuse += sampledEmissiveTransportDiffuse + sampledAnalyticTransportDiffuse + indirectTransportDiffuse;
-				specular += sampledEmissiveTransportSpecular + sampledAnalyticTransportSpecular + indirectTransportSpecular;
+				const float3 stochasticDiffuse = sampledEmissiveTransportDiffuse + sampledAnalyticTransportDiffuse + indirectTransportDiffuse;
+				const float3 stochasticSpecular = sampledEmissiveTransportSpecular + sampledAnalyticTransportSpecular + indirectTransportSpecular;
+				if (useProbabilisticIndirect)
+				{
+					if (indirectDiffuseSelected)
+					{
+						diffuse += stochasticDiffuse / indirectDiffuseSelectionProbability;
+					}
+					else
+					{
+						specular += stochasticSpecular / (1.0 - indirectDiffuseSelectionProbability);
+					}
+				}
+				else
+				{
+					diffuse += stochasticDiffuse;
+					specular += stochasticSpecular;
+				}
 				// Keep the placeholder sun out of the primary-hit demodulated NRD bucket so its
 				// hard shadow structure does not get spatially mixed back into REBLUR/RELAX history.
 				directLighting += ambientDirectLighting + sunTransportDiffuse + sunTransportSpecular + runtimePointDirectLighting;
