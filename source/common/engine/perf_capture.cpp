@@ -95,10 +95,26 @@ namespace
 			(unsigned long long)outer.traceFrame, (unsigned long long)nri.frame,
 			nri.resourceWaitCalls, nri.resourceWaitMs,
 			(unsigned long long)gCapture.epoch, record.eligibleIndex);
-		Printf("PERF pt gpu timing NRI: frame=%llu nri_frame=%llu segment=%.3f scene=%.3f trace=%.3f denoise=%.3f compose=%.3f upscale=%.3f final=%.3f segments=%u invalid=%u dropped=%u resolved=%u expected=%u compact=1 epoch=%llu sample=%u\n",
+		Printf("PERF pt trace workload NRI: frame=%llu nri_frame=%llu renderer_frame=%llu schema=1 settings_key=%llu workload_key=%llu render_w=%u render_h=%u output_w=%u output_h=%u dispatch_x=%u dispatch_y=%u dispatch_z=%u light_bounces=%u mirror_bounces=%u portal_depth=%u emissive_samples=%u runtime_lights=%u light_tiles_x=%u light_tiles_y=%u light_tile_size=%u light_tile_indices=%u light_tile_max=%u emissive_prims=%u emissive_power=%.3f flags=%u debug=%u bootstrap=%u upscaler=%u upscaler_mode=%u denoiser=%u direct_scene=%u directional=%u directional_shadow=%u split_shadow=%u fast_emissive_shadow=%u visible_chunk_gate=%u compact=1 epoch=%llu sample=%u\n",
+			(unsigned long long)outer.traceFrame, (unsigned long long)nri.frame,
+			(unsigned long long)nri.traceRendererFrame,
+			(unsigned long long)nri.traceSettingsKey,
+			(unsigned long long)nri.traceWorkloadKey,
+			nri.traceRenderWidth, nri.traceRenderHeight, nri.traceOutputWidth, nri.traceOutputHeight,
+			nri.traceDispatchX, nri.traceDispatchY, nri.traceDispatchZ,
+			nri.traceLightBounces, nri.traceMirrorBounces, nri.tracePortalDepth, nri.traceEmissiveSamples,
+			nri.traceRuntimeLights, nri.traceRuntimeLightTilesX, nri.traceRuntimeLightTilesY,
+			nri.traceRuntimeLightTileSize, nri.traceRuntimeLightTileIndices, nri.traceRuntimeLightMaxOccupancy,
+			nri.traceEmissivePrimitiveCount, nri.traceEmissiveTotalPower,
+			nri.traceFlags, nri.traceDebugMode, nri.traceBootstrapMode,
+			nri.traceUpscalerKind, nri.traceUpscalerMode, nri.traceDenoiserMode,
+			nri.traceDirectScene, nri.traceDirectional, nri.traceDirectionalShadow,
+			nri.traceSplitShadow, nri.traceFastEmissiveShadow, nri.traceVisibleChunkGate,
+			(unsigned long long)gCapture.epoch, record.eligibleIndex);
+		Printf("PERF pt gpu timing NRI: frame=%llu nri_frame=%llu segment=%.3f scene=%.3f trace=%.3f trace_dispatch=%.3f denoise=%.3f compose=%.3f upscale=%.3f final=%.3f segments=%u invalid=%u dropped=%u resolved=%u expected=%u compact=1 epoch=%llu sample=%u\n",
 			(unsigned long long)outer.traceFrame, (unsigned long long)nri.frame,
 			record.gpu.segmentMs, record.gpu.sceneMs,
-			record.gpu.traceMs, record.gpu.denoiseMs, record.gpu.compositionMs,
+			record.gpu.traceMs, record.gpu.traceDispatchMs, record.gpu.denoiseMs, record.gpu.compositionMs,
 			record.gpu.upscaleMs, record.gpu.finalMs, record.gpu.segmentCount,
 			record.gpu.invalidPairs, record.gpu.droppedScopes, record.resolvedGpuSegments,
 			record.expectedGpuSegments, (unsigned long long)gCapture.epoch,
@@ -193,7 +209,8 @@ void PerfCompactCaptureResolveGpuSegment(const PerfCompactCaptureToken& token, c
 	if (r.resolvedGpuSegments >= r.expectedGpuSegments) return;
 	r.resolvedGpuSegments++;
 	r.gpu.segmentMs += timing.segmentMs; r.gpu.sceneMs += timing.sceneMs;
-	r.gpu.traceMs += timing.traceMs; r.gpu.denoiseMs += timing.denoiseMs;
+	r.gpu.traceMs += timing.traceMs; r.gpu.traceDispatchMs += timing.traceDispatchMs;
+	r.gpu.denoiseMs += timing.denoiseMs;
 	r.gpu.compositionMs += timing.compositionMs; r.gpu.upscaleMs += timing.upscaleMs;
 	r.gpu.finalMs += timing.finalMs; r.gpu.segmentCount += timing.segmentCount;
 	r.gpu.invalidPairs += timing.invalidPairs; r.gpu.droppedScopes += timing.droppedScopes;

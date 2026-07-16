@@ -117,6 +117,7 @@ void NRIGpuTiming::RetireSlot(nri::CoreInterface& core, uint32_t slotIndex)
 			{
 			case NRIGpuTimingScope::Scene: timing.sceneMs += value; break;
 			case NRIGpuTimingScope::Trace: timing.traceMs += value; break;
+			case NRIGpuTimingScope::TraceDispatch: timing.traceDispatchMs += value; break;
 			case NRIGpuTimingScope::Denoise: timing.denoiseMs += value; break;
 			case NRIGpuTimingScope::Composition: timing.compositionMs += value; break;
 			case NRIGpuTimingScope::Upscale: timing.upscaleMs += value; break;

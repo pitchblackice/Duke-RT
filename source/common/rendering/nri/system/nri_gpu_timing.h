@@ -12,6 +12,7 @@ enum class NRIGpuTimingScope : uint8_t
 {
 	Scene,
 	Trace,
+	TraceDispatch,
 	Denoise,
 	Composition,
 	Upscale,

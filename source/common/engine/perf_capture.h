@@ -13,6 +13,9 @@ struct PerfCompactCaptureToken
 struct PerfCompactNriStats
 {
 	uint64_t frame = 0;
+	uint64_t traceRendererFrame = 0;
+	uint64_t traceSettingsKey = 0;
+	uint64_t traceWorkloadKey = 0;
 	double totalMs = 0.0, initMs = 0.0, mapMs = 0.0, stateMs = 0.0;
 	double selectMs = 0.0, lightsMs = 0.0, frameGraphMs = 0.0;
 	double postDiagnosticsMs = 0.0, unattributedMs = 0.0;
@@ -24,6 +27,17 @@ struct PerfCompactNriStats
 	uint32_t resourceWaitCalls = 0;
 	uint32_t activePrimitives = 0, dynamicPrimitives = 0, activeMaterials = 0, sceneInstances = 0;
 	uint32_t mutationStructural = 0, mutationMaterial = 0, mutationResident = 0;
+	uint32_t traceRenderWidth = 0, traceRenderHeight = 0, traceOutputWidth = 0, traceOutputHeight = 0;
+	uint32_t traceDispatchX = 0, traceDispatchY = 0, traceDispatchZ = 0;
+	uint32_t traceLightBounces = 0, traceMirrorBounces = 0, tracePortalDepth = 0, traceEmissiveSamples = 0;
+	uint32_t traceRuntimeLights = 0, traceRuntimeLightTilesX = 0, traceRuntimeLightTilesY = 0;
+	uint32_t traceRuntimeLightTileSize = 0, traceRuntimeLightTileIndices = 0, traceRuntimeLightMaxOccupancy = 0;
+	uint32_t traceEmissivePrimitiveCount = 0;
+	double traceEmissiveTotalPower = 0.0;
+	uint32_t traceFlags = 0, traceDebugMode = 0, traceBootstrapMode = 0;
+	uint32_t traceUpscalerKind = 0, traceUpscalerMode = 0, traceDenoiserMode = 0;
+	uint32_t traceDirectScene = 0, traceDirectional = 0, traceDirectionalShadow = 0;
+	uint32_t traceSplitShadow = 0, traceFastEmissiveShadow = 0, traceVisibleChunkGate = 0;
 	bool rendered = false;
 	bool valid = false;
 };
@@ -57,7 +71,7 @@ struct PerfCompactOuterFrame
 
 struct PerfCompactGpuTiming
 {
-	double segmentMs = 0.0, sceneMs = 0.0, traceMs = 0.0, denoiseMs = 0.0;
+	double segmentMs = 0.0, sceneMs = 0.0, traceMs = 0.0, traceDispatchMs = 0.0, denoiseMs = 0.0;
 	double compositionMs = 0.0, upscaleMs = 0.0, finalMs = 0.0;
 	uint32_t segmentCount = 0, invalidPairs = 0, droppedScopes = 0;
 };

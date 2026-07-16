@@ -97,6 +97,11 @@ namespace
 		return (value + 7u) / 8u;
 	}
 
+	static uint64_t AppendTraceWorkloadHash(uint64_t hash, uint64_t value)
+	{
+		return (hash ^ value) * 1099511628211ull;
+	}
+
 	static float Clamp01(float value)
 	{
 		return std::max(0.0f, std::min(value, 1.0f));
@@ -514,12 +519,68 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	context.mLastPerfShellTraceStats.traceOpaqueDispatchX = dispatchX;
 	context.mLastPerfShellTraceStats.traceOpaqueDispatchY = dispatchY;
 	context.mLastPerfShellTraceStats.traceOpaqueDispatchZ = dispatchZ;
+	auto& tracePerf = context.mLastPerfShellTraceStats;
+	tracePerf.traceRendererFrame = context.mFrame.frameIndex;
+	tracePerf.traceRenderWidth = constants.RenderWidth;
+	tracePerf.traceRenderHeight = constants.RenderHeight;
+	tracePerf.traceOutputWidth = constants.DisplayWidth;
+	tracePerf.traceOutputHeight = constants.DisplayHeight;
+	tracePerf.traceLightBounceCount = traceSettings.lightBounceCount;
+	tracePerf.traceMirrorBounceCount = traceSettings.mirrorBounceCount;
+	tracePerf.tracePortalDepth = traceSettings.portalDepth;
+	tracePerf.traceEmissiveSampleCount = traceSettings.emissiveSampleCount;
+	tracePerf.traceRuntimeLightCount = context.mSceneStats.runtimeLightCount;
+	tracePerf.traceRuntimeLightTileCountX = context.mSceneStats.runtimeLightTileCountX;
+	tracePerf.traceRuntimeLightTileCountY = context.mSceneStats.runtimeLightTileCountY;
+	tracePerf.traceRuntimeLightTileSize = context.mSceneStats.runtimeLightTileSize;
+	tracePerf.traceRuntimeLightTileIndexCount = context.mSceneStats.runtimeLightTileIndexCount;
+	tracePerf.traceRuntimeLightMaxTileOccupancy = context.mSceneStats.runtimeLightMaxTileOccupancy;
+	tracePerf.traceEmissivePrimitiveCount = context.mSceneStats.emissivePrimitiveCount;
+	tracePerf.traceEmissiveTotalPower = context.mSceneStats.emissiveTotalPower;
+	tracePerf.traceFlags = constants.Flags;
+	tracePerf.traceDebugMode = constants.DebugMode;
+	tracePerf.traceBootstrapMode = constants.BootstrapMode;
+	tracePerf.traceUpscalerKind = (uint32_t)resolvedMainUpscaler;
+	tracePerf.traceUpscalerMode = (uint32_t)resolvedUpscalerMode;
+	tracePerf.traceDenoiserMode = (uint32_t)denoiserSettings.denoiserMode;
+	tracePerf.traceDirectScene = directSceneTrace ? 1u : 0u;
+	tracePerf.traceDirectional = context.mDirectionalLightState.enabled ? 1u : 0u;
+	tracePerf.traceDirectionalShadow = context.mDirectionalLightState.enabled && context.mDirectionalLightState.shadow ? 1u : 0u;
+	tracePerf.traceSplitShadow = context.mUseSplitShadowDenoiser && !directSceneTrace ? 1u : 0u;
+	tracePerf.traceFastEmissiveShadow = nri_ptemissivefastshadow ? 1u : 0u;
+	tracePerf.traceVisibleChunkGate = nri_ptvisiblechunkgate ? 1u : 0u;
+	uint64_t settingsKey = 1469598103934665603ull;
+	const uint64_t settingsValues[] = {
+		constants.RenderWidth, constants.RenderHeight, constants.DisplayWidth, constants.DisplayHeight,
+		dispatchX, dispatchY, dispatchZ, constants.Flags & ~NRI_FLAG_RESET_HISTORY,
+		constants.DebugMode, constants.BootstrapMode, constants.BounceCounts, constants.PortalDepth,
+		constants.ReservedTrace1, (uint32_t)resolvedMainUpscaler, (uint32_t)resolvedUpscalerMode
+	};
+	for (uint64_t value : settingsValues) settingsKey = AppendTraceWorkloadHash(settingsKey, value);
+	tracePerf.traceSettingsKey = settingsKey;
+	uint64_t workloadKey = settingsKey;
+	const uint64_t workloadValues[] = {
+		constants.Flags, constants.ReservedTrace0,
+		constants.SceneInstanceCount, constants.StaticPrimitiveCount, constants.DynamicPrimitiveCount,
+		constants.StaticMaterialCount, constants.DynamicMaterialCount, constants.PortalCount,
+		constants.RuntimeLightCount, context.mSceneStats.runtimeLightTileSize,
+		context.mSceneStats.runtimeLightTileIndexCount, context.mSceneStats.runtimeLightMaxTileOccupancy,
+		context.mSceneStats.emissivePrimitiveCount, (uint32_t)resolvedMainUpscaler, (uint32_t)resolvedUpscalerMode
+	};
+	for (uint64_t value : workloadValues) workloadKey = AppendTraceWorkloadHash(workloadKey, value);
+	uint32_t emissivePowerBits = 0;
+	static_assert(sizeof(emissivePowerBits) == sizeof(context.mSceneStats.emissiveTotalPower));
+	std::memcpy(&emissivePowerBits, &context.mSceneStats.emissiveTotalPower, sizeof(emissivePowerBits));
+	tracePerf.traceWorkloadKey = AppendTraceWorkloadHash(workloadKey, emissivePowerBits);
 	{
 		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueCommandMs);
 		context.mTraceShaderStats.ResetBuffer(context.mResources.BuildResourceServices(), ShouldCollectTraceShaderStats());
 		context.mCommands.core->CmdBeginAnnotation(*context.mCommands.commandBuffer, "Raze.TraceOpaque.Dispatch", nri::BGRA_UNUSED);
 		context.mCommands.SetPipeline(context.mPipelines.Get(NRIRenderer::PipelineSlot::TraceOpaque));
-		context.mCommands.Dispatch(dispatchX, dispatchY, dispatchZ);
+		{
+			NRIScopedGpuTiming dispatchGpuTiming(context.mResources.frameBuffer, NRIGpuTimingScope::TraceDispatch);
+			context.mCommands.Dispatch(dispatchX, dispatchY, dispatchZ);
+		}
 		context.mCommands.core->CmdEndAnnotation(*context.mCommands.commandBuffer);
 	}
 	{
