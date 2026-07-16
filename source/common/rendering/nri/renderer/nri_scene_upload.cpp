@@ -226,6 +226,19 @@ namespace
 		return resource.size;
 	}
 
+	static NRISceneDataLightBufferReuseView BuildSceneDataLightBufferReuseView(const NRIBufferResource& resource)
+	{
+		NRISceneDataLightBufferReuseView view = {};
+		view.resourceIdentity = reinterpret_cast<uintptr_t>(resource.buffer);
+		view.descriptorIdentity = reinterpret_cast<uintptr_t>(resource.shaderView);
+		view.resourceReady = resource.buffer != nullptr;
+		view.descriptorReady = resource.shaderView != nullptr;
+		view.usedSize = resource.usedSize;
+		view.capacity = resource.size;
+		view.stride = resource.stride;
+		return view;
+	}
+
 	static uint64_t EstimateSceneDataFrameSlotCapacity(
 		const NRISceneDataFrameSlot& slot,
 		uint64_t reprojectionSize,
@@ -2722,11 +2735,30 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		runtimeLightUsesFrameSlot ? sceneDataFrameSlot->runtimeLightBuffer : renderer.mRuntimeLightBuffer;
 	SceneBufferDebugStats& runtimeLightStats =
 		runtimeLightUsesFrameSlot ? sceneDataFrameSlot->runtimeLightStats : renderer.mRuntimeLightBufferStats;
-	if (runtimeLightUsesFrameSlot ||
-		!renderer.mRuntimeLightPayloadCacheValid ||
-		renderer.mRuntimeLightPayloadHash != runtimeLightPayloadHash ||
-		runtimeLightBuffer.shaderView == nullptr)
+	uint32_t boundRuntimeLightCount = activeRuntimeLightCount;
+	const bool runtimeLightFrameSlotCacheHit =
+		runtimeLightUsesFrameSlot &&
+		sceneDataFrameSlot->lightReuse.runtimeLight.CanReuse(
+			runtimeLightPayloadHash,
+			activeRuntimeLightCount,
+			BuildSceneDataLightBufferReuseView(runtimeLightBuffer),
+			sizeof(NRIRuntimePointLightGpuData));
+	const bool runtimeLightNeedsUpload =
+		runtimeLightUsesFrameSlot ?
+		!runtimeLightFrameSlotCacheHit :
+		(!renderer.mRuntimeLightPayloadCacheValid ||
+			renderer.mRuntimeLightPayloadHash != runtimeLightPayloadHash ||
+			runtimeLightBuffer.shaderView == nullptr);
+	if (runtimeLightNeedsUpload)
 	{
+		if (runtimeLightUsesFrameSlot)
+		{
+			sceneDataFrameSlot->lightReuse.runtimeLight.Invalidate();
+		}
+		else
+		{
+			renderer.mRuntimeLightPayloadCacheValid = false;
+		}
 		renderer.mLastPerfShellTraceStats.sceneDataSetRuntimeLightUploads++;
 		std::vector<NRIRuntimePointLightGpuData> runtimeLights;
 		{
@@ -2750,11 +2782,25 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 			return false;
 		}
 
-		renderer.mRuntimeLightPayloadCacheValid = true;
-		renderer.mRuntimeLightPayloadHash = runtimeLightPayloadHash;
+		if (runtimeLightUsesFrameSlot)
+		{
+			sceneDataFrameSlot->lightReuse.runtimeLight.Commit(
+				runtimeLightPayloadHash,
+				(uint32_t)runtimeLights.size(),
+				BuildSceneDataLightBufferReuseView(runtimeLightBuffer));
+		}
+		else
+		{
+			renderer.mRuntimeLightPayloadCacheValid = true;
+			renderer.mRuntimeLightPayloadHash = runtimeLightPayloadHash;
+		}
 	}
 	else
 	{
+		if (runtimeLightUsesFrameSlot)
+		{
+			boundRuntimeLightCount = sceneDataFrameSlot->lightReuse.runtimeLight.lightCount;
+		}
 		renderer.mLastPerfShellTraceStats.sceneDataSetRuntimeLightCacheHits++;
 	}
 
@@ -2777,12 +2823,31 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		runtimeLightUsesFrameSlot ? sceneDataFrameSlot->runtimeLightTileIndexBuffer : renderer.mRuntimeLightTileIndexBuffer;
 	SceneBufferDebugStats& runtimeLightTileIndexStats =
 		runtimeLightUsesFrameSlot ? sceneDataFrameSlot->runtimeLightTileIndexStats : renderer.mRuntimeLightTileIndexBufferStats;
-	if (runtimeLightUsesFrameSlot ||
-		!renderer.mRuntimeLightClusterCacheValid ||
-		renderer.mRuntimeLightClusterPayloadHash != runtimeLightClusterPayloadHash ||
-		runtimeLightTileHeaderBuffer.shaderView == nullptr ||
-		runtimeLightTileIndexBuffer.shaderView == nullptr)
+	const bool runtimeLightClusterFrameSlotCacheHit =
+		runtimeLightUsesFrameSlot &&
+		sceneDataFrameSlot->lightReuse.runtimeLightCluster.CanReuse(
+			runtimeLightClusterPayloadHash,
+			BuildSceneDataLightBufferReuseView(runtimeLightTileHeaderBuffer),
+			sizeof(NRIRuntimeLightTileHeaderGpuData),
+			BuildSceneDataLightBufferReuseView(runtimeLightTileIndexBuffer),
+			sizeof(uint32_t));
+	const bool runtimeLightClusterNeedsUpload =
+		runtimeLightUsesFrameSlot ?
+		!runtimeLightClusterFrameSlotCacheHit :
+		(!renderer.mRuntimeLightClusterCacheValid ||
+			renderer.mRuntimeLightClusterPayloadHash != runtimeLightClusterPayloadHash ||
+			runtimeLightTileHeaderBuffer.shaderView == nullptr ||
+			runtimeLightTileIndexBuffer.shaderView == nullptr);
+	if (runtimeLightClusterNeedsUpload)
 	{
+		if (runtimeLightUsesFrameSlot)
+		{
+			sceneDataFrameSlot->lightReuse.runtimeLightCluster.Invalidate();
+		}
+		else
+		{
+			renderer.mRuntimeLightClusterCacheValid = false;
+		}
 		renderer.mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterUploads++;
 		std::vector<NRIRuntimeLightTileHeaderGpuData> runtimeLightTileHeaders;
 		std::vector<uint32_t> runtimeLightTileIndices;
@@ -2831,16 +2896,40 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 			return false;
 		}
 
-		renderer.mRuntimeLightClusterCacheValid = true;
-		renderer.mRuntimeLightClusterPayloadHash = runtimeLightClusterPayloadHash;
-		renderer.mRuntimeLightClusterCameraHash = runtimeLightClusterCameraHash;
+		if (runtimeLightUsesFrameSlot)
+		{
+			sceneDataFrameSlot->lightReuse.runtimeLightCluster.Commit(
+				runtimeLightClusterPayloadHash,
+				runtimeLightTileCountX,
+				runtimeLightTileCountY,
+				runtimeLightTileIndexCount,
+				runtimeLightMaxTileOccupancy,
+				BuildSceneDataLightBufferReuseView(runtimeLightTileHeaderBuffer),
+				BuildSceneDataLightBufferReuseView(runtimeLightTileIndexBuffer));
+		}
+		else
+		{
+			renderer.mRuntimeLightClusterCacheValid = true;
+			renderer.mRuntimeLightClusterPayloadHash = runtimeLightClusterPayloadHash;
+			renderer.mRuntimeLightClusterCameraHash = runtimeLightClusterCameraHash;
+		}
 	}
 	else
 	{
-		runtimeLightTileCountX = renderer.mBoundRuntimeLightTileCountX;
-		runtimeLightTileCountY = renderer.mBoundRuntimeLightTileCountY;
-		runtimeLightTileIndexCount = renderer.mBoundRuntimeLightTileIndexCount;
-		runtimeLightMaxTileOccupancy = renderer.mBoundRuntimeLightMaxTileOccupancy;
+		if (runtimeLightUsesFrameSlot)
+		{
+			runtimeLightTileCountX = sceneDataFrameSlot->lightReuse.runtimeLightCluster.tileCountX;
+			runtimeLightTileCountY = sceneDataFrameSlot->lightReuse.runtimeLightCluster.tileCountY;
+			runtimeLightTileIndexCount = sceneDataFrameSlot->lightReuse.runtimeLightCluster.tileIndexCount;
+			runtimeLightMaxTileOccupancy = sceneDataFrameSlot->lightReuse.runtimeLightCluster.maxTileOccupancy;
+		}
+		else
+		{
+			runtimeLightTileCountX = renderer.mBoundRuntimeLightTileCountX;
+			runtimeLightTileCountY = renderer.mBoundRuntimeLightTileCountY;
+			runtimeLightTileIndexCount = renderer.mBoundRuntimeLightTileIndexCount;
+			runtimeLightMaxTileOccupancy = renderer.mBoundRuntimeLightMaxTileOccupancy;
+		}
 		renderer.mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterCacheHits++;
 	}
 
@@ -2946,12 +3035,32 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		runtimeLightUsesFrameSlot ? sceneDataFrameSlot->sectorLightBuffer : renderer.mSectorLightBuffer;
 	SceneBufferDebugStats& sectorLightStats =
 		runtimeLightUsesFrameSlot ? sceneDataFrameSlot->sectorLightStats : renderer.mSectorLightBufferStats;
-	if (runtimeLightUsesFrameSlot ||
-		!renderer.mSectorLightingPayloadCacheValid ||
-		renderer.mSectorLightingPayloadHash != sectorLightingPayloadHash ||
-		sectorLightHeaderBuffer.shaderView == nullptr ||
-		sectorLightBuffer.shaderView == nullptr)
+	const bool sectorLightFrameSlotCacheHit =
+		runtimeLightUsesFrameSlot &&
+		sceneDataFrameSlot->lightReuse.sectorLight.CanReuse(
+			sectorLightingPayloadHash,
+			renderer.mBoundSectorLightSectorCount,
+			BuildSceneDataLightBufferReuseView(sectorLightHeaderBuffer),
+			sizeof(NRISectorLightHeaderGpuData),
+			BuildSceneDataLightBufferReuseView(sectorLightBuffer),
+			sizeof(NRISectorLightGpuData));
+	const bool sectorLightNeedsUpload =
+		runtimeLightUsesFrameSlot ?
+		!sectorLightFrameSlotCacheHit :
+		(!renderer.mSectorLightingPayloadCacheValid ||
+			renderer.mSectorLightingPayloadHash != sectorLightingPayloadHash ||
+			sectorLightHeaderBuffer.shaderView == nullptr ||
+			sectorLightBuffer.shaderView == nullptr);
+	if (sectorLightNeedsUpload)
 	{
+		if (runtimeLightUsesFrameSlot)
+		{
+			sceneDataFrameSlot->lightReuse.sectorLight.Invalidate();
+		}
+		else
+		{
+			renderer.mSectorLightingPayloadCacheValid = false;
+		}
 		renderer.mLastPerfShellTraceStats.sceneDataSetSectorLightUploads++;
 		NRISectorLightHeaderGpuData sectorLightHeader = {};
 		std::vector<NRISectorLightGpuData> sectorLights;
@@ -2994,11 +3103,26 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 			return false;
 		}
 
-		renderer.mSectorLightingPayloadCacheValid = true;
-		renderer.mSectorLightingPayloadHash = sectorLightingPayloadHash;
+		if (runtimeLightUsesFrameSlot)
+		{
+			sceneDataFrameSlot->lightReuse.sectorLight.Commit(
+				sectorLightingPayloadHash,
+				(uint32_t)sectorLights.size(),
+				BuildSceneDataLightBufferReuseView(sectorLightHeaderBuffer),
+				BuildSceneDataLightBufferReuseView(sectorLightBuffer));
+		}
+		else
+		{
+			renderer.mSectorLightingPayloadCacheValid = true;
+			renderer.mSectorLightingPayloadHash = sectorLightingPayloadHash;
+		}
 	}
 	else
 	{
+		if (runtimeLightUsesFrameSlot)
+		{
+			renderer.mBoundSectorLightSectorCount = sceneDataFrameSlot->lightReuse.sectorLight.sectorCount;
+		}
 		renderer.mLastPerfShellTraceStats.sceneDataSetSectorLightCacheHits++;
 	}
 
@@ -3109,7 +3233,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 	renderer.mBoundStaticMaterialCount = staticMaterialCount;
 	renderer.mBoundDynamicMaterialCount = dynamicMaterialCount;
 	renderer.mBoundPortalCount = renderer.mMapWorld.valid ? (uint32_t)renderer.mMapWorld.portals.size() : 0u;
-	renderer.mBoundRuntimeLightCount = activeRuntimeLightCount;
+	renderer.mBoundRuntimeLightCount = boundRuntimeLightCount;
 	renderer.mBoundRuntimeLightTileCountX = runtimeLightTileCountX;
 	renderer.mBoundRuntimeLightTileCountY = runtimeLightTileCountY;
 	renderer.mBoundRuntimeLightTileSize = NRI_RUNTIME_LIGHT_TILE_SIZE;
@@ -3147,11 +3271,30 @@ bool NRISceneUploadManager::UpdateRuntimeLightAndSectorSceneData(NRIRenderer& re
 	SceneBufferDebugStats& runtimeLightStats =
 		runtimeLightUsesFrameSlot ? sceneDataFrameSlot->runtimeLightStats : renderer.mRuntimeLightBufferStats;
 	const uint32_t activeRuntimeLightCount = (uint32_t)renderer.mSceneLights.GetAnalyticLights().activeLights.size();
-	if (runtimeLightUsesFrameSlot ||
-		!renderer.mRuntimeLightPayloadCacheValid ||
-		renderer.mRuntimeLightPayloadHash != runtimeLightPayloadHash ||
-		runtimeLightBuffer.shaderView == nullptr)
+	uint32_t boundRuntimeLightCount = activeRuntimeLightCount;
+	const bool runtimeLightFrameSlotCacheHit =
+		runtimeLightUsesFrameSlot &&
+		sceneDataFrameSlot->lightReuse.runtimeLight.CanReuse(
+			runtimeLightPayloadHash,
+			activeRuntimeLightCount,
+			BuildSceneDataLightBufferReuseView(runtimeLightBuffer),
+			sizeof(NRIRuntimePointLightGpuData));
+	const bool runtimeLightNeedsUpload =
+		runtimeLightUsesFrameSlot ?
+		!runtimeLightFrameSlotCacheHit :
+		(!renderer.mRuntimeLightPayloadCacheValid ||
+			renderer.mRuntimeLightPayloadHash != runtimeLightPayloadHash ||
+			runtimeLightBuffer.shaderView == nullptr);
+	if (runtimeLightNeedsUpload)
 	{
+		if (runtimeLightUsesFrameSlot)
+		{
+			sceneDataFrameSlot->lightReuse.runtimeLight.Invalidate();
+		}
+		else
+		{
+			renderer.mRuntimeLightPayloadCacheValid = false;
+		}
 		renderer.mLastPerfShellTraceStats.sceneDataSetRuntimeLightUploads++;
 		std::vector<NRIRuntimePointLightGpuData> runtimeLights;
 		{
@@ -3175,11 +3318,25 @@ bool NRISceneUploadManager::UpdateRuntimeLightAndSectorSceneData(NRIRenderer& re
 			return false;
 		}
 
-		renderer.mRuntimeLightPayloadCacheValid = true;
-		renderer.mRuntimeLightPayloadHash = runtimeLightPayloadHash;
+		if (runtimeLightUsesFrameSlot)
+		{
+			sceneDataFrameSlot->lightReuse.runtimeLight.Commit(
+				runtimeLightPayloadHash,
+				(uint32_t)runtimeLights.size(),
+				BuildSceneDataLightBufferReuseView(runtimeLightBuffer));
+		}
+		else
+		{
+			renderer.mRuntimeLightPayloadCacheValid = true;
+			renderer.mRuntimeLightPayloadHash = runtimeLightPayloadHash;
+		}
 	}
 	else
 	{
+		if (runtimeLightUsesFrameSlot)
+		{
+			boundRuntimeLightCount = sceneDataFrameSlot->lightReuse.runtimeLight.lightCount;
+		}
 		renderer.mLastPerfShellTraceStats.sceneDataSetRuntimeLightCacheHits++;
 	}
 
@@ -3202,12 +3359,31 @@ bool NRISceneUploadManager::UpdateRuntimeLightAndSectorSceneData(NRIRenderer& re
 		runtimeLightUsesFrameSlot ? sceneDataFrameSlot->runtimeLightTileIndexBuffer : renderer.mRuntimeLightTileIndexBuffer;
 	SceneBufferDebugStats& runtimeLightTileIndexStats =
 		runtimeLightUsesFrameSlot ? sceneDataFrameSlot->runtimeLightTileIndexStats : renderer.mRuntimeLightTileIndexBufferStats;
-	if (runtimeLightUsesFrameSlot ||
-		!renderer.mRuntimeLightClusterCacheValid ||
-		renderer.mRuntimeLightClusterPayloadHash != runtimeLightClusterPayloadHash ||
-		runtimeLightTileHeaderBuffer.shaderView == nullptr ||
-		runtimeLightTileIndexBuffer.shaderView == nullptr)
+	const bool runtimeLightClusterFrameSlotCacheHit =
+		runtimeLightUsesFrameSlot &&
+		sceneDataFrameSlot->lightReuse.runtimeLightCluster.CanReuse(
+			runtimeLightClusterPayloadHash,
+			BuildSceneDataLightBufferReuseView(runtimeLightTileHeaderBuffer),
+			sizeof(NRIRuntimeLightTileHeaderGpuData),
+			BuildSceneDataLightBufferReuseView(runtimeLightTileIndexBuffer),
+			sizeof(uint32_t));
+	const bool runtimeLightClusterNeedsUpload =
+		runtimeLightUsesFrameSlot ?
+		!runtimeLightClusterFrameSlotCacheHit :
+		(!renderer.mRuntimeLightClusterCacheValid ||
+			renderer.mRuntimeLightClusterPayloadHash != runtimeLightClusterPayloadHash ||
+			runtimeLightTileHeaderBuffer.shaderView == nullptr ||
+			runtimeLightTileIndexBuffer.shaderView == nullptr);
+	if (runtimeLightClusterNeedsUpload)
 	{
+		if (runtimeLightUsesFrameSlot)
+		{
+			sceneDataFrameSlot->lightReuse.runtimeLightCluster.Invalidate();
+		}
+		else
+		{
+			renderer.mRuntimeLightClusterCacheValid = false;
+		}
 		renderer.mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterUploads++;
 		std::vector<NRIRuntimeLightTileHeaderGpuData> runtimeLightTileHeaders;
 		std::vector<uint32_t> runtimeLightTileIndices;
@@ -3256,16 +3432,40 @@ bool NRISceneUploadManager::UpdateRuntimeLightAndSectorSceneData(NRIRenderer& re
 			return false;
 		}
 
-		renderer.mRuntimeLightClusterCacheValid = true;
-		renderer.mRuntimeLightClusterPayloadHash = runtimeLightClusterPayloadHash;
-		renderer.mRuntimeLightClusterCameraHash = runtimeLightClusterCameraHash;
+		if (runtimeLightUsesFrameSlot)
+		{
+			sceneDataFrameSlot->lightReuse.runtimeLightCluster.Commit(
+				runtimeLightClusterPayloadHash,
+				runtimeLightTileCountX,
+				runtimeLightTileCountY,
+				runtimeLightTileIndexCount,
+				runtimeLightMaxTileOccupancy,
+				BuildSceneDataLightBufferReuseView(runtimeLightTileHeaderBuffer),
+				BuildSceneDataLightBufferReuseView(runtimeLightTileIndexBuffer));
+		}
+		else
+		{
+			renderer.mRuntimeLightClusterCacheValid = true;
+			renderer.mRuntimeLightClusterPayloadHash = runtimeLightClusterPayloadHash;
+			renderer.mRuntimeLightClusterCameraHash = runtimeLightClusterCameraHash;
+		}
 	}
 	else
 	{
-		runtimeLightTileCountX = renderer.mBoundRuntimeLightTileCountX;
-		runtimeLightTileCountY = renderer.mBoundRuntimeLightTileCountY;
-		runtimeLightTileIndexCount = renderer.mBoundRuntimeLightTileIndexCount;
-		runtimeLightMaxTileOccupancy = renderer.mBoundRuntimeLightMaxTileOccupancy;
+		if (runtimeLightUsesFrameSlot)
+		{
+			runtimeLightTileCountX = sceneDataFrameSlot->lightReuse.runtimeLightCluster.tileCountX;
+			runtimeLightTileCountY = sceneDataFrameSlot->lightReuse.runtimeLightCluster.tileCountY;
+			runtimeLightTileIndexCount = sceneDataFrameSlot->lightReuse.runtimeLightCluster.tileIndexCount;
+			runtimeLightMaxTileOccupancy = sceneDataFrameSlot->lightReuse.runtimeLightCluster.maxTileOccupancy;
+		}
+		else
+		{
+			runtimeLightTileCountX = renderer.mBoundRuntimeLightTileCountX;
+			runtimeLightTileCountY = renderer.mBoundRuntimeLightTileCountY;
+			runtimeLightTileIndexCount = renderer.mBoundRuntimeLightTileIndexCount;
+			runtimeLightMaxTileOccupancy = renderer.mBoundRuntimeLightMaxTileOccupancy;
+		}
 		renderer.mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterCacheHits++;
 	}
 
@@ -3283,12 +3483,32 @@ bool NRISceneUploadManager::UpdateRuntimeLightAndSectorSceneData(NRIRenderer& re
 		runtimeLightUsesFrameSlot ? sceneDataFrameSlot->sectorLightBuffer : renderer.mSectorLightBuffer;
 	SceneBufferDebugStats& sectorLightStats =
 		runtimeLightUsesFrameSlot ? sceneDataFrameSlot->sectorLightStats : renderer.mSectorLightBufferStats;
-	if (runtimeLightUsesFrameSlot ||
-		!renderer.mSectorLightingPayloadCacheValid ||
-		renderer.mSectorLightingPayloadHash != sectorLightingPayloadHash ||
-		sectorLightHeaderBuffer.shaderView == nullptr ||
-		sectorLightBuffer.shaderView == nullptr)
+	const bool sectorLightFrameSlotCacheHit =
+		runtimeLightUsesFrameSlot &&
+		sceneDataFrameSlot->lightReuse.sectorLight.CanReuse(
+			sectorLightingPayloadHash,
+			renderer.mBoundSectorLightSectorCount,
+			BuildSceneDataLightBufferReuseView(sectorLightHeaderBuffer),
+			sizeof(NRISectorLightHeaderGpuData),
+			BuildSceneDataLightBufferReuseView(sectorLightBuffer),
+			sizeof(NRISectorLightGpuData));
+	const bool sectorLightNeedsUpload =
+		runtimeLightUsesFrameSlot ?
+		!sectorLightFrameSlotCacheHit :
+		(!renderer.mSectorLightingPayloadCacheValid ||
+			renderer.mSectorLightingPayloadHash != sectorLightingPayloadHash ||
+			sectorLightHeaderBuffer.shaderView == nullptr ||
+			sectorLightBuffer.shaderView == nullptr);
+	if (sectorLightNeedsUpload)
 	{
+		if (runtimeLightUsesFrameSlot)
+		{
+			sceneDataFrameSlot->lightReuse.sectorLight.Invalidate();
+		}
+		else
+		{
+			renderer.mSectorLightingPayloadCacheValid = false;
+		}
 		renderer.mLastPerfShellTraceStats.sceneDataSetSectorLightUploads++;
 		NRISectorLightHeaderGpuData sectorLightHeader = {};
 		std::vector<NRISectorLightGpuData> sectorLights;
@@ -3331,11 +3551,26 @@ bool NRISceneUploadManager::UpdateRuntimeLightAndSectorSceneData(NRIRenderer& re
 			return false;
 		}
 
-		renderer.mSectorLightingPayloadCacheValid = true;
-		renderer.mSectorLightingPayloadHash = sectorLightingPayloadHash;
+		if (runtimeLightUsesFrameSlot)
+		{
+			sceneDataFrameSlot->lightReuse.sectorLight.Commit(
+				sectorLightingPayloadHash,
+				(uint32_t)sectorLights.size(),
+				BuildSceneDataLightBufferReuseView(sectorLightHeaderBuffer),
+				BuildSceneDataLightBufferReuseView(sectorLightBuffer));
+		}
+		else
+		{
+			renderer.mSectorLightingPayloadCacheValid = true;
+			renderer.mSectorLightingPayloadHash = sectorLightingPayloadHash;
+		}
 	}
 	else
 	{
+		if (runtimeLightUsesFrameSlot)
+		{
+			renderer.mBoundSectorLightSectorCount = sceneDataFrameSlot->lightReuse.sectorLight.sectorCount;
+		}
 		renderer.mLastPerfShellTraceStats.sceneDataSetSectorLightCacheHits++;
 	}
 
@@ -3363,7 +3598,7 @@ bool NRISceneUploadManager::UpdateRuntimeLightAndSectorSceneData(NRIRenderer& re
 		return false;
 	}
 
-	renderer.mBoundRuntimeLightCount = activeRuntimeLightCount;
+	renderer.mBoundRuntimeLightCount = boundRuntimeLightCount;
 	renderer.mBoundRuntimeLightTileCountX = runtimeLightTileCountX;
 	renderer.mBoundRuntimeLightTileCountY = runtimeLightTileCountY;
 	renderer.mBoundRuntimeLightTileSize = NRI_RUNTIME_LIGHT_TILE_SIZE;

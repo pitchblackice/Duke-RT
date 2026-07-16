@@ -1433,8 +1433,8 @@ CVAR(Bool, nri_ptemissivefastshadow, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptemissivesamples, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-// Session-only experiment: 0 preserves the requested count; 1..4 cap only the primary direct loop.
-CUSTOM_CVAR(Int, nri_ptemissiveprimarybudget, 0, 0)
+// Session-only policy: 0 preserves the requested count; 1..4 cap only the primary direct loop.
+CUSTOM_CVAR(Int, nri_ptemissiveprimarybudget, 2, 0)
 {
 	if (self < 0 || self > 4)
 	{
@@ -1442,8 +1442,8 @@ CUSTOM_CVAR(Int, nri_ptemissiveprimarybudget, 0, 0)
 	}
 }
 
-// Session-only experiment: 0 preserves dual indirect paths; 1 requests probabilistic single-lobe sampling.
-CUSTOM_CVAR(Int, nri_ptindirectsampling, 0, 0)
+// Session-only policy: 0 preserves dual indirect paths; 1 requests probabilistic single-lobe sampling.
+CUSTOM_CVAR(Int, nri_ptindirectsampling, 1, 0)
 {
 	if (self < 0 || self > 1)
 	{
@@ -1617,6 +1617,8 @@ CVAR(Int, nri_ptvoxelresidentmaxbytes, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelresidentminheadroombytes, 512 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptvoxelresidentmaxcoldmaps, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CVAR(Int, nri_ptvoxelpressureauditframes, 0, 0)
 
 CVAR(Bool, nri_ptvoxeltrimcoldloading, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 

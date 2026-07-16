@@ -47,10 +47,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mRuntimeMutation.ClearResidentGeometryUploadRanges();
 	const NRIRuntimeMutationSettings runtimeMutationSettings = BuildNRIRuntimeMutationSettingsFromCVars();
 	const bool tracePtPerf = ShouldTracePtPerf();
+	const bool collectRuntimeMutationTiming = ShouldCollectRuntimeMutationPerfTiming();
 	const bool collectRuntimeMutationCacheStats = tracePtPerf || (bool)nri_ptslowdowntrace;
+	mLastPerfShellTraceStats.runtimeMutationDiscoveryMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationBudgetMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationCommitMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildVisibleMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildInvisibleMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildNearMs = 0.0;
@@ -114,6 +118,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationCandidateDraggedChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationCandidateSignatureWatchChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationCandidateBackgroundSweepSourceChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateDeferredMaterialChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationCandidateDeferredStructuralChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationDirtyVisibleChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationDirtyInvisibleChunks = 0;
@@ -658,7 +663,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			bool mixedMaterialOnly,
 			bool geometryOrDirty)
 	{
-		if (!ShouldTracePtPerf())
+		if (!ShouldCollectRuntimeMutationPerfTiming())
 		{
 			return;
 		}
@@ -847,6 +852,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	{
 		return false;
 	}
+	const auto runtimeMutationDiscoveryStart = collectRuntimeMutationTiming ?
+		std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 	NRIMapMoverRigidRouteFrameInput rigidRouteInput;
 	rigidRouteInput.movers = &mMapMovers;
 	rigidRouteInput.shadowState = &mMapMoverShadow.GetState();
@@ -922,7 +929,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		}
 	}
 	const bool runtimeMutationWorklistEnabled = runtimeMutationSettings.worklistEnabled;
-	std::vector<uint32_t> runtimeMutationCandidateSourceMasks(mMapWorld.chunks.size(), 0u);
+	mRuntimeMutation.BeginWorklistFrame((uint32_t)mMapWorld.chunks.size());
+	const std::vector<uint32_t>& runtimeMutationCandidateSourceMasks =
+		mRuntimeMutation.GetWorklistCandidateSourceMasks();
 	uint32_t runtimeMutationCandidateCount = 0;
 	uint32_t runtimeMutationSignatureWatchlistCandidateCount = 0;
 	uint32_t runtimeMutationBackgroundSweepCandidateCount = 0;
@@ -1053,12 +1062,16 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				mLastPerfShellTraceStats.runtimeMutationCandidateBackgroundSweepSourceChunks++;
 			}
+			if ((sourceMask & RuntimeMutationWorklistCandidateSource_DeferredMaterialRefresh) != 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationCandidateDeferredMaterialChunks++;
+			}
 			if ((sourceMask & RuntimeMutationWorklistCandidateSource_DeferredStructuralRebuild) != 0)
 			{
 				mLastPerfShellTraceStats.runtimeMutationCandidateDeferredStructuralChunks++;
 			}
 		}
-		runtimeMutationCandidateSourceMasks[chunkListIndex] |= sourceMask;
+		mRuntimeMutation.MarkWorklistCandidate(chunkListIndex, sourceMask);
 	};
 	struct RuntimeMutationWorklistValidationState
 	{
@@ -1249,6 +1262,11 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		mStartupMutationProbe.startupMaterialOnlyDirtyChunkCount = 0;
 		TraceStartupMutationProbe("worklist-built");
 	}
+	if (collectRuntimeMutationTiming)
+	{
+		mLastPerfShellTraceStats.runtimeMutationDiscoveryMs += std::chrono::duration<double, std::milli>(
+			std::chrono::steady_clock::now() - runtimeMutationDiscoveryStart).count();
+	}
 	const auto recordRuntimeMutationDirtyTier = [&](bool chunkVisibleNow, RuntimeMutationDistanceTier distanceTier, uint32_t sourceMask)
 	{
 		if (chunkVisibleNow)
@@ -1373,6 +1391,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mLastPerfShellTraceStats.runtimeMutationResidentApplyBackgroundSweepChunks++;
 		}
 	};
+	const auto runtimeMutationBudgetStart = collectRuntimeMutationTiming ?
+		std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 	const bool deferNearInvisibleStructuralRebuilds = runtimeMutationSettings.deferNearInvisibleStructuralRebuilds;
 	const bool deferFarInvisibleStructuralRebuilds = runtimeMutationSettings.deferFarStructuralRebuilds;
 	const uint32_t nearInvisibleStructuralBudget = runtimeMutationSettings.nearInvisibleStructuralBudget;
@@ -1657,6 +1677,11 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		}
 	};
 	double ignoredRuntimeMutationDistanceTierMs = 0.0;
+	if (collectRuntimeMutationTiming)
+	{
+		mLastPerfShellTraceStats.runtimeMutationBudgetMs += std::chrono::duration<double, std::milli>(
+			std::chrono::steady_clock::now() - runtimeMutationBudgetStart).count();
+	}
 
 	for (size_t chunkIndex = 0; chunkIndex < mMapWorld.chunks.size(); ++chunkIndex)
 	{
@@ -2601,8 +2626,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				Clocker clock(NriPTGeometryBuild);
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildRuntimeMutationRebuildMs);
-				nri_scene::BuildGeometry(liveChunkView, liveGeometry);
-				AssignGeometryPortalIndices(mMapWorld, liveGeometry);
+				{
+					ScopedPtPerfTimer bridgeTimer(mLastPerfShellTraceStats.runtimeMutationGeometryBridgeMs);
+					nri_scene::BuildGeometry(liveChunkView, liveGeometry);
+				}
+				{
+					ScopedPtPerfTimer portalTimer(mLastPerfShellTraceStats.runtimeMutationPortalAssignMs);
+					AssignGeometryPortalIndices(mMapWorld, liveGeometry);
+				}
 			}
 			if (tryGetCachedRuntimeMutationMaterials(
 				liveAnimatedGeometrySignature,
@@ -2636,6 +2667,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				Clocker clock(NriPTGeometryBuild);
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildRuntimeMutationRebuildMs);
+				ScopedPtPerfTimer deformerTimer(mLastPerfShellTraceStats.runtimeMutationDeformerCanonicalMs);
 				NRISE29FloorDeformerRouteInput deformerRouteInput;
 				deformerRouteInput.movers = &mMapMovers;
 				deformerRouteInput.mapWorld = &mMapWorld;
@@ -3956,11 +3988,19 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		refreshRequest.animatedMaterialChunkListIndices = &animatedResidentApplyMaterialChunkListIndices;
 		refreshRequest.geometryChunkListIndices = &residentGeometryChunkListIndices;
 		RuntimeMutationResidentSceneRefreshResult refreshResult = {};
-		if (mRuntimeMutation.CommitResidentSceneRefresh(
+		const auto runtimeMutationCommitStart = collectRuntimeMutationTiming ?
+			std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+		const bool committed = mRuntimeMutation.CommitResidentSceneRefresh(
 				NRIRuntimeMutationSystem::BuildResidentUploadServices(*this),
 				NRIRuntimeMutationSystem::BuildResidentSceneRefreshServices(*this),
 				refreshRequest,
-				refreshResult))
+				refreshResult);
+		if (collectRuntimeMutationTiming)
+		{
+			mLastPerfShellTraceStats.runtimeMutationCommitMs += std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - runtimeMutationCommitStart).count();
+		}
+		if (committed)
 		{
 			if (outResidentStaticSceneChanged != nullptr)
 			{

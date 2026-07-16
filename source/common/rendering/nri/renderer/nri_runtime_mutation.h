@@ -2,6 +2,7 @@
 
 #include "nri_resources.h"
 #include "nri_scene_lights.h"
+#include "nri_runtime_mutation_worklist.h"
 
 #include "../scene/nri_geometry_bridge.h"
 #include "../scene/nri_map_builder.h"
@@ -435,6 +436,11 @@ public:
 	void PrepareStartupBaseline(uint64_t buildSerial, uint32_t chunkCount);
 	bool CanApplyStartupCorrection(uint32_t chunkCount) const;
 	void ResetWorklist();
+	void BeginWorklistFrame(uint32_t chunkCount);
+	bool MarkWorklistCandidate(uint32_t chunkIndex, uint32_t sourceMask);
+	uint32_t GetWorklistCandidateSourceMask(uint32_t chunkIndex) const;
+	const std::vector<uint32_t>& GetWorklistCandidateSourceMasks() const;
+	const std::vector<uint32_t>& GetWorklistCandidates() const;
 	void ResetFrameState();
 	void ResetHighWaterStats();
 	void PrepareSignatureWatchlist(uint64_t buildSerial, uint32_t chunkCount);
@@ -474,6 +480,7 @@ public:
 	RuntimeMapMutationFrameState lastFrame = {};
 	RuntimeMutationCacheStats cacheHighWaterStats = {};
 	std::vector<RuntimeMutationResidentUploadRange> residentGeometryUploadRanges;
+	NRIRuntimeMutationWorklist worklist;
 	std::vector<uint8_t> signatureWatchlist;
 	uint64_t signatureWatchlistBuildSerial = 0;
 	uint32_t worklistSweepCursor = 0;

@@ -837,6 +837,29 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 					(bool)nri_voxelstats,
 					BuildNRIPersistentVoxelResetServices(*this),
 					BuildNRIPersistentVoxelAdmissionServices(*this));
+				const auto& voxelMaintenance = mPersistentVoxels.GetMaintenanceStats();
+				const bool pressureEvaluated = voxelMaintenance.pressureEvaluatedLast;
+				const bool pressureSkipped = voxelMaintenance.pressureSkippedLast;
+				const uint32_t knownPressureReasonMask = (1u << 7u) - 1u;
+				const bool pressureDecisionValid =
+					pressureEvaluated != pressureSkipped &&
+					(voxelMaintenance.pressureEvaluationReasonMaskLast & ~knownPressureReasonMask) == 0u &&
+					((pressureEvaluated && voxelMaintenance.pressureEvaluationReasonMaskLast != 0u) ||
+						(pressureSkipped && voxelMaintenance.pressureEvaluationReasonMaskLast == 0u)) &&
+					voxelMaintenance.pressureEntriesScannedLast <= voxelMaintenance.registryEntries;
+				if (pressureDecisionValid)
+				{
+					mLastPerfShellTraceStats.persistentVoxelPressureReason =
+						voxelMaintenance.pressureEvaluationReasonMaskLast;
+					mLastPerfShellTraceStats.persistentVoxelPressureFlags =
+						(pressureEvaluated ? 1u : 0u) |
+						(pressureSkipped ? 2u : 0u) |
+						(voxelMaintenance.pressureProtectionBlockedLast ? 4u : 0u);
+					mLastPerfShellTraceStats.persistentVoxelPressureAdmissionRows =
+						voxelMaintenance.pressureEntriesScannedLast;
+					mLastPerfShellTraceStats.persistentVoxelPressureResourceRows =
+						voxelMaintenance.pressureResourceRowsScannedLast;
+				}
 			}
 			return EnsurePersistentVoxelBatch();
 		}();

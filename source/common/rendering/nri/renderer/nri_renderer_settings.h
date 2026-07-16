@@ -84,6 +84,7 @@ struct NRIPersistentVoxelSettings
 	uint64_t residentMaxBytes = 0;
 	uint64_t residentMinHeadroomBytes = 0;
 	uint32_t residentMaxColdMaps = 0;
+	uint32_t pressureSafetyAuditFrames = 0;
 	bool trimColdOnLoading = false;
 	bool sharedBlasBuildEnabled = false;
 	uint32_t sharedBlasBuildsPerFrame = 0;

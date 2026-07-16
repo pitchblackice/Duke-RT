@@ -1064,9 +1064,35 @@ void NRIRuntimeMutationSystem::InitializeStaticChunkReplacement(const nri_scene:
 
 void NRIRuntimeMutationSystem::ResetWorklist()
 {
+	worklist.Reset();
 	signatureWatchlist.clear();
 	signatureWatchlistBuildSerial = 0;
 	worklistSweepCursor = 0;
+}
+
+void NRIRuntimeMutationSystem::BeginWorklistFrame(uint32_t chunkCount)
+{
+	worklist.BeginFrame(chunkCount);
+}
+
+bool NRIRuntimeMutationSystem::MarkWorklistCandidate(uint32_t chunkIndex, uint32_t sourceMask)
+{
+	return worklist.MarkCandidate(chunkIndex, sourceMask);
+}
+
+uint32_t NRIRuntimeMutationSystem::GetWorklistCandidateSourceMask(uint32_t chunkIndex) const
+{
+	return worklist.GetSourceMask(chunkIndex);
+}
+
+const std::vector<uint32_t>& NRIRuntimeMutationSystem::GetWorklistCandidateSourceMasks() const
+{
+	return worklist.GetSourceMasks();
+}
+
+const std::vector<uint32_t>& NRIRuntimeMutationSystem::GetWorklistCandidates() const
+{
+	return worklist.GetCandidates();
 }
 
 void NRIRuntimeMutationSystem::ResetFrameState()

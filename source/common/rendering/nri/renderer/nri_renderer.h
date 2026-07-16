@@ -464,7 +464,10 @@ public:
 		double otherMs = 0.0;
 		double staticSceneMs = 0.0;
 		double runtimeMutationMs = 0.0;
+		double runtimeMutationDiscoveryMs = 0.0;
+		double runtimeMutationBudgetMs = 0.0;
 		double runtimeMutationAnalyzeMs = 0.0;
+		double runtimeMutationCommitMs = 0.0;
 		uint32_t runtimeMutationCandidateChunks = 0;
 		uint32_t runtimeMutationAnalyzedChunks = 0;
 		uint32_t runtimeMutationBackgroundSweepChunks = 0;
@@ -568,6 +571,10 @@ public:
 		double persistentVoxelBatchMeshAdmissionMs = 0.0;
 		double persistentVoxelBatchMaterialBridgeMs = 0.0;
 		double persistentVoxelBatchStateMs = 0.0;
+		uint32_t persistentVoxelPressureReason = 0;
+		uint32_t persistentVoxelPressureFlags = 0;
+		uint32_t persistentVoxelPressureAdmissionRows = 0;
+		uint32_t persistentVoxelPressureResourceRows = 0;
 		double sceneSelectPersistentEmissiveMs = 0.0;
 		double sceneSelectDynamicMergeMs = 0.0;
 		double sceneSelectDynamicMergeCopyMs = 0.0;
@@ -925,6 +932,9 @@ public:
 		double geometryBuildDebugSphereMs = 0.0;
 		double geometryBuildRuntimeMutationTruthMs = 0.0;
 		double geometryBuildRuntimeMutationRebuildMs = 0.0;
+		double runtimeMutationGeometryBridgeMs = 0.0;
+		double runtimeMutationPortalAssignMs = 0.0;
+		double runtimeMutationDeformerCanonicalMs = 0.0;
 		double geometryBuildRuntimeMutationMaterialOnlyMs = 0.0;
 		double geometryBuildRuntimeSpaceLinkMs = 0.0;
 		double geometryBuildResidentApplyMs = 0.0;
@@ -954,6 +964,7 @@ public:
 		uint32_t runtimeMutationCandidateDraggedChunks = 0;
 		uint32_t runtimeMutationCandidateSignatureWatchChunks = 0;
 		uint32_t runtimeMutationCandidateBackgroundSweepSourceChunks = 0;
+		uint32_t runtimeMutationCandidateDeferredMaterialChunks = 0;
 		uint32_t runtimeMutationCandidateDeferredStructuralChunks = 0;
 		uint32_t runtimeMutationDirtyVisibleChunks = 0;
 		uint32_t runtimeMutationDirtyInvisibleChunks = 0;

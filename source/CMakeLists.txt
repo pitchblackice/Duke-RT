@@ -959,6 +959,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_persistent_voxel_material_range_allocator.cpp
 	common/rendering/nri/renderer/nri_persistent_voxel_admission_index.cpp
 	common/rendering/nri/renderer/nri_persistent_voxel_blas_compaction.cpp
+	common/rendering/nri/renderer/nri_persistent_voxel_pressure_policy.cpp
 	common/rendering/nri/renderer/nri_persistent_voxel_services.cpp
 	common/rendering/nri/renderer/nri_persistent_voxels.cpp
 	common/rendering/nri/renderer/nri_pass_dispatch.cpp
@@ -996,6 +997,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_static_scene_geometry.cpp
 	common/rendering/nri/renderer/nri_static_scene_geometry_upload.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation.cpp
+	common/rendering/nri/renderer/nri_runtime_mutation_worklist.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_overlay.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_resident_apply.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_resident_static.cpp

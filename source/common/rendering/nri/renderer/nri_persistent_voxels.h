@@ -661,6 +661,8 @@ struct NRIPersistentVoxelMaintenanceStats
 	bool pumpFastReturnLast = false;
 	bool pressureEvaluatedLast = false;
 	bool pressureSkippedLast = false;
+	bool pressureProtectionBlockedLast = false;
+	uint32_t pressureEvaluationReasonMaskLast = 0;
 	uint64_t pumpCalls = 0;
 	uint64_t pumpFastReturns = 0;
 	uint64_t entriesScanned = 0;
@@ -669,6 +671,10 @@ struct NRIPersistentVoxelMaintenanceStats
 	uint64_t pressureEvaluations = 0;
 	uint64_t pressureNoops = 0;
 	uint64_t pressureSkips = 0;
+	uint64_t pressureSafetyAudits = 0;
+	uint64_t pressureMembershipChanges = 0;
+	uint64_t pressureMembershipInvalidations = 0;
+	uint64_t pressureProtectionBlockedEvaluations = 0;
 	uint64_t memorySnapshotRebuilds = 0;
 	uint64_t memorySnapshotHits = 0;
 	uint64_t resourceStatusRebuilds = 0;
@@ -1136,6 +1142,7 @@ public:
 	uint64_t pressureAdapterBudget = 0;
 	uint32_t pressureEvaluationFrame = 0;
 	bool pressureEvaluationValid = false;
+	bool pressureProtectionBlocked = false;
 	mutable NRIPersistentVoxelMaintenanceStats maintenanceStats = {};
 	std::unordered_set<uint64_t> publishedMeshKeys;
 	std::unordered_set<uint64_t> publishedMaterialKeys;

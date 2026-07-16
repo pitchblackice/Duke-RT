@@ -25,8 +25,31 @@ void NRIRenderDevice::CaptureCompactPerfRendererStats(bool rendered)
 	stats.postDiagnosticsMs = shell.postFrameDiagnosticsMs;
 	stats.unattributedMs = shell.unattributedMs;
 	stats.mutationMs = shell.runtimeMutationMs;
+	stats.mutationDiscoveryMs = shell.runtimeMutationDiscoveryMs;
+	stats.mutationBudgetMs = shell.runtimeMutationBudgetMs;
+	stats.mutationAnalyzeMs = shell.runtimeMutationAnalyzeMs;
+	stats.mutationStructuralMs = shell.runtimeMutationStructuralRebuildMs;
+	stats.mutationMaterialMs = shell.runtimeMutationMaterialRefreshMs;
+	stats.mutationResidentMs = shell.runtimeMutationResidentApplyMs;
+	stats.mutationCommitMs = shell.runtimeMutationCommitMs;
+	stats.mutationGeometryBuildMs = shell.geometryBuildRuntimeMutationRebuildMs;
+	stats.mutationGeometryBridgeMs = shell.runtimeMutationGeometryBridgeMs;
+	stats.mutationPortalAssignMs = shell.runtimeMutationPortalAssignMs;
+	stats.mutationDeformerCanonicalMs = shell.runtimeMutationDeformerCanonicalMs;
+	stats.mutationMaterialBuildMs = shell.materialBuildByLabel[
+		(size_t)NRIRenderer::MaterialBuildTraceSlot::RuntimeMutationChunk].materialBuildMs;
 	stats.dynamicCaptureMs = shell.dynamicCaptureMs;
 	stats.persistentBatchMs = shell.sceneSelectPersistentVoxelBatchMs;
+	stats.voxelAdmissionPumpMs = shell.sceneSelectPersistentVoxelAdmissionPumpMs;
+	stats.voxelBatchCacheEntryMs = shell.persistentVoxelBatchCacheEntryMs;
+	stats.voxelBatchSortMs = shell.persistentVoxelBatchSortMs;
+	stats.voxelBatchInstanceSyncMs = shell.persistentVoxelBatchInstanceSyncMs;
+	stats.voxelBatchExistingActorMapMs = shell.persistentVoxelBatchExistingActorMapMs;
+	stats.voxelBatchActorLoopMs = shell.persistentVoxelBatchActorLoopMs;
+	stats.voxelBatchMaterialVariantMs = shell.persistentVoxelBatchMaterialVariantMs;
+	stats.voxelBatchMeshAdmissionMs = shell.persistentVoxelBatchMeshAdmissionMs;
+	stats.voxelBatchMaterialBridgeMs = shell.persistentVoxelBatchMaterialBridgeMs;
+	stats.voxelBatchStateMs = shell.persistentVoxelBatchStateMs;
 	stats.materialBridgeMs = shell.sceneSelectMaterialBridgeMs;
 	stats.texturesMs = shell.sceneSelectTexturesMs;
 	stats.bufferUploadMs = shell.sceneSelectBufferUploadMs;
@@ -45,6 +68,35 @@ void NRIRenderDevice::CaptureCompactPerfRendererStats(bool rendered)
 	stats.mutationStructural = shell.runtimeMutationValidStructuralCount;
 	stats.mutationMaterial = shell.runtimeMutationValidMaterialCount;
 	stats.mutationResident = shell.runtimeMutationResidentApplyCount;
+	stats.mutationCandidates = shell.runtimeMutationCandidateChunks;
+	stats.mutationAnalyzed = shell.runtimeMutationAnalyzedChunks;
+	stats.mutationSweep = shell.runtimeMutationBackgroundSweepChunks;
+	stats.mutationCandidateActive = shell.runtimeMutationCandidateActiveReplacementChunks;
+	stats.mutationCandidateVisible = shell.runtimeMutationCandidateVisibleResidentValidationChunks;
+	stats.mutationCandidateStartupVisible = shell.runtimeMutationCandidateStartupVisibleValidationChunks;
+	stats.mutationCandidateUnresolved = shell.runtimeMutationCandidateUnresolvedTextureChunks;
+	stats.mutationCandidateStaticAnimated = shell.runtimeMutationCandidateStaticAnimatedSuppressedChunks;
+	stats.mutationCandidateSectorDirty = shell.runtimeMutationCandidateSectorDirtyChunks;
+	stats.mutationCandidateSectionDirty = shell.runtimeMutationCandidateSectionDirtyChunks;
+	stats.mutationCandidateDragged = shell.runtimeMutationCandidateDraggedChunks;
+	stats.mutationCandidateSignatureWatch = shell.runtimeMutationCandidateSignatureWatchChunks;
+	stats.mutationCandidateDeferredMaterial = shell.runtimeMutationCandidateDeferredMaterialChunks;
+	stats.mutationCandidateDeferredStructural = shell.runtimeMutationCandidateDeferredStructuralChunks;
+	for (uint32_t index = 0; index < 4u; ++index)
+	{
+		const auto& entry = shell.runtimeStructuralRebuildEntries[index];
+		if (!entry.valid)
+		{
+			continue;
+		}
+		stats.mutationStructuralChunk[index] = entry.chunkIndex;
+		stats.mutationStructuralReason[index] = entry.reasonMask;
+		stats.mutationStructuralTrigger[index] = entry.triggerMask;
+	}
+	stats.voxelPressureReason = shell.persistentVoxelPressureReason;
+	stats.voxelPressureEntries = shell.persistentVoxelPressureAdmissionRows;
+	stats.voxelPressureResources = shell.persistentVoxelPressureResourceRows;
+	stats.voxelPressureFlags = shell.persistentVoxelPressureFlags;
 	stats.traceRenderWidth = shell.traceRenderWidth;
 	stats.traceRenderHeight = shell.traceRenderHeight;
 	stats.traceOutputWidth = shell.traceOutputWidth;
