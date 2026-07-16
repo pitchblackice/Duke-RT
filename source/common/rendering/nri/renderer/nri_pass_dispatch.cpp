@@ -529,6 +529,8 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	tracePerf.traceMirrorBounceCount = traceSettings.mirrorBounceCount;
 	tracePerf.tracePortalDepth = traceSettings.portalDepth;
 	tracePerf.traceEmissiveSampleCount = traceSettings.emissiveSampleCount;
+	tracePerf.traceEmissiveRequestedSampleCount = traceSettings.emissiveRequestedSampleCount;
+	tracePerf.traceEmissivePrimarySampleBudget = traceSettings.emissivePrimarySampleBudget;
 	tracePerf.traceRuntimeLightCount = context.mSceneStats.runtimeLightCount;
 	tracePerf.traceRuntimeLightTileCountX = context.mSceneStats.runtimeLightTileCountX;
 	tracePerf.traceRuntimeLightTileCountY = context.mSceneStats.runtimeLightTileCountY;
@@ -554,7 +556,8 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		constants.RenderWidth, constants.RenderHeight, constants.DisplayWidth, constants.DisplayHeight,
 		dispatchX, dispatchY, dispatchZ, constants.Flags & ~NRI_FLAG_RESET_HISTORY,
 		constants.DebugMode, constants.BootstrapMode, constants.BounceCounts, constants.PortalDepth,
-		constants.ReservedTrace1, (uint32_t)resolvedMainUpscaler, (uint32_t)resolvedUpscalerMode
+		constants.ReservedTrace1, traceSettings.emissiveRequestedSampleCount,
+		traceSettings.emissivePrimarySampleBudget, (uint32_t)resolvedMainUpscaler, (uint32_t)resolvedUpscalerMode
 	};
 	for (uint64_t value : settingsValues) settingsKey = AppendTraceWorkloadHash(settingsKey, value);
 	tracePerf.traceSettingsKey = settingsKey;

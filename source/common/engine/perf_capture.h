@@ -30,6 +30,7 @@ struct PerfCompactNriStats
 	uint32_t traceRenderWidth = 0, traceRenderHeight = 0, traceOutputWidth = 0, traceOutputHeight = 0;
 	uint32_t traceDispatchX = 0, traceDispatchY = 0, traceDispatchZ = 0;
 	uint32_t traceLightBounces = 0, traceMirrorBounces = 0, tracePortalDepth = 0, traceEmissiveSamples = 0;
+	uint32_t traceEmissiveRequestedSamples = 0, traceEmissivePrimaryBudget = 0;
 	uint32_t traceRuntimeLights = 0, traceRuntimeLightTilesX = 0, traceRuntimeLightTilesY = 0;
 	uint32_t traceRuntimeLightTileSize = 0, traceRuntimeLightTileIndices = 0, traceRuntimeLightMaxOccupancy = 0;
 	uint32_t traceEmissivePrimitiveCount = 0;

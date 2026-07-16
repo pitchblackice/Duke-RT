@@ -95,7 +95,7 @@ namespace
 			(unsigned long long)outer.traceFrame, (unsigned long long)nri.frame,
 			nri.resourceWaitCalls, nri.resourceWaitMs,
 			(unsigned long long)gCapture.epoch, record.eligibleIndex);
-		Printf("PERF pt trace workload NRI: frame=%llu nri_frame=%llu renderer_frame=%llu schema=1 settings_key=%llu workload_key=%llu render_w=%u render_h=%u output_w=%u output_h=%u dispatch_x=%u dispatch_y=%u dispatch_z=%u light_bounces=%u mirror_bounces=%u portal_depth=%u emissive_samples=%u runtime_lights=%u light_tiles_x=%u light_tiles_y=%u light_tile_size=%u light_tile_indices=%u light_tile_max=%u emissive_prims=%u emissive_power=%.3f flags=%u debug=%u bootstrap=%u upscaler=%u upscaler_mode=%u denoiser=%u direct_scene=%u directional=%u directional_shadow=%u split_shadow=%u fast_emissive_shadow=%u visible_chunk_gate=%u compact=1 epoch=%llu sample=%u\n",
+		Printf("PERF pt trace workload NRI: frame=%llu nri_frame=%llu renderer_frame=%llu schema=1 settings_key=%llu workload_key=%llu render_w=%u render_h=%u output_w=%u output_h=%u dispatch_x=%u dispatch_y=%u dispatch_z=%u light_bounces=%u mirror_bounces=%u portal_depth=%u emissive_samples=%u emissive_requested=%u emissive_budget=%u runtime_lights=%u light_tiles_x=%u light_tiles_y=%u light_tile_size=%u light_tile_indices=%u light_tile_max=%u emissive_prims=%u emissive_power=%.3f flags=%u debug=%u bootstrap=%u upscaler=%u upscaler_mode=%u denoiser=%u direct_scene=%u directional=%u directional_shadow=%u split_shadow=%u fast_emissive_shadow=%u visible_chunk_gate=%u compact=1 epoch=%llu sample=%u\n",
 			(unsigned long long)outer.traceFrame, (unsigned long long)nri.frame,
 			(unsigned long long)nri.traceRendererFrame,
 			(unsigned long long)nri.traceSettingsKey,
@@ -103,6 +103,7 @@ namespace
 			nri.traceRenderWidth, nri.traceRenderHeight, nri.traceOutputWidth, nri.traceOutputHeight,
 			nri.traceDispatchX, nri.traceDispatchY, nri.traceDispatchZ,
 			nri.traceLightBounces, nri.traceMirrorBounces, nri.tracePortalDepth, nri.traceEmissiveSamples,
+			nri.traceEmissiveRequestedSamples, nri.traceEmissivePrimaryBudget,
 			nri.traceRuntimeLights, nri.traceRuntimeLightTilesX, nri.traceRuntimeLightTilesY,
 			nri.traceRuntimeLightTileSize, nri.traceRuntimeLightTileIndices, nri.traceRuntimeLightMaxOccupancy,
 			nri.traceEmissivePrimitiveCount, nri.traceEmissiveTotalPower,

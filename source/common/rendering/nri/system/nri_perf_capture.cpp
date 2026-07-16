@@ -56,6 +56,8 @@ void NRIRenderDevice::CaptureCompactPerfRendererStats(bool rendered)
 	stats.traceMirrorBounces = shell.traceMirrorBounceCount;
 	stats.tracePortalDepth = shell.tracePortalDepth;
 	stats.traceEmissiveSamples = shell.traceEmissiveSampleCount;
+	stats.traceEmissiveRequestedSamples = shell.traceEmissiveRequestedSampleCount;
+	stats.traceEmissivePrimaryBudget = shell.traceEmissivePrimarySampleBudget;
 	stats.traceRuntimeLights = shell.traceRuntimeLightCount;
 	stats.traceRuntimeLightTilesX = shell.traceRuntimeLightTileCountX;
 	stats.traceRuntimeLightTilesY = shell.traceRuntimeLightTileCountY;

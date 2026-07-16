@@ -110,7 +110,11 @@ NRITraceSettings BuildNRITraceSettingsFromCVars()
 	settings.lightBounceCount = ClampTraceBounceCount((int)nri_ptlightbounces, 4u);
 	settings.mirrorBounceCount = ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u);
 	settings.portalDepth = ClampTraceBounceCount((int)nri_ptportaldepth, 8u);
-	settings.emissiveSampleCount = std::max<uint32_t>(ClampTraceBounceCount((int)nri_ptemissivesamples, 4u), 1u);
+	settings.emissiveRequestedSampleCount = std::max<uint32_t>(ClampTraceBounceCount((int)nri_ptemissivesamples, 4u), 1u);
+	settings.emissivePrimarySampleBudget = (uint32_t)std::clamp((int)nri_ptemissiveprimarybudget, 0, 4);
+	settings.emissiveSampleCount = NRIResolvePrimaryEmissiveSampleCount(
+		settings.emissiveRequestedSampleCount,
+		settings.emissivePrimarySampleBudget);
 	return settings;
 }
 

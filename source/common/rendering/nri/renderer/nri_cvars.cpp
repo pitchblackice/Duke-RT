@@ -1373,6 +1373,15 @@ CVAR(Bool, nri_ptemissivefastshadow, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptemissivesamples, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+// Session-only experiment: 0 preserves the requested count; 1..4 cap only the primary direct loop.
+CUSTOM_CVAR(Int, nri_ptemissiveprimarybudget, 0, 0)
+{
+	if (self < 0 || self > 4)
+	{
+		self = std::clamp((int)self, 0, 4);
+	}
+}
+
 CVAR(Bool, nri_ptsectorlighting, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CUSTOM_CVAR(Float, nri_ptsectorlightmultiplier, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
