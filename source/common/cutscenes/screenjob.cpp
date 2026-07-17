@@ -53,6 +53,7 @@
 #include "m_argv.h"
 #include "i_interface.h"
 #include "mapinfo.h"
+#include <utility>
 
 CVAR(Bool, inter_subtitles, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
@@ -194,6 +195,8 @@ void DeleteScreenJob()
 {
 	if (cutscene.runner) cutscene.runner->Destroy();
 	cutscene.runner = nullptr;
+	cutscene.levelTransition = false;
+	cutscene.retainedForLevelLoad = false;
 }
 
 void EndScreenJob()
@@ -201,6 +204,37 @@ void EndScreenJob()
 	DeleteScreenJob();
 	if (cutscene.completion) cutscene.completion(false);
 	cutscene.completion = nullptr;
+}
+
+bool CompleteLevelTransitionScreenJob()
+{
+	if (!cutscene.levelTransition)
+	{
+		return false;
+	}
+
+	// A map transition can synchronously spend a long time loading before the
+	// renderer's level gate is armed. Keep the completed runner's last frame
+	// alive across that callback so the gate can continue presenting it.
+	cutscene.levelTransition = false;
+	cutscene.retainedForLevelLoad = cutscene.runner != nullptr;
+	auto completion = std::move(cutscene.completion);
+	cutscene.completion = nullptr;
+	if (completion)
+	{
+		completion(false);
+	}
+	return true;
+}
+
+bool IsLevelTransitionScreenJob()
+{
+	return cutscene.levelTransition;
+}
+
+bool IsScreenJobRetainedForLevelLoad()
+{
+	return cutscene.retainedForLevelLoad && cutscene.runner != nullptr;
 }
 
 
@@ -323,8 +357,10 @@ bool StartCutscene(CutsceneDef& cs, int flags, const CompletionFunc& completion_
 {
 	if ((cs.function.IsNotEmpty() || cs.video.IsNotEmpty()) && cs.function.CompareNoCase("none") != 0)
 	{
+		cutscene.levelTransition = false;
+		cutscene.retainedForLevelLoad = false;
 		cutscene.completion = completion_;
-		cutscene.runner = CreateRunner();
+		cutscene.runner = CreateRunner((flags & SJ_NOCLEAR) == 0);
 		GC::WriteBarrier(cutscene.runner);
 		try
 		{
