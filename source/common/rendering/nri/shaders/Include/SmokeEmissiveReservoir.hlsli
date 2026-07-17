@@ -328,7 +328,9 @@ bool SmokeEvaluateEmissiveIncidentWithSolidAngleDenominator(
 	}
 	distanceToLight = sqrt(distanceSquared);
 	lightDirection = toLight / distanceToLight;
-	const float emitterCosine = max(dot(lightNormal, -lightDirection), 0.0);
+	// Raster-visible emissive sheets behave as two-sided emitters in the world.
+	// Preserve that convention for smoke without changing opaque radiometry.
+	const float emitterCosine = abs(dot(lightNormal, -lightDirection));
 	if (emitterCosine <= 0.0)
 	{
 		if (diagnostics)
