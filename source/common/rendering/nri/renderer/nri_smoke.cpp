@@ -795,6 +795,8 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 				mStatus.emissiveInnerBlockerReceiverCell = control.emissiveInnerBlockerReceiverCell;
 				mStatus.emissiveInnerBlockerEmitterCell = control.emissiveInnerBlockerEmitterCell;
 				mStatus.emissiveInnerBlockerInterior = control.emissiveInnerBlockerInterior;
+				mStatus.emissiveInnerSourceSelections = control.emissiveInnerSourceSelections;
+				mStatus.emissiveInnerSourceOverflow = control.emissiveInnerSourceOverflow;
 				mStatus.indirectFroxelsProcessed = control.indirectFroxelsProcessed;
 				mStatus.indirectLocalityRays = control.indirectLocalityRays;
 				mStatus.indirectLocalityAgreement = control.indirectLocalityAgreement;
@@ -1988,6 +1990,8 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.emissiveInnerBlockerReceiverCell = 0;
 	mStatus.emissiveInnerBlockerEmitterCell = 0;
 	mStatus.emissiveInnerBlockerInterior = 0;
+	mStatus.emissiveInnerSourceSelections = 0;
+	mStatus.emissiveInnerSourceOverflow = 0;
 	mStatus.indirectFroxelsProcessed = 0;
 	mStatus.indirectLocalityRays = 0;
 	mStatus.indirectLocalityAgreement = 0;
@@ -2217,7 +2221,7 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.directSpatialAccepted, mStatus.directSpatialRejected,
 		mStatus.directHistoryMaximumAge, mStatus.directHistoryResolved,
 		mStatus.directHistoryClamps, mStatus.directNanRejects);
-	Printf("NRI PT smoke emissive reservoir: reuse_requested=%u reuse_effective=%u lanes=%u reference=%s history=%s reservoir_mib=%.2f initialized=%u invalid=%u temporal=%u/%u spatial=%u/%u final=%u source_clamps=%u removed_energy=%u maximum_age=%u identity_rejects=%u reference_samples=%u reference_rays=%u inner_sets=%u inner_points=%u inner_zeros=%u inner_rejects=%u inner_selections=%u inner_visibility_rays=%u inner_source_visibility_rays=%u inner_source_visible=%u inner_source_blocker_receiver_immediate=%u inner_source_blocker_receiver_cell=%u inner_source_blocker_emitter_cell=%u inner_source_blocker_interior=%u field_readback=0\n",
+	Printf("NRI PT smoke emissive reservoir: reuse_requested=%u reuse_effective=%u lanes=%u reference=%s history=%s reservoir_mib=%.2f initialized=%u invalid=%u temporal=%u/%u spatial=%u/%u final=%u source_clamps=%u removed_energy=%u maximum_age=%u identity_rejects=%u reference_samples=%u reference_rays=%u inner_sets=%u inner_points=%u inner_zeros=%u inner_rejects=%u inner_selections=%u inner_visibility_rays=%u inner_source_visibility_rays=%u inner_source_visible=%u inner_source_blocker_receiver_immediate=%u inner_source_blocker_receiver_cell=%u inner_source_blocker_emitter_cell=%u inner_source_blocker_interior=%u inner_source_selections=%u inner_source_overflow=%u field_readback=0\n",
 		mStatus.emissiveReuseModeRequested, mStatus.emissiveReuseModeEffective, mStatus.emissiveLaneCount, mStatus.emissiveReference ? "yes" : "no",
 		mStatus.emissiveHistoryValid ? "valid" : "invalid", (double)mStatus.emissiveReservoirBytes / (1024.0 * 1024.0),
 		mStatus.emissiveReservoirInitial, mStatus.emissiveReservoirInvalid,
@@ -2230,7 +2234,8 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.emissiveInnerSourceVisibilityRays,
 		mStatus.emissiveInnerVisibilityVisible, mStatus.emissiveInnerBlockerReceiverImmediate,
 		mStatus.emissiveInnerBlockerReceiverCell, mStatus.emissiveInnerBlockerEmitterCell,
-		mStatus.emissiveInnerBlockerInterior);
+		mStatus.emissiveInnerBlockerInterior, mStatus.emissiveInnerSourceSelections,
+		mStatus.emissiveInnerSourceOverflow);
 	Printf("NRI PT smoke indirect status: enabled=%s scale=%.3f cache_mode_requested=%u cache_mode_effective=%u samples=%u history=%s cache_mib=%.2f froxels=%u locality_rays=%u agreement=%u one_sided=%u mismatch=%u invalid=%u reference_rays=%u hits=%u misses=%u sector=%u sky=%u emission=%u clamps=%u nan=%u temporal=%u/%u spatial=%u/%u cache_age=%u cache_clamps=%u resolved=%u field_readback=0\n",
 		mSettings.indirect ? "yes" : "no", mSettings.indirectScale, mStatus.indirectCacheModeRequested, mStatus.indirectCacheModeEffective, 1u << std::min(mSettings.quality, 2u),
 		mIndirectHistoryValid ? "valid" : "invalid", (double)mStatus.indirectCacheBytes / (1024.0 * 1024.0), mStatus.indirectFroxelsProcessed,

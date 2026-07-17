@@ -134,6 +134,7 @@ bool SmokeGridLightEvaluateJointEmissiveRis(
 	float3 receiverPosition,
 	float cellSize,
 	uint requestedCandidates,
+	bool visibilityDiagnostics,
 	out float3 estimator,
 	out float3 lightDirection,
 	out float distanceToLight,
@@ -199,8 +200,8 @@ bool SmokeGridLightEvaluateJointEmissiveRis(
 			visibilityStats.Rays++;
 			float blockerDistance;
 			const bool pointVisible = SmokeFilteredVisibilityEffective() ?
-				SmokeEmissiveVisibleFiltered(receiverPosition, pointDirection, pointDistance, false, blockerDistance) :
-				SmokeEmissiveVisible(receiverPosition, pointDirection, pointDistance, false, blockerDistance);
+				SmokeEmissiveVisibleFiltered(receiverPosition, pointDirection, pointDistance, visibilityDiagnostics, blockerDistance) :
+				SmokeEmissiveVisible(receiverPosition, pointDirection, pointDistance, visibilityDiagnostics, blockerDistance);
 			if (!pointVisible)
 			{
 				zeroProposals++;
@@ -339,7 +340,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			if (innerRisDiagnostics)
 				InterlockedAdd(gSmokeControl[0].EmissiveInnerRisSets, 1u);
 			incidentValid = SmokeGridLightEvaluateJointEmissiveRis(proposal, localReady, localMix, randomState,
-				receiverPosition, cellSize, pointCandidateCount, estimator, lightDirection, lightDistance,
+				receiverPosition, cellSize, pointCandidateCount, innerRisDiagnostics && diagnosticSourceCell,
+				estimator, lightDirection, lightDistance,
 				innerPointProposals, innerZeroProposals, innerRisRejects, innerVisibilityStats);
 		}
 		if (innerRisDiagnostics)
@@ -370,6 +372,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		if (innerRisDiagnostics)
 		{
 			InterlockedAdd(gSmokeControl[0].EmissiveInnerSelections, 1u);
+			if (diagnosticSourceCell)
+				InterlockedAdd(gSmokeControl[0].EmissiveInnerSourceSelections, 1u);
 		}
 		bool isVisible = true;
 		if (referenceSampling && gSmokeConstants.LightMode >= 2u)
@@ -439,6 +443,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (!finite)
 	{
 		InterlockedAdd(gSmokeGridLightControl[0].OverflowRejects, 1u);
+		if (innerRisDiagnostics && diagnosticSourceCell && visible > 0u)
+			InterlockedAdd(gSmokeControl[0].EmissiveInnerSourceOverflow, 1u);
 		SmokeGridLightWriteTarget(cellIndex, output, selfShadowOutput);
 		return;
 	}

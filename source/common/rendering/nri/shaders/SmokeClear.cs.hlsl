@@ -58,6 +58,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const uint innerBlockerReceiverCell = preserveInnerRis ? gSmokeControl[0].EmissiveInnerBlockerReceiverCell : 0u;
 			const uint innerBlockerEmitterCell = preserveInnerRis ? gSmokeControl[0].EmissiveInnerBlockerEmitterCell : 0u;
 			const uint innerBlockerInterior = preserveInnerRis ? gSmokeControl[0].EmissiveInnerBlockerInterior : 0u;
+			const uint innerSourceSelections = preserveInnerRis ? gSmokeControl[0].EmissiveInnerSourceSelections : 0u;
+			const uint innerSourceOverflow = preserveInnerRis ? gSmokeControl[0].EmissiveInnerSourceOverflow : 0u;
 			SmokeControl control = (SmokeControl)0;
 			control.Epoch = gSmokeConstants.SimulationEpoch;
 			control.MaximumCandidatesPerFroxel = 0u;
@@ -73,6 +75,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			control.EmissiveInnerBlockerReceiverCell = innerBlockerReceiverCell;
 			control.EmissiveInnerBlockerEmitterCell = innerBlockerEmitterCell;
 			control.EmissiveInnerBlockerInterior = innerBlockerInterior;
+			control.EmissiveInnerSourceSelections = innerSourceSelections;
+			control.EmissiveInnerSourceOverflow = innerSourceOverflow;
 			gSmokeControl[0] = control;
 		}
 		else

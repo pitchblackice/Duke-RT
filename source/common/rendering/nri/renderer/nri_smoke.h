@@ -161,6 +161,8 @@ struct NRISmokeStatusSnapshot
 	uint32_t emissiveInnerBlockerReceiverCell = 0;
 	uint32_t emissiveInnerBlockerEmitterCell = 0;
 	uint32_t emissiveInnerBlockerInterior = 0;
+	uint32_t emissiveInnerSourceSelections = 0;
+	uint32_t emissiveInnerSourceOverflow = 0;
 	uint32_t indirectFroxelsProcessed = 0;
 	uint32_t indirectLocalityRays = 0;
 	uint32_t indirectLocalityAgreement = 0;
