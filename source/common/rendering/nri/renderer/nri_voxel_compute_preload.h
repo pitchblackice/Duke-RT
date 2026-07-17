@@ -31,12 +31,6 @@ struct NRIVoxelComputePreloadSettings
 	uint32_t watchdogMilliseconds = 0;
 	uint32_t peakEstimatePercent = 175;
 	uint64_t minimumLocalMemoryReserveBytes = 0;
-	bool predictiveEnabled = true;
-	float predictiveNearbyDistance = 8192.0f;
-	uint32_t predictiveMaxBindings = 512;
-	uint32_t predictiveMaxUniqueMeshes = 256;
-	uint32_t predictiveMaxMaterialsPerMesh = 4;
-	uint64_t predictiveMaxUniqueGeometryBytes = 512ull * 1024ull * 1024ull;
 };
 
 struct NRIVoxelComputePreloadStats
@@ -125,18 +119,6 @@ struct NRIVoxelComputePreloadStats
 	uint32_t rawSelectedUniqueTextures = 0;
 	uint64_t rawSelectedUniqueGeometryBytes = 0;
 	uint64_t rawSelectedUniqueSourceBytes = 0;
-	uint32_t predictiveCandidates = 0;
-	uint32_t predictiveSelectedBindings = 0;
-	uint32_t predictiveSelectedUniqueMeshes = 0;
-	uint32_t predictiveSelectedRequired = 0;
-	uint32_t predictiveSelectedOptional = 0;
-	uint32_t predictiveExcludedDynamic = 0;
-	uint32_t predictiveCapSkippedBindings = 0;
-	uint32_t predictiveCapSkippedMeshes = 0;
-	uint32_t predictiveCapSkippedMaterials = 0;
-	uint32_t predictiveCapSkippedBytes = 0;
-	uint64_t predictiveSelectedGeometryBytes = 0;
-	uint64_t predictiveDigest = 0;
 	uint64_t currentTrackedBytes = 0;
 	uint64_t localMemoryBudgetBytes = 0;
 	uint64_t minimumLocalMemoryReserveBytes = 0;
@@ -194,15 +176,6 @@ struct NRIVoxelComputePreloadClosureStats
 	uint64_t cpuGeometryUploadBytes = 0;
 	uint64_t cpuGeometryFallback = 0;
 	uint64_t fullGeometryReadbackBytes = 0;
-	uint32_t predictivePreparedAssets = 0;
-	uint32_t predictiveUsefulAssets = 0;
-	uint32_t predictiveUnobservedAssets = 0;
-	uint32_t predictivePreparedMeshes = 0;
-	uint32_t predictiveUsefulMeshes = 0;
-	uint32_t predictiveUnobservedMeshes = 0;
-	uint64_t predictivePreparedBytes = 0;
-	uint64_t predictiveUsefulBytes = 0;
-	uint64_t predictiveUnobservedBytes = 0;
 	const char* outcome = "invalid";
 };
 
@@ -231,12 +204,6 @@ bool IsNRIVoxelComputePreloadRuntimeWithheldMesh(uint64_t buildSerial, uint64_t 
 bool IsNRIVoxelComputePreloadRuntimeProbeMesh(uint64_t buildSerial, uint64_t meshResourceKey);
 bool IsNRIVoxelComputePreloadRuntimeTailReleased(uint64_t buildSerial);
 void NotifyNRIVoxelComputePreloadRuntimeTailReleased(uint64_t buildSerial, uint32_t frameIndex);
-void NotifyNRIVoxelPredictivePrepared(uint64_t buildSerial, uint64_t pairKey, uint32_t frameIndex);
-void NotifyNRIVoxelPredictiveUseful(
-	uint64_t buildSerial,
-	uint64_t meshResourceKey,
-	uint64_t materialKey,
-	uint32_t frameIndex);
 NRIVoxelComputePreloadClosureStats BuildNRIVoxelComputePreloadClosure(
 	const NRIPersistentVoxelResidency& residency,
 	uint64_t buildSerial);

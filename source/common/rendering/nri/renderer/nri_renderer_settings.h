@@ -76,8 +76,6 @@ struct NRIPersistentVoxelSettings
 	uint64_t admitMaxBytesRuntime = 0;
 	uint32_t admitMaxMsLoading = 0;
 	uint32_t admitMaxMsRuntime = 0;
-	bool onboardingEnabled = true;
-	uint32_t onboardingDeadlineFrames = 12;
 	uint32_t admitMaxBlasLoading = 0;
 	uint32_t admitMaxBlasRuntime = 0;
 	uint32_t admitMaxBlasPrimitives = 0;

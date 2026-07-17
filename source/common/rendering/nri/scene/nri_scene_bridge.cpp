@@ -287,11 +287,8 @@ namespace
 		FTextureID texid = {};
 		DCoreActor* actor = nullptr;
 		int32_t actorIndex = -1;
-		uint64_t actorLifecycleKey = 0;
-		float actorDistanceSquared = 0.0f;
 		uint32_t sourceBits = LoadingVoxelRequestSource_None;
 		LoadingVoxelRequestPriority priority = LoadingVoxelRequestPriority::Normal;
-		bool localPlayer = false;
 		bool gpuForce = false;
 		bool gpuPrefer = false;
 	};
@@ -3171,7 +3168,7 @@ namespace
 		}
 		if ((actor->sprext.renderflags & (SPREXT_NOTMD | SPREXT_TEMPINVISIBLE)) != 0 ||
 			(actor->spr.cstat2 & CSTAT2_SPRITE_NOMODEL) != 0 ||
-			((actor->spr.cstat & CSTAT_SPRITE_INVISIBLE) != 0 && !IsLocalPlayerActor(actor)) ||
+			(actor->spr.cstat & CSTAT_SPRITE_INVISIBLE) != 0 ||
 			actor->spr.scale.X == 0.0 ||
 			actor->spr.scale.Y == 0.0)
 		{
@@ -3357,12 +3354,6 @@ namespace
 		return (int)request.priority * 10000 + LoadingVoxelSourceRank(request.sourceBits) * 100 + LoadingVoxelGpuIntentRank(request);
 	}
 
-	int LoadingVoxelAdmissionRank(const LoadingVoxelMaterialContext& context)
-	{
-		const int gpuIntentRank = context.gpuForce ? 0 : (context.gpuPrefer ? 1 : 2);
-		return (int)context.priority * 10000 + LoadingVoxelSourceRank(context.sourceBits) * 100 + gpuIntentRank;
-	}
-
 	bool IsLoadingVoxelRequestGpuCandidate(const LoadingVoxelPreloadRequest& request)
 	{
 		if (!nri_ptloadingvoxelgpu)
@@ -3535,21 +3526,6 @@ namespace
 		materialContext.texid = candidate.texid;
 		materialContext.actor = actor;
 		materialContext.actorIndex = actor != nullptr ? (int32_t)actor->GetIndex() : -1;
-		materialContext.actorLifecycleKey = actor != nullptr ?
-			BuildVoxelInstanceKeyHash(BuildVoxelInstanceKey(materialContext.actorIndex, actor)) : 0ull;
-		materialContext.localPlayer = IsLocalPlayerActor(actor);
-		if (actor != nullptr && myconnectindex >= 0 && myconnectindex < MAXPLAYERS)
-		{
-			DCorePlayer* localPlayer = PlayerArray[myconnectindex];
-			DCoreActor* localActor = localPlayer != nullptr ? localPlayer->GetActor() : nullptr;
-			if (localActor != nullptr)
-			{
-				const double dx = actor->spr.pos.X - localActor->spr.pos.X;
-				const double dy = actor->spr.pos.Y - localActor->spr.pos.Y;
-				const double dz = actor->spr.pos.Z - localActor->spr.pos.Z;
-				materialContext.actorDistanceSquared = (float)(dx * dx + dy * dy + dz * dz);
-			}
-		}
 		materialContext.sourceBits = candidate.sourceBits;
 		materialContext.priority = candidate.priority;
 		materialContext.gpuForce = candidate.gpuForce;
@@ -7160,9 +7136,6 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 			fallbackContext.texid = request.texid;
 			fallbackContext.actor = request.actor;
 			fallbackContext.actorIndex = request.actorIndex;
-			fallbackContext.actorLifecycleKey = request.actor != nullptr ?
-				BuildVoxelInstanceKeyHash(BuildVoxelInstanceKey(request.actorIndex, request.actor)) : 0ull;
-			fallbackContext.localPlayer = IsLocalPlayerActor(request.actor);
 			fallbackContext.sourceBits = request.sourceBits;
 			fallbackContext.priority = request.priority;
 			fallbackContext.gpuForce = request.gpuForce;
@@ -7238,21 +7211,14 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 			view.renderPrimitiveHash = renderPrimitiveHash;
 			view.meshVariantHash = request.meshVariantHash;
 			view.materialVariantHash = materialVariantHash;
-			view.sourceBits = context.sourceBits;
-			view.priority = (int32_t)context.priority;
-			view.admissionRank = LoadingVoxelAdmissionRank(context);
+			view.sourceBits = request.sourceBits | context.sourceBits;
+			view.priority = (int32_t)request.priority;
+			view.admissionRank = LoadingVoxelAdmissionRank(request);
 			view.sourcePicnum = context.texid.GetIndex();
 			view.resolvedVoxelIndex = request.resolvedVoxelIndex;
-			view.actorIndex = context.actorIndex;
 			view.primitiveCount = primitiveCount;
-			view.actorLifecycleKey = context.actorLifecycleKey;
-			view.actorDistanceSquared = context.actorDistanceSquared;
-			view.gpuForce = context.gpuForce;
-			view.gpuPrefer = context.gpuPrefer;
-			view.localPlayer = context.localPlayer;
-			view.dynamicMaterial =
-				(material.texture != nullptr && material.texture->GetTexture() != nullptr && material.texture->GetTexture()->isCanvas()) ||
-				(material.emissiveSourceTexture != nullptr && material.emissiveSourceTexture->GetTexture() != nullptr && material.emissiveSourceTexture->GetTexture()->isCanvas());
+			view.gpuForce = forcedGpu;
+			view.gpuPrefer = preferredGpu;
 			view.model = request.model;
 			view.surface = surface;
 			view.material = material;
@@ -7404,9 +7370,6 @@ bool BuildPrecachedVoxelRawManifestViews(std::vector<PrecachedVoxelRawManifestVi
 			fallbackContext.texid = request.texid;
 			fallbackContext.actor = request.actor;
 			fallbackContext.actorIndex = request.actorIndex;
-			fallbackContext.actorLifecycleKey = request.actor != nullptr ?
-				BuildVoxelInstanceKeyHash(BuildVoxelInstanceKey(request.actorIndex, request.actor)) : 0ull;
-			fallbackContext.localPlayer = IsLocalPlayerActor(request.actor);
 			fallbackContext.sourceBits = request.sourceBits;
 			fallbackContext.priority = request.priority;
 			fallbackContext.gpuForce = request.gpuForce;
@@ -7443,24 +7406,17 @@ bool BuildPrecachedVoxelRawManifestViews(std::vector<PrecachedVoxelRawManifestVi
 			view.renderPrimitiveHash = renderPrimitiveHash;
 			view.meshVariantHash = request.meshVariantHash;
 			view.materialVariantHash = materialVariantHash;
-			view.sourceBits = context.sourceBits;
-			view.priority = (int32_t)context.priority;
-			view.admissionRank = LoadingVoxelAdmissionRank(context);
+			view.sourceBits = request.sourceBits | context.sourceBits;
+			view.priority = (int32_t)request.priority;
+			view.admissionRank = LoadingVoxelAdmissionRank(request);
 			view.sourcePicnum = context.texid.GetIndex();
 			view.resolvedVoxelIndex = request.resolvedVoxelIndex;
-			view.actorIndex = context.actorIndex;
 			view.primitiveCount = primitiveCount;
 			view.rawSlabCount = rawStatsReady ? rawStats.slabCount : 0u;
 			view.rawColorRunCount = 0u;
 			view.rawBytes = rawStatsReady ? rawStats.rawByteCount : 0ull;
-			view.actorLifecycleKey = context.actorLifecycleKey;
-			view.actorDistanceSquared = context.actorDistanceSquared;
-			view.gpuForce = context.gpuForce;
-			view.gpuPrefer = context.gpuPrefer;
-			view.localPlayer = context.localPlayer;
-			view.dynamicMaterial =
-				(material.texture != nullptr && material.texture->GetTexture() != nullptr && material.texture->GetTexture()->isCanvas()) ||
-				(material.emissiveSourceTexture != nullptr && material.emissiveSourceTexture->GetTexture() != nullptr && material.emissiveSourceTexture->GetTexture()->isCanvas());
+			view.gpuForce = forcedGpu;
+			view.gpuPrefer = preferredGpu;
 			view.legacyGpuCandidate = legacyGpuCandidate;
 			view.rawSourceResident = rawStatsReady;
 			view.rawStatsReady = rawStatsReady;
@@ -7473,23 +7429,6 @@ bool BuildPrecachedVoxelRawManifestViews(std::vector<PrecachedVoxelRawManifestVi
 	}
 
 	return !outEntries.empty();
-}
-
-void BuildLiveVoxelActorLifecycleKeys(std::vector<uint64_t>& outKeys)
-{
-	outKeys.clear();
-	TSpriteIterator<DCoreActor> it;
-	while (DCoreActor* actor = it.Next())
-	{
-		if (actor == nullptr || !actor->exists() || (actor->ObjectFlags & OF_EuthanizeMe) != 0)
-			continue;
-		const int32_t actorIndex = (int32_t)actor->GetIndex();
-		const uint64_t key = BuildVoxelInstanceKeyHash(BuildVoxelInstanceKey(actorIndex, actor));
-		if (key != 0)
-			outKeys.push_back(key);
-	}
-	std::sort(outKeys.begin(), outKeys.end());
-	outKeys.erase(std::unique(outKeys.begin(), outKeys.end()), outKeys.end());
 }
 
 bool CaptureScene(HWDrawInfo& di, SceneView& outView)

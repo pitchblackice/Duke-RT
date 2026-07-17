@@ -167,10 +167,7 @@ NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars()
 	settings.admitMaxBytesLoading = (int)nri_ptvoxeladmitmaxbytesloading <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmitmaxbytesloading;
 	settings.admitMaxBytesRuntime = (int)nri_ptvoxeladmitmaxbytesruntime <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmitmaxbytesruntime;
 	settings.admitMaxMsLoading = (uint32_t)std::max(0, (int)nri_ptvoxeladmitmaxmsloading);
-	settings.onboardingEnabled = (bool)nri_ptvoxelonboardingenabled;
-	settings.admitMaxMsRuntime = settings.onboardingEnabled ?
-		((int)nri_ptvoxeladmitmaxmsruntime > 0 ? (uint32_t)(int)nri_ptvoxeladmitmaxmsruntime : 4u) : 0u;
-	settings.onboardingDeadlineFrames = (uint32_t)std::max(1, (int)nri_ptvoxelonboardingdeadlineframes);
+	settings.admitMaxMsRuntime = (uint32_t)std::max(0, (int)nri_ptvoxeladmitmaxmsruntime);
 	settings.admitMaxBlasLoading = (int)nri_ptvoxeladmitmaxblasloading <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmitmaxblasloading;
 	settings.admitMaxBlasRuntime = (int)nri_ptvoxeladmitmaxblasruntime <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmitmaxblasruntime;
 	settings.admitMaxBlasPrimitives = (int)nri_ptvoxeladmitmaxblasprims <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmitmaxblasprims;
