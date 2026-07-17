@@ -455,12 +455,6 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	const bool rawTraceDirectScene = inputs.rawTraceDirectScene;
 	const bool preserveHistory = inputs.preserveHistory;
 	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
-	nri_scene::SetPersistentVoxelResidentActorQuery(
-		&mPersistentVoxels,
-		[](void* user, uint64_t identityKey)
-		{
-			return static_cast<NRIPersistentVoxelResidency*>(user)->HasResidentActor(identityKey);
-		});
 	const bool allowStaticMapScene = !bootstrapCapturedView && !rawTraceDirectScene && mMapWorld.valid;
 	nri_scene::SceneView& capturedSceneView = frame.capturedSceneView;
 	nri_scene::SceneView& dynamicSceneView = frame.dynamicSceneView;
