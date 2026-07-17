@@ -50,6 +50,158 @@ float SmokeGridLightLocalPdf(SmokeGridLightProposal proposal, uint candidateInde
 	return 0.0;
 }
 
+bool SmokeGridLightDrawEmissiveProposal(
+	SmokeGridLightProposal proposal,
+	bool localReady,
+	float localMix,
+	inout uint randomState,
+	out uint candidateIndex,
+	out EmissivePrimitiveData candidate,
+	out float proposalPdf)
+{
+	candidateIndex = 0xffffffffu;
+	candidate = (EmissivePrimitiveData)0;
+	proposalPdf = 0.0;
+	if (localReady && SmokeRandom01(randomState) < localMix)
+	{
+		const uint localIndex = min((uint)(SmokeRandom01(randomState) * proposal.Count), proposal.Count - 1u);
+		candidateIndex = proposal.CandidateIndices[localIndex];
+		InterlockedAdd(gSmokeGridLightControl[0].ProposalLocalSamples, 1u);
+	}
+	else
+	{
+		candidateIndex = SmokeSampleEmissivePrimitive(randomState);
+		InterlockedAdd(gSmokeGridLightControl[0].ProposalGlobalSamples, 1u);
+	}
+	InterlockedAdd(gSmokeGridLightControl[0].Samples, 1u);
+	if (candidateIndex == 0xffffffffu)
+	{
+		InterlockedAdd(gSmokeGridLightControl[0].Missing, 1u);
+		return false;
+	}
+	uint candidateCapacity, candidateStride;
+	gSmokeEmissivePrimitives.GetDimensions(candidateCapacity, candidateStride);
+	if (candidateIndex >= candidateCapacity)
+	{
+		InterlockedAdd(gSmokeGridLightControl[0].StructuralErrors, 1u);
+		return false;
+	}
+	candidate = gSmokeEmissivePrimitives[candidateIndex];
+	const float localPdf = localReady ? SmokeGridLightLocalPdf(proposal, candidateIndex) : 0.0;
+	proposalPdf = (1.0 - localMix) * candidate.selectionPdf + localMix * localPdf;
+	if (!isfinite(proposalPdf) || proposalPdf <= 0.0)
+	{
+		InterlockedAdd(gSmokeGridLightControl[0].StructuralErrors, 1u);
+		return false;
+	}
+	return true;
+}
+
+bool SmokeGridLightEvaluateJointEmissiveRis(
+	SmokeGridLightProposal proposal,
+	bool localReady,
+	float localMix,
+	uint setSeed,
+	float3 receiverPosition,
+	uint requestedCandidates,
+	out float3 estimator,
+	out float3 lightDirection,
+	out float distanceToLight,
+	out uint pointProposals,
+	out uint zeroProposals,
+	out uint risRejects)
+{
+	estimator = 0.0;
+	lightDirection = 0.0;
+	distanceToLight = 0.0;
+	pointProposals = 0u;
+	zeroProposals = 0u;
+	risRejects = 0u;
+	const uint candidateCount = clamp(requestedCandidates, 1u, 8u);
+	float targetSum = 0.0;
+	float selectedTarget = 0.0;
+	float3 selectedEstimator = 0.0;
+	float3 selectedDirection = 0.0;
+	float selectedDistance = 0.0;
+	uint selectionState = SmokeHash(setSeed ^ 0x68bc21ebu);
+	[loop]
+	for (uint proposalIndex = 0u; proposalIndex < candidateCount; ++proposalIndex)
+	{
+		// Proposal zero preserves the exact legacy candidate and point sequence,
+		// making K=1 a strict A/B fallback. Later proposals are independent.
+		uint randomState = proposalIndex == 0u ?
+			setSeed : SmokeHash(setSeed ^ SmokeHash(proposalIndex + 0x02e5be93u));
+		uint candidateIndex;
+		EmissivePrimitiveData candidate;
+		float proposalPdf;
+		pointProposals++;
+		if (!SmokeGridLightDrawEmissiveProposal(proposal, localReady, localMix, randomState,
+			candidateIndex, candidate, proposalPdf))
+		{
+			zeroProposals++;
+			continue;
+		}
+		SmokeEmissiveReservoirRecord record = SmokeEmptyEmissiveReservoir();
+		record.CandidateIndex = candidateIndex;
+		record.SampleSeed = randomState;
+		record.StableKeyLo = candidate.stableKeyLo;
+		record.StableKeyHi = candidate.stableKeyHi;
+		record.Generation = gSmokeConstants.CommandCount;
+		float3 pointIncident, pointDirection;
+		float pointDistance;
+		if (!SmokeEvaluateWorldEmissiveIncident(record, receiverPosition, false,
+			pointIncident, pointDirection, pointDistance))
+		{
+			zeroProposals++;
+			continue;
+		}
+		const float3 pointEstimator = pointIncident / proposalPdf;
+		const float pointTarget = SmokeEmissiveLuminance(pointEstimator);
+		if (!all(isfinite(pointEstimator)) || !isfinite(pointTarget) || pointTarget <= 1e-8)
+		{
+			risRejects++;
+			continue;
+		}
+		const float nextTargetSum = targetSum + pointTarget;
+		if (!isfinite(nextTargetSum))
+		{
+			risRejects++;
+			return false;
+		}
+		if (SmokeRandom01(selectionState) * nextTargetSum < pointTarget)
+		{
+			selectedTarget = pointTarget;
+			selectedEstimator = pointEstimator;
+			selectedDirection = pointDirection;
+			selectedDistance = pointDistance;
+		}
+		targetSum = nextTargetSum;
+	}
+	if (targetSum <= 1e-8 || selectedTarget <= 1e-8)
+		return false;
+	// pointEstimator already contains the inverse conditional point density and
+	// the selected candidate's exact local/global mixture PDF. This is only the
+	// fixed-K RIS correction; physical zero proposals remain in the denominator.
+	const float risNormalization = targetSum / ((float)candidateCount * selectedTarget);
+	if (!isfinite(risNormalization) || risNormalization <= 0.0)
+	{
+		risRejects++;
+		return false;
+	}
+	estimator = selectedEstimator * risNormalization;
+	lightDirection = selectedDirection;
+	distanceToLight = selectedDistance;
+	if (!all(isfinite(estimator)))
+	{
+		risRejects++;
+		estimator = 0.0;
+		lightDirection = 0.0;
+		distanceToLight = 0.0;
+		return false;
+	}
+	return true;
+}
+
 [numthreads(64, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -96,65 +248,45 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
 	{
 		uint randomState = SmokeGridLightSeedForCell(cell, sampleIndex);
-		uint candidateIndex = 0xffffffffu;
-		if (localReady && SmokeRandom01(randomState) < localMix)
-		{
-			const uint localIndex = min((uint)(SmokeRandom01(randomState) * proposal.Count), proposal.Count - 1u);
-			candidateIndex = proposal.CandidateIndices[localIndex];
-			InterlockedAdd(gSmokeGridLightControl[0].ProposalLocalSamples, 1u);
-		}
-		else
-		{
-			candidateIndex = SmokeSampleEmissivePrimitive(randomState);
-			InterlockedAdd(gSmokeGridLightControl[0].ProposalGlobalSamples, 1u);
-		}
-		InterlockedAdd(gSmokeGridLightControl[0].Samples, 1u);
-		if (candidateIndex == 0xffffffffu)
-		{
-			InterlockedAdd(gSmokeGridLightControl[0].Missing, 1u);
-			physicalZero++;
-			continue;
-		}
-		uint candidateCapacity, candidateStride;
-		gSmokeEmissivePrimitives.GetDimensions(candidateCapacity, candidateStride);
-		if (candidateIndex >= candidateCapacity)
-		{
-			InterlockedAdd(gSmokeGridLightControl[0].StructuralErrors, 1u);
-			continue;
-		}
-		const EmissivePrimitiveData candidate = gSmokeEmissivePrimitives[candidateIndex];
-		const float localPdf = localReady ? SmokeGridLightLocalPdf(proposal, candidateIndex) : 0.0;
-		const float proposalPdf = (1.0 - localMix) * candidate.selectionPdf + localMix * localPdf;
-		if (!isfinite(proposalPdf) || proposalPdf <= 0.0)
-		{
-			InterlockedAdd(gSmokeGridLightControl[0].StructuralErrors, 1u);
-			continue;
-		}
-		SmokeEmissiveReservoirRecord record = SmokeEmptyEmissiveReservoir();
-		record.CandidateIndex = candidateIndex;
-		record.SampleSeed = randomState;
-		record.StableKeyLo = candidate.stableKeyLo;
-		record.StableKeyHi = candidate.stableKeyHi;
-		record.Generation = gSmokeConstants.CommandCount;
-		float3 incident, lightDirection;
+		float3 estimator, lightDirection;
 		float lightDistance;
 		uint innerPointProposals, innerZeroProposals, innerRisRejects;
-		if (innerRisDiagnostics)
-			InterlockedAdd(gSmokeControl[0].EmissiveInnerRisSets, 1u);
 		bool incidentValid = false;
 		if (referenceSampling)
 		{
 			// Keep the frozen 32-sample reference independent from the RIS
 			// implementation so it remains a useful energy/variance oracle.
+			uint candidateIndex;
+			EmissivePrimitiveData candidate;
+			float proposalPdf;
 			innerPointProposals = 1u;
-			incidentValid = SmokeEvaluateWorldEmissiveIncident(record, receiverPosition, false,
-				incident, lightDirection, lightDistance);
+			incidentValid = SmokeGridLightDrawEmissiveProposal(proposal, localReady, localMix, randomState,
+				candidateIndex, candidate, proposalPdf);
+			if (incidentValid)
+			{
+				SmokeEmissiveReservoirRecord record = SmokeEmptyEmissiveReservoir();
+				record.CandidateIndex = candidateIndex;
+				record.SampleSeed = randomState;
+				record.StableKeyLo = candidate.stableKeyLo;
+				record.StableKeyHi = candidate.stableKeyHi;
+				record.Generation = gSmokeConstants.CommandCount;
+				float3 incident;
+				incidentValid = SmokeEvaluateWorldEmissiveIncident(record, receiverPosition, false,
+					incident, lightDirection, lightDistance);
+				if (incidentValid)
+					estimator = incident / proposalPdf;
+			}
 			innerZeroProposals = incidentValid ? 0u : 1u;
 			innerRisRejects = 0u;
 		}
 		else
-			incidentValid = SmokeEvaluateWorldEmissiveIncidentRis(record, receiverPosition, false, pointCandidateCount,
-				incident, lightDirection, lightDistance, innerPointProposals, innerZeroProposals, innerRisRejects);
+		{
+			if (innerRisDiagnostics)
+				InterlockedAdd(gSmokeControl[0].EmissiveInnerRisSets, 1u);
+			incidentValid = SmokeGridLightEvaluateJointEmissiveRis(proposal, localReady, localMix, randomState,
+				receiverPosition, pointCandidateCount, estimator, lightDirection, lightDistance,
+				innerPointProposals, innerZeroProposals, innerRisRejects);
+		}
 		if (!incidentValid)
 		{
 			if (innerRisDiagnostics)
@@ -209,7 +341,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			continue;
 		}
 		visible++;
-		const float3 estimator = incident / proposalPdf;
 		float weights[6];
 		float weightSum = 0.0;
 		[unroll]
