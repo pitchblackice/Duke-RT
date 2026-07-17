@@ -19,5 +19,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gSmokeControl[0].EmissiveInnerRisRejects = 0u;
 		gSmokeControl[0].EmissiveInnerSelections = 0u;
 		gSmokeControl[0].EmissiveInnerVisibilityRays = 0u;
+		gSmokeControl[0].EmissiveInnerVisibilityVisible = 0u;
+		gSmokeControl[0].EmissiveInnerBlockerReceiverImmediate = 0u;
+		gSmokeControl[0].EmissiveInnerBlockerReceiverCell = 0u;
+		gSmokeControl[0].EmissiveInnerBlockerEmitterCell = 0u;
+		gSmokeControl[0].EmissiveInnerBlockerInterior = 0u;
 	}
 }

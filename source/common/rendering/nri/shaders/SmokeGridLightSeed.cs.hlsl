@@ -306,13 +306,38 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			InterlockedAdd(gSmokeControl[0].EmissiveInnerSelections, 1u);
 		}
 		bool isVisible = true;
+		float blockerDistance = -1.0;
 		if (gSmokeConstants.LightMode >= 2u)
 		{
 			if (innerRisDiagnostics)
 				InterlockedAdd(gSmokeControl[0].EmissiveInnerVisibilityRays, 1u);
 			isVisible = SmokeFilteredVisibilityEffective() ?
-				SmokeEmissiveVisibleFiltered(receiverPosition, lightDirection, lightDistance, false) :
-				SmokeEmissiveVisible(receiverPosition, lightDirection, lightDistance, false);
+				SmokeEmissiveVisibleFiltered(receiverPosition, lightDirection, lightDistance, false, blockerDistance) :
+				SmokeEmissiveVisible(receiverPosition, lightDirection, lightDistance, false, blockerDistance);
+			if (innerRisDiagnostics)
+			{
+				if (isVisible)
+				{
+					InterlockedAdd(gSmokeControl[0].EmissiveInnerVisibilityVisible, 1u);
+				}
+				else
+				{
+					// World-light receivers live at coarse cell centers rather than on a
+					// known exterior surface. Split blockers by where they occur so a
+					// support-geometry fix cannot accidentally turn real walls into leaks.
+					const float hitFromReceiver = blockerDistance >= 0.0 ? 0.05 + blockerDistance : 0.0;
+					const float emitterRemainder = max(lightDistance - hitFromReceiver, 0.0);
+					const float cellReach = cellSize * 0.8660254 + 0.05;
+					if (blockerDistance >= 0.0 && hitFromReceiver <= 0.1)
+						InterlockedAdd(gSmokeControl[0].EmissiveInnerBlockerReceiverImmediate, 1u);
+					else if (blockerDistance >= 0.0 && emitterRemainder <= cellReach)
+						InterlockedAdd(gSmokeControl[0].EmissiveInnerBlockerEmitterCell, 1u);
+					else if (blockerDistance >= 0.0 && hitFromReceiver <= cellReach)
+						InterlockedAdd(gSmokeControl[0].EmissiveInnerBlockerReceiverCell, 1u);
+					else
+						InterlockedAdd(gSmokeControl[0].EmissiveInnerBlockerInterior, 1u);
+				}
+			}
 		}
 		float mediumTransmittance = 1.0;
 		if (SmokeSelfShadowEnabled(gSmokeConstants.DebugMode))
