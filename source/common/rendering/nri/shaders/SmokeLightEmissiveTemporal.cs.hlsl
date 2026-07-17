@@ -29,8 +29,8 @@ bool SmokeEvaluateEmissiveLaneAtReceiver(
 		if (diagnostics)
 			InterlockedAdd(gSmokeControl[0].EmissiveShadowRays, 1u);
 		const bool visible = SmokeFilteredVisibilityEffective()
-			? SmokePointLightVisibleFiltered(receiverPosition, direction, distanceToLight, diagnostics)
-			: SmokePointLightVisible(receiverPosition, direction, distanceToLight, diagnostics);
+			? SmokeEmissiveVisibleFiltered(receiverPosition, direction, distanceToLight, diagnostics)
+			: SmokeEmissiveVisible(receiverPosition, direction, distanceToLight, diagnostics);
 		if (diagnostics)
 		{
 			if (visible)

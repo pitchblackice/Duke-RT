@@ -311,8 +311,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			if (innerRisDiagnostics)
 				InterlockedAdd(gSmokeControl[0].EmissiveInnerVisibilityRays, 1u);
 			isVisible = SmokeFilteredVisibilityEffective() ?
-				SmokePointLightVisibleFiltered(receiverPosition, lightDirection, lightDistance, false) :
-				SmokePointLightVisible(receiverPosition, lightDirection, lightDistance, false);
+				SmokeEmissiveVisibleFiltered(receiverPosition, lightDirection, lightDistance, false) :
+				SmokeEmissiveVisible(receiverPosition, lightDirection, lightDistance, false);
 		}
 		float mediumTransmittance = 1.0;
 		if (SmokeSelfShadowEnabled(gSmokeConstants.DebugMode))

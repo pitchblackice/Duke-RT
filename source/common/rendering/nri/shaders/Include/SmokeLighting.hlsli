@@ -286,11 +286,17 @@ void SmokeCommitFilterStats(SmokeFilterStats stats)
 	if (stats.continuationLimitExits != 0u) InterlockedAdd(gSmokeControl[0].FilterContinuationLimitExits, stats.continuationLimitExits);
 }
 
-bool SmokePointLightVisibleFiltered(float3 receiverPosition, float3 lightDirection, float lightDistance, bool diagnostics)
+bool SmokePointLightVisibleFilteredBiased(
+	float3 receiverPosition,
+	float3 lightDirection,
+	float lightDistance,
+	float originBias,
+	float endpointBias,
+	bool diagnostics)
 {
 	SmokeFilterStats stats = (SmokeFilterStats)0;
-	float3 origin = receiverPosition + lightDirection * 0.05;
-	float remainingDistance = max(lightDistance - 0.051, 0.001);
+	float3 origin = receiverPosition + lightDirection * originBias;
+	float remainingDistance = max(lightDistance - originBias - endpointBias, 0.001);
 	uint portalBudget = min((gSmokeConstants.FilteredVisibilityEnabled >> 8u) & 0xffu, 8u);
 	uint sceneInstanceCount, sceneInstanceStride, portalCount, portalStride;
 	gSmokeSceneInstances.GetDimensions(sceneInstanceCount, sceneInstanceStride);
@@ -391,6 +397,18 @@ bool SmokePointLightVisibleFiltered(float3 receiverPosition, float3 lightDirecti
 	return true;
 }
 
+bool SmokePointLightVisibleFiltered(float3 receiverPosition, float3 lightDirection, float lightDistance, bool diagnostics)
+{
+	return SmokePointLightVisibleFilteredBiased(
+		receiverPosition, lightDirection, lightDistance, 0.05, 0.001, diagnostics);
+}
+
+bool SmokeEmissiveVisibleFiltered(float3 receiverPosition, float3 lightDirection, float lightDistance, bool diagnostics)
+{
+	return SmokePointLightVisibleFilteredBiased(
+		receiverPosition, lightDirection, lightDistance, 0.05, 0.05, diagnostics);
+}
+
 float SmokeHenyeyGreenstein(float cosineTheta, float anisotropy)
 {
 	const float g = clamp(anisotropy, -0.95, 0.95);
@@ -407,21 +425,39 @@ float3 SmokeSampleReceiverFacingEmitter(RuntimePointLightData light, float3 cent
 	return SampleAnalyticReceiverFacingDisk(light.position, emitterRadius, centerDirection, float2(cos(phi), sin(phi)) * radius);
 }
 
-bool SmokePointLightVisible(float3 receiverPosition, float3 lightDirection, float lightDistance, bool diagnostics)
+bool SmokePointLightVisibleBiased(
+	float3 receiverPosition,
+	float3 lightDirection,
+	float lightDistance,
+	float originBias,
+	float endpointBias,
+	bool diagnostics)
 {
-	if (lightDistance <= 0.052)
+	if (lightDistance <= originBias + endpointBias + 0.001)
 		return true;
 
 	RayDesc ray;
-	ray.Origin = receiverPosition + lightDirection * 0.05;
+	ray.Origin = receiverPosition + lightDirection * originBias;
 	ray.TMin = 0.001;
 	ray.Direction = lightDirection;
-	ray.TMax = max(lightDistance - 0.051, 0.001);
+	ray.TMax = max(lightDistance - originBias - endpointBias, 0.001);
 	const uint rayFlags = RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
 	RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
 	query.TraceRayInline(gSmokeWorldTlas, rayFlags, NRI_TLAS_MASK_SHADOW, ray);
 	while (query.Proceed()) {}
 	return query.CommittedStatus() != COMMITTED_TRIANGLE_HIT;
+}
+
+bool SmokePointLightVisible(float3 receiverPosition, float3 lightDirection, float lightDistance, bool diagnostics)
+{
+	return SmokePointLightVisibleBiased(
+		receiverPosition, lightDirection, lightDistance, 0.05, 0.001, diagnostics);
+}
+
+bool SmokeEmissiveVisible(float3 receiverPosition, float3 lightDirection, float lightDistance, bool diagnostics)
+{
+	return SmokePointLightVisibleBiased(
+		receiverPosition, lightDirection, lightDistance, 0.05, 0.05, diagnostics);
 }
 
 float3 SmokeDirectionalColor()

@@ -41,8 +41,8 @@ void SmokeAccumulateReference(
 				InterlockedAdd(gSmokeControl[0].EmissiveShadowRays, 1u);
 			}
 			visibility = (SmokeFilteredVisibilityEffective()
-				? SmokePointLightVisibleFiltered(receiverPosition, lightDirection, distanceToLight, diagnostics)
-				: SmokePointLightVisible(receiverPosition, lightDirection, distanceToLight, diagnostics)) ? 1.0 : 0.0;
+				? SmokeEmissiveVisibleFiltered(receiverPosition, lightDirection, distanceToLight, diagnostics)
+				: SmokeEmissiveVisible(receiverPosition, lightDirection, distanceToLight, diagnostics)) ? 1.0 : 0.0;
 		}
 		estimate += integrand * visibility / max(candidate.selectionPdf, 1e-6);
 	}
@@ -120,8 +120,8 @@ void SmokeResolveLegacyEmissive(
 		if (diagnostics)
 			InterlockedAdd(gSmokeControl[0].EmissiveShadowRays, 1u);
 		visibility = (SmokeFilteredVisibilityEffective()
-			? SmokePointLightVisibleFiltered(receiverPosition, lightDirection, distanceToLight, diagnostics)
-			: SmokePointLightVisible(receiverPosition, lightDirection, distanceToLight, diagnostics)) ? 1.0 : 0.0;
+			? SmokeEmissiveVisibleFiltered(receiverPosition, lightDirection, distanceToLight, diagnostics)
+			: SmokeEmissiveVisible(receiverPosition, lightDirection, distanceToLight, diagnostics)) ? 1.0 : 0.0;
 		if (diagnostics)
 		{
 			if (visibility > 0.0)
