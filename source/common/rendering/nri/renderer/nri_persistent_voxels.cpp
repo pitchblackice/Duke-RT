@@ -9,6 +9,7 @@
 #include "nri_upload_hash.h"
 #include "nri_voxel_compute_meshing.h"
 #include "nri_voxel_compute_preload.h"
+#include "nri_voxel_admission_policy.h"
 #include "printf.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "stats.h"
@@ -917,6 +918,29 @@ bool NRIPersistentVoxelResidency::HasRenderableOverlay() const
 		batch.activeActorCount > 0 &&
 		batch.primitiveCount > 0 &&
 		!batch.materialBridge.materials.empty();
+}
+
+bool NRIPersistentVoxelResidency::HasResidentActor(uint64_t identityKey) const
+{
+	if (identityKey == 0 || !batch.valid)
+	{
+		return false;
+	}
+
+	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	{
+		if (!actor.active || actor.identityKey != identityKey)
+		{
+			continue;
+		}
+		const auto mesh = meshVariantResources.find(actor.meshResourceKey);
+		if (mesh != meshVariantResources.end() &&
+			mesh->second.accelerationStructure.accelerationStructure != nullptr)
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 bool NRIPersistentVoxelResidency::HasResidentIndirectOnlyActor(int32_t actorIndex) const
@@ -3803,6 +3827,7 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 	std::vector<uint64_t> drainedReadyKeys;
 	drainedReadyKeys.reserve(admissionIndex.ActiveCount());
 	std::vector<uint64_t> stalePredictiveKeys;
+	std::vector<uint64_t> staleRuntimeKeys;
 	std::vector<uint64_t> liveActorLifecycleKeys;
 	if (!loadingPhase)
 		nri_scene::BuildLiveVoxelActorLifecycleKeys(liveActorLifecycleKeys);
@@ -3857,6 +3882,22 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 			TraceReadiness("stale-ready", phase, &entry, meshResourceKey, entry.variant.materialKeyHash, readiness, traceLevel2);
 			entry.state = PersistentVoxelAdmissionState::Pending;
 			entry.lastReason = "stale-ready";
+		}
+		const uint32_t staleRuntimeGraceFrames = std::max(32u, settings.onboardingDeadlineFrames * 2u);
+		const bool staleRuntimeUnsubmitted =
+			entry.runtimeRequested &&
+			(entry.state == PersistentVoxelAdmissionState::Pending || entry.state == PersistentVoxelAdmissionState::Deferred) &&
+			entry.schedulerTokenId == 0 &&
+			!entry.directComputeRequested &&
+			!entry.uploadPrepared;
+		if (!loadingPhase && staleRuntimeUnsubmitted &&
+			IsNRIVoxelRuntimeAdmissionRequestStale(
+				entry.runtimeLastRequestedFrame,
+				frameIndex,
+				staleRuntimeGraceFrames))
+		{
+			staleRuntimeKeys.push_back(key);
+			continue;
 		}
 		if (entry.state == PersistentVoxelAdmissionState::Failed)
 		{
@@ -3913,6 +3954,27 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		admissionQueue.erase(found);
 		MarkMaintenanceMutation();
 	}
+	for (uint64_t key : staleRuntimeKeys)
+	{
+		auto found = admissionQueue.find(key);
+		if (found == admissionQueue.end())
+			continue;
+		const uint32_t requestAge =
+			found->second.runtimeLastRequestedFrame != UINT32_MAX && frameIndex >= found->second.runtimeLastRequestedFrame ?
+			frameIndex - found->second.runtimeLastRequestedFrame : 0u;
+		if (traceLevel1)
+		{
+			Printf("PERF pt voxel admission queue: event=cancel-stale-runtime frame=%u pair=0x%llx actor_key=0x%llx request_age=%u reason=unsubmitted-not-current\n",
+				frameIndex,
+				(unsigned long long)key,
+				(unsigned long long)found->second.variant.actorLifecycleKey,
+				requestAge);
+		}
+		admissionIndex.Remove(key, NRIPersistentVoxelAdmissionBucket::Active);
+		DiscardAdmissionEntry(found->second, resetServices);
+		admissionQueue.erase(found);
+		MarkMaintenanceMutation();
+	}
 
 	std::sort(candidates.begin(), candidates.end(), [&](const PersistentVoxelAdmissionEntry* left, const PersistentVoxelAdmissionEntry* right)
 	{
@@ -3935,6 +3997,13 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 		if (leftDirectPending != rightDirectPending)
 		{
 			return leftDirectPending;
+		}
+		if (!loadingPhase && left->runtimeRequested && right->runtimeRequested &&
+			left->runtimeLastRequestedFrame != right->runtimeLastRequestedFrame)
+		{
+			return IsNRIVoxelRuntimeAdmissionRequestMoreRecent(
+				left->runtimeLastRequestedFrame,
+				right->runtimeLastRequestedFrame);
 		}
 		if (!loadingPhase && left->runtimeRequested && right->runtimeRequested &&
 			left->runtimeFirstQueuedFrame != right->runtimeFirstQueuedFrame)
@@ -6891,6 +6960,29 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 					meshResource.indexBuffer.memorySize +
 					meshResource.accelerationStructure.memorySize;
 				meshResource.cold = false;
+				const bool replacementWaitsForTlasEligibility =
+					existingActor != nullptr &&
+					existingActor->meshResourceKey != baseMeshResourceKey &&
+					!meshResource.tlasPublished &&
+					meshResource.tlasReadyFrame > frameIndex;
+				if (replacementWaitsForTlasEligibility)
+				{
+					existingActor->active = true;
+					if (outDeferredReason != nullptr)
+					{
+						*outDeferredReason = PersistentVoxelActorDeferredReason::AdmissionPending;
+					}
+					if (voxelStatsEnabled)
+					{
+						Printf("PERF pt voxel instance NRI: frame=%u action=retain reason=replacement-tlas-not-ready actor_key=0x%llx mesh_resource=0x%llx desired_mesh_resource=0x%llx tlas_ready=%u tlas_published=0 active=1\n",
+							frameIndex,
+							(unsigned long long)cacheEntry.identityKey,
+							(unsigned long long)existingActor->meshResourceKey,
+							(unsigned long long)baseMeshResourceKey,
+							meshResource.tlasReadyFrame);
+					}
+					return true;
+				}
 				if (voxelStatsEnabled)
 				{
 					Printf("PERF pt voxel mesh variant NRI: frame=%u action=reuse reason=none actor_key=0x%llx resource_key=0x%llx mesh_key=0x%llx mat_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u vertex_offset=%u index_offset=%u primitive_offset=%u space=%s basis_sig=0x%llx transform_keyed=%u blas=%u tlas_ready=%u tlas_published=%u upload_bytes=0 ready=1\n",
@@ -9092,9 +9184,11 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 		"admission-map-generation",
 		loadingTraceLevel >= 1 || voxelStatsEnabled,
 		services);
-	if (!variant.predictiveGeometry &&
-		IsNRIVoxelComputePreloadRuntimeWithheldMesh(buildSerial, meshResourceKey) &&
-		!IsNRIVoxelComputePreloadRuntimeTailReleased(buildSerial))
+	if (ShouldHoldNRIVoxelRuntimeTailAdmission(
+			runtimeRequested,
+			variant.predictiveGeometry,
+			IsNRIVoxelComputePreloadRuntimeWithheldMesh(buildSerial, meshResourceKey),
+			IsNRIVoxelComputePreloadRuntimeTailReleased(buildSerial)))
 	{
 		if (loadingTraceLevel >= 1 || voxelStatsEnabled)
 		{
@@ -9279,6 +9373,7 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 		if (runtimeRequested)
 		{
 			entry.dormantOptional = false;
+			entry.runtimeLastRequestedFrame = frameIndex;
 			if (entry.onboarding.requestFrame == UINT32_MAX)
 				entry.onboarding.requestFrame = frameIndex;
 		}
@@ -9369,6 +9464,7 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 	entry.gpuForce = variant.gpuForce;
 	entry.gpuPrefer = variant.gpuPrefer;
 	entry.runtimeRequested = runtimeRequested;
+	entry.runtimeLastRequestedFrame = runtimeRequested ? frameIndex : UINT32_MAX;
 	entry.onboarding.requestFrame = runtimeRequested ? frameIndex : UINT32_MAX;
 	entry.predictiveManifestOwner =
 		variant.predictiveGeometry && (variant.sourceBits & nri_scene::PrecachedVoxelSourceBit_MountedVoxelPreload) != 0;

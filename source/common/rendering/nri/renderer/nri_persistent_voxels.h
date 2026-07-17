@@ -186,6 +186,7 @@ struct PersistentVoxelAdmissionEntry
 	uint32_t mapGeneration = 0;
 	uint32_t firstQueuedFrame = UINT32_MAX;
 	uint32_t runtimeFirstQueuedFrame = UINT32_MAX;
+	uint32_t runtimeLastRequestedFrame = UINT32_MAX;
 	uint64_t estimatedBytes = 0;
 	uint64_t bytesUploaded = 0;
 	bool uploadPrepared = false;
@@ -1063,6 +1064,7 @@ public:
 	const NRIPersistentVoxelMaintenanceStats& GetMaintenanceStats() const { return maintenanceStats; }
 	bool HasValidBatch() const;
 	bool HasRenderableOverlay() const;
+	bool HasResidentActor(uint64_t identityKey) const;
 	bool HasResidentIndirectOnlyActor(int32_t actorIndex) const;
 	bool HasPreloadPending() const;
 	NRIPersistentVoxelPreloadStatus BuildPreloadStatusSnapshot() const;

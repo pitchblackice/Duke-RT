@@ -143,6 +143,8 @@ namespace
 	bool gVoxelActorStartupTransientMode = false;
 	uint64_t gVoxelActorLifecycleCursor = 0;
 	bool gVoxelActorPendingRemoval = false;
+	void* gPersistentVoxelResidentActorQueryUser = nullptr;
+	PersistentVoxelResidentActorQuery gPersistentVoxelResidentActorQuery = nullptr;
 	NRIVoxelActorMaintenanceGate gVoxelActorMaintenanceGate;
 	std::vector<ActorLifecycleEvent> gVoxelActorLifecycleEvents;
 
@@ -2584,6 +2586,14 @@ namespace
 		return lookup.entry != nullptr && lookup.entry->hasSurface && lookup.entry->persistentReady;
 	}
 
+	bool HasPersistentVoxelResidentActor(uint64_t identityKey)
+	{
+		return
+			identityKey != 0 &&
+			gPersistentVoxelResidentActorQuery != nullptr &&
+			gPersistentVoxelResidentActorQuery(gPersistentVoxelResidentActorQueryUser, identityKey);
+	}
+
 	bool IsVoxelMeshVariantSurfaceReady(uint64_t meshVariantHash);
 	bool GetReadyVoxelMeshVariantContentHashes(uint64_t meshVariantHash, uint64_t& outGeometryContentHash, uint64_t& outRenderPrimitiveHash);
 
@@ -2706,28 +2716,43 @@ namespace
 
 		VoxelActorCacheEntry& entry = lookup.entry != nullptr ? *lookup.entry : gVoxelActorCache[lookup.identityKey];
 		InitializeVoxelActorCacheEntryIdentity(entry, lookup);
-		entry.desiredSignature = lookup.signature;
+		const uint64_t desiredMaterialKey = material != nullptr && provenance != nullptr ?
+			BuildVoxelDirectMaterialPayloadKey(lookup.materialKeyHash, *provenance) : lookup.materialKeyHash;
+		const uint64_t desiredMaterialVariant = material != nullptr && provenance != nullptr ?
+			BuildVoxelDirectMaterialPayloadKey(lookup.materialVariantHash, *provenance) : lookup.materialVariantHash;
+		const uint64_t desiredSignature = BuildVoxelActorSignature(lookup.meshVariantHash, desiredMaterialVariant);
+		const bool sameDesiredVariant =
+			entry.pendingReason != (uint8_t)VoxelActorPendingReason::None &&
+			entry.desiredSignature == desiredSignature &&
+			entry.desiredMeshKeyHash == lookup.meshKeyHash &&
+			entry.desiredMaterialKeyHash == desiredMaterialKey &&
+			entry.desiredMeshVariantHash == lookup.meshVariantHash &&
+			entry.desiredMaterialVariantHash == desiredMaterialVariant &&
+			entry.desiredSurfaceSignature == lookup.surfaceSignature &&
+			entry.desiredPrimitiveCount == primitiveCount;
+		const bool pendingReasonChanged = entry.pendingReason != (uint8_t)reason;
+		entry.desiredSignature = desiredSignature;
 		entry.desiredMeshKeyHash = lookup.meshKeyHash;
-		entry.desiredMaterialKeyHash = lookup.materialKeyHash;
+		entry.desiredMaterialKeyHash = desiredMaterialKey;
 		entry.desiredMeshVariantHash = lookup.meshVariantHash;
-		entry.desiredMaterialVariantHash = lookup.materialVariantHash;
+		entry.desiredMaterialVariantHash = desiredMaterialVariant;
 		entry.desiredSurfaceSignature = lookup.surfaceSignature;
 		entry.pendingReason = (uint8_t)reason;
-		entry.pendingFrame = gVoxelActorCacheFrame;
+		if (!sameDesiredVariant)
+		{
+			entry.pendingFrame = gVoxelActorCacheFrame;
+		}
 		entry.lastSeenFrame = gVoxelActorCacheFrame;
 		const bool transformChanged = UpdateVoxelActorCacheEntryInstanceTransform(entry, lookup);
-		if (material != nullptr && provenance != nullptr)
+		if (!sameDesiredVariant && material != nullptr && provenance != nullptr)
 		{
 			StoreVoxelActorDesiredMaterialSurface(entry, *material, *provenance, primitiveCount);
-			entry.desiredMaterialKeyHash = BuildVoxelDirectMaterialPayloadKey(entry.desiredMaterialKeyHash, *provenance);
-			entry.desiredMaterialVariantHash = BuildVoxelDirectMaterialPayloadKey(entry.desiredMaterialVariantHash, *provenance);
-			entry.desiredSignature = BuildVoxelActorSignature(entry.desiredMeshVariantHash, entry.desiredMaterialVariantHash);
 		}
-		if (transformChanged || material != nullptr)
+		if (!sameDesiredVariant || transformChanged || pendingReasonChanged)
 		{
 			++gVoxelActorCacheSerial;
 		}
-		EmitVoxelActorStateTrace(nullptr, &lookup, &entry, "variant-build-queued", reason);
+		EmitVoxelActorStateTrace(nullptr, &lookup, &entry, sameDesiredVariant ? "variant-build-pending" : "variant-build-queued", reason);
 	}
 
 	void TraceVoxelActorFallbackLastValid(const HWSprite& sprite, const VoxelActorCacheLookup& lookup, VoxelActorPendingReason reason)
@@ -2735,9 +2760,13 @@ namespace
 		EmitVoxelActorKeyTrace(sprite, lookup, "fallback-last-valid", reason);
 	}
 
-	void TraceVoxelActorFirstUseFallback(const HWSprite& sprite, const VoxelActorCacheLookup& lookup, VoxelActorPendingReason reason)
+	void TraceVoxelActorFirstUseFallback(
+		const HWSprite& sprite,
+		const VoxelActorCacheLookup& lookup,
+		VoxelActorPendingReason reason,
+		bool rendered)
 	{
-		EmitVoxelActorKeyTrace(sprite, lookup, "fallback-empty", reason);
+		EmitVoxelActorKeyTrace(sprite, lookup, rendered ? "fallback-2d" : "fallback-empty", reason);
 		if (lookup.stability != VoxelActorStability::New) return;
 		PerfCompactFirstUseRecord record = {};
 		record.actorLifecycleKey = lookup.identityKey;
@@ -2803,12 +2832,6 @@ namespace
 		lookup.entry = &found->second;
 		lookup.entry->lastSeenFrame = gVoxelActorCacheFrame;
 		InitializeVoxelActorCacheEntryIdentity(*lookup.entry, lookup);
-		lookup.entry->desiredSignature = signature;
-		lookup.entry->desiredMeshKeyHash = meshKeyHash;
-		lookup.entry->desiredMaterialKeyHash = materialSignature;
-		lookup.entry->desiredMeshVariantHash = meshVariantHash;
-		lookup.entry->desiredMaterialVariantHash = materialVariantHash;
-		lookup.entry->desiredSurfaceSignature = surfaceSignature;
 		const bool canUpdateByTranslationInstance =
 			lookup.entry->hasSurface &&
 			lookup.entry->persistentReady &&
@@ -5640,7 +5663,12 @@ namespace
 				}
 			}
 
-			TraceVoxelActorFirstUseFallback(sprite, cacheLookup, reason);
+			const bool renderedFallback =
+				di != nullptr &&
+				!authoringIndirectOnlyActor &&
+				!HasPersistentVoxelResidentActor(cacheLookup.identityKey) &&
+				CaptureMirrorVoxelFallbackSprite(*di, sprite, drawListType, outSprites);
+			TraceVoxelActorFirstUseFallback(sprite, cacheLookup, reason, renderedFallback);
 			return true;
 		};
 		if (cacheUpdateConsumesActorBudget && !TrySpendVoxelCacheUpdateBudget(budget))
@@ -6826,6 +6854,12 @@ void SetPersistentVoxelActorStartupTransientMode(bool active, const char* reason
 			(uint32_t)gVoxelActorCache.size(),
 			promotedEntries);
 	}
+}
+
+void SetPersistentVoxelResidentActorQuery(void* user, PersistentVoxelResidentActorQuery query)
+{
+	gPersistentVoxelResidentActorQueryUser = user;
+	gPersistentVoxelResidentActorQuery = query;
 }
 
 bool BuildPersistentVoxelCacheSceneView(SceneView& outView)

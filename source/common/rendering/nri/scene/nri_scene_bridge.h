@@ -470,6 +470,8 @@ void BuildLiveVoxelActorLifecycleKeys(std::vector<uint64_t>& outKeys);
 uint64_t GetPersistentVoxelCacheSerial();
 void ResetPersistentVoxelActorCache(const char* reason);
 void SetPersistentVoxelActorStartupTransientMode(bool active, const char* reason);
+using PersistentVoxelResidentActorQuery = bool (*)(void* user, uint64_t identityKey);
+void SetPersistentVoxelResidentActorQuery(void* user, PersistentVoxelResidentActorQuery query);
 bool PrecacheVoxelModelCpuMesh(FVoxelModel* model, VoxelMeshPrecacheStats* stats = nullptr);
 bool PrecacheVoxelTextureCpuMesh(FTextureID texid, VoxelMeshPrecacheStats* stats = nullptr);
 void PreloadLiveActorVoxelRawSources();

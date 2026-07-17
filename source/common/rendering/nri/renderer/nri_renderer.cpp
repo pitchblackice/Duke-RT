@@ -1712,6 +1712,7 @@ bool NRIRenderer::Initialize()
 
 void NRIRenderer::Shutdown()
 {
+	nri_scene::SetPersistentVoxelResidentActorQuery(nullptr, nullptr);
 	ResetMuzzleFlashOverlayState("renderer-shutdown");
 	mLastResolvedLightOverlayGeneration = 0;
 
