@@ -97,19 +97,50 @@ bool SmokeGridLightDrawEmissiveProposal(
 	return true;
 }
 
+struct SmokeGridLightVisibilityStats
+{
+	uint Rays;
+	uint Visible;
+	uint BlockerReceiverImmediate;
+	uint BlockerReceiverCell;
+	uint BlockerEmitterCell;
+	uint BlockerInterior;
+};
+
+void SmokeGridLightClassifyBlocker(
+	float blockerDistance,
+	float lightDistance,
+	float cellSize,
+	inout SmokeGridLightVisibilityStats stats)
+{
+	const float hitFromReceiver = blockerDistance >= 0.0 ? 0.05 + blockerDistance : 0.0;
+	const float emitterRemainder = max(lightDistance - hitFromReceiver, 0.0);
+	const float cellReach = cellSize * 0.8660254 + 0.05;
+	if (blockerDistance >= 0.0 && hitFromReceiver <= 0.1)
+		stats.BlockerReceiverImmediate++;
+	else if (blockerDistance >= 0.0 && emitterRemainder <= cellReach)
+		stats.BlockerEmitterCell++;
+	else if (blockerDistance >= 0.0 && hitFromReceiver <= cellReach)
+		stats.BlockerReceiverCell++;
+	else
+		stats.BlockerInterior++;
+}
+
 bool SmokeGridLightEvaluateJointEmissiveRis(
 	SmokeGridLightProposal proposal,
 	bool localReady,
 	float localMix,
 	uint setSeed,
 	float3 receiverPosition,
+	float cellSize,
 	uint requestedCandidates,
 	out float3 estimator,
 	out float3 lightDirection,
 	out float distanceToLight,
 	out uint pointProposals,
 	out uint zeroProposals,
-	out uint risRejects)
+	out uint risRejects,
+	out SmokeGridLightVisibilityStats visibilityStats)
 {
 	estimator = 0.0;
 	lightDirection = 0.0;
@@ -117,6 +148,7 @@ bool SmokeGridLightEvaluateJointEmissiveRis(
 	pointProposals = 0u;
 	zeroProposals = 0u;
 	risRejects = 0u;
+	visibilityStats = (SmokeGridLightVisibilityStats)0;
 	const uint candidateCount = clamp(requestedCandidates, 1u, 8u);
 	float targetSum = 0.0;
 	float selectedTarget = 0.0;
@@ -161,6 +193,21 @@ bool SmokeGridLightEvaluateJointEmissiveRis(
 		{
 			risRejects++;
 			continue;
+		}
+		if (gSmokeConstants.LightMode >= 2u)
+		{
+			visibilityStats.Rays++;
+			float blockerDistance;
+			const bool pointVisible = SmokeFilteredVisibilityEffective() ?
+				SmokeEmissiveVisibleFiltered(receiverPosition, pointDirection, pointDistance, false, blockerDistance) :
+				SmokeEmissiveVisible(receiverPosition, pointDirection, pointDistance, false, blockerDistance);
+			if (!pointVisible)
+			{
+				zeroProposals++;
+				SmokeGridLightClassifyBlocker(blockerDistance, pointDistance, cellSize, visibilityStats);
+				continue;
+			}
+			visibilityStats.Visible++;
 		}
 		const float nextTargetSum = targetSum + pointTarget;
 		if (!isfinite(nextTargetSum))
@@ -258,6 +305,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float3 estimator, lightDirection;
 		float lightDistance;
 		uint innerPointProposals, innerZeroProposals, innerRisRejects;
+		SmokeGridLightVisibilityStats innerVisibilityStats = (SmokeGridLightVisibilityStats)0;
 		bool incidentValid = false;
 		if (referenceSampling)
 		{
@@ -291,62 +339,45 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			if (innerRisDiagnostics)
 				InterlockedAdd(gSmokeControl[0].EmissiveInnerRisSets, 1u);
 			incidentValid = SmokeGridLightEvaluateJointEmissiveRis(proposal, localReady, localMix, randomState,
-				receiverPosition, pointCandidateCount, estimator, lightDirection, lightDistance,
-				innerPointProposals, innerZeroProposals, innerRisRejects);
-		}
-		if (!incidentValid)
-		{
-			if (innerRisDiagnostics)
-			{
-				InterlockedAdd(gSmokeControl[0].EmissiveInnerPointProposals, innerPointProposals);
-				InterlockedAdd(gSmokeControl[0].EmissiveInnerZeroProposals, innerZeroProposals);
-				InterlockedAdd(gSmokeControl[0].EmissiveInnerRisRejects, innerRisRejects);
-			}
-			physicalZero++;
-			continue;
+				receiverPosition, cellSize, pointCandidateCount, estimator, lightDirection, lightDistance,
+				innerPointProposals, innerZeroProposals, innerRisRejects, innerVisibilityStats);
 		}
 		if (innerRisDiagnostics)
 		{
 			InterlockedAdd(gSmokeControl[0].EmissiveInnerPointProposals, innerPointProposals);
 			InterlockedAdd(gSmokeControl[0].EmissiveInnerZeroProposals, innerZeroProposals);
 			InterlockedAdd(gSmokeControl[0].EmissiveInnerRisRejects, innerRisRejects);
+			InterlockedAdd(gSmokeControl[0].EmissiveInnerVisibilityRays, innerVisibilityStats.Rays);
+			if (diagnosticSourceCell)
+			{
+				InterlockedAdd(gSmokeControl[0].EmissiveInnerSourceVisibilityRays, innerVisibilityStats.Rays);
+				InterlockedAdd(gSmokeControl[0].EmissiveInnerVisibilityVisible, innerVisibilityStats.Visible);
+				InterlockedAdd(gSmokeControl[0].EmissiveInnerBlockerReceiverImmediate,
+					innerVisibilityStats.BlockerReceiverImmediate);
+				InterlockedAdd(gSmokeControl[0].EmissiveInnerBlockerReceiverCell,
+					innerVisibilityStats.BlockerReceiverCell);
+				InterlockedAdd(gSmokeControl[0].EmissiveInnerBlockerEmitterCell,
+					innerVisibilityStats.BlockerEmitterCell);
+				InterlockedAdd(gSmokeControl[0].EmissiveInnerBlockerInterior,
+					innerVisibilityStats.BlockerInterior);
+			}
+		}
+		if (!incidentValid)
+		{
+			physicalZero++;
+			continue;
+		}
+		if (innerRisDiagnostics)
+		{
 			InterlockedAdd(gSmokeControl[0].EmissiveInnerSelections, 1u);
 		}
 		bool isVisible = true;
-		float blockerDistance = -1.0;
-		if (gSmokeConstants.LightMode >= 2u)
+		if (referenceSampling && gSmokeConstants.LightMode >= 2u)
 		{
-			if (innerRisDiagnostics)
-				InterlockedAdd(gSmokeControl[0].EmissiveInnerVisibilityRays, 1u);
-			if (innerRisDiagnostics && diagnosticSourceCell)
-				InterlockedAdd(gSmokeControl[0].EmissiveInnerSourceVisibilityRays, 1u);
+			float blockerDistance;
 			isVisible = SmokeFilteredVisibilityEffective() ?
 				SmokeEmissiveVisibleFiltered(receiverPosition, lightDirection, lightDistance, false, blockerDistance) :
 				SmokeEmissiveVisible(receiverPosition, lightDirection, lightDistance, false, blockerDistance);
-			if (innerRisDiagnostics && diagnosticSourceCell)
-			{
-				if (isVisible)
-				{
-					InterlockedAdd(gSmokeControl[0].EmissiveInnerVisibilityVisible, 1u);
-				}
-				else
-				{
-					// World-light receivers live at coarse cell centers rather than on a
-					// known exterior surface. Split blockers by where they occur so a
-					// support-geometry fix cannot accidentally turn real walls into leaks.
-					const float hitFromReceiver = blockerDistance >= 0.0 ? 0.05 + blockerDistance : 0.0;
-					const float emitterRemainder = max(lightDistance - hitFromReceiver, 0.0);
-					const float cellReach = cellSize * 0.8660254 + 0.05;
-					if (blockerDistance >= 0.0 && hitFromReceiver <= 0.1)
-						InterlockedAdd(gSmokeControl[0].EmissiveInnerBlockerReceiverImmediate, 1u);
-					else if (blockerDistance >= 0.0 && emitterRemainder <= cellReach)
-						InterlockedAdd(gSmokeControl[0].EmissiveInnerBlockerEmitterCell, 1u);
-					else if (blockerDistance >= 0.0 && hitFromReceiver <= cellReach)
-						InterlockedAdd(gSmokeControl[0].EmissiveInnerBlockerReceiverCell, 1u);
-					else
-						InterlockedAdd(gSmokeControl[0].EmissiveInnerBlockerInterior, 1u);
-				}
-			}
 		}
 		float mediumTransmittance = 1.0;
 		if (SmokeSelfShadowEnabled(gSmokeConstants.DebugMode))
