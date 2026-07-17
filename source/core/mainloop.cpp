@@ -1421,6 +1421,12 @@ void TryRunTics (void)
 			counts = 1;
 		}
 	}
+	if (gPathTracingLevelLoadClockAwaitingFirstPostRelease && !netgame && !demoplayback && counts > 1)
+	{
+		// Close the named boundary with one ordinary simulation tick even when
+		// the local command FIFO has an extra predictive tic available.
+		counts = 1;
+	}
 	perfTryRunTicsTraceStats.counts = counts;
 	if (gPathTracingLevelLoadClockAwaitingFirstPostRelease)
 	{
