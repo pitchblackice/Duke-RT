@@ -6,6 +6,7 @@ void NRIPersistentVoxelAdmissionIndex::Clear()
 	bucketsByKey.clear();
 	requiredReadyCount = 0;
 	optionalReadyCount = 0;
+	optionalDeferredCount = 0;
 	failedCount = 0;
 }
 
@@ -73,6 +74,9 @@ void NRIPersistentVoxelAdmissionIndex::AddToBucket(uint64_t key, NRIPersistentVo
 	case NRIPersistentVoxelAdmissionBucket::OptionalReady:
 		optionalReadyCount++;
 		break;
+	case NRIPersistentVoxelAdmissionBucket::OptionalDeferred:
+		optionalDeferredCount++;
+		break;
 	case NRIPersistentVoxelAdmissionBucket::Failed:
 		failedCount++;
 		break;
@@ -96,6 +100,12 @@ void NRIPersistentVoxelAdmissionIndex::RemoveFromBucket(uint64_t key, NRIPersist
 		if (optionalReadyCount != 0)
 		{
 			optionalReadyCount--;
+		}
+		break;
+	case NRIPersistentVoxelAdmissionBucket::OptionalDeferred:
+		if (optionalDeferredCount != 0)
+		{
+			optionalDeferredCount--;
 		}
 		break;
 	case NRIPersistentVoxelAdmissionBucket::Failed:

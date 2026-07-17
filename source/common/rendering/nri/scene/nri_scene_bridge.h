@@ -356,15 +356,21 @@ struct PrecachedVoxelVariantView
 	int32_t admissionRank = 0;
 	int32_t sourcePicnum = -1;
 	int32_t resolvedVoxelIndex = -1;
+	int32_t actorIndex = -1;
 	uint32_t primitiveCount = 0;
+	uint64_t actorLifecycleKey = 0;
+	float actorDistanceSquared = 0.0f;
 	bool gpuForce = false;
 	bool gpuPrefer = false;
+	bool localPlayer = false;
+	bool dynamicMaterial = false;
 	FVoxelModel* model = nullptr;
 	const SurfaceRef* surface = nullptr;
 	SurfaceRef materialSurface;
 	MaterialRef material;
 	bool directOnlyAdmission = false;
 	bool preloadGeometry = true;
+	bool predictiveGeometry = false;
 };
 
 struct PrecachedVoxelRawManifestStats
@@ -396,12 +402,17 @@ struct PrecachedVoxelRawManifestView
 	int32_t admissionRank = 0;
 	int32_t sourcePicnum = -1;
 	int32_t resolvedVoxelIndex = -1;
+	int32_t actorIndex = -1;
 	uint32_t primitiveCount = 0;
 	uint32_t rawSlabCount = 0;
 	uint32_t rawColorRunCount = 0;
 	uint64_t rawBytes = 0;
+	uint64_t actorLifecycleKey = 0;
+	float actorDistanceSquared = 0.0f;
 	bool gpuForce = false;
 	bool gpuPrefer = false;
+	bool localPlayer = false;
+	bool dynamicMaterial = false;
 	bool legacyGpuCandidate = false;
 	bool rawSourceResident = false;
 	bool rawStatsReady = false;
@@ -411,7 +422,12 @@ struct PrecachedVoxelRawManifestView
 	MaterialRef material;
 };
 
+static constexpr uint32_t PrecachedVoxelSourceBit_LiveActorCurrent = 1u << 0;
+static constexpr uint32_t PrecachedVoxelSourceBit_LiveActorAnimated = 1u << 1;
+static constexpr uint32_t PrecachedVoxelSourceBit_LiveActorPicrange = 1u << 2;
 static constexpr uint32_t PrecachedVoxelSourceBit_MountedVoxelPreload = 1u << 3;
+static constexpr uint32_t PrecachedVoxelSourceBit_MountedPreloadGlobal = 1u << 4;
+static constexpr uint32_t PrecachedVoxelSourceBit_MountedPreloadGame = 1u << 5;
 static constexpr uint32_t PrecachedVoxelSourceBit_MountedPreloadMap = 1u << 6;
 
 enum class DynamicVoxelCaptureMode : uint8_t
@@ -450,6 +466,7 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 PersistentVoxelActorCacheStats GetPersistentVoxelActorCacheStats();
 bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& outEntries);
 bool BuildPrecachedVoxelRawManifestViews(std::vector<PrecachedVoxelRawManifestView>& outEntries, PrecachedVoxelRawManifestStats* outStats = nullptr);
+void BuildLiveVoxelActorLifecycleKeys(std::vector<uint64_t>& outKeys);
 uint64_t GetPersistentVoxelCacheSerial();
 void ResetPersistentVoxelActorCache(const char* reason);
 void SetPersistentVoxelActorStartupTransientMode(bool active, const char* reason);

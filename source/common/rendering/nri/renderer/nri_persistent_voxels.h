@@ -5,6 +5,7 @@
 #include "nri_persistent_voxel_admission_index.h"
 #include "nri_persistent_voxel_material_closure.h"
 #include "nri_persistent_voxel_material_range_allocator.h"
+#include "nri_persistent_voxel_onboarding.h"
 #include "nri_frame_resources.h"
 #include "nri_persistent_voxel_shared_blas.h"
 #include "nri_renderer_settings.h"
@@ -177,6 +178,10 @@ struct PersistentVoxelAdmissionEntry
 	bool gpuForce = false;
 	bool gpuPrefer = false;
 	bool runtimeRequested = false;
+	bool predictiveManifestOwner = false;
+	std::vector<uint64_t> predictiveActorOwners;
+	bool dormantOptional = false;
+	NRIPersistentVoxelOnboardingProgress onboarding;
 	uint32_t retryCount = 0;
 	uint32_t mapGeneration = 0;
 	uint32_t firstQueuedFrame = UINT32_MAX;
@@ -652,6 +657,7 @@ struct NRIPersistentVoxelMaintenanceStats
 	uint32_t activeEntries = 0;
 	uint32_t requiredReadyEntries = 0;
 	uint32_t optionalReadyEntries = 0;
+	uint32_t optionalDeferredEntries = 0;
 	uint32_t failedEntries = 0;
 	uint32_t entriesScannedLastPump = 0;
 	uint32_t pressureEntriesScannedLast = 0;
@@ -894,6 +900,9 @@ struct NRIPersistentVoxelTlasBuildStats
 	uint32_t sharedMeshResourceCount = 0;
 	uint32_t instanceCount = 0;
 	uint32_t bakedFallbackInstanceCount = 0;
+	uint32_t requestToTlasSamples = 0;
+	uint64_t requestToTlasTotalFrames = 0;
+	uint32_t requestToTlasMaxFrames = 0;
 };
 
 struct NRIPersistentVoxelPreloadStatus
@@ -932,6 +941,7 @@ public:
 		bool runtimeRequested,
 		const char* sourceLabel,
 		uint64_t buildSerial,
+		uint32_t frameIndex,
 		const NRIPersistentVoxelSettings& settings,
 		int loadingTraceLevel,
 		bool voxelStatsEnabled,
@@ -1147,6 +1157,7 @@ public:
 	std::unordered_set<uint64_t> publishedMaterialKeys;
 	std::unordered_set<uint64_t> dirtyMaterialResourceKeys;
 	NRIVoxelAdmissionScheduler admissionScheduler = NRIVoxelAdmissionScheduler(NRIVoxelAdmissionLimits{});
+	NRIPersistentVoxelOnboardingBudget onboardingBudget;
 	NRIPersistentVoxelSharedBlasCache sharedBlasCache;
 	uint32_t arenaVertexCursor = 0;
 	uint32_t arenaIndexCursor = 0;

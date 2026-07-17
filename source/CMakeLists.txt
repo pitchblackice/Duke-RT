@@ -958,6 +958,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_persistent_voxel_material_closure.cpp
 	common/rendering/nri/renderer/nri_persistent_voxel_material_range_allocator.cpp
 	common/rendering/nri/renderer/nri_persistent_voxel_admission_index.cpp
+	common/rendering/nri/renderer/nri_persistent_voxel_onboarding.cpp
 	common/rendering/nri/renderer/nri_persistent_voxel_blas_compaction.cpp
 	common/rendering/nri/renderer/nri_persistent_voxel_pressure_policy.cpp
 	common/rendering/nri/renderer/nri_persistent_voxel_services.cpp
@@ -1017,6 +1018,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_trace_stats.cpp
 	common/rendering/nri/renderer/nri_upscaler.cpp
 	common/rendering/nri/renderer/nri_voxel_compute_preload.cpp
+	common/rendering/nri/renderer/nri_voxel_predictive_residency.cpp
 	common/rendering/nri/renderer/nri_voxel_compute_batch_plan.cpp
 	common/rendering/nri/renderer/nri_voxel_admission_scheduler.cpp
 	common/rendering/nri/renderer/nri_voxel_compute_raw_archive.cpp

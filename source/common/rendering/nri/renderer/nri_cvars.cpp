@@ -408,6 +408,20 @@ CVAR(Int, nri_ptvoxelcomputepreloadpeakpercent, 175, 0)
 
 CVAR(Int, nri_ptvoxelcomputepreloadminreservemb, 1024, 0)
 
+CVAR(Bool, nri_ptvoxelpredictive, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CVAR(Bool, nri_ptvoxelpredictiveaggressive, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CVAR(Int, nri_ptvoxelpredictiveneardistance, 8192, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CVAR(Int, nri_ptvoxelpredictivemaxbindings, 64, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CVAR(Int, nri_ptvoxelpredictivemaxmeshes, 16, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CVAR(Int, nri_ptvoxelpredictivemaxmaterialspermesh, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CVAR(Int, nri_ptvoxelpredictivemaxmb, 128, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
 CVAR(Int, nri_ptvoxelblaspolicy, 0, 0)
 
 CVAR(Bool, nri_ptvoxelarenapresize, false, 0)
@@ -1542,7 +1556,11 @@ CVAR(Int, nri_ptvoxeladmitmaxbytesruntime, 32 * 1024 * 1024, CVAR_ARCHIVE | CVAR
 
 CVAR(Int, nri_ptvoxeladmitmaxmsloading, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_ptvoxeladmitmaxmsruntime, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmitmaxmsruntime, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CVAR(Bool, nri_ptvoxelonboardingenabled, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CVAR(Int, nri_ptvoxelonboardingdeadlineframes, 12, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptvoxeladmitmaxblasloading, 8, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
