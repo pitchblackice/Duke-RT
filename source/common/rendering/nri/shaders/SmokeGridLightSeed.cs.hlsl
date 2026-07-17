@@ -223,6 +223,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint pointCandidateCount = SmokeEmissivePointCandidateCount();
 	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;
 	const bool innerRisDiagnostics = diagnostics && !referenceSampling;
+	bool diagnosticSourceCell = false;
+	if (innerRisDiagnostics)
+	{
+		const bool fieldB = gSmokeRenderGridControl[0].FieldPing != 0u;
+		const float4 scalar = fieldB ? gSmokeRenderGridScalarB[cellIndex] : gSmokeRenderGridScalarA[cellIndex];
+		diagnosticSourceCell = scalar.z > 1e-6;
+	}
 	const bool localRequested = (gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_LOCAL_PROPOSALS) != 0u;
 	const SmokeGridLightProposal proposal = gSmokeGridLightProposals[brickIndex];
 	const bool localReady = localRequested && SmokeGridLightProposalValid(proposal, brick);
@@ -311,10 +318,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			if (innerRisDiagnostics)
 				InterlockedAdd(gSmokeControl[0].EmissiveInnerVisibilityRays, 1u);
+			if (innerRisDiagnostics && diagnosticSourceCell)
+				InterlockedAdd(gSmokeControl[0].EmissiveInnerSourceVisibilityRays, 1u);
 			isVisible = SmokeFilteredVisibilityEffective() ?
 				SmokeEmissiveVisibleFiltered(receiverPosition, lightDirection, lightDistance, false, blockerDistance) :
 				SmokeEmissiveVisible(receiverPosition, lightDirection, lightDistance, false, blockerDistance);
-			if (innerRisDiagnostics)
+			if (innerRisDiagnostics && diagnosticSourceCell)
 			{
 				if (isVisible)
 				{

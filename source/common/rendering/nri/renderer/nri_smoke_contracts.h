@@ -130,6 +130,7 @@ struct NRISmokeControlGpu
 	uint32_t emissiveInnerRisRejects = 0;
 	uint32_t emissiveInnerSelections = 0;
 	uint32_t emissiveInnerVisibilityRays = 0;
+	uint32_t emissiveInnerSourceVisibilityRays = 0;
 	uint32_t emissiveInnerVisibilityVisible = 0;
 	uint32_t emissiveInnerBlockerReceiverImmediate = 0;
 	uint32_t emissiveInnerBlockerReceiverCell = 0;
@@ -235,7 +236,7 @@ struct NRISmokeEmissiveStorageGpu
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
 static_assert(sizeof(NRISmokeStyleGpu) == 80);
 static_assert(sizeof(NRISmokeInjectionCommandGpu) == 64);
-static_assert(sizeof(NRISmokeControlGpu) == 496);
+static_assert(sizeof(NRISmokeControlGpu) == 500);
 static_assert(sizeof(NRISmokeIndirectCacheGpu) == 32);
 static_assert(sizeof(NRISmokeDirectCacheGpu) == 40);
 static_assert(sizeof(NRISmokeEmissiveStorageGpu) == 48);

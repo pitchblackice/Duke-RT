@@ -166,6 +166,7 @@ struct SmokeControl
 	uint EmissiveInnerRisRejects;
 	uint EmissiveInnerSelections;
 	uint EmissiveInnerVisibilityRays;
+	uint EmissiveInnerSourceVisibilityRays;
 	uint EmissiveInnerVisibilityVisible;
 	uint EmissiveInnerBlockerReceiverImmediate;
 	uint EmissiveInnerBlockerReceiverCell;

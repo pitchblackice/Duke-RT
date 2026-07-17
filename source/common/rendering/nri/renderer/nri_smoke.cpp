@@ -789,6 +789,7 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 				mStatus.emissiveInnerRisRejects = control.emissiveInnerRisRejects;
 				mStatus.emissiveInnerSelections = control.emissiveInnerSelections;
 				mStatus.emissiveInnerVisibilityRays = control.emissiveInnerVisibilityRays;
+				mStatus.emissiveInnerSourceVisibilityRays = control.emissiveInnerSourceVisibilityRays;
 				mStatus.emissiveInnerVisibilityVisible = control.emissiveInnerVisibilityVisible;
 				mStatus.emissiveInnerBlockerReceiverImmediate = control.emissiveInnerBlockerReceiverImmediate;
 				mStatus.emissiveInnerBlockerReceiverCell = control.emissiveInnerBlockerReceiverCell;
@@ -1981,6 +1982,7 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.emissiveInnerRisRejects = 0;
 	mStatus.emissiveInnerSelections = 0;
 	mStatus.emissiveInnerVisibilityRays = 0;
+	mStatus.emissiveInnerSourceVisibilityRays = 0;
 	mStatus.emissiveInnerVisibilityVisible = 0;
 	mStatus.emissiveInnerBlockerReceiverImmediate = 0;
 	mStatus.emissiveInnerBlockerReceiverCell = 0;
@@ -2215,7 +2217,7 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.directSpatialAccepted, mStatus.directSpatialRejected,
 		mStatus.directHistoryMaximumAge, mStatus.directHistoryResolved,
 		mStatus.directHistoryClamps, mStatus.directNanRejects);
-	Printf("NRI PT smoke emissive reservoir: reuse_requested=%u reuse_effective=%u lanes=%u reference=%s history=%s reservoir_mib=%.2f initialized=%u invalid=%u temporal=%u/%u spatial=%u/%u final=%u source_clamps=%u removed_energy=%u maximum_age=%u identity_rejects=%u reference_samples=%u reference_rays=%u inner_sets=%u inner_points=%u inner_zeros=%u inner_rejects=%u inner_selections=%u inner_visibility_rays=%u inner_visible=%u inner_blocker_receiver_immediate=%u inner_blocker_receiver_cell=%u inner_blocker_emitter_cell=%u inner_blocker_interior=%u field_readback=0\n",
+	Printf("NRI PT smoke emissive reservoir: reuse_requested=%u reuse_effective=%u lanes=%u reference=%s history=%s reservoir_mib=%.2f initialized=%u invalid=%u temporal=%u/%u spatial=%u/%u final=%u source_clamps=%u removed_energy=%u maximum_age=%u identity_rejects=%u reference_samples=%u reference_rays=%u inner_sets=%u inner_points=%u inner_zeros=%u inner_rejects=%u inner_selections=%u inner_visibility_rays=%u inner_source_visibility_rays=%u inner_source_visible=%u inner_source_blocker_receiver_immediate=%u inner_source_blocker_receiver_cell=%u inner_source_blocker_emitter_cell=%u inner_source_blocker_interior=%u field_readback=0\n",
 		mStatus.emissiveReuseModeRequested, mStatus.emissiveReuseModeEffective, mStatus.emissiveLaneCount, mStatus.emissiveReference ? "yes" : "no",
 		mStatus.emissiveHistoryValid ? "valid" : "invalid", (double)mStatus.emissiveReservoirBytes / (1024.0 * 1024.0),
 		mStatus.emissiveReservoirInitial, mStatus.emissiveReservoirInvalid,
@@ -2225,6 +2227,7 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.emissiveIdentityRejects, mStatus.emissiveReferenceSamples, mStatus.emissiveReferenceRays,
 		mStatus.emissiveInnerRisSets, mStatus.emissiveInnerPointProposals, mStatus.emissiveInnerZeroProposals,
 		mStatus.emissiveInnerRisRejects, mStatus.emissiveInnerSelections, mStatus.emissiveInnerVisibilityRays,
+		mStatus.emissiveInnerSourceVisibilityRays,
 		mStatus.emissiveInnerVisibilityVisible, mStatus.emissiveInnerBlockerReceiverImmediate,
 		mStatus.emissiveInnerBlockerReceiverCell, mStatus.emissiveInnerBlockerEmitterCell,
 		mStatus.emissiveInnerBlockerInterior);

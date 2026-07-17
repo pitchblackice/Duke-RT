@@ -155,6 +155,7 @@ struct NRISmokeStatusSnapshot
 	uint32_t emissiveInnerRisRejects = 0;
 	uint32_t emissiveInnerSelections = 0;
 	uint32_t emissiveInnerVisibilityRays = 0;
+	uint32_t emissiveInnerSourceVisibilityRays = 0;
 	uint32_t emissiveInnerVisibilityVisible = 0;
 	uint32_t emissiveInnerBlockerReceiverImmediate = 0;
 	uint32_t emissiveInnerBlockerReceiverCell = 0;
