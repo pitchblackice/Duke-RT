@@ -35,10 +35,12 @@ private:
 	{
 		DVector3 previousPosition;
 		double previousTimeSeconds = 0.0;
+		double activationTimeSeconds = 0.0;
 		float spacingRemainder = 0.0f;
 		double intervalRemainder = 0.0;
 		double startDistanceTraveled = 0.0;
 		bool activationLatched = false;
+		bool startTimeElapsed = false;
 		bool emitted = false;
 		bool observed = false;
 	};

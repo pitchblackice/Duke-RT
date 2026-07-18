@@ -100,6 +100,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 	std::vector<uint32_t> emittedPerRule;
 	std::vector<uint32_t> particlesPerRule;
 	std::vector<uint32_t> deferredPerRule;
+	std::vector<uint32_t> timeDeferredPerRule;
 	std::vector<uint32_t> activatedPerRule;
 	if (traceMode != 0)
 	{
@@ -107,6 +108,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 		emittedPerRule.resize(resolved.smokeActorRules.Size());
 		particlesPerRule.resize(resolved.smokeActorRules.Size());
 		deferredPerRule.resize(resolved.smokeActorRules.Size());
+		timeDeferredPerRule.resize(resolved.smokeActorRules.Size());
 		activatedPerRule.resize(resolved.smokeActorRules.Size());
 	}
 	uint32_t verbosePrinted = 0;
@@ -141,15 +143,19 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 				if (rule.activationPolicy == LightOverlayActorActivationPolicy::Immediate || appearanceReady)
 				{
 					state.activationLatched = true;
+					state.activationTimeSeconds = gameplayTimeSeconds;
+					state.startTimeElapsed = rule.startTime <= 0.0f;
 					if (traceMode != 0) activatedPerRule[ruleIndex]++;
 				}
 				else
 				{
 					state.previousPosition = currentPosition;
 					state.previousTimeSeconds = gameplayTimeSeconds;
+					state.activationTimeSeconds = gameplayTimeSeconds;
 					state.spacingRemainder = 0.0f;
 					state.intervalRemainder = 0.0;
 					state.startDistanceTraveled = 0.0;
+					state.startTimeElapsed = false;
 					if (traceMode != 0) deferredPerRule[ruleIndex]++;
 					if (traceMode >= 2 && verbosePrinted < 32u)
 					{
@@ -160,38 +166,66 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 					continue;
 				}
 			}
-
 			std::vector<DVector3> emissionPositions;
 			DVector3 cadenceStartPosition = state.previousPosition;
 			double cadenceStartTimeSeconds = state.previousTimeSeconds;
 			if (!state.emitted)
 			{
-				if (rule.startDistance <= 0.0f)
+				// Time and distance advance independently from activation. If both
+				// are authored, only the tail after the later crossing enters cadence.
+				const DVector3 startSegment = currentPosition - state.previousPosition;
+				const double startSegmentLength = startSegment.Length();
+				const double elapsedSeconds = std::max(0.0, gameplayTimeSeconds - state.previousTimeSeconds);
+				double timeCrossingFraction = 0.0;
+				double distanceCrossingFraction = 0.0;
+				bool timeReady = state.startTimeElapsed || rule.startTime <= 0.0f;
+				if (!timeReady)
 				{
-					emissionPositions.push_back(currentPosition);
-					state.emitted = true;
-					cadenceStartPosition = currentPosition;
-					cadenceStartTimeSeconds = gameplayTimeSeconds;
+					const double previousElapsed = std::max(0.0, state.previousTimeSeconds - state.activationTimeSeconds);
+					const double elapsedSinceActivation = std::max(0.0, gameplayTimeSeconds - state.activationTimeSeconds);
+					if (elapsedSinceActivation >= (double)rule.startTime)
+					{
+						timeCrossingFraction = elapsedSeconds > 0.0 ?
+							std::clamp(((double)rule.startTime - previousElapsed) / elapsedSeconds, 0.0, 1.0) : 1.0;
+						timeReady = true;
+						state.startTimeElapsed = true;
+					}
+					else
+					{
+						if (traceMode != 0) timeDeferredPerRule[ruleIndex]++;
+						if (traceMode >= 2 && verbosePrinted < 32u)
+						{
+							Printf("NRI PT smoke emitter: event=starttime-deferred rule=%s class=%s actor=%d identity=%p elapsed=%.3f starttime=%.3f\n",
+								rule.id.GetChars(), actor->GetClass()->TypeName.GetChars(), actor->GetIndex(), actor,
+								elapsedSinceActivation, rule.startTime);
+							verbosePrinted++;
+						}
+					}
 				}
-				else
+
+				bool distanceReady = rule.startDistance <= 0.0f || state.startDistanceTraveled >= (double)rule.startDistance;
+				if (!distanceReady)
 				{
-					const DVector3 startSegment = currentPosition - state.previousPosition;
-					const double startSegmentLength = startSegment.Length();
 					const double remainingDistance = std::max(0.0, (double)rule.startDistance - state.startDistanceTraveled);
 					if (startSegmentLength >= remainingDistance && startSegmentLength > 0.0)
 					{
-						const double crossingFraction = std::clamp(remainingDistance / startSegmentLength, 0.0, 1.0);
-						cadenceStartPosition = state.previousPosition + startSegment * crossingFraction;
-						const double elapsedSeconds = std::max(0.0, gameplayTimeSeconds - state.previousTimeSeconds);
-						cadenceStartTimeSeconds = state.previousTimeSeconds + elapsedSeconds * crossingFraction;
-						emissionPositions.push_back(cadenceStartPosition);
+						distanceCrossingFraction = std::clamp(remainingDistance / startSegmentLength, 0.0, 1.0);
 						state.startDistanceTraveled = rule.startDistance;
-						state.emitted = true;
+						distanceReady = true;
 					}
 					else
 					{
 						state.startDistanceTraveled += startSegmentLength;
 					}
+				}
+
+				if (timeReady && distanceReady)
+				{
+					const double crossingFraction = std::max(timeCrossingFraction, distanceCrossingFraction);
+					cadenceStartPosition = state.previousPosition + startSegment * crossingFraction;
+					cadenceStartTimeSeconds = state.previousTimeSeconds + elapsedSeconds * crossingFraction;
+					emissionPositions.push_back(cadenceStartPosition);
+					state.emitted = true;
 				}
 			}
 			if (state.emitted && rule.trigger == LightOverlaySmokeTrigger::Interval)
@@ -274,12 +308,13 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 	{
 		for (uint32_t ruleIndex = 0; ruleIndex < resolved.smokeActorRules.Size(); ++ruleIndex)
 		{
-			if (emittedPerRule[ruleIndex] == 0u && deferredPerRule[ruleIndex] == 0u && activatedPerRule[ruleIndex] == 0u) continue;
+			if (emittedPerRule[ruleIndex] == 0u && deferredPerRule[ruleIndex] == 0u &&
+				timeDeferredPerRule[ruleIndex] == 0u && activatedPerRule[ruleIndex] == 0u) continue;
 			const auto& rule = resolved.smokeActorRules[ruleIndex];
-			Printf("NRI PT smoke emitter: event=frame-summary rule=%s class=%s observed=%u emitted=%u particles=%u activation=%s deferred=%u activated=%u\n",
+			Printf("NRI PT smoke emitter: event=frame-summary rule=%s class=%s observed=%u emitted=%u particles=%u activation=%s deferred=%u activated=%u starttime=%.3f time_deferred=%u\n",
 				rule.id.GetChars(), rule.actorClassName.GetChars(), observedPerRule[ruleIndex], emittedPerRule[ruleIndex], particlesPerRule[ruleIndex],
 				rule.activationPolicy == LightOverlayActorActivationPolicy::Immediate ? "immediate" : "surface",
-				deferredPerRule[ruleIndex], activatedPerRule[ruleIndex]);
+				deferredPerRule[ruleIndex], activatedPerRule[ruleIndex], rule.startTime, timeDeferredPerRule[ruleIndex]);
 		}
 	}
 	for (auto it = mActorStates.begin(); it != mActorStates.end(); )

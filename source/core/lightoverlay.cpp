@@ -906,6 +906,7 @@ namespace
 				else if (sc.Compare("velocitycone")) { sc.MustGetFloat(); rule.velocityCone = std::clamp((float)sc.Float, 0.0f, 180.0f); }
 				else if (sc.Compare("velocityscale")) { sc.MustGetFloat(); rule.velocityScale = std::max(0.0f, (float)sc.Float); }
 				else if (sc.Compare("intervalseconds")) { sc.MustGetFloat(); rule.intervalSeconds = std::max(0.001f, (float)sc.Float); }
+				else if (sc.Compare("starttime")) { sc.MustGetFloat(); rule.startTime = std::max(0.0f, (float)sc.Float); }
 				else if (sc.Compare("startdistance")) { sc.MustGetFloat(); rule.startDistance = std::max(0.0f, (float)sc.Float); }
 				else if (sc.Compare("spacing")) { sc.MustGetFloat(); rule.spacing = std::max(0.0f, (float)sc.Float); }
 				else if (sc.Compare("maxsegmentsperframe")) { sc.MustGetNumber(); rule.maxSegmentsPerFrame = (uint32_t)std::clamp(sc.Number, 1, 256); }
@@ -1829,6 +1830,7 @@ namespace
 		AppendLine(text, 2, FStringf("velocitycone %s", FormatLightOverlayFloat(rule.velocityCone).GetChars()));
 		AppendLine(text, 2, FStringf("velocityscale %s", FormatLightOverlayFloat(rule.velocityScale).GetChars()));
 		AppendLine(text, 2, FStringf("intervalseconds %s", FormatLightOverlayFloat(rule.intervalSeconds).GetChars()));
+		AppendLine(text, 2, FStringf("starttime %s", FormatLightOverlayFloat(rule.startTime).GetChars()));
 		AppendLine(text, 2, FStringf("startdistance %s", FormatLightOverlayFloat(rule.startDistance).GetChars()));
 		AppendLine(text, 2, FStringf("spacing %s", FormatLightOverlayFloat(rule.spacing).GetChars()));
 		AppendLine(text, 2, FStringf("maxsegmentsperframe %u", rule.maxSegmentsPerFrame));
@@ -2250,13 +2252,13 @@ namespace
 		{
 			Printf("LIGHTOVR smokeactorrule %s: actorclass=%s ownerclass=%s excludeownerclass=%s trigger=%s activation=%s emitterforeground=%s style=%s "
 				"count=%u offset=(%.3f,%.3f,%.3f) spawnradius=%.3f densityscale=%.3f radiusscale=%.3f "
-				"velocitycone=%.3f velocityscale=%.3f intervalseconds=%.3f startdistance=%.3f spacing=%.3f maxsegmentsperframe=%u source=%s\n",
+				"velocitycone=%.3f velocityscale=%.3f intervalseconds=%.3f starttime=%.3f startdistance=%.3f spacing=%.3f maxsegmentsperframe=%u source=%s\n",
 				rule->id.GetChars(), rule->actorClassName.GetChars(),
 				rule->ownerClassName.IsNotEmpty() ? rule->ownerClassName.GetChars() : "none",
 				rule->excludeOwnerClassName.IsNotEmpty() ? rule->excludeOwnerClassName.GetChars() : "none",
 				SmokeTriggerName(rule->trigger), ActorActivationPolicyName(rule->activationPolicy), rule->emitterForeground ? "on" : "off", rule->styleId.GetChars(), rule->count,
 				rule->offset[0], rule->offset[1], rule->offset[2], rule->spawnRadius, rule->densityScale,
-				rule->radiusScale, rule->velocityCone, rule->velocityScale, rule->intervalSeconds, rule->startDistance, rule->spacing,
+				rule->radiusScale, rule->velocityCone, rule->velocityScale, rule->intervalSeconds, rule->startTime, rule->startDistance, rule->spacing,
 				rule->maxSegmentsPerFrame, SourceLocationText(rule->source).GetChars());
 		}
 		for (const auto* rule : SortRulesByOrder(database.smokeEventRules))
@@ -2411,13 +2413,13 @@ namespace
 		for (const auto& rule : resolved.smokeActorRules)
 		{
 			Printf("LIGHTOVR resolved smokeactorrule %s: actorclass=%s resolved=%s ownerclass=%s owner_resolved=%s "
-				"excludeownerclass=%s exclude_owner_resolved=%s trigger=%s activation=%s emitterforeground=%s style=%s style_resolved=%s style_index=%u source=%s\n",
+				"excludeownerclass=%s exclude_owner_resolved=%s trigger=%s activation=%s emitterforeground=%s starttime=%.3f style=%s style_resolved=%s style_index=%u source=%s\n",
 				rule.id.GetChars(), rule.actorClassName.GetChars(), rule.actorClassResolved ? "yes" : "no",
 				rule.ownerClassName.IsNotEmpty() ? rule.ownerClassName.GetChars() : "none",
 				rule.ownerClassName.IsEmpty() ? "n/a" : (rule.ownerClassResolved ? "yes" : "no"),
 				rule.excludeOwnerClassName.IsNotEmpty() ? rule.excludeOwnerClassName.GetChars() : "none",
 				rule.excludeOwnerClassName.IsEmpty() ? "n/a" : (rule.excludeOwnerClassResolved ? "yes" : "no"),
-				SmokeTriggerName(rule.trigger), ActorActivationPolicyName(rule.activationPolicy), rule.emitterForeground ? "on" : "off", rule.styleId.GetChars(), rule.styleResolved ? "yes" : "no", rule.styleIndex,
+				SmokeTriggerName(rule.trigger), ActorActivationPolicyName(rule.activationPolicy), rule.emitterForeground ? "on" : "off", rule.startTime, rule.styleId.GetChars(), rule.styleResolved ? "yes" : "no", rule.styleIndex,
 				SourceLocationText(rule.source).GetChars());
 		}
 		for (const auto& rule : resolved.smokeEventRules)
