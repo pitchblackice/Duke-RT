@@ -1080,6 +1080,7 @@ OptionMenu "VideoOptions" protected
 	Option "HDR / SDR",							"nri_ptoutputmode",				"NRIPTOutputMode"
 	Option "Settings Profile",					"nri_settingsprofile",			"NRISettingsProfile"
 	Option "Bloom",								"nri_ptbloom",					"OnOff"
+	Option "Smoke",								"nri_ptsmoke",					"OnOff"
 	CVarStaticText "nri_settingsprofilewarning"
 	StaticText ""
 
