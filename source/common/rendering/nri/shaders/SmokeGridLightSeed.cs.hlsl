@@ -62,6 +62,27 @@ bool SmokeGridLightDrawEmissiveProposal(
 	candidateIndex = 0xffffffffu;
 	candidate = (EmissivePrimitiveData)0;
 	proposalPdf = 0.0;
+	const uint diagnosticCandidate = SmokeEmissiveDiagnosticCandidate();
+	if (diagnosticCandidate != 0xffffffffu)
+	{
+		candidateIndex = diagnosticCandidate;
+		InterlockedAdd(gSmokeGridLightControl[0].Samples, 1u);
+		uint headerCount, headerStride, candidateCapacity, candidateStride;
+		gSmokeEmissivePrimitiveHeaders.GetDimensions(headerCount, headerStride);
+		gSmokeEmissivePrimitives.GetDimensions(candidateCapacity, candidateStride);
+		const uint activeCount = headerCount > 0u ?
+			min(gSmokeEmissivePrimitiveHeaders[0].activeCount, candidateCapacity) : 0u;
+		if (candidateIndex >= activeCount)
+		{
+			InterlockedAdd(gSmokeGridLightControl[0].Missing, 1u);
+			return false;
+		}
+		candidate = gSmokeEmissivePrimitives[candidateIndex];
+		// Diagnostic targeting is a delta distribution over this one bound
+		// candidate. K still draws independent points on its primitive/range.
+		proposalPdf = 1.0;
+		return true;
+	}
 	if (localReady && SmokeRandom01(randomState) < localMix)
 	{
 		const uint localIndex = min((uint)(SmokeRandom01(randomState) * proposal.Count), proposal.Count - 1u);

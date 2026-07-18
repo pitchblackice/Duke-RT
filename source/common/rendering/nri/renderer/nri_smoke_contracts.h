@@ -307,7 +307,8 @@ struct NRISmokeConstants
 	// bit 0: filtered visibility effective, bit 1: filtered resources ready,
 	// bit 2: TLAS ready, bit 3: filtered visibility requested,
 	// bits 4..7: smoke-world emissive point-candidate count,
-	// bits 8..15: portal traversal depth.
+	// bits 8..15: portal traversal depth,
+	// bits 16..31: session-only exact emissive candidate index + 1.
 	uint32_t filteredVisibilityEnabled = 0;
 
 	float currentJitter[2] = {};

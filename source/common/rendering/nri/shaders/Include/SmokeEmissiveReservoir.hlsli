@@ -21,6 +21,12 @@ uint SmokeEmissivePointCandidateCount()
 		NRI_SMOKE_EMISSIVE_POINT_CANDIDATE_MASK, 1u, 8u);
 }
 
+uint SmokeEmissiveDiagnosticCandidate()
+{
+	const uint code = gSmokeConstants.FilteredVisibilityEnabled >> 16u;
+	return code != 0u ? code - 1u : 0xffffffffu;
+}
+
 bool SmokeEmissiveGridFroxel(float4 phase)
 {
 	return (gSmokeConstants.Flags & NRI_SMOKE_DIRECT_GRID_ENABLED) != 0u && phase.w > 1.5;

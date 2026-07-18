@@ -164,6 +164,7 @@ struct NRISmokeGridLightingStatusSnapshot
 	uint32_t scatterFinalPing = 0;
 	uint32_t emissivePointCandidatesRequested = 1;
 	uint32_t emissivePointCandidatesEffective = 1;
+	int32_t emissiveCandidateTarget = -1;
 	uint32_t lastUpdatedFrame = UINT32_MAX;
 	uint64_t fieldBytes = 0;
 	uint64_t workBytes = 0;

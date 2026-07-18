@@ -127,6 +127,7 @@ struct NRISmokeSettings
 	uint32_t emissiveReuseMode = 2;
 	bool emissiveReference = false;
 	uint32_t emissivePointCandidates = 4;
+	int32_t emissiveCandidateTarget = -1;
 	uint32_t emissiveBackend = 0;
 	bool emissiveWorldFilter = false;
 	bool emissiveLocalProposals = true;

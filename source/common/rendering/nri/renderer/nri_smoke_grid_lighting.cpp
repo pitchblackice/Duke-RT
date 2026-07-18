@@ -219,15 +219,20 @@ bool NRISmokeGridLighting::PrepareFrame(const NRISmokeGridServices& services, co
 {
 	const uint32_t requestedPointCandidates = std::clamp(settings.emissivePointCandidates, 1u, 8u);
 	const uint32_t effectivePointCandidates = settings.emissiveReference ? 1u : requestedPointCandidates;
-	const uint32_t estimatorKey = effectivePointCandidates | (settings.emissiveReference ? 0x100u : 0u);
+	const uint32_t candidateTargetCode = settings.emissiveCandidateTarget >= 0 ?
+		(uint32_t)settings.emissiveCandidateTarget + 1u : 0u;
+	const uint32_t estimatorKey = effectivePointCandidates | (settings.emissiveReference ? 0x100u : 0u) |
+		(candidateTargetCode << 16u);
 	mStatus.requested = settings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy ||
 		settings.multipleScatter || settings.selfShadow;
 	mStatus.requestedBackend = settings.emissiveBackend;
 	mStatus.filterRequested = settings.emissiveWorldFilter;
 	mStatus.filterDecision = settings.emissiveWorldFilter ? "requested" : "disabled/variance-gate-not-accepted";
-	mStatus.proposalDecision = settings.emissiveLocalProposals ? "brick-top16/uniform75+global25" : "global-cdf/manual-disable";
+	mStatus.proposalDecision = settings.emissiveCandidateTarget >= 0 ? "exact-candidate-diagnostic" :
+		(settings.emissiveLocalProposals ? "brick-top16/uniform75+global25" : "global-cdf/manual-disable");
 	mStatus.emissivePointCandidatesRequested = requestedPointCandidates;
 	mStatus.emissivePointCandidatesEffective = effectivePointCandidates;
+	mStatus.emissiveCandidateTarget = settings.emissiveCandidateTarget;
 	mStatus.multipleScatterRequested = settings.multipleScatter;
 	mStatus.scatterDecision = !settings.multipleScatter ? "disabled" : "gpu-probe4x4x4/boundary-aware";
 	mStatus.selfShadowRequested = settings.selfShadow;

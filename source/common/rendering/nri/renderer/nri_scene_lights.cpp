@@ -6527,13 +6527,15 @@ void SceneLightSystem::PrintEmissiveSurfaceDump(
 	{
 		const NRIEmissivePrimitiveDebugRecord* record = nullptr;
 		float distanceSq = 0.0f;
+		uint32_t gpuIndex = UINT32_MAX;
 	};
 
 	std::vector<Candidate> candidates;
 	candidates.reserve(boundPrimitiveRecords.size());
 	const float radiusSq = radius > 0.0f ? radius * radius : -1.0f;
-	for (const auto& record : boundPrimitiveRecords)
+	for (uint32_t gpuIndex = 0; gpuIndex < (uint32_t)boundPrimitiveRecords.size(); ++gpuIndex)
 	{
+		const auto& record = boundPrimitiveRecords[gpuIndex];
 		const float dx = record.center[0] - currentCameraPos[0];
 		const float dy = record.center[1] - currentCameraPos[1];
 		const float dz = record.center[2] - currentCameraPos[2];
@@ -6542,7 +6544,7 @@ void SceneLightSystem::PrintEmissiveSurfaceDump(
 		{
 			continue;
 		}
-		candidates.push_back({ &record, distanceSq });
+		candidates.push_back({ &record, distanceSq, gpuIndex });
 	}
 
 	std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b)
@@ -6574,7 +6576,8 @@ void SceneLightSystem::PrintEmissiveSurfaceDump(
 		const auto& record = *candidates[i].record;
 		const auto diagnosticIt = mEmissiveSurfaces.activeDiagnosticFlags.find(record.surfaceStableKey);
 		const uint32_t diagnosticFlags = diagnosticIt != mEmissiveSurfaces.activeDiagnosticFlags.end() ? diagnosticIt->second : SceneLightDiagnosticFlag_None;
-		Printf("NRI PT emissive %u: primitive_key=0x%016llx surface_key=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s source=%s primitive=%u material=%u flags=0x%x rule=%u override_rule=%u actor=%d sector=%d sector_scale=%.3f reach_scale=%.3f sector_applied=%s material_response=%s material_scale=%.3f tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f sample_weight=%.3f pdf=%.6f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
+		Printf("NRI PT emissive gpu_index=%u near_rank=%u: primitive_key=0x%016llx surface_key=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s source=%s primitive=%u material=%u flags=0x%x rule=%u override_rule=%u actor=%d sector=%d sector_scale=%.3f reach_scale=%.3f sector_applied=%s material_response=%s material_scale=%.3f tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f sample_weight=%.3f pdf=%.6f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
+			candidates[i].gpuIndex,
 			i,
 			(unsigned long long)record.stableKey,
 			(unsigned long long)record.surfaceStableKey,
