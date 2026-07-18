@@ -354,7 +354,7 @@ bool SmokeEvaluateEmissiveIncidentWithSolidAngleDenominatorAndPrimitive(
 	sampleIdentity.PrimitiveIndex = sampledPrimitiveIndex;
 	sampleIdentity.MaterialIndex = sampledMaterialIndex;
 	float3 lightRadiance = SmokeSampleMaterialEmission(material, lightUv) * max(material.emissiveIntensity, 0.0);
-	lightRadiance *= max(candidate.emissionScale, 0.0);
+	lightRadiance *= SmokeResolveEmissiveRadianceScale(candidate, sampledPrimitiveIndex);
 	if (!all(isfinite(lightRadiance)) || !any(lightRadiance > 0.0))
 		return false;
 	const float3 toLight = lightPosition - receiverPosition;

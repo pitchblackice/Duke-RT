@@ -712,6 +712,40 @@ float3 SmokeSampleMaterialEmission(MaterialData material, float2 uv)
 	return 0.0;
 }
 
+float SmokeGetEmissiveMaterialResponseScale(uint dataSource, uint primitiveIndex)
+{
+	uint responseCapacity, responseStride;
+	gSmokeEmissiveMaterialResponses.GetDimensions(responseCapacity, responseStride);
+	if (responseCapacity == 0u)
+		return 1.0;
+	const uint responseCount = min(gSmokeEmissiveMaterialResponses[0].dataSource, responseCapacity - 1u);
+	[loop]
+	for (uint responseIndex = 1u; responseIndex <= responseCount; ++responseIndex)
+	{
+		const EmissiveMaterialResponseData response = gSmokeEmissiveMaterialResponses[responseIndex];
+		if (response.dataSource == dataSource && response.primitiveIndex == primitiveIndex)
+			return max(response.materialScale, 0.0);
+	}
+	return 1.0;
+}
+
+float SmokeResolveEmissiveRadianceScale(EmissivePrimitiveData candidate, uint primitiveIndex)
+{
+	const float candidateScale = max(candidate.emissionScale, 0.0);
+	if (candidateScale > 1e-8)
+		return candidateScale;
+
+	// Candidate NEE applies a sector-response heuristic that may reach zero even
+	// while the sampled material remains visibly emissive. Smoke has no useful
+	// fallback once that source is discarded, so recover only this exact-zero
+	// case from the same per-primitive material-response table used by visible
+	// surface emission. Keep placed ranges conservative until their individual
+	// primitive response can be represented without ambiguity.
+	if (candidate.sceneInstanceIndex != 0xffffffffu || candidate.primitiveCount != 1u)
+		return 0.0;
+	return SmokeGetEmissiveMaterialResponseScale(candidate.dataSource, primitiveIndex);
+}
+
 uint SmokeSampleEmissivePrimitive(inout uint randomState)
 {
 	uint headerCount, headerStride, primitiveCount, primitiveStride, cdfCount, cdfStride;

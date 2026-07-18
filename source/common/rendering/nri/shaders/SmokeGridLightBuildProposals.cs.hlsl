@@ -65,7 +65,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	{
 		const EmissivePrimitiveData candidate = gSmokeEmissivePrimitives[candidateIndex];
 		if (!isfinite(candidate.selectionPdf) || candidate.selectionPdf <= 0.0 ||
-			!isfinite(candidate.emissionScale) || candidate.emissionScale <= 0.0)
+			!isfinite(candidate.emissionScale) ||
+			SmokeResolveEmissiveRadianceScale(candidate, candidate.primitiveIndex) <= 0.0)
 			continue;
 		float3 candidateCenter;
 		float candidateRadius;
