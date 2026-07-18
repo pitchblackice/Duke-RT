@@ -149,6 +149,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 					state.previousTimeSeconds = gameplayTimeSeconds;
 					state.spacingRemainder = 0.0f;
 					state.intervalRemainder = 0.0;
+					state.startDistanceTraveled = 0.0;
 					if (traceMode != 0) deferredPerRule[ruleIndex]++;
 					if (traceMode >= 2 && verbosePrinted < 32u)
 					{
@@ -161,14 +162,41 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			}
 
 			std::vector<DVector3> emissionPositions;
+			DVector3 cadenceStartPosition = state.previousPosition;
+			double cadenceStartTimeSeconds = state.previousTimeSeconds;
 			if (!state.emitted)
 			{
-				emissionPositions.push_back(currentPosition);
-				state.emitted = true;
+				if (rule.startDistance <= 0.0f)
+				{
+					emissionPositions.push_back(currentPosition);
+					state.emitted = true;
+					cadenceStartPosition = currentPosition;
+					cadenceStartTimeSeconds = gameplayTimeSeconds;
+				}
+				else
+				{
+					const DVector3 startSegment = currentPosition - state.previousPosition;
+					const double startSegmentLength = startSegment.Length();
+					const double remainingDistance = std::max(0.0, (double)rule.startDistance - state.startDistanceTraveled);
+					if (startSegmentLength >= remainingDistance && startSegmentLength > 0.0)
+					{
+						const double crossingFraction = std::clamp(remainingDistance / startSegmentLength, 0.0, 1.0);
+						cadenceStartPosition = state.previousPosition + startSegment * crossingFraction;
+						const double elapsedSeconds = std::max(0.0, gameplayTimeSeconds - state.previousTimeSeconds);
+						cadenceStartTimeSeconds = state.previousTimeSeconds + elapsedSeconds * crossingFraction;
+						emissionPositions.push_back(cadenceStartPosition);
+						state.startDistanceTraveled = rule.startDistance;
+						state.emitted = true;
+					}
+					else
+					{
+						state.startDistanceTraveled += startSegmentLength;
+					}
+				}
 			}
-			else if (rule.trigger == LightOverlaySmokeTrigger::Interval)
+			if (state.emitted && rule.trigger == LightOverlaySmokeTrigger::Interval)
 			{
-				const DVector3 segment = currentPosition - state.previousPosition;
+				const DVector3 segment = currentPosition - cadenceStartPosition;
 				const double segmentLength = segment.Length();
 				uint32_t candidateCount = 0;
 				double firstCrossing = 0.0;
@@ -185,7 +213,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 				}
 				else
 				{
-					measure = std::max(0.0, gameplayTimeSeconds - state.previousTimeSeconds);
+					measure = std::max(0.0, gameplayTimeSeconds - cadenceStartTimeSeconds);
 					const double total = state.intervalRemainder + measure;
 					candidateCount = (uint32_t)std::floor(total / (double)rule.intervalSeconds);
 					firstCrossing = (double)rule.intervalSeconds - state.intervalRemainder;
@@ -199,7 +227,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 				{
 					const double crossing = firstCrossing + (double)(skipped + emissionIndex) * stride;
 					const double fraction = measure > 0.0 ? std::clamp(crossing / measure, 0.0, 1.0) : 1.0;
-					emissionPositions.push_back(state.previousPosition + segment * fraction);
+					emissionPositions.push_back(cadenceStartPosition + segment * fraction);
 				}
 			}
 
