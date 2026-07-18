@@ -159,6 +159,7 @@ namespace
 		std::unordered_map<std::string, int> smokeStyleLookup;
 		std::unordered_map<std::string, int> smokeActorRuleLookup;
 		std::unordered_map<std::string, int> smokeEventRuleLookup;
+		std::unordered_map<std::string, int> mapSmokeEmitterRuleLookup;
 
 		void SetDefaults(const ParsedLightOverlayDefaults& defaults)
 		{
@@ -358,6 +359,26 @@ namespace
 		void AddSmokeEventRule(const ParsedLightOverlaySmokeEventRule& rule)
 		{
 			AddSmokeDefinition(rule, database.smokeEventRules, smokeEventRuleLookup, "smokeeventrule");
+		}
+
+		void AddMapSmokeEmitterRule(const ParsedLightOverlayMapSmokeEmitterRule& rule)
+		{
+			const std::string key = MakeMapScopedKey(rule.mapName, "smokeemitter", rule.id);
+			auto it = mapSmokeEmitterRuleLookup.find(key);
+			if (it == mapSmokeEmitterRuleLookup.end())
+			{
+				mapSmokeEmitterRuleLookup.emplace(key, database.mapSmokeEmitterRules.Size());
+				database.mapSmokeEmitterRules.Push(rule);
+				return;
+			}
+
+			auto& existing = database.mapSmokeEmitterRules[it->second];
+			if (existing.source.lumpNum == rule.source.lumpNum)
+			{
+				Printf(TEXTCOLOR_ORANGE "LIGHTOVR warning: duplicate smokeemitter '%s' for map '%s' in %s; using the last definition.\n",
+					rule.id.GetChars(), rule.mapName.GetChars(), rule.source.sourceName.GetChars());
+			}
+			existing = rule;
 		}
 	};
 
@@ -949,6 +970,48 @@ namespace
 			builder.AddSmokeEventRule(rule);
 		}
 
+		void ParseMapSmokeEmitterRule(const FString& mapName)
+		{
+			sc.MustGetString();
+			ParsedLightOverlayMapSmokeEmitterRule rule;
+			rule.mapName = mapName;
+			rule.id = sc.String;
+			rule.source = MakeSourceLocation(sc.GetMessageLine());
+			sc.MustGetStringName("{");
+			while (!sc.CheckString("}"))
+			{
+				sc.MustGetString();
+				if (sc.Compare("style")) { sc.MustGetString(); rule.styleId = sc.String; }
+				else if (sc.Compare("position")) { rule.hasPosition = true; MustParseVector3(rule.position); }
+				else if (sc.Compare("normal")) { rule.hasNormal = true; MustParseVector3(rule.normal); }
+				else if (sc.Compare("size"))
+				{
+					sc.MustGetFloat();
+					rule.size[0] = std::clamp((float)sc.Float, 1.0f, 4096.0f);
+					sc.MustGetFloat();
+					rule.size[1] = std::clamp((float)sc.Float, 1.0f, 4096.0f);
+					rule.hasSize = true;
+				}
+				else if (sc.Compare("rotation")) { sc.MustGetFloat(); rule.rotation = (float)sc.Float; }
+				else if (sc.Compare("offset")) { sc.MustGetFloat(); rule.offset = (float)sc.Float; }
+				else if (sc.Compare("count")) { sc.MustGetNumber(); rule.count = (uint32_t)std::clamp(sc.Number, 1, 256); }
+				else if (sc.Compare("intervalseconds")) { sc.MustGetFloat(); rule.intervalSeconds = std::max(0.001f, (float)sc.Float); }
+				else if (sc.Compare("spawnradius")) { sc.MustGetFloat(); rule.spawnRadius = std::max(0.0f, (float)sc.Float); }
+				else if (sc.Compare("densityscale")) { sc.MustGetFloat(); rule.densityScale = std::max(0.0f, (float)sc.Float); }
+				else if (sc.Compare("radiusscale")) { sc.MustGetFloat(); rule.radiusScale = std::max(0.0f, (float)sc.Float); }
+				else if (sc.Compare("velocityscale")) { sc.MustGetFloat(); rule.velocityScale = std::max(0.0f, (float)sc.Float); }
+				else if (sc.Compare("velocitycone")) { sc.MustGetFloat(); rule.velocityCone = std::clamp((float)sc.Float, 0.0f, 180.0f); }
+				else if (sc.Compare("maxsegmentsperframe")) { sc.MustGetNumber(); rule.maxSegmentsPerFrame = (uint32_t)std::clamp(sc.Number, 1, 256); }
+				else SkipUnknownField("smokeemitter", sc.String);
+			}
+			if (rule.styleId.IsEmpty()) sc.ScriptMessage("smokeemitter '%s' requires style", rule.id.GetChars());
+			if (!rule.hasPosition) sc.ScriptMessage("smokeemitter '%s' requires position", rule.id.GetChars());
+			if (!rule.hasNormal) sc.ScriptMessage("smokeemitter '%s' requires normal", rule.id.GetChars());
+			if (!rule.hasSize) sc.ScriptMessage("smokeemitter '%s' requires size", rule.id.GetChars());
+			FinalizeSourceLocation(rule.source);
+			builder.AddMapSmokeEmitterRule(rule);
+		}
+
 		void ParseMapBlock()
 		{
 			sc.MustGetString();
@@ -977,6 +1040,10 @@ namespace
 				else if (sc.Compare("actoroverride"))
 				{
 					ParseActorOverrideRule(mapName);
+				}
+				else if (sc.Compare("smokeemitter"))
+				{
+					ParseMapSmokeEmitterRule(mapName);
 				}
 				else
 				{
@@ -1705,6 +1772,7 @@ namespace
 		for (const auto& rule : database.emissiveOverrideRules) addMap(rule.mapName);
 		for (const auto& rule : database.surfaceLightRules) addMap(rule.mapName);
 		for (const auto& rule : database.actorOverrideRules) addMap(rule.mapName);
+		for (const auto& rule : database.mapSmokeEmitterRules) addMap(rule.mapName);
 
 		std::sort(mapNames.begin(), mapNames.end(), [](const FString& left, const FString& right)
 		{
@@ -1852,6 +1920,32 @@ namespace
 		AppendLine(text, 2, FStringf("normaloffset %s", FormatLightOverlayFloat(rule.normalOffset).GetChars()));
 		AppendLine(text, 2, FStringf("direction %s", SmokeDirectionPolicyName(rule.directionPolicy)));
 		AppendLine(text, 1, "}");
+	}
+
+	static void AppendMapSmokeEmitterRuleBlock(FString& text, const ParsedLightOverlayMapSmokeEmitterRule& rule)
+	{
+		AppendLine(text, 2, FStringf("smokeemitter %s", QuoteLightOverlayString(rule.id).GetChars()));
+		AppendLine(text, 2, "{");
+		AppendLine(text, 3, FStringf("style %s", QuoteLightOverlayString(rule.styleId).GetChars()));
+		if (rule.hasPosition) AppendVector3Field(text, 3, "position", rule.position);
+		if (rule.hasNormal) AppendVector3Field(text, 3, "normal", rule.normal);
+		if (rule.hasSize)
+		{
+			AppendLine(text, 3, FStringf("size %s %s",
+				FormatLightOverlayFloat(rule.size[0]).GetChars(),
+				FormatLightOverlayFloat(rule.size[1]).GetChars()));
+		}
+		AppendLine(text, 3, FStringf("rotation %s", FormatLightOverlayFloat(rule.rotation).GetChars()));
+		AppendLine(text, 3, FStringf("offset %s", FormatLightOverlayFloat(rule.offset).GetChars()));
+		AppendLine(text, 3, FStringf("count %u", rule.count));
+		AppendLine(text, 3, FStringf("intervalseconds %s", FormatLightOverlayFloat(rule.intervalSeconds).GetChars()));
+		AppendLine(text, 3, FStringf("spawnradius %s", FormatLightOverlayFloat(rule.spawnRadius).GetChars()));
+		AppendLine(text, 3, FStringf("densityscale %s", FormatLightOverlayFloat(rule.densityScale).GetChars()));
+		AppendLine(text, 3, FStringf("radiusscale %s", FormatLightOverlayFloat(rule.radiusScale).GetChars()));
+		AppendLine(text, 3, FStringf("velocityscale %s", FormatLightOverlayFloat(rule.velocityScale).GetChars()));
+		AppendLine(text, 3, FStringf("velocitycone %s", FormatLightOverlayFloat(rule.velocityCone).GetChars()));
+		AppendLine(text, 3, FStringf("maxsegmentsperframe %u", rule.maxSegmentsPerFrame));
+		AppendLine(text, 2, "}");
 	}
 
 	static void AppendDirectionalRuleBlock(FString& text, const ParsedLightOverlayDirectionalRule& rule)
@@ -2114,6 +2208,19 @@ namespace
 		return -1;
 	}
 
+	static int32_t FindMapSmokeEmitterRuleIndex(const ParsedLightOverlayDatabase& database, const FString& mapName, const FString& id)
+	{
+		for (unsigned i = 0; i < (unsigned)database.mapSmokeEmitterRules.Size(); ++i)
+		{
+			if (database.mapSmokeEmitterRules[i].mapName.CompareNoCase(mapName) == 0 &&
+				database.mapSmokeEmitterRules[i].id.CompareNoCase(id) == 0)
+			{
+				return (int32_t)i;
+			}
+		}
+		return -1;
+	}
+
 	static uint32_t FindNextLightOverlayOrderIndex(const ParsedLightOverlayDatabase& database)
 	{
 		uint32_t nextOrderIndex = 0;
@@ -2134,6 +2241,7 @@ namespace
 		for (const auto& rule : database.smokeStyles) update(rule.source);
 		for (const auto& rule : database.smokeActorRules) update(rule.source);
 		for (const auto& rule : database.smokeEventRules) update(rule.source);
+		for (const auto& rule : database.mapSmokeEmitterRules) update(rule.source);
 		return nextOrderIndex + 1;
 	}
 
@@ -2172,7 +2280,7 @@ namespace
 
 	static void DumpParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database)
 	{
-		Printf("LIGHTOVR: generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d emissive_material_responses=%d surface_lights=%d directional=%d actor_overrides=%d smoke_styles=%d smoke_actor_rules=%d smoke_event_rules=%d parse_errors=%s\n",
+		Printf("LIGHTOVR: generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d emissive_material_responses=%d surface_lights=%d directional=%d actor_overrides=%d smoke_styles=%d smoke_actor_rules=%d smoke_event_rules=%d map_smoke_emitters=%d parse_errors=%s\n",
 			database.generation,
 			database.sourceFiles.Size(),
 			database.actorRules.Size(),
@@ -2186,6 +2294,7 @@ namespace
 			database.smokeStyles.Size(),
 			database.smokeActorRules.Size(),
 			database.smokeEventRules.Size(),
+			database.mapSmokeEmitterRules.Size(),
 			database.hadParseErrors ? "yes" : "no");
 
 		for (const auto& sourceFile : database.sourceFiles)
@@ -2268,6 +2377,18 @@ namespace
 				rule->id.GetChars(), rule->styleId.GetChars(), rule->count, rule->spawnRadius, rule->velocityScale,
 				rule->normalOffset, SmokeDirectionPolicyName(rule->directionPolicy),
 				SourceLocationText(rule->source).GetChars());
+		}
+		for (const auto* rule : SortRulesByOrder(database.mapSmokeEmitterRules))
+		{
+			Printf("LIGHTOVR smokeemitter %s: map=%s style=%s position=(%.3f,%.3f,%.3f) normal=(%.3f,%.3f,%.3f) "
+				"size=(%.3f,%.3f) rotation=%.3f offset=%.3f count=%u intervalseconds=%.3f spawnradius=%.3f "
+				"densityscale=%.3f radiusscale=%.3f velocityscale=%.3f velocitycone=%.3f maxsegmentsperframe=%u source=%s\n",
+				rule->id.GetChars(), rule->mapName.GetChars(), rule->styleId.GetChars(),
+				rule->position[0], rule->position[1], rule->position[2],
+				rule->normal[0], rule->normal[1], rule->normal[2], rule->size[0], rule->size[1],
+				rule->rotation, rule->offset, rule->count, rule->intervalSeconds, rule->spawnRadius,
+				rule->densityScale, rule->radiusScale, rule->velocityScale, rule->velocityCone,
+				rule->maxSegmentsPerFrame, SourceLocationText(rule->source).GetChars());
 		}
 
 		for (const ParsedLightOverlayDirectionalRule* rule : SortRulesByOrder(database.directionalRules))
@@ -2356,7 +2477,7 @@ namespace
 
 	static void DumpResolvedLightOverlaySet(const ResolvedLightOverlaySet& resolved)
 	{
-		Printf("LIGHTOVR resolved: parsed_generation=%u resolved_generation=%u map=%s current_map=%s actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d emissive_material_responses=%d directional=%d actor_overrides=%d smoke_styles=%d smoke_actor_rules=%d smoke_event_rules=%d\n",
+		Printf("LIGHTOVR resolved: parsed_generation=%u resolved_generation=%u map=%s current_map=%s actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d emissive_material_responses=%d directional=%d actor_overrides=%d smoke_styles=%d smoke_actor_rules=%d smoke_event_rules=%d map_smoke_emitters=%d\n",
 			resolved.parsedGeneration,
 			resolved.resolvedGeneration,
 			resolved.activeMapName.IsNotEmpty() ? resolved.activeMapName.GetChars() : "(none)",
@@ -2370,7 +2491,8 @@ namespace
 			resolved.actorOverrideRules.Size(),
 			resolved.smokeStyles.Size(),
 			resolved.smokeActorRules.Size(),
-			resolved.smokeEventRules.Size());
+			resolved.smokeEventRules.Size(),
+			resolved.mapSmokeEmitterRules.Size());
 
 		for (const auto& rule : resolved.actorRules)
 		{
@@ -2429,6 +2551,15 @@ namespace
 				rule.id.GetChars(), rule.styleId.GetChars(), rule.styleResolved ? "yes" : "no", rule.styleIndex,
 				rule.velocityScale, rule.normalOffset, SmokeDirectionPolicyName(rule.directionPolicy),
 				SourceLocationText(rule.source).GetChars());
+		}
+		for (const auto& rule : resolved.mapSmokeEmitterRules)
+		{
+			Printf("LIGHTOVR resolved smokeemitter %s: map=%s style=%s style_resolved=%s style_index=%u "
+				"position_set=%s normal_set=%s size_set=%s size=(%.3f,%.3f) source=%s\n",
+				rule.id.GetChars(), rule.mapName.GetChars(), rule.styleId.GetChars(),
+				rule.styleResolved ? "yes" : "no", rule.styleIndex,
+				rule.hasPosition ? "yes" : "no", rule.hasNormal ? "yes" : "no", rule.hasSize ? "yes" : "no",
+				rule.size[0], rule.size[1], SourceLocationText(rule.source).GetChars());
 		}
 
 		for (const auto& rule : resolved.directionalRules)
@@ -2782,6 +2913,20 @@ namespace
 			resolved.smokeEventRules.Push(std::move(destination));
 		}
 
+		for (const auto& source : GLightOverlayDatabase.mapSmokeEmitterRules)
+		{
+			if (mapName.IsEmpty() || source.mapName.CompareNoCase(mapName) != 0)
+			{
+				continue;
+			}
+			ResolvedLightOverlayMapSmokeEmitterRule destination;
+			static_cast<ParsedLightOverlayMapSmokeEmitterRule&>(destination) = source;
+			const auto style = smokeStyleLookup.find(MakeNormalizedKey(source.styleId));
+			destination.styleResolved = style != smokeStyleLookup.end();
+			if (destination.styleResolved) destination.styleIndex = style->second;
+			resolved.mapSmokeEmitterRules.Push(std::move(destination));
+		}
+
 		for (const auto& source : GLightOverlayDatabase.actorRules)
 		{
 			ResolvedLightOverlayActorRule destination;
@@ -2869,7 +3014,7 @@ FString SerializeLightOverlayDatabase(const ParsedLightOverlayDatabase& database
 		AppendLine(text, 1, "defaults");
 		AppendLine(text, 1, "{");
 		AppendLine(text, 1, "}");
-		if (database.actorRules.Size() > 0 || database.muzzleFlashRules.Size() > 0 || database.smokeStyles.Size() > 0 || database.smokeActorRules.Size() > 0 || database.smokeEventRules.Size() > 0 || database.emissiveMaterialResponseRules.Size() > 0 || database.directionalRules.Size() > 0 || database.mapLightRules.Size() > 0 || database.emissiveOverrideRules.Size() > 0 || database.surfaceLightRules.Size() > 0 || database.actorOverrideRules.Size() > 0)
+		if (database.actorRules.Size() > 0 || database.muzzleFlashRules.Size() > 0 || database.smokeStyles.Size() > 0 || database.smokeActorRules.Size() > 0 || database.smokeEventRules.Size() > 0 || database.emissiveMaterialResponseRules.Size() > 0 || database.directionalRules.Size() > 0 || database.mapLightRules.Size() > 0 || database.emissiveOverrideRules.Size() > 0 || database.surfaceLightRules.Size() > 0 || database.actorOverrideRules.Size() > 0 || database.mapSmokeEmitterRules.Size() > 0)
 		{
 			text << "\n";
 		}
@@ -2979,6 +3124,24 @@ FString SerializeLightOverlayDatabase(const ParsedLightOverlayDatabase& database
 			AppendMapLightRuleBlock(text, *rule);
 		}
 
+		std::vector<const ParsedLightOverlayMapSmokeEmitterRule*> mapSmokeEmitters;
+		for (const auto& rule : database.mapSmokeEmitterRules)
+		{
+			if (rule.mapName.CompareNoCase(mapName) == 0)
+			{
+				mapSmokeEmitters.push_back(&rule);
+			}
+		}
+		std::sort(mapSmokeEmitters.begin(), mapSmokeEmitters.end(), [](const auto* left, const auto* right)
+		{
+			const int idCompare = left->id.CompareNoCase(right->id);
+			return idCompare != 0 ? idCompare < 0 : left->source.orderIndex < right->source.orderIndex;
+		});
+		for (const auto* rule : mapSmokeEmitters)
+		{
+			AppendMapSmokeEmitterRuleBlock(text, *rule);
+		}
+
 		std::vector<const ParsedLightOverlayEmissiveOverrideRule*> emissiveOverrides;
 		for (const auto& rule : database.emissiveOverrideRules)
 		{
@@ -3050,7 +3213,7 @@ bool ApplyParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database,
 
 	if (verbose)
 	{
-		Printf("LIGHTOVR: parsed generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d emissive_material_responses=%d surface_lights=%d directional=%d actor_overrides=%d smoke_styles=%d smoke_actor_rules=%d smoke_event_rules=%d parse_errors=%s changed=%s\n",
+		Printf("LIGHTOVR: parsed generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d emissive_material_responses=%d surface_lights=%d directional=%d actor_overrides=%d smoke_styles=%d smoke_actor_rules=%d smoke_event_rules=%d map_smoke_emitters=%d parse_errors=%s changed=%s\n",
 			GLightOverlayDatabase.generation,
 			GLightOverlayDatabase.sourceFiles.Size(),
 			GLightOverlayDatabase.actorRules.Size(),
@@ -3064,6 +3227,7 @@ bool ApplyParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database,
 			GLightOverlayDatabase.smokeStyles.Size(),
 			GLightOverlayDatabase.smokeActorRules.Size(),
 			GLightOverlayDatabase.smokeEventRules.Size(),
+			GLightOverlayDatabase.mapSmokeEmitterRules.Size(),
 			GLightOverlayDatabase.hadParseErrors ? "yes" : "no",
 			contentChanged ? "yes" : "no");
 	}
@@ -3235,6 +3399,17 @@ bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const Pa
 	return AddOrReplaceGlobalLightOverlayRule(database, database.smokeEventRules, rule, outReplaced);
 }
 
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayMapSmokeEmitterRule& rule, bool* outReplaced)
+{
+	ParsedLightOverlayMapSmokeEmitterRule nextRule = rule;
+	const int32_t index = FindMapSmokeEmitterRuleIndex(database, nextRule.mapName, nextRule.id);
+	if (outReplaced != nullptr) *outReplaced = index >= 0;
+	EnsureEditableSource(database, nextRule.source, index >= 0 ? &database.mapSmokeEmitterRules[index].source : nullptr);
+	if (index >= 0) database.mapSmokeEmitterRules[index] = std::move(nextRule);
+	else database.mapSmokeEmitterRules.Push(std::move(nextRule));
+	return true;
+}
+
 bool RemoveLightOverlayRule(ParsedLightOverlayDatabase& database, LightOverlayRuleKind kind, const char* id, const char* mapName)
 {
 	const FString ruleId = id != nullptr ? FString(id) : FString("");
@@ -3285,6 +3460,10 @@ bool RemoveLightOverlayRule(ParsedLightOverlayDatabase& database, LightOverlayRu
 	case LightOverlayRuleKind::SmokeEventRule:
 		index = FindGlobalRuleIndex(database.smokeEventRules, ruleId);
 		if (index >= 0) database.smokeEventRules.Delete(index);
+		return index >= 0;
+	case LightOverlayRuleKind::MapSmokeEmitter:
+		index = FindMapSmokeEmitterRuleIndex(database, scopedMapName, ruleId);
+		if (index >= 0) database.mapSmokeEmitterRules.Delete(index);
 		return index >= 0;
 	default:
 		return false;
