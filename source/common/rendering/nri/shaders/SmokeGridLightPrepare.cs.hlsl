@@ -27,5 +27,20 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gSmokeControl[0].EmissiveInnerBlockerInterior = 0u;
 		gSmokeControl[0].EmissiveInnerSourceSelections = 0u;
 		gSmokeControl[0].EmissiveInnerSourceOverflow = 0u;
+		gSmokeControl[0].EmissiveTargetVisibilityRays = 0u;
+		gSmokeControl[0].EmissiveTargetVisibilityVisible = 0u;
+		gSmokeControl[0].EmissiveTargetBlockerExact = 0u;
+		gSmokeControl[0].EmissiveTargetBlockerRange = 0u;
+		gSmokeControl[0].EmissiveTargetBlockerOther = 0u;
+		gSmokeControl[0].EmissiveTargetWitnessClaim = 0u;
+		gSmokeControl[0].EmissiveTargetWitnessCandidate = 0xffffffffu;
+		gSmokeControl[0].EmissiveTargetWitnessRelation = 0u;
+		gSmokeControl[0].EmissiveTargetWitnessSamplePrimitive = 0xffffffffu;
+		gSmokeControl[0].EmissiveTargetWitnessSampleMaterial = 0xffffffffu;
+		gSmokeControl[0].EmissiveTargetWitnessBlockerDataSource = 0xffffffffu;
+		gSmokeControl[0].EmissiveTargetWitnessBlockerInstance = 0xffffffffu;
+		gSmokeControl[0].EmissiveTargetWitnessBlockerPrimitive = 0xffffffffu;
+		gSmokeControl[0].EmissiveTargetWitnessBlockerMaterial = 0xffffffffu;
+		gSmokeControl[0].EmissiveTargetWitnessDistanceBits = 0u;
 	}
 }

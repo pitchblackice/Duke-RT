@@ -797,6 +797,21 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 				mStatus.emissiveInnerBlockerInterior = control.emissiveInnerBlockerInterior;
 				mStatus.emissiveInnerSourceSelections = control.emissiveInnerSourceSelections;
 				mStatus.emissiveInnerSourceOverflow = control.emissiveInnerSourceOverflow;
+				mStatus.emissiveTargetVisibilityRays = control.emissiveTargetVisibilityRays;
+				mStatus.emissiveTargetVisibilityVisible = control.emissiveTargetVisibilityVisible;
+				mStatus.emissiveTargetBlockerExact = control.emissiveTargetBlockerExact;
+				mStatus.emissiveTargetBlockerRange = control.emissiveTargetBlockerRange;
+				mStatus.emissiveTargetBlockerOther = control.emissiveTargetBlockerOther;
+				mStatus.emissiveTargetWitnessClaim = control.emissiveTargetWitnessClaim;
+				mStatus.emissiveTargetWitnessCandidate = control.emissiveTargetWitnessCandidate;
+				mStatus.emissiveTargetWitnessRelation = control.emissiveTargetWitnessRelation;
+				mStatus.emissiveTargetWitnessSamplePrimitive = control.emissiveTargetWitnessSamplePrimitive;
+				mStatus.emissiveTargetWitnessSampleMaterial = control.emissiveTargetWitnessSampleMaterial;
+				mStatus.emissiveTargetWitnessBlockerDataSource = control.emissiveTargetWitnessBlockerDataSource;
+				mStatus.emissiveTargetWitnessBlockerInstance = control.emissiveTargetWitnessBlockerInstance;
+				mStatus.emissiveTargetWitnessBlockerPrimitive = control.emissiveTargetWitnessBlockerPrimitive;
+				mStatus.emissiveTargetWitnessBlockerMaterial = control.emissiveTargetWitnessBlockerMaterial;
+				mStatus.emissiveTargetWitnessDistanceBits = control.emissiveTargetWitnessDistanceBits;
 				mStatus.indirectFroxelsProcessed = control.indirectFroxelsProcessed;
 				mStatus.indirectLocalityRays = control.indirectLocalityRays;
 				mStatus.indirectLocalityAgreement = control.indirectLocalityAgreement;
@@ -1995,6 +2010,21 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.emissiveInnerBlockerInterior = 0;
 	mStatus.emissiveInnerSourceSelections = 0;
 	mStatus.emissiveInnerSourceOverflow = 0;
+	mStatus.emissiveTargetVisibilityRays = 0;
+	mStatus.emissiveTargetVisibilityVisible = 0;
+	mStatus.emissiveTargetBlockerExact = 0;
+	mStatus.emissiveTargetBlockerRange = 0;
+	mStatus.emissiveTargetBlockerOther = 0;
+	mStatus.emissiveTargetWitnessClaim = 0;
+	mStatus.emissiveTargetWitnessCandidate = 0xffffffffu;
+	mStatus.emissiveTargetWitnessRelation = 0;
+	mStatus.emissiveTargetWitnessSamplePrimitive = 0xffffffffu;
+	mStatus.emissiveTargetWitnessSampleMaterial = 0xffffffffu;
+	mStatus.emissiveTargetWitnessBlockerDataSource = 0xffffffffu;
+	mStatus.emissiveTargetWitnessBlockerInstance = 0xffffffffu;
+	mStatus.emissiveTargetWitnessBlockerPrimitive = 0xffffffffu;
+	mStatus.emissiveTargetWitnessBlockerMaterial = 0xffffffffu;
+	mStatus.emissiveTargetWitnessDistanceBits = 0;
 	mStatus.indirectFroxelsProcessed = 0;
 	mStatus.indirectLocalityRays = 0;
 	mStatus.indirectLocalityAgreement = 0;
@@ -2240,6 +2270,24 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.emissiveInnerBlockerReceiverCell, mStatus.emissiveInnerBlockerEmitterCell,
 		mStatus.emissiveInnerBlockerInterior, mStatus.emissiveInnerSourceSelections,
 		mStatus.emissiveInnerSourceOverflow);
+	const uint64_t targetBlocked = (uint64_t)mStatus.emissiveTargetBlockerExact +
+		(uint64_t)mStatus.emissiveTargetBlockerRange + (uint64_t)mStatus.emissiveTargetBlockerOther;
+	const uint64_t targetAccounted = (uint64_t)mStatus.emissiveTargetVisibilityVisible + targetBlocked;
+	float targetWitnessDistance = -1.0f;
+	if (mStatus.emissiveTargetWitnessClaim != 0)
+		std::memcpy(&targetWitnessDistance, &mStatus.emissiveTargetWitnessDistanceBits, sizeof(targetWitnessDistance));
+	const char* targetWitnessRelation = mStatus.emissiveTargetWitnessRelation == 1u ? "exact" :
+		mStatus.emissiveTargetWitnessRelation == 2u ? "range" :
+		mStatus.emissiveTargetWitnessRelation == 3u ? "other" : "none";
+	Printf("NRI PT smoke emissive target visibility: target=%d rays=%u visible=%u exact=%u range=%u other=%u closure=%s witness=%s witness_target=%u relation=%s sampled_primitive=%u sampled_material=%u blocker_source=%u blocker_instance=%u blocker_primitive=%u blocker_material=%u blocker_distance=%.4f\n",
+		world.emissiveCandidateTarget, mStatus.emissiveTargetVisibilityRays, mStatus.emissiveTargetVisibilityVisible,
+		mStatus.emissiveTargetBlockerExact, mStatus.emissiveTargetBlockerRange, mStatus.emissiveTargetBlockerOther,
+		targetAccounted == (uint64_t)mStatus.emissiveTargetVisibilityRays ? "yes" : "no",
+		mStatus.emissiveTargetWitnessClaim != 0 ? "yes" : "no", mStatus.emissiveTargetWitnessCandidate,
+		targetWitnessRelation, mStatus.emissiveTargetWitnessSamplePrimitive, mStatus.emissiveTargetWitnessSampleMaterial,
+		mStatus.emissiveTargetWitnessBlockerDataSource, mStatus.emissiveTargetWitnessBlockerInstance,
+		mStatus.emissiveTargetWitnessBlockerPrimitive, mStatus.emissiveTargetWitnessBlockerMaterial,
+		targetWitnessDistance);
 	Printf("NRI PT smoke indirect status: enabled=%s scale=%.3f cache_mode_requested=%u cache_mode_effective=%u samples=%u history=%s cache_mib=%.2f froxels=%u locality_rays=%u agreement=%u one_sided=%u mismatch=%u invalid=%u reference_rays=%u hits=%u misses=%u sector=%u sky=%u emission=%u clamps=%u nan=%u temporal=%u/%u spatial=%u/%u cache_age=%u cache_clamps=%u resolved=%u field_readback=0\n",
 		mSettings.indirect ? "yes" : "no", mSettings.indirectScale, mStatus.indirectCacheModeRequested, mStatus.indirectCacheModeEffective, 1u << std::min(mSettings.quality, 2u),
 		mIndirectHistoryValid ? "valid" : "invalid", (double)mStatus.indirectCacheBytes / (1024.0 * 1024.0), mStatus.indirectFroxelsProcessed,

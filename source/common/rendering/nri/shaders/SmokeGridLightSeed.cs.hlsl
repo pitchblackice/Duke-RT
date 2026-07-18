@@ -128,6 +128,29 @@ struct SmokeGridLightVisibilityStats
 	uint BlockerInterior;
 };
 
+#define NRI_SMOKE_TARGET_BLOCKER_NONE 0u
+#define NRI_SMOKE_TARGET_BLOCKER_EXACT 1u
+#define NRI_SMOKE_TARGET_BLOCKER_RANGE 2u
+#define NRI_SMOKE_TARGET_BLOCKER_OTHER 3u
+
+uint SmokeGridLightClassifyBlockerIdentity(
+	SmokeEmissiveSampleIdentity sampleIdentity,
+	SmokeVisibilityBlocker blocker)
+{
+	if (blocker.Valid == 0u || blocker.DataSource == 0xffffffffu ||
+		blocker.DataSource != sampleIdentity.DataSource)
+		return NRI_SMOKE_TARGET_BLOCKER_OTHER;
+	const bool placed = sampleIdentity.SceneInstanceIndex != 0xffffffffu;
+	if (placed && blocker.InstanceId != sampleIdentity.SceneInstanceIndex)
+		return NRI_SMOKE_TARGET_BLOCKER_OTHER;
+	if (blocker.PrimitiveIndex == sampleIdentity.PrimitiveIndex)
+		return NRI_SMOKE_TARGET_BLOCKER_EXACT;
+	if (placed && blocker.PrimitiveIndex >= sampleIdentity.RangeBase &&
+		blocker.PrimitiveIndex - sampleIdentity.RangeBase < sampleIdentity.RangeCount)
+		return NRI_SMOKE_TARGET_BLOCKER_RANGE;
+	return NRI_SMOKE_TARGET_BLOCKER_OTHER;
+}
+
 void SmokeGridLightClassifyBlocker(
 	float blockerDistance,
 	float lightDistance,
@@ -147,6 +170,42 @@ void SmokeGridLightClassifyBlocker(
 		stats.BlockerInterior++;
 }
 
+void SmokeGridLightRecordTargetVisibility(
+	bool visible,
+	SmokeEmissiveSampleIdentity sampleIdentity,
+	SmokeVisibilityBlocker blocker)
+{
+	InterlockedAdd(gSmokeControl[0].EmissiveTargetVisibilityRays, 1u);
+	if (visible)
+	{
+		InterlockedAdd(gSmokeControl[0].EmissiveTargetVisibilityVisible, 1u);
+		return;
+	}
+	const uint relation = SmokeGridLightClassifyBlockerIdentity(sampleIdentity, blocker);
+	if (relation == NRI_SMOKE_TARGET_BLOCKER_EXACT)
+		InterlockedAdd(gSmokeControl[0].EmissiveTargetBlockerExact, 1u);
+	else if (relation == NRI_SMOKE_TARGET_BLOCKER_RANGE)
+		InterlockedAdd(gSmokeControl[0].EmissiveTargetBlockerRange, 1u);
+	else
+	{
+		InterlockedAdd(gSmokeControl[0].EmissiveTargetBlockerOther, 1u);
+		uint previousClaim;
+		InterlockedCompareExchange(gSmokeControl[0].EmissiveTargetWitnessClaim, 0u, 1u, previousClaim);
+		if (previousClaim == 0u)
+		{
+			gSmokeControl[0].EmissiveTargetWitnessCandidate = sampleIdentity.CandidateIndex;
+			gSmokeControl[0].EmissiveTargetWitnessRelation = NRI_SMOKE_TARGET_BLOCKER_OTHER;
+			gSmokeControl[0].EmissiveTargetWitnessSamplePrimitive = sampleIdentity.PrimitiveIndex;
+			gSmokeControl[0].EmissiveTargetWitnessSampleMaterial = sampleIdentity.MaterialIndex;
+			gSmokeControl[0].EmissiveTargetWitnessBlockerDataSource = blocker.DataSource;
+			gSmokeControl[0].EmissiveTargetWitnessBlockerInstance = blocker.InstanceId;
+			gSmokeControl[0].EmissiveTargetWitnessBlockerPrimitive = blocker.PrimitiveIndex;
+			gSmokeControl[0].EmissiveTargetWitnessBlockerMaterial = blocker.MaterialIndex;
+			gSmokeControl[0].EmissiveTargetWitnessDistanceBits = asuint(blocker.Distance);
+		}
+	}
+}
+
 bool SmokeGridLightEvaluateJointEmissiveRis(
 	SmokeGridLightProposal proposal,
 	bool localReady,
@@ -156,6 +215,7 @@ bool SmokeGridLightEvaluateJointEmissiveRis(
 	float cellSize,
 	uint requestedCandidates,
 	bool visibilityDiagnostics,
+	bool targetVisibilityDiagnostics,
 	out float3 estimator,
 	out float3 lightDirection,
 	out float distanceToLight,
@@ -203,8 +263,13 @@ bool SmokeGridLightEvaluateJointEmissiveRis(
 		record.Generation = gSmokeConstants.CommandCount;
 		float3 pointIncident, pointDirection;
 		float pointDistance;
-		if (!SmokeEvaluateWorldEmissiveIncident(record, receiverPosition, false,
-			pointIncident, pointDirection, pointDistance))
+		SmokeEmissiveSampleIdentity sampleIdentity = SmokeEmptyEmissiveSampleIdentity();
+		const bool pointIncidentValid = targetVisibilityDiagnostics ?
+			SmokeEvaluateWorldEmissiveIncidentWithPrimitive(record, receiverPosition, false,
+				pointIncident, pointDirection, pointDistance, sampleIdentity) :
+			SmokeEvaluateWorldEmissiveIncident(record, receiverPosition, false,
+				pointIncident, pointDirection, pointDistance);
+		if (!pointIncidentValid)
 		{
 			zeroProposals++;
 			continue;
@@ -219,10 +284,23 @@ bool SmokeGridLightEvaluateJointEmissiveRis(
 		if (gSmokeConstants.LightMode >= 2u)
 		{
 			visibilityStats.Rays++;
-			float blockerDistance;
-			const bool pointVisible = SmokeFilteredVisibilityEffective() ?
-				SmokeEmissiveVisibleFiltered(receiverPosition, pointDirection, pointDistance, visibilityDiagnostics, blockerDistance) :
-				SmokeEmissiveVisible(receiverPosition, pointDirection, pointDistance, visibilityDiagnostics, blockerDistance);
+			SmokeVisibilityBlocker blocker = SmokeEmptyVisibilityBlocker();
+			float blockerDistance = -1.0;
+			bool pointVisible;
+			if (targetVisibilityDiagnostics)
+			{
+				pointVisible = SmokeFilteredVisibilityEffective() ?
+					SmokeEmissiveVisibleFilteredWithBlocker(receiverPosition, pointDirection, pointDistance, visibilityDiagnostics, blocker) :
+					SmokeEmissiveVisibleWithBlocker(receiverPosition, pointDirection, pointDistance, visibilityDiagnostics, blocker);
+				blockerDistance = blocker.Distance;
+				SmokeGridLightRecordTargetVisibility(pointVisible, sampleIdentity, blocker);
+			}
+			else
+			{
+				pointVisible = SmokeFilteredVisibilityEffective() ?
+					SmokeEmissiveVisibleFiltered(receiverPosition, pointDirection, pointDistance, visibilityDiagnostics, blockerDistance) :
+					SmokeEmissiveVisible(receiverPosition, pointDirection, pointDistance, visibilityDiagnostics, blockerDistance);
+			}
 			if (!pointVisible)
 			{
 				zeroProposals++;
@@ -292,13 +370,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint pointCandidateCount = SmokeEmissivePointCandidateCount();
 	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;
 	const bool innerRisDiagnostics = diagnostics && !referenceSampling;
+	const bool diagnosticTargetActive = SmokeEmissiveDiagnosticCandidate() != 0xffffffffu;
 	bool diagnosticSourceCell = false;
-	if (innerRisDiagnostics)
+	if (diagnostics)
 	{
 		const bool fieldB = gSmokeRenderGridControl[0].FieldPing != 0u;
 		const float4 scalar = fieldB ? gSmokeRenderGridScalarB[cellIndex] : gSmokeRenderGridScalarA[cellIndex];
 		diagnosticSourceCell = scalar.z > 1e-6;
 	}
+	const bool targetVisibilityDiagnostics = diagnostics && diagnosticTargetActive && diagnosticSourceCell;
 	const bool localRequested = (gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_LOCAL_PROPOSALS) != 0u;
 	const SmokeGridLightProposal proposal = gSmokeGridLightProposals[brickIndex];
 	const bool localReady = localRequested && SmokeGridLightProposalValid(proposal, brick);
@@ -328,6 +408,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float lightDistance;
 		uint innerPointProposals, innerZeroProposals, innerRisRejects;
 		SmokeGridLightVisibilityStats innerVisibilityStats = (SmokeGridLightVisibilityStats)0;
+		SmokeEmissiveSampleIdentity sampleIdentity = SmokeEmptyEmissiveSampleIdentity();
 		bool incidentValid = false;
 		if (referenceSampling)
 		{
@@ -348,8 +429,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				record.StableKeyHi = candidate.stableKeyHi;
 				record.Generation = gSmokeConstants.CommandCount;
 				float3 incident;
-				incidentValid = SmokeEvaluateWorldEmissiveIncident(record, receiverPosition, false,
-					incident, lightDirection, lightDistance);
+				incidentValid = targetVisibilityDiagnostics ?
+					SmokeEvaluateWorldEmissiveIncidentWithPrimitive(record, receiverPosition, false,
+						incident, lightDirection, lightDistance, sampleIdentity) :
+					SmokeEvaluateWorldEmissiveIncident(record, receiverPosition, false,
+						incident, lightDirection, lightDistance);
 				if (incidentValid)
 					estimator = incident / proposalPdf;
 			}
@@ -362,6 +446,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				InterlockedAdd(gSmokeControl[0].EmissiveInnerRisSets, 1u);
 			incidentValid = SmokeGridLightEvaluateJointEmissiveRis(proposal, localReady, localMix, randomState,
 				receiverPosition, cellSize, pointCandidateCount, innerRisDiagnostics && diagnosticSourceCell,
+				targetVisibilityDiagnostics,
 				estimator, lightDirection, lightDistance,
 				innerPointProposals, innerZeroProposals, innerRisRejects, innerVisibilityStats);
 		}
@@ -385,6 +470,31 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					innerVisibilityStats.BlockerInterior);
 			}
 		}
+		bool isVisible = true;
+		if (referenceSampling && incidentValid && gSmokeConstants.LightMode >= 2u)
+		{
+			innerVisibilityStats.Rays++;
+			SmokeVisibilityBlocker blocker = SmokeEmptyVisibilityBlocker();
+			float blockerDistance = -1.0;
+			if (targetVisibilityDiagnostics)
+			{
+				isVisible = SmokeFilteredVisibilityEffective() ?
+					SmokeEmissiveVisibleFilteredWithBlocker(receiverPosition, lightDirection, lightDistance, false, blocker) :
+					SmokeEmissiveVisibleWithBlocker(receiverPosition, lightDirection, lightDistance, false, blocker);
+				blockerDistance = blocker.Distance;
+				SmokeGridLightRecordTargetVisibility(isVisible, sampleIdentity, blocker);
+			}
+			else
+			{
+				isVisible = SmokeFilteredVisibilityEffective() ?
+					SmokeEmissiveVisibleFiltered(receiverPosition, lightDirection, lightDistance, false, blockerDistance) :
+					SmokeEmissiveVisible(receiverPosition, lightDirection, lightDistance, false, blockerDistance);
+			}
+			if (isVisible)
+				innerVisibilityStats.Visible++;
+			else
+				SmokeGridLightClassifyBlocker(blockerDistance, lightDistance, cellSize, innerVisibilityStats);
+		}
 		if (!incidentValid)
 		{
 			physicalZero++;
@@ -395,14 +505,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			InterlockedAdd(gSmokeControl[0].EmissiveInnerSelections, 1u);
 			if (diagnosticSourceCell)
 				InterlockedAdd(gSmokeControl[0].EmissiveInnerSourceSelections, 1u);
-		}
-		bool isVisible = true;
-		if (referenceSampling && gSmokeConstants.LightMode >= 2u)
-		{
-			float blockerDistance;
-			isVisible = SmokeFilteredVisibilityEffective() ?
-				SmokeEmissiveVisibleFiltered(receiverPosition, lightDirection, lightDistance, false, blockerDistance) :
-				SmokeEmissiveVisible(receiverPosition, lightDirection, lightDistance, false, blockerDistance);
 		}
 		float mediumTransmittance = 1.0;
 		if (SmokeSelfShadowEnabled(gSmokeConstants.DebugMode))

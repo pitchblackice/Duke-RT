@@ -15,6 +15,29 @@
 #define NRI_SMOKE_EMISSIVE_LEGACY_GATHER_DISABLED 0x1000000u
 #define NRI_SMOKE_EMISSIVE_QUARTER_KEY 0x2000000u
 
+struct SmokeEmissiveSampleIdentity
+{
+	uint CandidateIndex;
+	uint DataSource;
+	uint SceneInstanceIndex;
+	uint RangeBase;
+	uint RangeCount;
+	uint PrimitiveIndex;
+	uint MaterialIndex;
+};
+
+SmokeEmissiveSampleIdentity SmokeEmptyEmissiveSampleIdentity()
+{
+	SmokeEmissiveSampleIdentity identity = (SmokeEmissiveSampleIdentity)0;
+	identity.CandidateIndex = 0xffffffffu;
+	identity.DataSource = 0xffffffffu;
+	identity.SceneInstanceIndex = 0xffffffffu;
+	identity.RangeBase = 0xffffffffu;
+	identity.PrimitiveIndex = 0xffffffffu;
+	identity.MaterialIndex = 0xffffffffu;
+	return identity;
+}
+
 uint SmokeEmissivePointCandidateCount()
 {
 	return clamp((gSmokeConstants.FilteredVisibilityEnabled >> NRI_SMOKE_EMISSIVE_POINT_CANDIDATE_SHIFT) &
@@ -286,18 +309,20 @@ float SmokeEmissiveLuminance(float3 value)
 	return dot(max(value, 0.0), float3(0.2126, 0.7152, 0.0722));
 }
 
-bool SmokeEvaluateEmissiveIncidentWithSolidAngleDenominator(
+bool SmokeEvaluateEmissiveIncidentWithSolidAngleDenominatorAndPrimitive(
 	SmokeEmissiveReservoirRecord record,
 	float3 receiverPosition,
 	bool diagnostics,
 	float solidAngleDenominator,
 	out float3 incidentRadiance,
 	out float3 lightDirection,
-	out float distanceToLight)
+	out float distanceToLight,
+	out SmokeEmissiveSampleIdentity sampleIdentity)
 {
 	incidentRadiance = 0.0;
 	lightDirection = 0.0;
 	distanceToLight = 0.0;
+	sampleIdentity = SmokeEmptyEmissiveSampleIdentity();
 	if (!SmokeEmissiveIdentityValid(record))
 	{
 		if (diagnostics)
@@ -305,21 +330,29 @@ bool SmokeEvaluateEmissiveIncidentWithSolidAngleDenominator(
 		return false;
 	}
 	const EmissivePrimitiveData candidate = gSmokeEmissivePrimitives[record.CandidateIndex];
+	sampleIdentity.CandidateIndex = record.CandidateIndex;
+	sampleIdentity.DataSource = candidate.dataSource;
+	sampleIdentity.SceneInstanceIndex = candidate.sceneInstanceIndex;
+	sampleIdentity.RangeBase = candidate.primitiveIndex;
+	sampleIdentity.RangeCount = candidate.primitiveCount;
 	uint randomState = record.SampleSeed;
 	uint sampledPrimitiveIndex;
+	uint sampledMaterialIndex;
 	PrimitiveData primitive;
 	MaterialData material;
 	float2 lightUv;
 	float3 lightNormal;
 	float3 lightPosition;
 	float effectiveArea;
-	if (!SmokeSamplePointOnEmissive(candidate, randomState, sampledPrimitiveIndex, primitive, material,
+	if (!SmokeSamplePointOnEmissive(candidate, randomState, sampledPrimitiveIndex, primitive, material, sampledMaterialIndex,
 		lightPosition, lightUv, lightNormal, effectiveArea))
 	{
 		if (diagnostics)
 			InterlockedAdd(gSmokeControl[0].EmissiveCandidateMisses, 1u);
 		return false;
 	}
+	sampleIdentity.PrimitiveIndex = sampledPrimitiveIndex;
+	sampleIdentity.MaterialIndex = sampledMaterialIndex;
 	float3 lightRadiance = SmokeSampleMaterialEmission(material, lightUv) * max(material.emissiveIntensity, 0.0);
 	lightRadiance *= max(candidate.emissionScale, 0.0);
 	if (!all(isfinite(lightRadiance)) || !any(lightRadiance > 0.0))
@@ -354,6 +387,20 @@ bool SmokeEvaluateEmissiveIncidentWithSolidAngleDenominator(
 	return all(isfinite(incidentRadiance)) && SmokeEmissiveLuminance(incidentRadiance) > 1e-8;
 }
 
+bool SmokeEvaluateEmissiveIncidentWithSolidAngleDenominator(
+	SmokeEmissiveReservoirRecord record,
+	float3 receiverPosition,
+	bool diagnostics,
+	float solidAngleDenominator,
+	out float3 incidentRadiance,
+	out float3 lightDirection,
+	out float distanceToLight)
+{
+	SmokeEmissiveSampleIdentity ignoredIdentity;
+	return SmokeEvaluateEmissiveIncidentWithSolidAngleDenominatorAndPrimitive(record, receiverPosition, diagnostics,
+		solidAngleDenominator, incidentRadiance, lightDirection, distanceToLight, ignoredIdentity);
+}
+
 bool SmokeEvaluateEmissiveIncident(
 	SmokeEmissiveReservoirRecord record,
 	float3 receiverPosition,
@@ -367,6 +414,22 @@ bool SmokeEvaluateEmissiveIncident(
 		12.56637061436, incidentRadiance, lightDirection, distanceToLight);
 }
 
+bool SmokeEvaluateWorldEmissiveIncidentWithPrimitive(
+	SmokeEmissiveReservoirRecord record,
+	float3 receiverPosition,
+	bool diagnostics,
+	out float3 incidentRadiance,
+	out float3 lightDirection,
+	out float distanceToLight,
+	out SmokeEmissiveSampleIdentity sampleIdentity)
+{
+	// The world field stores incident radiance before HG phase projection. Its
+	// area-over-distance term is already a solid-angle estimate, so applying
+	// 4*pi here and HG's normalization later would attenuate it twice.
+	return SmokeEvaluateEmissiveIncidentWithSolidAngleDenominatorAndPrimitive(record, receiverPosition, diagnostics,
+		1.0, incidentRadiance, lightDirection, distanceToLight, sampleIdentity);
+}
+
 bool SmokeEvaluateWorldEmissiveIncident(
 	SmokeEmissiveReservoirRecord record,
 	float3 receiverPosition,
@@ -375,11 +438,9 @@ bool SmokeEvaluateWorldEmissiveIncident(
 	out float3 lightDirection,
 	out float distanceToLight)
 {
-	// The world field stores incident radiance before HG phase projection. Its
-	// area-over-distance term is already a solid-angle estimate, so applying
-	// 4*pi here and HG's normalization later would attenuate it twice.
-	return SmokeEvaluateEmissiveIncidentWithSolidAngleDenominator(record, receiverPosition, diagnostics,
-		1.0, incidentRadiance, lightDirection, distanceToLight);
+	SmokeEmissiveSampleIdentity ignoredIdentity;
+	return SmokeEvaluateWorldEmissiveIncidentWithPrimitive(record, receiverPosition, diagnostics,
+		incidentRadiance, lightDirection, distanceToLight, ignoredIdentity);
 }
 
 bool SmokeEvaluateEmissiveCandidate(

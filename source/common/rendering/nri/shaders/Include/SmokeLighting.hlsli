@@ -286,16 +286,37 @@ void SmokeCommitFilterStats(SmokeFilterStats stats)
 	if (stats.continuationLimitExits != 0u) InterlockedAdd(gSmokeControl[0].FilterContinuationLimitExits, stats.continuationLimitExits);
 }
 
-bool SmokePointLightVisibleFilteredBiased(
+struct SmokeVisibilityBlocker
+{
+	uint Valid;
+	uint InstanceId;
+	uint DataSource;
+	uint PrimitiveIndex;
+	uint MaterialIndex;
+	float Distance;
+};
+
+SmokeVisibilityBlocker SmokeEmptyVisibilityBlocker()
+{
+	SmokeVisibilityBlocker blocker = (SmokeVisibilityBlocker)0;
+	blocker.InstanceId = 0xffffffffu;
+	blocker.DataSource = 0xffffffffu;
+	blocker.PrimitiveIndex = 0xffffffffu;
+	blocker.MaterialIndex = 0xffffffffu;
+	blocker.Distance = -1.0;
+	return blocker;
+}
+
+bool SmokePointLightVisibleFilteredBiasedWithBlocker(
 	float3 receiverPosition,
 	float3 lightDirection,
 	float lightDistance,
 	float originBias,
 	float endpointBias,
 	bool diagnostics,
-	out float blockerDistance)
+	out SmokeVisibilityBlocker blocker)
 {
-	blockerDistance = -1.0;
+	blocker = SmokeEmptyVisibilityBlocker();
 	SmokeFilterStats stats = (SmokeFilterStats)0;
 	float3 origin = receiverPosition + lightDirection * originBias;
 	float remainingDistance = max(lightDistance - originBias - endpointBias, 0.001);
@@ -332,7 +353,9 @@ bool SmokePointLightVisibleFilteredBiased(
 			const uint instanceId = query.CommittedInstanceID();
 			if (instanceId >= sceneInstanceCount)
 			{
-				blockerDistance = query.CommittedRayT();
+				blocker.Valid = 1u;
+				blocker.InstanceId = instanceId;
+				blocker.Distance = query.CommittedRayT();
 				stats.acceptedBlockers++;
 				if (diagnostics) SmokeCommitFilterStats(stats);
 				return false;
@@ -385,7 +408,12 @@ bool SmokePointLightVisibleFilteredBiased(
 				}
 			}
 			stats.acceptedBlockers++;
-			blockerDistance = hitDistance;
+			blocker.Valid = 1u;
+			blocker.InstanceId = instanceId;
+			blocker.DataSource = instanceData.dataSource;
+			blocker.PrimitiveIndex = primitiveIndex;
+			blocker.MaterialIndex = materialIndex;
+			blocker.Distance = hitDistance;
 			if (diagnostics) SmokeCommitFilterStats(stats);
 			return false;
 		}
@@ -399,6 +427,22 @@ bool SmokePointLightVisibleFilteredBiased(
 	stats.continuationLimitExits++;
 	if (diagnostics) SmokeCommitFilterStats(stats);
 	return true;
+}
+
+bool SmokePointLightVisibleFilteredBiased(
+	float3 receiverPosition,
+	float3 lightDirection,
+	float lightDistance,
+	float originBias,
+	float endpointBias,
+	bool diagnostics,
+	out float blockerDistance)
+{
+	SmokeVisibilityBlocker blocker;
+	const bool visible = SmokePointLightVisibleFilteredBiasedWithBlocker(receiverPosition, lightDirection,
+		lightDistance, originBias, endpointBias, diagnostics, blocker);
+	blockerDistance = blocker.Distance;
+	return visible;
 }
 
 bool SmokePointLightVisibleFilteredBiased(
@@ -437,6 +481,17 @@ bool SmokeEmissiveVisibleFiltered(
 		receiverPosition, lightDirection, lightDistance, 0.05, 0.05, diagnostics, blockerDistance);
 }
 
+bool SmokeEmissiveVisibleFilteredWithBlocker(
+	float3 receiverPosition,
+	float3 lightDirection,
+	float lightDistance,
+	bool diagnostics,
+	out SmokeVisibilityBlocker blocker)
+{
+	return SmokePointLightVisibleFilteredBiasedWithBlocker(
+		receiverPosition, lightDirection, lightDistance, 0.05, 0.05, diagnostics, blocker);
+}
+
 float SmokeHenyeyGreenstein(float cosineTheta, float anisotropy)
 {
 	const float g = clamp(anisotropy, -0.95, 0.95);
@@ -453,16 +508,16 @@ float3 SmokeSampleReceiverFacingEmitter(RuntimePointLightData light, float3 cent
 	return SampleAnalyticReceiverFacingDisk(light.position, emitterRadius, centerDirection, float2(cos(phi), sin(phi)) * radius);
 }
 
-bool SmokePointLightVisibleBiased(
+bool SmokePointLightVisibleBiasedWithBlocker(
 	float3 receiverPosition,
 	float3 lightDirection,
 	float lightDistance,
 	float originBias,
 	float endpointBias,
 	bool diagnostics,
-	out float blockerDistance)
+	out SmokeVisibilityBlocker blocker)
 {
-	blockerDistance = -1.0;
+	blocker = SmokeEmptyVisibilityBlocker();
 	if (lightDistance <= originBias + endpointBias + 0.001)
 		return true;
 
@@ -477,7 +532,43 @@ bool SmokePointLightVisibleBiased(
 	while (query.Proceed()) {}
 	const bool visible = query.CommittedStatus() != COMMITTED_TRIANGLE_HIT;
 	if (!visible)
-		blockerDistance = query.CommittedRayT();
+	{
+		blocker.Valid = 1u;
+		blocker.InstanceId = query.CommittedInstanceID();
+		blocker.Distance = query.CommittedRayT();
+		// Force-opaque production visibility historically needed only distance.
+		// Resolve the extra scene identity solely for an explicit target run.
+		if ((gSmokeConstants.FilteredVisibilityEnabled >> 16u) != 0u)
+		{
+			uint sceneInstanceCount, sceneInstanceStride;
+			gSmokeSceneInstances.GetDimensions(sceneInstanceCount, sceneInstanceStride);
+			if (blocker.InstanceId < sceneInstanceCount)
+			{
+				const SceneInstanceData instanceData = gSmokeSceneInstances[blocker.InstanceId];
+				const uint primitiveIndex = instanceData.primitiveBase + query.CommittedPrimitiveIndex();
+				const PrimitiveData primitive = SmokeGetPrimitive(instanceData.dataSource, primitiveIndex);
+				blocker.DataSource = instanceData.dataSource;
+				blocker.PrimitiveIndex = primitiveIndex;
+				blocker.MaterialIndex = SmokeResolveMaterialIndex(instanceData, primitive);
+			}
+		}
+	}
+	return visible;
+}
+
+bool SmokePointLightVisibleBiased(
+	float3 receiverPosition,
+	float3 lightDirection,
+	float lightDistance,
+	float originBias,
+	float endpointBias,
+	bool diagnostics,
+	out float blockerDistance)
+{
+	SmokeVisibilityBlocker blocker;
+	const bool visible = SmokePointLightVisibleBiasedWithBlocker(receiverPosition, lightDirection,
+		lightDistance, originBias, endpointBias, diagnostics, blocker);
+	blockerDistance = blocker.Distance;
 	return visible;
 }
 
@@ -515,6 +606,17 @@ bool SmokeEmissiveVisible(
 {
 	return SmokePointLightVisibleBiased(
 		receiverPosition, lightDirection, lightDistance, 0.05, 0.05, diagnostics, blockerDistance);
+}
+
+bool SmokeEmissiveVisibleWithBlocker(
+	float3 receiverPosition,
+	float3 lightDirection,
+	float lightDistance,
+	bool diagnostics,
+	out SmokeVisibilityBlocker blocker)
+{
+	return SmokePointLightVisibleBiasedWithBlocker(
+		receiverPosition, lightDirection, lightDistance, 0.05, 0.05, diagnostics, blocker);
 }
 
 float3 SmokeDirectionalColor()
@@ -651,6 +753,7 @@ bool SmokeSamplePointOnEmissive(
 	out uint primitiveIndex,
 	out PrimitiveData primitive,
 	out MaterialData material,
+	out uint materialIndex,
 	out float3 position,
 	out float2 uv,
 	out float3 normal,
@@ -659,6 +762,7 @@ bool SmokeSamplePointOnEmissive(
 	primitiveIndex = candidate.primitiveIndex;
 	primitive = (PrimitiveData)0;
 	material = (MaterialData)0;
+	materialIndex = 0xffffffffu;
 	position = 0.0;
 	uv = 0.0;
 	normal = 0.0;
@@ -684,7 +788,7 @@ bool SmokeSamplePointOnEmissive(
 		primitiveIndex = candidate.primitiveIndex + min((uint)(SmokeRandom01(randomState) * candidate.primitiveCount), candidate.primitiveCount - 1u);
 	}
 	primitive = SmokeGetPrimitive(candidate.dataSource, primitiveIndex);
-	const uint materialIndex = placedRange ? SmokeResolveMaterialIndex(instanceData, primitive) : primitive.materialIndex;
+	materialIndex = placedRange ? SmokeResolveMaterialIndex(instanceData, primitive) : primitive.materialIndex;
 	material = SmokeGetMaterial(candidate.dataSource, materialIndex);
 	SceneVertex v0 = SmokeGetVertex(candidate.dataSource, primitive.indices.x);
 	SceneVertex v1 = SmokeGetVertex(candidate.dataSource, primitive.indices.y);

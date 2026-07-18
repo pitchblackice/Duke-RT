@@ -138,6 +138,23 @@ struct NRISmokeControlGpu
 	uint32_t emissiveInnerBlockerInterior = 0;
 	uint32_t emissiveInnerSourceSelections = 0;
 	uint32_t emissiveInnerSourceOverflow = 0;
+	// Exact-candidate smoke visibility telemetry. These fields are only written
+	// while an explicit diagnostic emissive candidate is selected.
+	uint32_t emissiveTargetVisibilityRays = 0;
+	uint32_t emissiveTargetVisibilityVisible = 0;
+	uint32_t emissiveTargetBlockerExact = 0;
+	uint32_t emissiveTargetBlockerRange = 0;
+	uint32_t emissiveTargetBlockerOther = 0;
+	uint32_t emissiveTargetWitnessClaim = 0;
+	uint32_t emissiveTargetWitnessCandidate = 0xffffffffu;
+	uint32_t emissiveTargetWitnessRelation = 0;
+	uint32_t emissiveTargetWitnessSamplePrimitive = 0xffffffffu;
+	uint32_t emissiveTargetWitnessSampleMaterial = 0xffffffffu;
+	uint32_t emissiveTargetWitnessBlockerDataSource = 0xffffffffu;
+	uint32_t emissiveTargetWitnessBlockerInstance = 0xffffffffu;
+	uint32_t emissiveTargetWitnessBlockerPrimitive = 0xffffffffu;
+	uint32_t emissiveTargetWitnessBlockerMaterial = 0xffffffffu;
+	uint32_t emissiveTargetWitnessDistanceBits = 0;
 	uint32_t maximumDepthSpan = 0;
 	uint32_t depthSpanOne = 0;
 	uint32_t depthSpanTwoToFour = 0;
@@ -238,7 +255,7 @@ struct NRISmokeEmissiveStorageGpu
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
 static_assert(sizeof(NRISmokeStyleGpu) == 80);
 static_assert(sizeof(NRISmokeInjectionCommandGpu) == 64);
-static_assert(sizeof(NRISmokeControlGpu) == 508);
+static_assert(sizeof(NRISmokeControlGpu) == 568);
 static_assert(sizeof(NRISmokeIndirectCacheGpu) == 32);
 static_assert(sizeof(NRISmokeDirectCacheGpu) == 40);
 static_assert(sizeof(NRISmokeEmissiveStorageGpu) == 48);

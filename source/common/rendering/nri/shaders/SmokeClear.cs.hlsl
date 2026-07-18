@@ -60,6 +60,21 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const uint innerBlockerInterior = preserveInnerRis ? gSmokeControl[0].EmissiveInnerBlockerInterior : 0u;
 			const uint innerSourceSelections = preserveInnerRis ? gSmokeControl[0].EmissiveInnerSourceSelections : 0u;
 			const uint innerSourceOverflow = preserveInnerRis ? gSmokeControl[0].EmissiveInnerSourceOverflow : 0u;
+			const uint emissiveTargetVisibilityRays = preserveInnerRis ? gSmokeControl[0].EmissiveTargetVisibilityRays : 0u;
+			const uint emissiveTargetVisibilityVisible = preserveInnerRis ? gSmokeControl[0].EmissiveTargetVisibilityVisible : 0u;
+			const uint emissiveTargetBlockerExact = preserveInnerRis ? gSmokeControl[0].EmissiveTargetBlockerExact : 0u;
+			const uint emissiveTargetBlockerRange = preserveInnerRis ? gSmokeControl[0].EmissiveTargetBlockerRange : 0u;
+			const uint emissiveTargetBlockerOther = preserveInnerRis ? gSmokeControl[0].EmissiveTargetBlockerOther : 0u;
+			const uint emissiveTargetWitnessClaim = preserveInnerRis ? gSmokeControl[0].EmissiveTargetWitnessClaim : 0u;
+			const uint emissiveTargetWitnessCandidate = preserveInnerRis ? gSmokeControl[0].EmissiveTargetWitnessCandidate : 0xffffffffu;
+			const uint emissiveTargetWitnessRelation = preserveInnerRis ? gSmokeControl[0].EmissiveTargetWitnessRelation : 0u;
+			const uint emissiveTargetWitnessSamplePrimitive = preserveInnerRis ? gSmokeControl[0].EmissiveTargetWitnessSamplePrimitive : 0xffffffffu;
+			const uint emissiveTargetWitnessSampleMaterial = preserveInnerRis ? gSmokeControl[0].EmissiveTargetWitnessSampleMaterial : 0xffffffffu;
+			const uint emissiveTargetWitnessBlockerDataSource = preserveInnerRis ? gSmokeControl[0].EmissiveTargetWitnessBlockerDataSource : 0xffffffffu;
+			const uint emissiveTargetWitnessBlockerInstance = preserveInnerRis ? gSmokeControl[0].EmissiveTargetWitnessBlockerInstance : 0xffffffffu;
+			const uint emissiveTargetWitnessBlockerPrimitive = preserveInnerRis ? gSmokeControl[0].EmissiveTargetWitnessBlockerPrimitive : 0xffffffffu;
+			const uint emissiveTargetWitnessBlockerMaterial = preserveInnerRis ? gSmokeControl[0].EmissiveTargetWitnessBlockerMaterial : 0xffffffffu;
+			const uint emissiveTargetWitnessDistanceBits = preserveInnerRis ? gSmokeControl[0].EmissiveTargetWitnessDistanceBits : 0u;
 			SmokeControl control = (SmokeControl)0;
 			control.Epoch = gSmokeConstants.SimulationEpoch;
 			control.MaximumCandidatesPerFroxel = 0u;
@@ -77,6 +92,21 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			control.EmissiveInnerBlockerInterior = innerBlockerInterior;
 			control.EmissiveInnerSourceSelections = innerSourceSelections;
 			control.EmissiveInnerSourceOverflow = innerSourceOverflow;
+			control.EmissiveTargetVisibilityRays = emissiveTargetVisibilityRays;
+			control.EmissiveTargetVisibilityVisible = emissiveTargetVisibilityVisible;
+			control.EmissiveTargetBlockerExact = emissiveTargetBlockerExact;
+			control.EmissiveTargetBlockerRange = emissiveTargetBlockerRange;
+			control.EmissiveTargetBlockerOther = emissiveTargetBlockerOther;
+			control.EmissiveTargetWitnessClaim = emissiveTargetWitnessClaim;
+			control.EmissiveTargetWitnessCandidate = emissiveTargetWitnessCandidate;
+			control.EmissiveTargetWitnessRelation = emissiveTargetWitnessRelation;
+			control.EmissiveTargetWitnessSamplePrimitive = emissiveTargetWitnessSamplePrimitive;
+			control.EmissiveTargetWitnessSampleMaterial = emissiveTargetWitnessSampleMaterial;
+			control.EmissiveTargetWitnessBlockerDataSource = emissiveTargetWitnessBlockerDataSource;
+			control.EmissiveTargetWitnessBlockerInstance = emissiveTargetWitnessBlockerInstance;
+			control.EmissiveTargetWitnessBlockerPrimitive = emissiveTargetWitnessBlockerPrimitive;
+			control.EmissiveTargetWitnessBlockerMaterial = emissiveTargetWitnessBlockerMaterial;
+			control.EmissiveTargetWitnessDistanceBits = emissiveTargetWitnessDistanceBits;
 			gSmokeControl[0] = control;
 		}
 		else
