@@ -44,7 +44,15 @@ private:
 		bool emitted = false;
 		bool observed = false;
 	};
+	struct MapEmitterState
+	{
+		double previousTimeSeconds = 0.0;
+		double intervalRemainder = 0.0;
+		bool emitted = false;
+	};
 
 	uint32_t mGeneration = 0;
+	FString mActiveMapName;
 	std::unordered_map<Identity, ActorState, IdentityHash> mActorStates;
+	std::unordered_map<uint32_t, MapEmitterState> mMapEmitterStates;
 };

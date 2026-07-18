@@ -25,6 +25,49 @@ namespace
 		outDirection[2] = (float)-worldDirection.Y;
 	}
 
+	void SetPointSourceShape(NRISmokeInjectionCommandGpu& command)
+	{
+		command.shape = static_cast<uint32_t>(NRISmokeInjectionShape::Sphere);
+		std::fill(command.halfAxisU, command.halfAxisU + 3, 0.0f);
+		std::fill(command.halfAxisV, command.halfAxisV + 3, 0.0f);
+	}
+
+	bool BuildMapEmitterRectangleBasis(const float sourceNormal[3], float rotationDegrees,
+		float width, float height, DVector3& outNormal, DVector3& outAxisU, DVector3& outAxisV)
+	{
+		if (!std::isfinite(rotationDegrees) || !std::isfinite(width) || !std::isfinite(height))
+		{
+			return false;
+		}
+		outNormal = DVector3(sourceNormal[0], sourceNormal[1], sourceNormal[2]);
+		if (!std::isfinite(outNormal.X) || !std::isfinite(outNormal.Y) || !std::isfinite(outNormal.Z) ||
+			outNormal.isZero())
+		{
+			return false;
+		}
+		outNormal.MakeUnit();
+
+		const DVector3 reference = std::abs(outNormal.Z) < 0.999 ?
+			DVector3(0.0, 0.0, 1.0) : DVector3(0.0, 1.0, 0.0);
+		DVector3 baseU = reference ^ outNormal;
+		if (baseU.isZero())
+		{
+			return false;
+		}
+		baseU.MakeUnit();
+		DVector3 baseV = outNormal ^ baseU;
+		baseV.MakeUnit();
+
+		const double radians = (double)rotationDegrees * (3.14159265358979323846 / 180.0);
+		const double cosine = std::cos(radians);
+		const double sine = std::sin(radians);
+		const DVector3 rotatedU = baseU * cosine + baseV * sine;
+		const DVector3 rotatedV = baseV * cosine - baseU * sine;
+		outAxisU = rotatedU * (std::max(0.0f, width) * 0.5);
+		outAxisV = rotatedV * (std::max(0.0f, height) * 0.5);
+		return true;
+	}
+
 	bool ActorMatchesClass(const DCoreActor* actor, const PClassActor* actorClass)
 	{
 		return actor != nullptr && actorClass != nullptr && actor->GetClass() != nullptr &&
@@ -55,6 +98,8 @@ size_t NRISmokeEmitterSystem::IdentityHash::operator()(const Identity& value) co
 void NRISmokeEmitterSystem::Reset()
 {
 	mActorStates.clear();
+	mMapEmitterStates.clear();
+	mActiveMapName = "";
 	mGeneration = 0;
 }
 
@@ -64,10 +109,12 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 	uint32_t& nextSerial, uint32_t traceMode)
 {
 	const ResolvedLightOverlaySet& resolved = GetResolvedLightOverlaySet();
-	if (mGeneration != resolved.resolvedGeneration)
+	if (mGeneration != resolved.resolvedGeneration || mActiveMapName.CompareNoCase(resolved.activeMapName) != 0)
 	{
 		mGeneration = resolved.resolvedGeneration;
+		mActiveMapName = resolved.activeMapName;
 		mActorStates.clear();
+		mMapEmitterStates.clear();
 	}
 	styles.clear();
 	styles.resize(std::max<uint32_t>(1u, resolved.smokeStyles.Size()));
@@ -285,6 +332,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 				command.radiusScale = rule.radiusScale;
 				command.velocityCone = rule.velocityCone;
 				command.epoch = epoch;
+				SetPointSourceShape(command);
 				commands.push_back(command);
 				if (traceMode != 0)
 				{
@@ -319,6 +367,117 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 	}
 	for (auto it = mActorStates.begin(); it != mActorStates.end(); )
 		it = !it->second.observed ? mActorStates.erase(it) : std::next(it);
+
+	std::vector<uint32_t> mapEmittedPerRule;
+	std::vector<uint32_t> mapParticlesPerRule;
+	std::vector<uint32_t> mapSkippedPerRule;
+	std::vector<uint32_t> mapActivePerRule;
+	if (traceMode != 0)
+	{
+		mapEmittedPerRule.resize(resolved.mapSmokeEmitterRules.Size());
+		mapParticlesPerRule.resize(resolved.mapSmokeEmitterRules.Size());
+		mapSkippedPerRule.resize(resolved.mapSmokeEmitterRules.Size());
+		mapActivePerRule.resize(resolved.mapSmokeEmitterRules.Size());
+	}
+	for (uint32_t ruleIndex = 0; ruleIndex < resolved.mapSmokeEmitterRules.Size(); ++ruleIndex)
+	{
+		const auto& rule = resolved.mapSmokeEmitterRules[ruleIndex];
+		if (!resolved.currentMapAvailable || !rule.styleResolved ||
+			rule.mapName.CompareNoCase(resolved.activeMapName) != 0)
+		{
+			continue;
+		}
+		if (traceMode != 0) mapActivePerRule[ruleIndex] = 1u;
+
+		DVector3 normal;
+		DVector3 axisU;
+		DVector3 axisV;
+		if (!BuildMapEmitterRectangleBasis(rule.normal, rule.rotation, rule.size[0], rule.size[1],
+			normal, axisU, axisV))
+		{
+			if (traceMode >= 2 && verbosePrinted < 32u)
+			{
+				Printf("NRI PT smoke emitter: event=map-ignored map=%s rule=%s reason=invalid-basis\n",
+					resolved.activeMapName.GetChars(), rule.id.GetChars());
+				verbosePrinted++;
+			}
+			continue;
+		}
+
+		MapEmitterState& state = mMapEmitterStates[ruleIndex];
+		uint32_t emitCount = 0u;
+		uint32_t skipped = 0u;
+		if (!state.emitted)
+		{
+			state.emitted = true;
+			state.previousTimeSeconds = gameplayTimeSeconds;
+			state.intervalRemainder = 0.0;
+			emitCount = 1u;
+		}
+		else
+		{
+			const double elapsedSeconds = std::max(0.0, gameplayTimeSeconds - state.previousTimeSeconds);
+			state.previousTimeSeconds = gameplayTimeSeconds;
+			const double intervalSeconds = std::max(0.001, (double)rule.intervalSeconds);
+			const double total = state.intervalRemainder + elapsedSeconds;
+			const uint32_t candidateCount = (uint32_t)std::floor(total / intervalSeconds);
+			state.intervalRemainder = std::fmod(total, intervalSeconds);
+			emitCount = std::min(candidateCount, rule.maxSegmentsPerFrame);
+			skipped = candidateCount - emitCount;
+		}
+
+		const DVector3 center(rule.position[0], rule.position[1], rule.position[2]);
+		const DVector3 offsetCenter = center + normal * rule.offset;
+		const DVector3 velocity = normal * rule.velocityScale;
+		for (uint32_t emissionIndex = 0; emissionIndex < emitCount; ++emissionIndex)
+		{
+			NRISmokeInjectionCommandGpu command = {};
+			WorldToPathTracingPosition(offsetCenter, command.position);
+			WorldToPathTracingDirection(velocity, command.velocity);
+			WorldToPathTracingDirection(axisU, command.halfAxisU);
+			WorldToPathTracingDirection(axisV, command.halfAxisV);
+			command.spawnRadius = rule.spawnRadius;
+			command.styleIndex = rule.styleIndex;
+			command.count = rule.count;
+			command.serial = nextSerial++;
+			command.densityScale = rule.densityScale;
+			command.radiusScale = rule.radiusScale;
+			command.velocityCone = rule.velocityCone;
+			command.epoch = epoch;
+			command.shape = static_cast<uint32_t>(NRISmokeInjectionShape::Rectangle);
+			commands.push_back(command);
+			if (traceMode != 0)
+			{
+				mapEmittedPerRule[ruleIndex]++;
+				mapParticlesPerRule[ruleIndex] += command.count;
+			}
+			if (traceMode >= 2 && verbosePrinted < 32u)
+			{
+				Printf("NRI PT smoke emitter: event=map map=%s rule=%s command_serial=%u style=%u particles=%u render=(%.3f,%.3f,%.3f) velocity=(%.3f,%.3f,%.3f) axis_u=(%.3f,%.3f,%.3f) axis_v=(%.3f,%.3f,%.3f) shape=rectangle\n",
+					resolved.activeMapName.GetChars(), rule.id.GetChars(), command.serial, command.styleIndex, command.count,
+					command.position[0], command.position[1], command.position[2],
+					command.velocity[0], command.velocity[1], command.velocity[2],
+					command.halfAxisU[0], command.halfAxisU[1], command.halfAxisU[2],
+					command.halfAxisV[0], command.halfAxisV[1], command.halfAxisV[2]);
+				verbosePrinted++;
+			}
+		}
+		if (traceMode != 0)
+		{
+			mapSkippedPerRule[ruleIndex] += skipped;
+		}
+	}
+	if (traceMode != 0)
+	{
+		for (uint32_t ruleIndex = 0; ruleIndex < resolved.mapSmokeEmitterRules.Size(); ++ruleIndex)
+		{
+			if (mapActivePerRule[ruleIndex] == 0u) continue;
+			const auto& rule = resolved.mapSmokeEmitterRules[ruleIndex];
+			Printf("NRI PT smoke emitter: event=map-frame-summary map=%s rule=%s active=%u emitted=%u particles=%u skipped=%u interval=%.3f shape=rectangle\n",
+				resolved.activeMapName.GetChars(), rule.id.GetChars(), mapActivePerRule[ruleIndex], mapEmittedPerRule[ruleIndex],
+				mapParticlesPerRule[ruleIndex], mapSkippedPerRule[ruleIndex], rule.intervalSeconds);
+		}
+	}
 
 	uint32_t eventCommands = 0;
 	uint32_t eventParticles = 0;
@@ -383,6 +542,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			command.radiusScale = rule.radiusScale;
 			command.velocityCone = rule.velocityCone;
 			command.epoch = epoch;
+			SetPointSourceShape(command);
 			commands.push_back(command);
 			eventCommands++;
 			eventParticles += command.count;
