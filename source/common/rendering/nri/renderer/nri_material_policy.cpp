@@ -762,7 +762,7 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 void NRIRenderer::ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials)
 {
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
-	if (resolvedLightOverlays.actorRules.Size() == 0 && resolvedLightOverlays.actorOverrideRules.Size() == 0)
+	if (!nri_material_policy::HasActorMaterialOverrideRules(resolvedLightOverlays))
 	{
 		return;
 	}
@@ -789,7 +789,18 @@ uint64_t NRIRenderer::ComputeChunkEmissiveOverrideHash(const nri_scene::Material
 
 bool nri_material_policy::HasActorMaterialOverrideRules(const ResolvedLightOverlaySet& resolved)
 {
-	return resolved.actorRules.Size() > 0 || resolved.actorOverrideRules.Size() > 0;
+	if (resolved.actorRules.Size() > 0 || resolved.actorOverrideRules.Size() > 0)
+	{
+		return true;
+	}
+	for (const auto& rule : resolved.smokeActorRules)
+	{
+		if (rule.emitterForeground)
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 bool nri_material_policy::HasActorFullbrightOverrides(const ResolvedLightOverlaySet& resolved)
@@ -933,6 +944,35 @@ void nri_material_policy::BuildActorMaterialOverrideMap(
 			}
 		}
 
+		for (const auto& resolvedRule : resolved.smokeActorRules)
+		{
+			if (!resolvedRule.emitterForeground ||
+				!resolvedRule.actorClassResolved ||
+				!resolvedRule.styleResolved ||
+				resolvedRule.actorClass == nullptr ||
+				(actorClass != resolvedRule.actorClass && !actorClass->IsDescendantOf(resolvedRule.actorClass)))
+			{
+				continue;
+			}
+
+			DCoreActor* owner = actor->GetOwnerActor();
+			if (!resolvedRule.ownerClassName.IsEmpty() &&
+				(!resolvedRule.ownerClassResolved || owner == nullptr || owner->GetClass() == nullptr ||
+					(owner->GetClass() != resolvedRule.ownerClass && !owner->GetClass()->IsDescendantOf(resolvedRule.ownerClass))))
+			{
+				continue;
+			}
+			if (!resolvedRule.excludeOwnerClassName.IsEmpty() &&
+				(!resolvedRule.excludeOwnerClassResolved || (owner != nullptr && owner->GetClass() != nullptr &&
+					(owner->GetClass() == resolvedRule.excludeOwnerClass || owner->GetClass()->IsDescendantOf(resolvedRule.excludeOwnerClass)))))
+			{
+				continue;
+			}
+
+			touched = true;
+			overrideState.bits |= ActorMaterialOverride_SmokeForeground;
+		}
+
 		if (touched && !overrideState.Empty())
 		{
 			outOverrides[(int32_t)actor->GetIndex()] = overrideState;
@@ -1009,6 +1049,12 @@ void nri_material_policy::ApplyActorMaterialOverridesToBuiltMaterials(
 		{
 			material.lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowCast;
 			metadata.lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowCast;
+			appliedOverride = true;
+		}
+		if ((overrideBits & ActorMaterialOverride_SmokeForeground) != 0)
+		{
+			material.lightingFlags |= nri_scene::MaterialLightingFlag_SmokeForeground;
+			metadata.lightingFlags |= nri_scene::MaterialLightingFlag_SmokeForeground;
 			appliedOverride = true;
 		}
 		if ((overrideBits & ActorMaterialOverride_Fullbright) == 0)
@@ -1097,6 +1143,10 @@ void nri_material_policy::ApplyActorShadowMaterialOverrides(
 		if ((overrideBits & ActorMaterialOverride_NoShadowCast) != 0)
 		{
 			inOutGpuMaterials[materialIndex].lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowCast;
+		}
+		if ((overrideBits & ActorMaterialOverride_SmokeForeground) != 0)
+		{
+			inOutGpuMaterials[materialIndex].lightingFlags |= nri_scene::MaterialLightingFlag_SmokeForeground;
 		}
 		if ((overrideBits & ActorMaterialOverride_Fullbright) != 0)
 		{

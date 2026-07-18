@@ -17,6 +17,7 @@ namespace nri_material_policy
 		ActorMaterialOverride_NoShadowReceive = 1u << 0,
 		ActorMaterialOverride_NoShadowCast = 1u << 1,
 		ActorMaterialOverride_Fullbright = 1u << 2,
+		ActorMaterialOverride_SmokeForeground = 1u << 3,
 	};
 
 	struct ActorMaterialOverrideState

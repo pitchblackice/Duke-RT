@@ -1170,6 +1170,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float shadowVisibility = 1.0;
 		float shadowPenumbra = 0.0;
 		float roughness = 1.0;
+		bool smokeForeground = false;
 		if (bootstrapFlat)
 		{
 			const float primitiveHash = (float)(hit.primitiveIndex % 31u) / 30.0;
@@ -1179,6 +1180,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			albedo = SampleMaterialBaseColor(hit.materialIndex, hit.dataSource, hit.uv);
 			const MaterialData material = GetMaterialData(hit.materialIndex, hit.dataSource);
+			smokeForeground = (material.lightingFlags & MATERIAL_LIGHTING_FLAG_SMOKE_FOREGROUND) != 0u;
 			const bool fullbright = (material.flags & MATERIAL_FLAG_FULLBRIGHT) != 0;
 			const bool emissiveMaterial = IsMaterialEmissive(material);
 			const bool plainMirrorMaterial = IsPlainMirrorMaterial(material);
@@ -1458,7 +1460,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		const float4 motionOutput = float4(motion, currentViewZ);
 		gMotionOutput[pixelPos] = motionOutput;
-		gViewZOutput[pixelPos] = float4(currentViewZ, 0.0, 0.0, 1.0);
+		gViewZOutput[pixelPos] = float4(currentViewZ, smokeForeground ? 1.0 : 0.0, 0.0, 1.0);
 		const float4 packedDiffuse = PackDiffuseRadiance(diffuse, diffuseHitDistance, currentViewZ);
 		const float4 packedSpecular = PackSpecularRadiance(specular, specularHitDistance, currentViewZ, roughness);
 		if (bootstrapFlat)

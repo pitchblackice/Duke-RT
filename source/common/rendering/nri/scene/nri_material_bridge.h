@@ -190,6 +190,7 @@ enum MaterialLightingFlags : uint32_t
 	MaterialLightingFlag_HasGlowmap = 1u << 4,
 	MaterialLightingFlag_NoShadowReceive = 1u << 5,
 	MaterialLightingFlag_NoShadowCast = 1u << 6,
+	MaterialLightingFlag_SmokeForeground = 1u << 7,
 };
 
 enum MaterialEmissiveMode : uint32_t

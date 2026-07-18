@@ -86,8 +86,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gSmokeConstants.FroxelWidth == 0u || gSmokeConstants.FroxelHeight == 0u || gSmokeConstants.FroxelDepth == 0u)
 		return;
 	const uint2 pixel = dispatchThreadId.xy;
+	const float4 viewZSample = gSmokeViewZInput.Load(int3(pixel, 0));
 	float viewDepth;
-	if (!SmokeDecodeViewDepth(gSmokeViewZInput.Load(int3(pixel, 0)).x, viewDepth))
+	if (viewZSample.y > 0.5 || !SmokeDecodeViewDepth(viewZSample.x, viewDepth))
 	{
 		gSmokeVolumeCurrentOutput[pixel] = 0.0;
 		gSmokeVolumeCurrentMetaOutput[pixel] = 0.0;

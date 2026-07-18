@@ -321,6 +321,7 @@ struct ParsedLightOverlaySmokeActorRule
 	FString excludeOwnerClassName;
 	LightOverlaySmokeTrigger trigger = LightOverlaySmokeTrigger::Spawn;
 	LightOverlayActorActivationPolicy activationPolicy = LightOverlayActorActivationPolicy::Immediate;
+	bool emitterForeground = false;
 	FString styleId;
 	uint32_t count = 1;
 	float offset[3] = { 0.0f, 0.0f, 0.0f };
