@@ -125,6 +125,7 @@ void MarkPlayers()
 }
 
 bool r_NoInterpolate;
+extern bool demoplayback;
 int entertic;
 int oldentertics;
 int gametic;
@@ -298,6 +299,85 @@ static bool gPathTracingLevelPreloadSimulationHoldActive = false;
 static bool gPathTracingLevelPreloadNeeded = false;
 static bool gPathTracingLevelPreloadFinalCheckNeeded = false;
 static uint64_t gLevelTransitionSerial = 0;
+static uint64_t gPathTracingLevelLoadClockSerial = 0;
+static uint32_t gPathTracingLevelLoadClockRebases = 0;
+static uint32_t gPathTracingLevelLoadClockHoldFrames = 0;
+static uint32_t gPathTracingLevelLoadClockSuppressedTicks = 0;
+static double gPathTracingLevelLoadClockExcludedMs = 0.0;
+static bool gPathTracingLevelLoadClockAwaitingFirstPostRelease = false;
+
+static bool IsPathTracingLevelLoadBoundaryActive()
+{
+	return gPendingPathTracingLevelPreload ||
+		gPathTracingLevelPreloadAwaitingFirstLevelFrame ||
+		gPathTracingLevelPreloadFinalCheckNeeded ||
+		gPathTracingLevelPreloadSimulationHoldActive;
+}
+
+static bool UsePathTracingLevelLoadClockPolicy()
+{
+	return IsPathTracingLevelLoadBoundaryActive() && !netgame && !demoplayback;
+}
+
+static const char* GetPathTracingLevelLoadClockPolicyName()
+{
+	if (netgame) return "skip-network";
+	if (demoplayback) return "skip-demo";
+	return "single-player-rebase";
+}
+
+static void ResetPathTracingLevelLoadClockMetrics()
+{
+	gPathTracingLevelLoadClockSerial = gLevelTransitionSerial;
+	gPathTracingLevelLoadClockRebases = 0;
+	gPathTracingLevelLoadClockHoldFrames = 0;
+	gPathTracingLevelLoadClockSuppressedTicks = 0;
+	gPathTracingLevelLoadClockExcludedMs = 0.0;
+	gPathTracingLevelLoadClockAwaitingFirstPostRelease = false;
+}
+
+static void RebasePathTracingLevelLoadClock(const char* stage, double excludedMs, bool resetInput = false)
+{
+	if (!IsPathTracingLevelLoadBoundaryActive())
+	{
+		return;
+	}
+
+	const bool apply = UsePathTracingLevelLoadClockPolicy();
+	const int clockBefore = I_GetTime();
+	if (apply)
+	{
+		I_ResetFrameTime();
+		// Some blocking paths refresh the cached frame time internally. Align
+		// both SP tic producers explicitly so none of that already-observed
+		// elapsed time survives this named boundary.
+		oldentertics = I_GetTime();
+		Net_ClearFifo();
+		oldentertics = I_GetTime();
+		if (resetInput)
+		{
+			I_ResetInputTime();
+		}
+		++gPathTracingLevelLoadClockRebases;
+		gPathTracingLevelLoadClockExcludedMs += std::max(0.0, excludedMs);
+	}
+	const int clockAfter = I_GetTime();
+
+	const bool summaryStage = strcmp(stage, "begin") == 0 || strcmp(stage, "first-frame-release") == 0;
+	if ((int)nri_ptloadingtrace >= (summaryStage ? 1 : 2))
+	{
+		Printf("PERF level load clock: event=rebase stage=%s transition_serial=%llu policy=%s applied=%u excluded_ms=%.3f clock_before=%d clock_after=%d gametic=%d presentation=%llu\n",
+			stage,
+			(unsigned long long)gPathTracingLevelLoadClockSerial,
+			GetPathTracingLevelLoadClockPolicyName(),
+			apply ? 1u : 0u,
+			excludedMs,
+			clockBefore,
+			clockAfter,
+			gametic,
+			(unsigned long long)gPresentationGeneration);
+	}
+}
 
 static void PrintPathTracingLevelPreloadActorCacheStats(const char* event)
 {
@@ -410,6 +490,7 @@ static void FinalizePendingLevelStart()
 
 static bool BeginPathTracingLevelPreloadGate()
 {
+	const double beginStartMs = I_msTimeF();
 	if (screen == nullptr || !screen->StartPathTracingLevelPreload())
 	{
 		if ((int)nri_ptloadingtrace >= 1)
@@ -428,16 +509,23 @@ static bool BeginPathTracingLevelPreloadGate()
 	gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
 	gPathTracingLevelPreloadFirstLevelFrameCaptured = false;
 	gPathTracingLevelPreloadSimulationHoldActive = false;
+	ResetPathTracingLevelLoadClockMetrics();
 	nri_scene::SetPersistentVoxelActorStartupTransientMode(true, "begin-level-preload");
-	if (cl_loadingscreens && globalCutscenes.LoadingScreen.isdefined())
+	const bool retainedLoadingScreen = IsScreenJobRetainedForLevelLoad();
+	bool loadingScreenStarted = false;
+	if (!retainedLoadingScreen && cl_loadingscreens && globalCutscenes.LoadingScreen.isdefined())
 	{
-		StartCutscene(globalCutscenes.LoadingScreen, SJ_BLOCKUI, [](bool) {});
+		loadingScreenStarted = StartCutscene(globalCutscenes.LoadingScreen, SJ_BLOCKUI | SJ_NOCLEAR, [](bool) {});
 	}
 	gameaction = ga_intermission;
+	RebasePathTracingLevelLoadClock("begin", I_msTimeF() - beginStartMs);
 	if ((int)nri_ptloadingtrace >= 1)
 	{
-		Printf("NRI PT loading gate: event=begin result=pending loading_screen=%u gamestate=%s gameaction=%d screen_pending=%u\n",
+		Printf("NRI PT loading gate: event=begin result=pending loading_screen=%u loading_screen_started=%u loading_screen_retained=%u loading_runner=%u gamestate=%s gameaction=%d screen_pending=%u\n",
 			cl_loadingscreens && globalCutscenes.LoadingScreen.isdefined() ? 1u : 0u,
+			loadingScreenStarted ? 1u : 0u,
+			retainedLoadingScreen ? 1u : 0u,
+			cutscene.runner != nullptr ? 1u : 0u,
 			GetGameStateName(gamestate),
 			(int)gameaction,
 			screen != nullptr && screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
@@ -452,7 +540,9 @@ static bool TickPendingPathTracingLevelPreloadGate()
 		return false;
 	}
 
+	const double tickStartMs = I_msTimeF();
 	const bool preloadReady = screen->TickPathTracingLevelPreload();
+	RebasePathTracingLevelLoadClock("preload-pump", I_msTimeF() - tickStartMs);
 	if ((int)nri_ptloadingtrace >= 2)
 	{
 		Printf("NRI PT loading gate: event=pre-frame-tick ready=%u gamestate=%s gameaction=%d screen_pending=%u\n",
@@ -521,10 +611,12 @@ static bool RunPathTracingLevelPreloadFinalCheck()
 		}
 	}
 
+	const double finalCheckStartMs = I_msTimeF();
 	for (uint32_t pass = 0; pass < 8u && screen->IsPathTracingLevelPreloadPending(); ++pass)
 	{
 		(void)screen->TickPathTracingLevelPreload();
 	}
+	RebasePathTracingLevelLoadClock("final-check-pump", I_msTimeF() - finalCheckStartMs);
 
 	if (screen->IsPathTracingLevelPreloadPending())
 	{
@@ -546,10 +638,11 @@ static bool RunPathTracingLevelPreloadFinalCheck()
 		const auto drainStart = std::chrono::steady_clock::now();
 		screen->WaitForCommands(true);
 		screen->NotifyPathTracingLevelPreloadFinalCheckRelease();
+		const auto drainEnd = std::chrono::steady_clock::now();
+		const double drainMs = std::chrono::duration<double, std::milli>(drainEnd - drainStart).count();
+		RebasePathTracingLevelLoadClock("final-command-drain", drainMs);
 		if ((int)nri_ptloadingtrace >= 1)
 		{
-			const auto drainEnd = std::chrono::steady_clock::now();
-			const double drainMs = std::chrono::duration<double, std::milli>(drainEnd - drainStart).count();
 			Printf("NRI PT loading gate: event=final-check-drain ms=%.3f\n", drainMs);
 		}
 	}
@@ -573,6 +666,10 @@ void NewGame(MapRecord* map, int skill, bool ns = false)
 		if (!BeginPathTracingLevelPreloadGate())
 		{
 			FinalizePendingLevelStart();
+			if (IsScreenJobRetainedForLevelLoad())
+			{
+				EndScreenJob();
+			}
 		}
 		});
 }
@@ -701,6 +798,10 @@ static void GameTicker()
 					break;
 				}
 				gPathTracingLevelPreloadNeeded = false;
+				if (IsScreenJobRetainedForLevelLoad())
+				{
+					EndScreenJob();
+				}
 			}
 			if (gPathTracingLevelPreloadAwaitingFirstLevelFrame &&
 				gPathTracingLevelPreloadFirstLevelFrameCaptured &&
@@ -777,7 +878,24 @@ static void GameTicker()
 			break;
 
 		case ga_endscreenjob:
-			EndScreenJob();
+			if (IsPathTracingLevelLoadBoundaryActive())
+			{
+				if ((int)nri_ptloadingtrace >= 1)
+				{
+					Printf("NRI PT loading gate: event=screenjob-end-held source=queued-action gamestate=%s gameaction=%d loading_runner=%u\n",
+						GetGameStateName(gamestate),
+						(int)gameaction,
+						cutscene.runner != nullptr ? 1u : 0u);
+				}
+			}
+			else if (!netgame && !demoplayback && IsLevelTransitionScreenJob())
+			{
+				CompleteLevelTransitionScreenJob();
+			}
+			else
+			{
+				EndScreenJob();
+			}
 			break;
 
 			// for later
@@ -868,12 +986,9 @@ static void GameTicker()
 	case GS_INTRO:
 	{
 		TickPendingPathTracingLevelPreloadGate();
-		const bool pathTracingPreloadPending =
-			gPendingPathTracingLevelPreload &&
-			screen != nullptr &&
-			screen->IsPathTracingLevelPreloadPending();
+		const bool levelLoadPresentationHeld = IsPathTracingLevelLoadBoundaryActive();
 		const bool screenJobComplete = ScreenJobTick();
-		if (screenJobComplete && pathTracingPreloadPending && !gPathTracingLevelPreloadHeldScreenJobCompletion)
+		if (screenJobComplete && levelLoadPresentationHeld && !gPathTracingLevelPreloadHeldScreenJobCompletion)
 		{
 			gPathTracingLevelPreloadHeldScreenJobCompletion = true;
 			if ((int)nri_ptloadingtrace >= 1)
@@ -881,10 +996,10 @@ static void GameTicker()
 				Printf("NRI PT loading gate: event=screenjob-complete-held gamestate=%s gameaction=%d screen_pending=%u\n",
 					GetGameStateName(gamestate),
 					(int)gameaction,
-					screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
+					screen != nullptr && screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
 			}
 		}
-		if (screenJobComplete && !pathTracingPreloadPending)
+		if (screenJobComplete && !levelLoadPresentationHeld)
 		{
 			// synchronize termination with the playsim.
 			Net_WriteByte(DEM_ENDSCREENJOB);
@@ -963,6 +1078,7 @@ void Display()
 		perfDisplayTraceStats.skippedInactive = true;
 		return;
 	}
+	const double levelLoadDisplayStartMs = I_msTimeF();
 
 	const bool pathTracingGuiCaptureActive =
 		gamestate == GS_LEVEL &&
@@ -994,6 +1110,8 @@ void Display()
 	twod->Begin(screen->GetWidth(), screen->GetHeight());
 	twod->ClearClipRect();
 	bool levelRenderedThisFrame = false;
+	bool rebaseLevelLoadCaptureAfterPresent = false;
+	bool releaseLevelLoadBoundaryAfterPresent = false;
 	switch (gamestate)
 	{
 	case GS_MENUSCREEN:
@@ -1049,6 +1167,7 @@ void Display()
 			{
 				gPathTracingLevelPreloadFirstLevelFrameCaptured = true;
 				gPathTracingLevelPreloadSimulationHoldActive = true;
+				rebaseLevelLoadCaptureAfterPresent = true;
 				if ((int)nri_ptloadingtrace >= 1)
 				{
 					Printf("NRI PT loading gate: event=first-level-capture-complete gamestate=%s gameaction=%d gametic=%d final_check=%u\n",
@@ -1065,35 +1184,7 @@ void Display()
 			}
 			else if (!gPathTracingLevelPreloadFinalCheckNeeded)
 			{
-				nri_scene::SetPersistentVoxelActorStartupTransientMode(false, "first-level-frame-release");
-				if ((int)nri_ptloadingtrace >= 1)
-				{
-					PrintPathTracingLevelPreloadActorCacheStats("first-level-frame-release-cache");
-					Printf("NRI PT loading gate: event=simulation-hold-end gamestate=%s gameaction=%d gametic=%d\n",
-						GetGameStateName(gamestate),
-						(int)gameaction,
-						gametic);
-					Printf("NRI PT loading gate: event=first-level-frame-release gamestate=%s gameaction=%d gametic=%d\n",
-						GetGameStateName(gamestate),
-						(int)gameaction,
-						gametic);
-				}
-				if (screen != nullptr)
-				{
-					screen->NotifyPathTracingLevelFirstFrameRelease();
-				}
-				if (cutscene.runner != nullptr)
-				{
-					EndScreenJob();
-				}
-				gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
-				gPathTracingLevelPreloadFirstLevelFrameCaptured = false;
-				gPathTracingLevelPreloadSimulationHoldActive = false;
-				gPathTracingLevelPreloadHeldScreenJobCompletion = false;
-				if (gameaction == ga_level)
-				{
-					gameaction = ga_nothing;
-				}
+				releaseLevelLoadBoundaryAfterPresent = true;
 			}
 		}
 	}
@@ -1157,6 +1248,56 @@ void Display()
 	}
 	screen->Update();
 	perfDisplayTraceStats.updateMs += I_msTimeF() - stageStart;
+
+	if (releaseLevelLoadBoundaryAfterPresent)
+	{
+		nri_scene::SetPersistentVoxelActorStartupTransientMode(false, "first-level-frame-release");
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			PrintPathTracingLevelPreloadActorCacheStats("first-level-frame-release-cache");
+			Printf("NRI PT loading gate: event=simulation-hold-end gamestate=%s gameaction=%d gametic=%d loading_runner=%u\n",
+				GetGameStateName(gamestate),
+				(int)gameaction,
+				gametic,
+				cutscene.runner != nullptr ? 1u : 0u);
+			Printf("NRI PT loading gate: event=first-level-frame-release gamestate=%s gameaction=%d gametic=%d loading_runner=%u\n",
+				GetGameStateName(gamestate),
+				(int)gameaction,
+				gametic,
+				cutscene.runner != nullptr ? 1u : 0u);
+		}
+		screen->NotifyPathTracingLevelFirstFrameRelease();
+		if (cutscene.runner != nullptr)
+		{
+			EndScreenJob();
+		}
+		RebasePathTracingLevelLoadClock("first-frame-release", I_msTimeF() - levelLoadDisplayStartMs, true);
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("PERF level load clock: event=release transition_serial=%llu policy=%s rebases=%u excluded_ms=%.3f hold_frames=%u suppressed_ticks=%u gametic=%d presentation=%llu\n",
+				(unsigned long long)gPathTracingLevelLoadClockSerial,
+				GetPathTracingLevelLoadClockPolicyName(),
+				gPathTracingLevelLoadClockRebases,
+				gPathTracingLevelLoadClockExcludedMs,
+				gPathTracingLevelLoadClockHoldFrames,
+				gPathTracingLevelLoadClockSuppressedTicks,
+				gametic,
+				(unsigned long long)gPresentationGeneration);
+		}
+		gPathTracingLevelLoadClockAwaitingFirstPostRelease = true;
+		gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
+		gPathTracingLevelPreloadFirstLevelFrameCaptured = false;
+		gPathTracingLevelPreloadSimulationHoldActive = false;
+		gPathTracingLevelPreloadHeldScreenJobCompletion = false;
+		if (gameaction == ga_level)
+		{
+			gameaction = ga_nothing;
+		}
+	}
+	else if (rebaseLevelLoadCaptureAfterPresent)
+	{
+		RebasePathTracingLevelLoadClock("first-frame-capture", I_msTimeF() - levelLoadDisplayStartMs);
+	}
 }
 
 //==========================================================================
@@ -1271,7 +1412,37 @@ void TryRunTics (void)
 		counts = realtics;
 	else
 		counts = availabletics;
+	if (UsePathTracingLevelLoadClockPolicy())
+	{
+		++gPathTracingLevelLoadClockHoldFrames;
+		if (counts > 1)
+		{
+			gPathTracingLevelLoadClockSuppressedTicks += (uint32_t)(counts - 1);
+			counts = 1;
+		}
+	}
+	if (gPathTracingLevelLoadClockAwaitingFirstPostRelease && !netgame && !demoplayback && counts > 1)
+	{
+		// Close the named boundary with one ordinary simulation tick even when
+		// the local command FIFO has an extra predictive tic available.
+		counts = 1;
+	}
 	perfTryRunTicsTraceStats.counts = counts;
+	if (gPathTracingLevelLoadClockAwaitingFirstPostRelease)
+	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("PERF level load clock: event=first-post-release transition_serial=%llu policy=%s realtics=%d counts=%d gametic=%d gamestate=%s presentation=%llu\n",
+				(unsigned long long)gPathTracingLevelLoadClockSerial,
+				GetPathTracingLevelLoadClockPolicyName(),
+				realtics,
+				counts,
+				gametic,
+				GetGameStateName(gamestate),
+				(unsigned long long)gPresentationGeneration);
+		}
+		gPathTracingLevelLoadClockAwaitingFirstPostRelease = false;
+	}
 
 	// Uncapped framerate needs seprate checks
 	if (counts == 0 && !doWait)
@@ -1388,6 +1559,15 @@ void TryRunTics (void)
 
 			NetUpdate ();	// check for new console commands
 			TicStabilityEnd();
+			if (UsePathTracingLevelLoadClockPolicy() && counts > 0)
+			{
+				// The named loading boundary may begin inside a batch that was
+				// calculated before map/preload work started. Do not spend the
+				// remainder as catch-up ticks before another loading presentation.
+				gPathTracingLevelLoadClockSuppressedTicks += (uint32_t)counts;
+				counts = 0;
+				++gPathTracingLevelLoadClockHoldFrames;
+			}
 		}
 #if 0
 		gi->Predict(myconnectindex);

@@ -102,6 +102,82 @@ struct PerfCompactGpuTiming
 	uint32_t segmentCount = 0, invalidPairs = 0, droppedScopes = 0;
 };
 
+enum class PerfCompactFirstUseDomain : uint32_t
+{
+	Actor = 1,
+	Material = 2,
+	Texture = 3,
+	Voxel = 4,
+	Arena = 5,
+	Acceleration = 6,
+	Descriptor = 7,
+	Ingest = 8,
+	Compute = 9,
+};
+
+enum class PerfCompactFirstUseStage : uint32_t
+{
+	Request = 1,
+	IndexedPayload = 2,
+	ContentHash = 3,
+	AverageColor = 4,
+	Palette = 5,
+	MaterialRows = 6,
+	TextureResource = 7,
+	UploadRecord = 8,
+	UploadSubmit = 9,
+	UploadComplete = 10,
+	ArenaGrowth = 11,
+	ArenaCopy = 12,
+	BlasObject = 13,
+	BlasSubmit = 14,
+	BlasComplete = 15,
+	TlasPublish = 16,
+	DescriptorWrite = 17,
+	Publication = 18,
+};
+
+enum class PerfCompactFirstUseState : uint32_t
+{
+	Instant = 0,
+	Pending = 1,
+	Fallback = 2,
+	Ready = 3,
+	Cancelled = 4,
+	Failed = 5,
+};
+
+enum PerfCompactFirstUseFlags : uint32_t
+{
+	PerfCompactFirstUseBegin = 1u << 0,
+	PerfCompactFirstUseEnd = 1u << 1,
+};
+
+// A fixed-size, deferred-output event record. Callers should retain the returned
+// event ID while first-use work spans frames and close it with an End record.
+struct PerfCompactFirstUseRecord
+{
+	uint64_t eventId = 0;
+	uint64_t actorLifecycleKey = 0;
+	uint64_t sourceKey = 0;
+	uint64_t meshKey = 0;
+	uint64_t materialKey = 0;
+	uint64_t validatedSignature = 0;
+	uint64_t textureKey = 0;
+	uint64_t rendererFrame = 0;
+	uint64_t producerFrame = 0;
+	uint64_t submittedFence = 0;
+	uint64_t publicationFrame = 0;
+	uint64_t bytes = 0;
+	double cpuMs = 0.0;
+	uint32_t queuedSlot = UINT32_MAX;
+	uint32_t count = 1;
+	PerfCompactFirstUseDomain domain = PerfCompactFirstUseDomain::Actor;
+	PerfCompactFirstUseStage stage = PerfCompactFirstUseStage::Request;
+	PerfCompactFirstUseState state = PerfCompactFirstUseState::Instant;
+	uint32_t flags = 0;
+};
+
 void PerfCompactCaptureBeginOuterFrame(uint64_t presentationGeneration);
 void PerfCompactCaptureFlushIfReady();
 bool PerfCompactCaptureTimingActive();
@@ -110,5 +186,6 @@ void PerfCompactCaptureNoteNri(const PerfCompactCaptureToken& token, const PerfC
 void PerfCompactCaptureNoteBoundary(const PerfCompactCaptureToken& token, const PerfCompactBoundaryStats& stats);
 void PerfCompactCaptureExpectGpuSegment(const PerfCompactCaptureToken& token);
 void PerfCompactCaptureResolveGpuSegment(const PerfCompactCaptureToken& token, const PerfCompactGpuTiming& timing);
+uint64_t PerfCompactCaptureNoteFirstUse(const PerfCompactFirstUseRecord& record);
 void PerfCompactCaptureEndOuterFrame(const PerfCompactOuterFrame& frame);
 void PerfCompactCaptureAbort(const char* reason);

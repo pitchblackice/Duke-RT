@@ -7,6 +7,7 @@
 #include "nri_diagnostic_names.h"
 #include "nri_shader_contracts.h"
 #include "nri_scene_material_texture_slots.h"
+#include "../../../engine/perf_capture.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
 #include "printf.h"
@@ -44,6 +45,39 @@ namespace
 		return (int)perf_looptraceframes > 0;
 	}
 
+	bool MaterialReferencesTextureSlot(
+		const nri_scene::MaterialData& material,
+		const std::unordered_set<uint32_t>& textureSlots)
+	{
+		return textureSlots.find(material.textureIndex) != textureSlots.end() ||
+			textureSlots.find(material.normalTextureIndex) != textureSlots.end() ||
+			textureSlots.find(material.metallicTextureIndex) != textureSlots.end() ||
+			textureSlots.find(material.roughnessTextureIndex) != textureSlots.end() ||
+			textureSlots.find(material.emissiveTextureIndex) != textureSlots.end();
+	}
+
+	void MakePendingTextureMaterialTransparent(nri_scene::MaterialData& material)
+	{
+		// A white descriptor is not a safe fallback for an alpha-tested actor: it
+		// turns the cutout into an opaque ray occluder. Make only the affected
+		// material row reject every ray until its upload fence completes. The
+		// original row is rebuilt from the immutable bridge on the next frame.
+		material.textureIndex = UINT32_MAX;
+		material.normalTextureIndex = UINT32_MAX;
+		material.metallicTextureIndex = UINT32_MAX;
+		material.roughnessTextureIndex = UINT32_MAX;
+		material.emissiveTextureIndex = UINT32_MAX;
+		material.flags &= ~(nri_scene::MaterialFlag_Indexed | nri_scene::MaterialFlag_PlainMirror);
+		material.lightingFlags = 0;
+		material.alpha = 0.0f;
+		material.emissiveColor[0] = 0.0f;
+		material.emissiveColor[1] = 0.0f;
+		material.emissiveColor[2] = 0.0f;
+		material.emissiveIntensity = 0.0f;
+		material.emissiveMaskScale = 0.0f;
+		material.emissiveMode = nri_scene::MaterialEmissiveMode_None;
+	}
+
 	double SceneTextureDurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
 	{
 		return std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count();
@@ -57,6 +91,43 @@ namespace
 		}
 		const uint64_t bytesPerPixel = upload.indexed ? 1ull : 4ull;
 		return (uint64_t)upload.width * (uint64_t)upload.height * bytesPerPixel;
+	}
+
+	uint64_t NoteTextureFirstUse(
+		uint64_t eventId,
+		uint64_t textureKey,
+		uint64_t rendererFrame,
+		uint32_t queuedSlot,
+		uint64_t submittedFence,
+		uint64_t publicationFrame,
+		uint64_t bytes,
+		double cpuMs,
+		PerfCompactFirstUseStage stage,
+		PerfCompactFirstUseState state,
+		uint32_t flags,
+		uint64_t producerFrame = 0)
+	{
+		if (eventId == 0 && (flags & PerfCompactFirstUseBegin) == 0)
+		{
+			return 0;
+		}
+
+		PerfCompactFirstUseRecord record = {};
+		record.eventId = eventId;
+		record.textureKey = textureKey;
+		record.rendererFrame = rendererFrame;
+		record.producerFrame = producerFrame != 0 ? producerFrame : rendererFrame;
+		record.submittedFence = submittedFence;
+		record.publicationFrame = publicationFrame;
+		record.bytes = bytes;
+		record.cpuMs = cpuMs;
+		record.queuedSlot = queuedSlot;
+		record.count = 1;
+		record.domain = PerfCompactFirstUseDomain::Texture;
+		record.stage = stage;
+		record.state = state;
+		record.flags = flags;
+		return PerfCompactCaptureNoteFirstUse(record);
 	}
 
 	uint64_t SceneTextureHashCombine64(uint64_t hash, uint64_t value)
@@ -133,6 +204,26 @@ namespace
 		return counts;
 	}
 
+}
+
+uint32_t NRIPreservePendingTextureMaterialProxies(
+	const std::vector<nri_scene::MaterialData>& publishedMaterials,
+	std::vector<nri_scene::MaterialData>& refreshedMaterials,
+	const std::vector<uint32_t>& deferredMaterialIndices)
+{
+	const size_t materialCount = std::min(publishedMaterials.size(), refreshedMaterials.size());
+	uint32_t preservedCount = 0;
+	for (uint32_t materialIndex : deferredMaterialIndices)
+	{
+		if (materialIndex >= materialCount)
+		{
+			continue;
+		}
+
+		refreshedMaterials[materialIndex] = publishedMaterials[materialIndex];
+		preservedCount++;
+	}
+	return preservedCount;
 }
 
 bool NRISceneTextureResidency::EnsurePaletteTexture(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials)
@@ -261,6 +352,30 @@ bool NRISceneTextureResidency::QueryPreloadClosure(uint64_t key, NRISceneTexture
 	outResult.state = NRISceneTextureClosureState::Ready;
 	outResult.reused = true;
 	return true;
+}
+
+bool NRISceneTextureResidency::QueryRuntimeClosure(
+	NRIRenderDevice& device,
+	uint64_t key,
+	NRISceneTextureClosureResult& outResult)
+{
+	outResult = {};
+	outResult.key = key;
+	const uint32_t cacheIndex = FindCacheIndex(key);
+	if (cacheIndex == UINT32_MAX)
+	{
+		outResult.state = NRISceneTextureClosureState::Failed;
+		outResult.failure = NRISceneTextureClosureFailure::ResidencyLost;
+		return false;
+	}
+
+	const CachedTextureReadiness readiness = PollCachedTexture(device, cacheIndex, outResult);
+	if (readiness == CachedTextureReadiness::Ready)
+	{
+		outResult.reused = true;
+		return true;
+	}
+	return false;
 }
 
 bool NRISceneTextureResidency::EnsurePreloadClosure(
@@ -421,6 +536,21 @@ bool NRISceneTextureResidency::EnsureRuntimeClosure(
 		outResult.estimatedBytes = EstimateSceneTextureUploadBytes(upload);
 	}
 
+	const uint64_t rendererFrame = device.mFrameIndex + 1ull;
+	const uint32_t queuedSlot = device.mCurrentQueuedFrameIndex;
+	const uint64_t estimatedBytes = EstimateSceneTextureUploadBytes(upload);
+	const uint64_t firstUseEventId = NoteTextureFirstUse(
+		0,
+		upload.key,
+		rendererFrame,
+		queuedSlot,
+		0,
+		0,
+		estimatedBytes,
+		0.0,
+		PerfCompactFirstUseStage::Request,
+		PerfCompactFirstUseState::Pending,
+		PerfCompactFirstUseBegin);
 	const auto realizeStart = std::chrono::steady_clock::now();
 	std::vector<uint8_t> realizedPixels;
 	uint32_t realizedWidth = upload.width;
@@ -430,6 +560,11 @@ bool NRISceneTextureResidency::EnsureRuntimeClosure(
 	{
 		if (!nri_scene::RealizeTextureUploadPayload(upload, realizedPixels, realizedWidth, realizedHeight))
 		{
+			NoteTextureFirstUse(
+				firstUseEventId, upload.key, rendererFrame, queuedSlot, 0, 0, estimatedBytes,
+				SceneTextureDurationMs(realizeStart, std::chrono::steady_clock::now()),
+				PerfCompactFirstUseStage::IndexedPayload, PerfCompactFirstUseState::Failed,
+				PerfCompactFirstUseEnd);
 			outResult.state = NRISceneTextureClosureState::Failed;
 			outResult.failure = NRISceneTextureClosureFailure::PayloadUnavailable;
 			return false;
@@ -438,6 +573,11 @@ bool NRISceneTextureResidency::EnsureRuntimeClosure(
 	}
 	if (pixelData == nullptr || realizedWidth == 0 || realizedHeight == 0)
 	{
+		NoteTextureFirstUse(
+			firstUseEventId, upload.key, rendererFrame, queuedSlot, 0, 0, estimatedBytes,
+			SceneTextureDurationMs(realizeStart, std::chrono::steady_clock::now()),
+			PerfCompactFirstUseStage::IndexedPayload, PerfCompactFirstUseState::Failed,
+			PerfCompactFirstUseEnd);
 		outResult.state = NRISceneTextureClosureState::Failed;
 		outResult.failure = NRISceneTextureClosureFailure::PayloadUnavailable;
 		return false;
@@ -445,10 +585,39 @@ bool NRISceneTextureResidency::EnsureRuntimeClosure(
 
 	NRISceneCachedTexture cacheEntry = {};
 	cacheEntry.key = upload.key;
+	if (upload.indexed)
+	{
+		NoteTextureFirstUse(
+			firstUseEventId, upload.key, rendererFrame, queuedSlot, 0, 0, estimatedBytes,
+			SceneTextureDurationMs(realizeStart, std::chrono::steady_clock::now()),
+			PerfCompactFirstUseStage::IndexedPayload, PerfCompactFirstUseState::Instant, 0);
+	}
+	cacheEntry.firstUseEventId = firstUseEventId;
+	cacheEntry.firstUseRequestFrame = rendererFrame;
+	cacheEntry.estimatedUploadBytes = estimatedBytes;
+	cacheEntry.firstUseQueuedSlot = queuedSlot;
 	const nri::Format format = upload.indexed ? nri::Format::R8_UNORM : nri::Format::BGRA8_UNORM;
 	const uint32_t rowPitch = upload.indexed ? realizedWidth : realizedWidth * 4u;
-	if (!device.CreateOwnedTexture(cacheEntry.resource, realizedWidth, realizedHeight, format, nri::TextureUsageBits::SHADER_RESOURCE) ||
-		!device.UploadTextureDataAsync(
+	const auto resourceStart = std::chrono::steady_clock::now();
+	if (!device.CreateOwnedTexture(cacheEntry.resource, realizedWidth, realizedHeight, format, nri::TextureUsageBits::SHADER_RESOURCE))
+	{
+		const double resourceMs = SceneTextureDurationMs(resourceStart, std::chrono::steady_clock::now());
+		NoteTextureFirstUse(
+			firstUseEventId, upload.key, rendererFrame, queuedSlot, 0, 0, estimatedBytes, resourceMs,
+			PerfCompactFirstUseStage::TextureResource, PerfCompactFirstUseState::Failed,
+			PerfCompactFirstUseEnd);
+		device.DestroyTextureResource(cacheEntry.resource);
+		outResult.state = NRISceneTextureClosureState::Deferred;
+		outResult.failure = NRISceneTextureClosureFailure::ResourceCreation;
+		return false;
+	}
+	NoteTextureFirstUse(
+		firstUseEventId, upload.key, rendererFrame, queuedSlot, 0, 0, estimatedBytes,
+		SceneTextureDurationMs(resourceStart, std::chrono::steady_clock::now()),
+		PerfCompactFirstUseStage::TextureResource, PerfCompactFirstUseState::Instant, 0);
+
+	const auto uploadStart = std::chrono::steady_clock::now();
+	if (!device.UploadTextureDataAsync(
 			cacheEntry.resource,
 			pixelData,
 			realizedWidth,
@@ -456,11 +625,20 @@ bool NRISceneTextureResidency::EnsureRuntimeClosure(
 			rowPitch,
 			cacheEntry.uploadFenceValue))
 	{
+		NoteTextureFirstUse(
+			firstUseEventId, upload.key, rendererFrame, queuedSlot, 0, 0, estimatedBytes,
+			SceneTextureDurationMs(uploadStart, std::chrono::steady_clock::now()),
+			PerfCompactFirstUseStage::UploadRecord, PerfCompactFirstUseState::Failed,
+			PerfCompactFirstUseEnd);
 		device.DestroyTextureResource(cacheEntry.resource);
 		outResult.state = NRISceneTextureClosureState::Deferred;
 		outResult.failure = NRISceneTextureClosureFailure::ResourceCreation;
 		return false;
 	}
+	NoteTextureFirstUse(
+		firstUseEventId, upload.key, rendererFrame, queuedSlot, cacheEntry.uploadFenceValue, 0,
+		estimatedBytes, SceneTextureDurationMs(uploadStart, std::chrono::steady_clock::now()),
+		PerfCompactFirstUseStage::UploadRecord, PerfCompactFirstUseState::Pending, 0);
 
 	const uint32_t cacheIndex = AddCachedTexture(std::move(cacheEntry));
 	outResult.residencyIndex = cacheIndex;
@@ -471,7 +649,12 @@ bool NRISceneTextureResidency::EnsureRuntimeClosure(
 	return false;
 }
 
-bool NRISceneTextureResidency::ResolveTextureDescriptor(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, bool tracePerf, SceneTextureResolveResult& outResult)
+bool NRISceneTextureResidency::ResolveTextureDescriptor(
+	NRIRenderDevice& device,
+	const nri_scene::TextureUpload& upload,
+	bool tracePerf,
+	NRISceneTextureMissPolicy missPolicy,
+	SceneTextureResolveResult& outResult)
 {
 	outResult = {};
 
@@ -517,14 +700,28 @@ bool NRISceneTextureResidency::ResolveTextureDescriptor(NRIRenderDevice& device,
 	if (cacheIndex == UINT32_MAX)
 	{
 		outResult.cacheMiss = true;
-		if (!EnsureCacheEntry(device, upload, &outResult.realizeMs))
+		if (missPolicy == NRISceneTextureMissPolicy::Synchronous)
 		{
-			return false;
+			if (!EnsureCacheEntry(device, upload, &outResult.realizeMs))
+			{
+				return false;
+			}
+			cacheIndex = FindReadyCacheIndex(upload.key);
+			outResult.inserted = cacheIndex != UINT32_MAX;
 		}
-		cacheIndex = FindCacheIndex(upload.key);
-		if (cacheIndex != UINT32_MAX)
+		else
 		{
-			outResult.inserted = true;
+			NRISceneTextureClosureResult closureResult = {};
+			if (!EnsureRuntimeClosure(device, upload, closureResult))
+			{
+				outResult.inserted = closureResult.realized;
+				outResult.pending = closureResult.state == NRISceneTextureClosureState::Pending;
+				outResult.realizeMs += closureResult.realizeMs;
+				return false;
+			}
+			cacheIndex = closureResult.residencyIndex;
+			outResult.inserted = closureResult.realized;
+			outResult.realizeMs += closureResult.realizeMs;
 		}
 	}
 
@@ -534,14 +731,42 @@ bool NRISceneTextureResidency::ResolveTextureDescriptor(NRIRenderDevice& device,
 		const CachedTextureReadiness readiness = PollCachedTexture(device, cacheIndex, closureResult);
 		if (readiness == CachedTextureReadiness::Abandoned)
 		{
+			if (missPolicy == NRISceneTextureMissPolicy::Synchronous)
+			{
+				if (!EnsureCacheEntry(device, upload, &outResult.realizeMs))
+				{
+					return false;
+				}
+				cacheIndex = FindReadyCacheIndex(upload.key);
+				outResult.inserted = cacheIndex != UINT32_MAX;
+			}
+			else
+			{
+				if (!EnsureRuntimeClosure(device, upload, closureResult))
+				{
+					outResult.inserted = closureResult.realized;
+					outResult.pending = closureResult.state == NRISceneTextureClosureState::Pending;
+					outResult.realizeMs += closureResult.realizeMs;
+					return false;
+				}
+				cacheIndex = closureResult.residencyIndex;
+				outResult.inserted = closureResult.realized;
+				outResult.realizeMs += closureResult.realizeMs;
+			}
+		}
+		else if (readiness == CachedTextureReadiness::Pending && missPolicy == NRISceneTextureMissPolicy::Synchronous)
+		{
+			InvalidateCachedTexture(device, cacheIndex);
 			if (!EnsureCacheEntry(device, upload, &outResult.realizeMs))
 			{
 				return false;
 			}
 			cacheIndex = FindReadyCacheIndex(upload.key);
+			outResult.inserted = cacheIndex != UINT32_MAX;
 		}
 		else if (readiness != CachedTextureReadiness::Ready)
 		{
+			outResult.pending = readiness == CachedTextureReadiness::Pending;
 			return false;
 		}
 		if (cacheIndex != UINT32_MAX && cacheIndex < mTextureCache.size())
@@ -873,7 +1098,9 @@ bool NRIRenderer::EnsureSceneTextures(
 	std::vector<nri_scene::MaterialData>& outGpuMaterials,
 	bool preserveExistingSky,
 	const char* reason,
-	const NRISceneTextureFrameReuseInputs* reuseInputs)
+	const NRISceneTextureFrameReuseInputs* reuseInputs,
+	NRISceneTextureMissPolicy missPolicy,
+	std::vector<uint32_t>* outDeferredMaterialIndices)
 {
 	Clocker clock(NriPTSceneTextures);
 	static bool sLoggedActiveCanvasTextureReuse = false;
@@ -904,6 +1131,10 @@ bool NRIRenderer::EnsureSceneTextures(
 	mSceneTextures.CacheStats().stableSlotModeLastBuild = 0;
 	mSceneTextures.CacheStats().stableDescriptorHitsLastBuild = 0;
 	mSceneTextures.CacheStats().stableDescriptorMissesLastBuild = 0;
+	if (outDeferredMaterialIndices != nullptr)
+	{
+		outDeferredMaterialIndices->clear();
+	}
 	mSceneTextures.ClearLiveResources();
 	mLastPerfShellTraceStats.sceneTextureCacheCount = mSceneTextures.CacheCount();
 	mLastPerfShellTraceStats.sceneTextureCacheMisses = 0;
@@ -1129,6 +1360,7 @@ bool NRIRenderer::EnsureSceneTextures(
 
 	std::vector<nri::Descriptor*> descriptors;
 	std::vector<NRISceneTextureDynamicDependency> dynamicDependencies;
+	std::unordered_set<uint32_t> pendingTextureSlots;
 	const bool useCachedDescriptorProduct = reuseProduct != nullptr && !reuseInputs->validateReuse;
 	if (useCachedDescriptorProduct)
 	{
@@ -1158,10 +1390,15 @@ bool NRIRenderer::EnsureSceneTextures(
 				*mFrameBuffer,
 				materials.textures[dependency.uploadIndex],
 				tracePerf,
+				missPolicy,
 				textureResult))
 			{
-				mLastPerfShellTraceStats.sceneReuseTextureReject = 1;
-				return false;
+				if (!textureResult.pending || dependency.descriptorIndex < 2u)
+				{
+					mLastPerfShellTraceStats.sceneReuseTextureReject = 1;
+					return false;
+				}
+				pendingTextureSlots.insert(dependency.descriptorIndex - 2u);
 			}
 			lookupMisses += textureResult.cacheMiss ? 1u : 0u;
 			insertCount += textureResult.inserted ? 1u : 0u;
@@ -1216,11 +1453,16 @@ bool NRIRenderer::EnsureSceneTextures(
 				mSceneTextures.CacheStats().stableDescriptorHitsLastBuild++;
 				mLastPerfShellTraceStats.sceneTextureStableDescriptorHits++;
 			}
-			else if (!mSceneTextures.ResolveTextureDescriptor(*mFrameBuffer, upload, tracePerf, textureResult))
+			else if (!mSceneTextures.ResolveTextureDescriptor(*mFrameBuffer, upload, tracePerf, missPolicy, textureResult))
 			{
-				return false;
+				if (!textureResult.pending)
+				{
+					return false;
+				}
+				const uint32_t descriptorSlot = mSceneTextureStableSlotsActive ? stableHandle.slot : i;
+				pendingTextureSlots.insert(descriptorSlot);
 			}
-			else if (mSceneTextureStableSlotsActive && !dynamicDescriptor)
+			else if (mSceneTextureStableSlotsActive && !dynamicDescriptor && textureResult.descriptor != nullptr)
 			{
 				mSceneTextures.StoreStableSlotDescriptor(upload.key, stableHandle, textureResult.descriptor);
 				mSceneTextures.CacheStats().stableDescriptorMissesLastBuild++;
@@ -1253,6 +1495,33 @@ bool NRIRenderer::EnsureSceneTextures(
 		}
 	}
 
+	uint32_t deferredMaterialCount = 0;
+	if (!pendingTextureSlots.empty())
+	{
+		for (uint32_t materialIndex = 0; materialIndex < (uint32_t)outGpuMaterials.size(); ++materialIndex)
+		{
+			nri_scene::MaterialData& material = outGpuMaterials[materialIndex];
+			if (!MaterialReferencesTextureSlot(material, pendingTextureSlots))
+			{
+				continue;
+			}
+			MakePendingTextureMaterialTransparent(material);
+			if (outDeferredMaterialIndices != nullptr)
+			{
+				outDeferredMaterialIndices->push_back(materialIndex);
+			}
+			deferredMaterialCount++;
+		}
+		if (nri_ptscenestats || ShouldTraceSceneTexturePerf())
+		{
+			Printf(
+				"NRI PT scene textures: event=runtime_pending_defer reason=%s pending_slots=%u deferred_materials=%u action=transparent-material-proxy\n",
+				reason != nullptr ? reason : "none",
+				(uint32_t)pendingTextureSlots.size(),
+				deferredMaterialCount);
+		}
+	}
+
 	uint32_t actorOverflowTraceLines = 0;
 	if (!mSceneTextureStableSlotsActive)
 	{
@@ -1269,7 +1538,7 @@ bool NRIRenderer::EnsureSceneTextures(
 		bool metallicClamped = false;
 		bool roughnessClamped = false;
 		bool emissiveClamped = false;
-		if (material.textureIndex >= NRI_MAX_SCENE_TEXTURES)
+		if (material.textureIndex != UINT32_MAX && material.textureIndex >= NRI_MAX_SCENE_TEXTURES)
 		{
 			mSceneTextures.OverflowStats().baseTextureClampCountLastBuild++;
 			material.textureIndex = 0;
@@ -1433,7 +1702,7 @@ bool NRIRenderer::EnsureSceneTextures(
 		mLastPerfShellTraceStats.sceneReuseTextureReject = updated ? 0u : 1u;
 		mLastPerfShellTraceStats.sceneReuseTextureDynamicCount = (uint32_t)dynamicDependencies.size();
 	}
-	if (reuseOwnerEligible && updated && !useCachedDescriptorProduct)
+	if (reuseOwnerEligible && updated && !useCachedDescriptorProduct && pendingTextureSlots.empty())
 	{
 		const uint64_t currentMappingRevision = mSceneTextures.SlotTable().MappingRevision();
 		NRISceneTextureFrameProductKey storedKey = reuseKey;
@@ -1589,6 +1858,12 @@ NRISceneTextureResidency::CachedTextureReadiness NRISceneTextureResidency::PollC
 	{
 		if (device.IsCommandFenceValueAbandoned(cached.uploadFenceValue))
 		{
+			NoteTextureFirstUse(
+				cached.firstUseEventId, cached.key, device.mFrameIndex + 1ull, device.mCurrentQueuedFrameIndex,
+				cached.uploadFenceValue, 0, cached.estimatedUploadBytes, 0.0,
+				PerfCompactFirstUseStage::UploadComplete, PerfCompactFirstUseState::Cancelled,
+				PerfCompactFirstUseEnd, cached.firstUseRequestFrame);
+			cached.firstUseEventId = 0;
 			outResult.state = NRISceneTextureClosureState::Deferred;
 			outResult.failure = NRISceneTextureClosureFailure::ResourceCreation;
 			InvalidateCachedTexture(device, cacheIndex);
@@ -1599,24 +1874,51 @@ NRISceneTextureResidency::CachedTextureReadiness NRISceneTextureResidency::PollC
 			outResult.state = NRISceneTextureClosureState::Pending;
 			return CachedTextureReadiness::Pending;
 		}
+		const uint64_t completedFenceValue = cached.uploadFenceValue;
 		cached.uploadFenceValue = 0;
+		NoteTextureFirstUse(
+			cached.firstUseEventId, cached.key, device.mFrameIndex + 1ull, device.mCurrentQueuedFrameIndex,
+			completedFenceValue, device.mFrameIndex + 1ull, cached.estimatedUploadBytes, 0.0,
+			PerfCompactFirstUseStage::UploadComplete, PerfCompactFirstUseState::Ready, 0,
+			cached.firstUseRequestFrame);
 	}
 
 	outResult.descriptorReady = cached.resource.shaderView != nullptr;
 	if (cached.resource.texture == nullptr)
 	{
+		NoteTextureFirstUse(
+			cached.firstUseEventId, cached.key, device.mFrameIndex + 1ull, device.mCurrentQueuedFrameIndex,
+			0, 0, cached.estimatedUploadBytes, 0.0,
+			PerfCompactFirstUseStage::Publication, PerfCompactFirstUseState::Failed,
+			PerfCompactFirstUseEnd, cached.firstUseRequestFrame);
+		cached.firstUseEventId = 0;
 		outResult.state = NRISceneTextureClosureState::Failed;
 		outResult.failure = NRISceneTextureClosureFailure::ResidencyLost;
 		return CachedTextureReadiness::Failed;
 	}
 	if (!outResult.descriptorReady)
 	{
+		NoteTextureFirstUse(
+			cached.firstUseEventId, cached.key, device.mFrameIndex + 1ull, device.mCurrentQueuedFrameIndex,
+			0, 0, cached.estimatedUploadBytes, 0.0,
+			PerfCompactFirstUseStage::Publication, PerfCompactFirstUseState::Failed,
+			PerfCompactFirstUseEnd, cached.firstUseRequestFrame);
+		cached.firstUseEventId = 0;
 		outResult.state = NRISceneTextureClosureState::Failed;
 		outResult.failure = NRISceneTextureClosureFailure::DescriptorUnavailable;
 		return CachedTextureReadiness::Failed;
 	}
 
 	outResult.state = NRISceneTextureClosureState::Ready;
+	if (cached.firstUseEventId != 0)
+	{
+		NoteTextureFirstUse(
+			cached.firstUseEventId, cached.key, device.mFrameIndex + 1ull, device.mCurrentQueuedFrameIndex,
+			0, device.mFrameIndex + 1ull, cached.estimatedUploadBytes, 0.0,
+			PerfCompactFirstUseStage::Publication, PerfCompactFirstUseState::Ready,
+			PerfCompactFirstUseEnd, cached.firstUseRequestFrame);
+		cached.firstUseEventId = 0;
+	}
 	return CachedTextureReadiness::Ready;
 }
 
@@ -1628,6 +1930,15 @@ void NRISceneTextureResidency::InvalidateCachedTexture(NRIRenderDevice& device, 
 	}
 
 	NRISceneCachedTexture& cached = mTextureCache[cacheIndex];
+	if (cached.firstUseEventId != 0)
+	{
+		NoteTextureFirstUse(
+			cached.firstUseEventId, cached.key, device.mFrameIndex + 1ull, device.mCurrentQueuedFrameIndex,
+			cached.uploadFenceValue, 0, cached.estimatedUploadBytes, 0.0,
+			PerfCompactFirstUseStage::Publication, PerfCompactFirstUseState::Cancelled,
+			PerfCompactFirstUseEnd, cached.firstUseRequestFrame);
+		cached.firstUseEventId = 0;
+	}
 	const auto indexed = mTextureCacheKeyIndex.find(cached.key);
 	if (indexed != mTextureCacheKeyIndex.end() && indexed->second == cacheIndex)
 	{
@@ -1679,8 +1990,25 @@ void NRISceneTextureResidency::TrackLiveResource(NRITextureResource& resource)
 	mLiveResources.push_back(&resource);
 }
 
-void NRISceneTextureResidency::ClearCachedTextures()
+void NRISceneTextureResidency::ClearCachedTextures(NRIRenderDevice* device)
 {
+	const uint64_t rendererFrame = device != nullptr ? device->mFrameIndex + 1ull : 0;
+	const uint32_t queuedSlot = device != nullptr ? device->mCurrentQueuedFrameIndex : UINT32_MAX;
+	for (NRISceneCachedTexture& cached : mTextureCache)
+	{
+		if (cached.firstUseEventId == 0)
+		{
+			continue;
+		}
+		NoteTextureFirstUse(
+			cached.firstUseEventId, cached.key,
+			rendererFrame != 0 ? rendererFrame : cached.firstUseRequestFrame,
+			queuedSlot != UINT32_MAX ? queuedSlot : cached.firstUseQueuedSlot,
+			cached.uploadFenceValue, 0, cached.estimatedUploadBytes, 0.0,
+			PerfCompactFirstUseStage::Publication, PerfCompactFirstUseState::Cancelled,
+			PerfCompactFirstUseEnd, cached.firstUseRequestFrame);
+		cached.firstUseEventId = 0;
+	}
 	mTextureCache.clear();
 	mTextureCacheKeyIndex.clear();
 	mStableSlotDescriptors.clear();

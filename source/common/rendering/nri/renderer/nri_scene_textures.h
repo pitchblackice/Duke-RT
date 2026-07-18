@@ -11,14 +11,28 @@ class NRIRenderDevice;
 
 namespace nri_scene
 {
+	struct MaterialData;
 	struct MaterialBridgeData;
 	struct TextureUpload;
 }
+
+// Runtime texture misses deliberately publish a fail-closed material row until
+// the upload fence completes.  A later same-frame material refresh must preserve
+// that row instead of rebuilding a live material against the placeholder
+// descriptor.
+uint32_t NRIPreservePendingTextureMaterialProxies(
+	const std::vector<nri_scene::MaterialData>& publishedMaterials,
+	std::vector<nri_scene::MaterialData>& refreshedMaterials,
+	const std::vector<uint32_t>& deferredMaterialIndices);
 
 struct NRISceneCachedTexture
 {
 	uint64_t key = 0;
 	uint64_t uploadFenceValue = 0;
+	uint64_t firstUseEventId = 0;
+	uint64_t firstUseRequestFrame = 0;
+	uint64_t estimatedUploadBytes = 0;
+	uint32_t firstUseQueuedSlot = UINT32_MAX;
 	NRITextureResource resource;
 };
 
@@ -59,9 +73,16 @@ struct SceneTextureResolveResult
 	nri::Descriptor* descriptor = nullptr;
 	bool cacheMiss = false;
 	bool inserted = false;
+	bool pending = false;
 	bool activeCanvasSelfReference = false;
 	double lookupMs = 0.0;
 	double realizeMs = 0.0;
+};
+
+enum class NRISceneTextureMissPolicy : uint8_t
+{
+	Synchronous,
+	RuntimeAsyncDeferOverlay,
 };
 
 struct NRIMaterialTextureWarmupResult
@@ -161,9 +182,10 @@ public:
 	bool EnsurePreloadClosure(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, NRISceneTextureClosureResult& outResult);
 	bool EnsureRuntimeClosure(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, NRISceneTextureClosureResult& outResult);
 	bool QueryPreloadClosure(uint64_t key, NRISceneTextureClosureResult& outResult) const;
+	bool QueryRuntimeClosure(NRIRenderDevice& device, uint64_t key, NRISceneTextureClosureResult& outResult);
 	bool WarmMaterialTextures(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials, NRIMaterialTextureWarmupResult& outResult);
 	bool WarmMaterialTexturesBudgeted(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials, const NRIMaterialTextureWarmupOptions& options, NRIMaterialTextureWarmupCursor& cursor, NRIMaterialTextureWarmupResult& outResult);
-	bool ResolveTextureDescriptor(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, bool tracePerf, SceneTextureResolveResult& outResult);
+	bool ResolveTextureDescriptor(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, bool tracePerf, NRISceneTextureMissPolicy missPolicy, SceneTextureResolveResult& outResult);
 	nri::Descriptor* FindStableSlotDescriptor(uint64_t key, NRISceneTextureSlotHandle handle) const;
 	void StoreStableSlotDescriptor(uint64_t key, NRISceneTextureSlotHandle handle, nri::Descriptor* descriptor);
 	void PopulateStableSlotDescriptors(std::vector<nri::Descriptor*>& descriptors, uint32_t descriptorOffset) const;
@@ -173,7 +195,7 @@ public:
 	void TrackLiveResource(NRITextureResource& resource);
 	const std::vector<NRITextureResource*>& LiveResources() const { return mLiveResources; }
 
-	void ClearCachedTextures();
+	void ClearCachedTextures(NRIRenderDevice* device);
 
 private:
 	struct StableSlotDescriptorCacheEntry

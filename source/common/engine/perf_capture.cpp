@@ -16,6 +16,8 @@ CUSTOM_CVAR(Int, perf_compactframes, 0, 0)
 namespace
 {
 	constexpr uint32_t MaxRecords = 4096;
+	constexpr uint32_t MaxFirstUseRecords = 4096;
+	constexpr uint32_t MaxFirstUseDrainFrames = 32;
 
 	struct Record
 	{
@@ -29,13 +31,27 @@ namespace
 		bool eligible = false;
 	};
 
+	struct FirstUseRecord
+	{
+		PerfCompactFirstUseRecord value;
+		uint32_t outerRecordIndex = 0;
+	};
+
 	enum class CaptureState : uint8_t { Idle, Active, Draining, Aborted };
 	struct Capture
 	{
 		std::array<Record, MaxRecords> records = {};
+		std::array<FirstUseRecord, MaxFirstUseRecords> firstUseRecords = {};
+		std::array<uint64_t, MaxFirstUseRecords> openFirstUseEvents = {};
 		CaptureState state = CaptureState::Idle;
 		uint64_t epoch = 0;
+		uint64_t nextFirstUseEvent = 1;
 		uint32_t requested = 0, observed = 0, eligible = 0, pendingGpu = 0;
+		uint32_t firstUseCount = 0, firstUseDropped = 0, openFirstUseCount = 0;
+		uint32_t firstUseDrainFrames = 0;
+		uint32_t rejectState = 0, rejectLevelRendered = 0, rejectNriActive = 0;
+		uint32_t rejectNriInvalid = 0, rejectNriNotRendered = 0, rejectBoundaryInvalid = 0;
+		uint32_t rejectNotPathTraced = 0, rejectPresent = 0, rejectFrameJoin = 0;
 		PerfCompactCaptureToken current;
 		const char* abortReason = "none";
 	};
@@ -50,14 +66,115 @@ namespace
 	{
 		const uint64_t epoch = gCapture.epoch;
 		for (Record& record : gCapture.records) record = {};
+		for (FirstUseRecord& record : gCapture.firstUseRecords) record = {};
+		gCapture.openFirstUseEvents.fill(0);
 		gCapture.state = CaptureState::Idle;
 		gCapture.requested = 0;
 		gCapture.observed = 0;
 		gCapture.eligible = 0;
 		gCapture.pendingGpu = 0;
+		gCapture.nextFirstUseEvent = 1;
+		gCapture.firstUseCount = 0;
+		gCapture.firstUseDropped = 0;
+		gCapture.openFirstUseCount = 0;
+		gCapture.firstUseDrainFrames = 0;
+		gCapture.rejectState = 0;
+		gCapture.rejectLevelRendered = 0;
+		gCapture.rejectNriActive = 0;
+		gCapture.rejectNriInvalid = 0;
+		gCapture.rejectNriNotRendered = 0;
+		gCapture.rejectBoundaryInvalid = 0;
+		gCapture.rejectNotPathTraced = 0;
+		gCapture.rejectPresent = 0;
+		gCapture.rejectFrameJoin = 0;
 		gCapture.current = {};
 		gCapture.abortReason = "none";
 		gCapture.epoch = epoch;
+	}
+
+	int32_t FindOpenFirstUseEvent(uint64_t eventId)
+	{
+		for (uint32_t index = 0; index < gCapture.openFirstUseCount; ++index)
+			if (gCapture.openFirstUseEvents[index] == eventId) return (int32_t)index;
+		return -1;
+	}
+
+	bool SameFirstUseRecord(const PerfCompactFirstUseRecord& a, const PerfCompactFirstUseRecord& b)
+	{
+		return a.eventId == b.eventId && a.domain == b.domain && a.stage == b.stage &&
+			a.state == b.state && a.rendererFrame == b.rendererFrame &&
+			a.producerFrame == b.producerFrame && a.submittedFence == b.submittedFence &&
+			a.publicationFrame == b.publicationFrame;
+	}
+
+	void MeasureFirstUseClosure(uint32_t& pending, uint32_t& duplicates, uint32_t& unresolved)
+	{
+		pending = duplicates = unresolved = 0;
+		for (uint32_t i = 0; i < gCapture.firstUseCount; ++i)
+		{
+			const PerfCompactFirstUseRecord& event = gCapture.firstUseRecords[i].value;
+			for (uint32_t j = i + 1; j < gCapture.firstUseCount; ++j)
+			{
+				if (SameFirstUseRecord(event, gCapture.firstUseRecords[j].value))
+				{
+					duplicates++;
+					break;
+				}
+			}
+			bool firstOccurrence = true;
+			for (uint32_t j = 0; j < i; ++j)
+			{
+				if (gCapture.firstUseRecords[j].value.eventId == event.eventId)
+				{
+					firstOccurrence = false;
+					break;
+				}
+			}
+			if (!firstOccurrence) continue;
+
+			uint32_t begins = 0, ends = 0;
+			bool submitted = false, published = false, abandoned = false;
+			for (uint32_t j = i; j < gCapture.firstUseCount; ++j)
+			{
+				const PerfCompactFirstUseRecord& candidate = gCapture.firstUseRecords[j].value;
+				if (candidate.eventId != event.eventId) continue;
+				if ((candidate.flags & PerfCompactFirstUseBegin) != 0) begins++;
+				if ((candidate.flags & PerfCompactFirstUseEnd) != 0) ends++;
+				submitted = submitted || candidate.submittedFence != 0;
+				published = published || candidate.publicationFrame != 0;
+				abandoned = abandoned || candidate.state == PerfCompactFirstUseState::Cancelled ||
+					candidate.state == PerfCompactFirstUseState::Failed;
+			}
+			if (begins > ends) pending++;
+			if (submitted && !published && !abandoned) unresolved++;
+		}
+	}
+
+	void FlushFirstUseRecords()
+	{
+		for (uint32_t index = 0; index < gCapture.firstUseCount; ++index)
+		{
+			const FirstUseRecord& stored = gCapture.firstUseRecords[index];
+			const PerfCompactFirstUseRecord& event = stored.value;
+			const uint64_t outerFrame = stored.outerRecordIndex < gCapture.observed ?
+				gCapture.records[stored.outerRecordIndex].outer.traceFrame : 0;
+			const uint64_t joinedRendererFrame =
+				stored.outerRecordIndex < gCapture.observed &&
+				gCapture.records[stored.outerRecordIndex].nri.valid &&
+				gCapture.records[stored.outerRecordIndex].nri.frame != 0 ?
+				gCapture.records[stored.outerRecordIndex].nri.frame : event.rendererFrame;
+			Printf("PERF compact first use NRI: schema=1 record=%u event=%llu outer_frame=%llu nri_frame=%llu producer_frame=%llu queued_slot=%u submitted_fence=%llu publication_frame=%llu domain=%u stage=%u state=%u flags=0x%x actor=%llu source=%llu mesh=%llu material=%llu signature=%llu texture=%llu cpu_ms=%.3f bytes=%llu count=%u compact=1 epoch=%llu\n",
+				index, (unsigned long long)event.eventId, (unsigned long long)outerFrame,
+				(unsigned long long)joinedRendererFrame, (unsigned long long)event.producerFrame,
+				event.queuedSlot, (unsigned long long)event.submittedFence,
+				(unsigned long long)event.publicationFrame, (uint32_t)event.domain,
+				(uint32_t)event.stage, (uint32_t)event.state, event.flags,
+				(unsigned long long)event.actorLifecycleKey, (unsigned long long)event.sourceKey,
+				(unsigned long long)event.meshKey, (unsigned long long)event.materialKey,
+				(unsigned long long)event.validatedSignature, (unsigned long long)event.textureKey,
+				event.cpuMs, (unsigned long long)event.bytes, event.count,
+				(unsigned long long)gCapture.epoch);
+		}
 	}
 
 	void FlushRecordOwners(const Record& record)
@@ -174,6 +291,12 @@ void PerfCompactCaptureFlushIfReady()
 {
 	if (gCapture.state != CaptureState::Draining && gCapture.state != CaptureState::Aborted) return;
 	if (gCapture.state == CaptureState::Draining && gCapture.pendingGpu != 0) return;
+	if (gCapture.state == CaptureState::Draining && gCapture.openFirstUseCount != 0)
+	{
+		if (gCapture.firstUseDrainFrames < MaxFirstUseDrainFrames) return;
+		gCapture.abortReason = "first-use-drain-exhausted";
+		gCapture.state = CaptureState::Aborted;
+	}
 	if (gCapture.state == CaptureState::Draining)
 	{
 		for (uint32_t i = 0; i < gCapture.observed; ++i)
@@ -181,10 +304,18 @@ void PerfCompactCaptureFlushIfReady()
 		for (uint32_t i = 0; i < gCapture.observed; ++i)
 			if (gCapture.records[i].eligible) FlushLoopRecord(gCapture.records[i]);
 	}
-	Printf("PERF compact capture complete: epoch=%llu status=%s requested=%u eligible=%u observed=%u pending_gpu=%u dropped=0 reason=%s\n",
+	FlushFirstUseRecords();
+	uint32_t firstUsePending = 0, firstUseDuplicates = 0, firstUseUnresolved = 0;
+	MeasureFirstUseClosure(firstUsePending, firstUseDuplicates, firstUseUnresolved);
+	Printf("PERF compact capture complete: epoch=%llu status=%s requested=%u eligible=%u observed=%u pending_gpu=%u dropped=0 first_use_records=%u first_use_pending=%u first_use_dropped=%u first_use_duplicates=%u first_use_unresolved=%u first_use_drain_frames=%u reject_state=%u reject_level_rendered=%u reject_nri_active=%u reject_nri_invalid=%u reject_nri_not_rendered=%u reject_boundary_invalid=%u reject_not_path_traced=%u reject_present=%u reject_frame_join=%u reason=%s\n",
 		(unsigned long long)gCapture.epoch,
 		gCapture.state == CaptureState::Draining ? "complete" : "aborted",
 		gCapture.requested, gCapture.eligible, gCapture.observed, gCapture.pendingGpu,
+		gCapture.firstUseCount, firstUsePending, gCapture.firstUseDropped,
+		firstUseDuplicates, firstUseUnresolved, gCapture.firstUseDrainFrames,
+		gCapture.rejectState, gCapture.rejectLevelRendered, gCapture.rejectNriActive,
+		gCapture.rejectNriInvalid, gCapture.rejectNriNotRendered, gCapture.rejectBoundaryInvalid,
+		gCapture.rejectNotPathTraced, gCapture.rejectPresent, gCapture.rejectFrameJoin,
 		gCapture.abortReason);
 	ResetCapture();
 }
@@ -201,7 +332,9 @@ void PerfCompactCaptureBeginOuterFrame(uint64_t presentationGeneration)
 		gCapture.requested = requested;
 		gCapture.state = CaptureState::Active;
 	}
-	if (gCapture.state != CaptureState::Active)
+	const bool drainFirstUse = gCapture.state == CaptureState::Draining &&
+		gCapture.openFirstUseCount != 0 && gCapture.firstUseDrainFrames < MaxFirstUseDrainFrames;
+	if (gCapture.state != CaptureState::Active && !drainFirstUse)
 	{
 		gCapture.current = {};
 		return;
@@ -214,9 +347,14 @@ void PerfCompactCaptureBeginOuterFrame(uint64_t presentationGeneration)
 	const uint32_t index = gCapture.observed++;
 	gCapture.records[index] = {};
 	gCapture.current = { gCapture.epoch, presentationGeneration, index };
+	if (drainFirstUse) gCapture.firstUseDrainFrames++;
 }
 
-bool PerfCompactCaptureTimingActive() { return gCapture.state == CaptureState::Active && (bool)gCapture.current; }
+bool PerfCompactCaptureTimingActive()
+{
+	return (gCapture.state == CaptureState::Active || gCapture.state == CaptureState::Draining) &&
+		(bool)gCapture.current;
+}
 PerfCompactCaptureToken PerfCompactCaptureGetCurrentToken() { return PerfCompactCaptureTimingActive() ? gCapture.current : PerfCompactCaptureToken{}; }
 
 void PerfCompactCaptureNoteNri(const PerfCompactCaptureToken& token, const PerfCompactNriStats& stats)
@@ -251,15 +389,73 @@ void PerfCompactCaptureResolveGpuSegment(const PerfCompactCaptureToken& token, c
 	if (gCapture.pendingGpu > 0) gCapture.pendingGpu--;
 }
 
+uint64_t PerfCompactCaptureNoteFirstUse(const PerfCompactFirstUseRecord& record)
+{
+	if ((gCapture.state != CaptureState::Active && gCapture.state != CaptureState::Draining) ||
+		!TokenMatches(gCapture.current)) return record.eventId;
+	if (gCapture.state == CaptureState::Draining &&
+		(record.eventId == 0 || (record.flags & PerfCompactFirstUseBegin) != 0))
+	{
+		return record.eventId;
+	}
+	PerfCompactFirstUseRecord stored = record;
+	if (stored.eventId == 0)
+	{
+		stored.eventId = 0x8000000000000000ull |
+			((gCapture.epoch & 0x7fffffffull) << 32) | gCapture.nextFirstUseEvent++;
+	}
+	const int32_t openIndex = FindOpenFirstUseEvent(stored.eventId);
+	if (gCapture.state == CaptureState::Draining && openIndex < 0)
+	{
+		return stored.eventId;
+	}
+	if (gCapture.firstUseCount >= MaxFirstUseRecords)
+	{
+		gCapture.firstUseDropped++;
+		return stored.eventId;
+	}
+	FirstUseRecord& destination = gCapture.firstUseRecords[gCapture.firstUseCount++];
+	destination.value = stored;
+	destination.outerRecordIndex = gCapture.current.recordIndex;
+	if ((stored.flags & PerfCompactFirstUseBegin) != 0 && openIndex < 0 &&
+		gCapture.openFirstUseCount < MaxFirstUseRecords)
+	{
+		gCapture.openFirstUseEvents[gCapture.openFirstUseCount++] = stored.eventId;
+	}
+	if ((stored.flags & PerfCompactFirstUseEnd) != 0)
+	{
+		const int32_t resolvedIndex = FindOpenFirstUseEvent(stored.eventId);
+		if (resolvedIndex >= 0)
+		{
+			const uint32_t index = (uint32_t)resolvedIndex;
+			gCapture.openFirstUseEvents[index] = gCapture.openFirstUseEvents[--gCapture.openFirstUseCount];
+			gCapture.openFirstUseEvents[gCapture.openFirstUseCount] = 0;
+		}
+	}
+	return stored.eventId;
+}
+
 void PerfCompactCaptureEndOuterFrame(const PerfCompactOuterFrame& frame)
 {
 	const PerfCompactCaptureToken token = gCapture.current;
 	if (!TokenMatches(token)) return;
 	Record& r = gCapture.records[token.recordIndex];
 	r.outer = frame;
-	r.eligible = frame.stateIsLevel && frame.levelRendered && frame.nriActive && r.nri.valid &&
-		r.nri.rendered && r.boundary.valid && r.boundary.pathTraced && r.boundary.presentOk &&
-		r.nri.frame == r.boundary.frame;
+	r.eligible = gCapture.state == CaptureState::Active && frame.stateIsLevel && frame.levelRendered &&
+		frame.nriActive && r.nri.valid && r.nri.rendered && r.boundary.valid &&
+		r.boundary.pathTraced && r.boundary.presentOk && r.nri.frame == r.boundary.frame;
+	if (gCapture.state == CaptureState::Active && !r.eligible)
+	{
+		if (!frame.stateIsLevel) gCapture.rejectState++;
+		if (!frame.levelRendered) gCapture.rejectLevelRendered++;
+		if (!frame.nriActive) gCapture.rejectNriActive++;
+		if (!r.nri.valid) gCapture.rejectNriInvalid++;
+		if (!r.nri.rendered) gCapture.rejectNriNotRendered++;
+		if (!r.boundary.valid) gCapture.rejectBoundaryInvalid++;
+		if (!r.boundary.pathTraced) gCapture.rejectNotPathTraced++;
+		if (!r.boundary.presentOk) gCapture.rejectPresent++;
+		if (r.nri.valid && r.boundary.valid && r.nri.frame != r.boundary.frame) gCapture.rejectFrameJoin++;
+	}
 	if (r.eligible) r.eligibleIndex = gCapture.eligible++;
 	gCapture.current = {};
 	if (gCapture.eligible >= gCapture.requested) gCapture.state = CaptureState::Draining;

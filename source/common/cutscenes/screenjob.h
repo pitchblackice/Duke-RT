@@ -17,6 +17,7 @@ void Job_Init();
 enum
 {
 	SJ_BLOCKUI = 1,
+	SJ_NOCLEAR = 2,
 };
 
 struct CutsceneDef
@@ -35,6 +36,9 @@ struct CutsceneDef
 
 void EndScreenJob();
 void DeleteScreenJob();
+bool CompleteLevelTransitionScreenJob();
+bool IsLevelTransitionScreenJob();
+bool IsScreenJobRetainedForLevelLoad();
 bool ScreenJobResponder(event_t* ev);
 bool ScreenJobTick();
 void ScreenJobDraw();
@@ -56,6 +60,8 @@ struct CutsceneState
 	PClass* runnerclass;
 	PType* runnerclasstype;
 	CompletionFunc completion;
+	bool levelTransition = false;
+	bool retainedForLevelLoad = false;
 };
 
 extern CutsceneState cutscene;

@@ -1394,7 +1394,10 @@ void NRIRenderer::PrintSceneBufferStatus() const
 
 void NRIRenderer::LogFallback(const char* reason)
 {
-	if (mHasLoggedFallback)
+	// Keep the normal log quiet, but let explicit debug sessions expose the
+	// current failure instead of permanently hiding it behind an earlier,
+	// unrelated preload fallback.
+	if (mHasLoggedFallback && nri_ptdebug <= 0)
 	{
 		return;
 	}

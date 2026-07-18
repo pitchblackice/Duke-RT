@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <mutex>
 #include <unordered_map>
 
 
@@ -135,19 +137,17 @@ namespace
 		return ((uint64_t)(uintptr_t)texture ^ (indexed ? 1ull : 0ull)) ^ 0x4000000000000000ull;
 	}
 
+	IndexedTexturePayloadCache gIndexedTexturePayloadCache;
+	std::mutex gIndexedTexturePayloadCacheMutex;
+
 	bool TryBuildSharedTextureContentKey(FGameTexture* gameTexture, FTexture* baseTexture, bool indexed, uint64_t& outKey, uint32_t& outWidth, uint32_t& outHeight)
 	{
 		outKey = 0;
 		outWidth = 0;
 		outHeight = 0;
 
-		if (indexed)
-		{
-			return false;
-		}
-
 		TextureSignatureRequest request = {};
-		request.contentKind = TextureSignatureContentKind::ProcessedBGRA;
+		request.contentKind = indexed ? TextureSignatureContentKind::Indexed : TextureSignatureContentKind::ProcessedBGRA;
 		request.translation = 0;
 		request.flags = TextureSignatureRequestFlag_None;
 
@@ -173,7 +173,66 @@ namespace
 		return true;
 	}
 
-	TextureUpload BuildTextureUpload(FGameTexture* gameTexture, FTexture* texture, bool indexed)
+	bool ResolveIndexedTexturePayload(
+		FTexture* texture,
+		uint64_t sourceSignature,
+		uint32_t sourceWidth,
+		uint32_t sourceHeight,
+		TextureUpload& upload,
+		MaterialBridgeBuildStats& stats)
+	{
+		{
+			std::lock_guard<std::mutex> lock(gIndexedTexturePayloadCacheMutex);
+			IndexedTexturePayloadCacheEntry cached = {};
+			if (gIndexedTexturePayloadCache.FindSource(
+				sourceSignature, sourceWidth, sourceHeight, cached))
+			{
+				upload.key = cached.contentKey;
+				upload.width = cached.width;
+				upload.height = cached.height;
+				upload.pixels = cached.pixels;
+				stats.indexedPayloadReuses++;
+				return true;
+			}
+		}
+
+		const auto start = std::chrono::steady_clock::now();
+		FTextureBuffer texBuffer = texture->CreateTexBuffer(0, CTF_Indexed);
+		if (texBuffer.mBuffer == nullptr || texBuffer.mWidth <= 0 || texBuffer.mHeight <= 0)
+		{
+			stats.indexedPayloadMs += std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - start).count();
+			return false;
+		}
+
+		std::vector<uint8_t> realizedPixels(
+			texBuffer.mBuffer,
+			texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight);
+		IndexedTexturePayloadCacheEntry cached = {};
+		{
+			std::lock_guard<std::mutex> lock(gIndexedTexturePayloadCacheMutex);
+			cached = gIndexedTexturePayloadCache.ResolveSource(
+				sourceSignature,
+				(uint32_t)texBuffer.mWidth,
+				(uint32_t)texBuffer.mHeight,
+				std::move(realizedPixels));
+		}
+		upload.key = cached.contentKey;
+		upload.width = cached.width;
+		upload.height = cached.height;
+		upload.pixels = cached.pixels;
+		stats.indexedPayloadRealizations++;
+		stats.indexedPayloadBytes += upload.pixels.size();
+		stats.indexedPayloadMs += std::chrono::duration<double, std::milli>(
+			std::chrono::steady_clock::now() - start).count();
+		return true;
+	}
+
+	TextureUpload BuildTextureUpload(
+		FGameTexture* gameTexture,
+		FTexture* texture,
+		bool indexed,
+		MaterialBridgeBuildStats& stats)
 	{
 		TextureUpload upload = {};
 		upload.indexed = indexed;
@@ -191,8 +250,20 @@ namespace
 		const bool hasSharedKey = TryBuildSharedTextureContentKey(gameTexture, texture, indexed, sharedKey, sharedWidth, sharedHeight);
 
 		const bool deferRealization = hasSharedKey && !indexed;
-		if (indexed)
+		if (indexed && hasSharedKey)
 		{
+			ResolveIndexedTexturePayload(
+				texture, sharedKey, sharedWidth, sharedHeight, upload, stats);
+		}
+		else if (deferRealization)
+		{
+			upload.width = sharedWidth;
+			upload.height = sharedHeight;
+			upload.key = sharedKey;
+		}
+		else if (indexed)
+		{
+			const auto start = std::chrono::steady_clock::now();
 			FTextureBuffer texBuffer = texture->CreateTexBuffer(0, CTF_Indexed);
 			if (texBuffer.mBuffer != nullptr && texBuffer.mWidth > 0 && texBuffer.mHeight > 0)
 			{
@@ -200,36 +271,31 @@ namespace
 				upload.height = (uint32_t)texBuffer.mHeight;
 				upload.pixels.assign(texBuffer.mBuffer, texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight);
 				upload.key = Fnv1a64(upload.pixels.data(), upload.pixels.size());
+				stats.indexedPayloadRealizations++;
+				stats.indexedPayloadBytes += upload.pixels.size();
 			}
+			stats.indexedPayloadMs += std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - start).count();
 		}
 		else
 		{
-			if (deferRealization)
+			FTextureBuffer texBuffer = texture->CreateTexBuffer(0, CTF_ProcessData);
+			if (texBuffer.mBuffer != nullptr && texBuffer.mWidth > 0 && texBuffer.mHeight > 0)
 			{
-				upload.width = sharedWidth;
-				upload.height = sharedHeight;
-				upload.key = sharedKey;
-			}
-			else
-			{
-				FTextureBuffer texBuffer = texture->CreateTexBuffer(0, CTF_ProcessData);
-				if (texBuffer.mBuffer != nullptr && texBuffer.mWidth > 0 && texBuffer.mHeight > 0)
-				{
-					upload.width = (uint32_t)texBuffer.mWidth;
-					upload.height = (uint32_t)texBuffer.mHeight;
-					upload.pixels.assign(texBuffer.mBuffer, texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight * 4u);
-					upload.key = hasSharedKey ? sharedKey : Fnv1a64(upload.pixels.data(), upload.pixels.size());
-				}
+				upload.width = (uint32_t)texBuffer.mWidth;
+				upload.height = (uint32_t)texBuffer.mHeight;
+				upload.pixels.assign(texBuffer.mBuffer, texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight * 4u);
+				upload.key = Fnv1a64(upload.pixels.data(), upload.pixels.size());
 			}
 		}
 
-		if (hasSharedKey && upload.width != 0 && upload.height != 0)
+		if (hasSharedKey && !indexed && upload.width != 0 && upload.height != 0)
 		{
 			upload.width = sharedWidth;
 			upload.height = sharedHeight;
 			upload.key = sharedKey;
 		}
-		else if (upload.width != 0 && upload.height != 0)
+		else if ((!indexed || !hasSharedKey) && upload.width != 0 && upload.height != 0)
 		{
 			upload.key ^= ((uint64_t)upload.width << 32) | (uint64_t)upload.height;
 			upload.key ^= indexed ? (1ull << 63) : 0ull;
@@ -238,14 +304,14 @@ namespace
 		return upload;
 	}
 
-	TextureUpload BuildTextureUpload(FTexture* texture, bool indexed)
+	TextureUpload BuildTextureUpload(FTexture* texture, bool indexed, MaterialBridgeBuildStats& stats)
 	{
-		return BuildTextureUpload(nullptr, texture, indexed);
+		return BuildTextureUpload(nullptr, texture, indexed, stats);
 	}
 
-	TextureUpload BuildTextureUpload(FGameTexture* texture, bool indexed)
+	TextureUpload BuildTextureUpload(FGameTexture* texture, bool indexed, MaterialBridgeBuildStats& stats)
 	{
-		return texture != nullptr ? BuildTextureUpload(texture, texture->GetTexture(), indexed) : TextureUpload{};
+		return texture != nullptr ? BuildTextureUpload(texture, texture->GetTexture(), indexed, stats) : TextureUpload{};
 	}
 
 	uint32_t EnsureTextureUploadIndex(FGameTexture* texture, bool indexed, std::unordered_map<uint64_t, uint32_t>& textureLookup, MaterialBridgeData& outMaterials)
@@ -256,7 +322,7 @@ namespace
 		{
 			const uint32_t textureIndex = (uint32_t)outMaterials.textures.size();
 			textureLookup.emplace(textureKey, textureIndex);
-			outMaterials.textures.push_back(BuildTextureUpload(texture, indexed));
+			outMaterials.textures.push_back(BuildTextureUpload(texture, indexed, outMaterials.buildStats));
 			return textureIndex;
 		}
 
@@ -271,7 +337,7 @@ namespace
 		{
 			const uint32_t textureIndex = (uint32_t)outMaterials.textures.size();
 			textureLookup.emplace(textureKey, textureIndex);
-			outMaterials.textures.push_back(BuildTextureUpload(texture, indexed));
+			outMaterials.textures.push_back(BuildTextureUpload(texture, indexed, outMaterials.buildStats));
 			return textureIndex;
 		}
 
@@ -527,11 +593,85 @@ namespace
 		outMaterials.lightMetadata.push_back(metadata);
 	}
 
-	void BuildPaletteLookup(MaterialBridgeData& outMaterials)
+	struct PaletteLookupCache
+	{
+		uint64_t sourceSignature = 0;
+		ImmutableBytePayload payload;
+	};
+
+	PaletteLookupCache gPaletteLookupCache;
+	std::mutex gPaletteLookupCacheMutex;
+
+	uint64_t BuildPaletteSourceSignature()
+	{
+		uint64_t signature = 1469598103934665603ull;
+		for (uint32_t colorIndex = 0; colorIndex < 256; ++colorIndex)
+		{
+			const PalEntry color = GPalette.BaseColors[colorIndex];
+			Fnv1a64Append(signature, &color.b, sizeof(color.b));
+			Fnv1a64Append(signature, &color.g, sizeof(color.g));
+			Fnv1a64Append(signature, &color.r, sizeof(color.r));
+		}
+		for (uint32_t paletteIndex = 0; paletteIndex < MAXPALOOKUPS; ++paletteIndex)
+		{
+			const uint8_t* table = lookups.getTable((int)paletteIndex);
+			if (table != nullptr)
+			{
+				Fnv1a64Append(signature, table, 256);
+			}
+			else
+			{
+				for (uint32_t colorIndex = 0; colorIndex < 256; ++colorIndex)
+				{
+					const uint8_t identity = (uint8_t)colorIndex;
+					Fnv1a64Append(signature, &identity, sizeof(identity));
+				}
+			}
+		}
+		return signature;
+	}
+
+	bool PalettePayloadMatchesLiveSamples(const ImmutableBytePayload& payload)
+	{
+		if (payload.size() != (size_t)256 * MAXPALOOKUPS * 4u)
+		{
+			return false;
+		}
+		for (uint32_t sample = 0; sample < 32; ++sample)
+		{
+			const uint32_t paletteIndex = (sample * 67u) & 255u;
+			const uint32_t colorIndex = (sample * 149u) & 255u;
+			const uint8_t* table = lookups.getTable((int)paletteIndex);
+			const uint8_t remappedIndex = table != nullptr ? table[colorIndex] : (uint8_t)colorIndex;
+			const PalEntry color = GPalette.BaseColors[remappedIndex];
+			const size_t pixelIndex = ((size_t)paletteIndex * 256u + colorIndex) * 4u;
+			const uint8_t* bytes = payload.data();
+			if (bytes[pixelIndex + 0] != color.b ||
+				bytes[pixelIndex + 1] != color.g ||
+				bytes[pixelIndex + 2] != color.r ||
+				bytes[pixelIndex + 3] != 255)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	bool BuildPaletteLookup(MaterialBridgeData& outMaterials)
 	{
 		outMaterials.paletteWidth = 256;
 		outMaterials.paletteHeight = MAXPALOOKUPS;
-		outMaterials.paletteLookup.resize((size_t)outMaterials.paletteWidth * (size_t)outMaterials.paletteHeight * 4u);
+		const uint64_t sourceSignature = BuildPaletteSourceSignature();
+		std::lock_guard<std::mutex> lock(gPaletteLookupCacheMutex);
+		if (gPaletteLookupCache.sourceSignature == sourceSignature &&
+			PalettePayloadMatchesLiveSamples(gPaletteLookupCache.payload))
+		{
+			outMaterials.paletteLookup = gPaletteLookupCache.payload;
+			return false;
+		}
+
+		std::vector<uint8_t> paletteLookup(
+			(size_t)outMaterials.paletteWidth * (size_t)outMaterials.paletteHeight * 4u);
 
 		for (uint32_t paletteIndex = 0; paletteIndex < outMaterials.paletteHeight; ++paletteIndex)
 		{
@@ -541,12 +681,17 @@ namespace
 				const uint8_t remappedIndex = table != nullptr ? table[colorIndex] : (uint8_t)colorIndex;
 				const PalEntry color = GPalette.BaseColors[remappedIndex];
 				const size_t pixelIndex = ((size_t)paletteIndex * outMaterials.paletteWidth + colorIndex) * 4u;
-				outMaterials.paletteLookup[pixelIndex + 0] = color.b;
-				outMaterials.paletteLookup[pixelIndex + 1] = color.g;
-				outMaterials.paletteLookup[pixelIndex + 2] = color.r;
-				outMaterials.paletteLookup[pixelIndex + 3] = 255;
+				paletteLookup[pixelIndex + 0] = color.b;
+				paletteLookup[pixelIndex + 1] = color.g;
+				paletteLookup[pixelIndex + 2] = color.r;
+				paletteLookup[pixelIndex + 3] = 255;
 			}
 		}
+		const uint64_t payloadSignature = Fnv1a64(paletteLookup.data(), paletteLookup.size());
+		gPaletteLookupCache.sourceSignature = sourceSignature;
+		gPaletteLookupCache.payload.Assign(std::move(paletteLookup), payloadSignature);
+		outMaterials.paletteLookup = gPaletteLookupCache.payload;
+		return true;
 	}
 }
 
@@ -591,11 +736,19 @@ bool RealizeTextureUploadPayload(const TextureUpload& upload, std::vector<uint8_
 
 uint64_t EstimateMaterialBridgeBytes(const MaterialBridgeData& materials)
 {
+	uint64_t uniquePayloadBytes = materials.paletteLookup.uniqueStorageBytes();
+	for (const TextureUpload& texture : materials.textures)
+	{
+		uniquePayloadBytes += texture.pixels.uniqueStorageBytes();
+	}
+	// Shared palette/indexed bytes are owned by the process-wide immutable caches.
+	// Charging them to every material resource would multiply residency pressure by
+	// the variant count. This estimate represents incremental bridge ownership.
 	return
 		(uint64_t)materials.materials.size() * sizeof(MaterialData) +
 		(uint64_t)materials.lightMetadata.size() * sizeof(MaterialLightingMetadata) +
 		(uint64_t)materials.textures.size() * sizeof(TextureUpload) +
-		(uint64_t)materials.paletteLookup.size();
+		uniquePayloadBytes;
 }
 
 void ClearMaterialBridgeRetainingCapacity(MaterialBridgeData& materials)
@@ -606,6 +759,7 @@ void ClearMaterialBridgeRetainingCapacity(MaterialBridgeData& materials)
 	materials.paletteLookup.clear();
 	materials.paletteWidth = 256;
 	materials.paletteHeight = 256;
+	materials.buildStats = {};
 }
 
 void AppendMaterialBridge(const MaterialBridgeData& source, MaterialBridgeData& destination)
@@ -616,6 +770,14 @@ void AppendMaterialBridge(const MaterialBridgeData& source, MaterialBridgeData& 
 	{
 		textureLookup.emplace(destination.textures[i].key, i);
 	}
+	AppendMaterialBridge(source, destination, textureLookup);
+}
+
+void AppendMaterialBridge(
+	const MaterialBridgeData& source,
+	MaterialBridgeData& destination,
+	std::unordered_map<uint64_t, uint32_t>& textureLookup)
+{
 
 	auto remapTextureIndex = [&source, &destination, &textureLookup](uint32_t textureIndex) -> uint32_t
 	{
@@ -678,6 +840,7 @@ void BuildMaterials(const SceneView& sceneView, MaterialBridgeData& outMaterials
 {
 	outMaterials = {};
 	std::unordered_map<uint64_t, uint32_t> textureLookup;
+	const auto materialRowsStart = std::chrono::steady_clock::now();
 
 	for (const SurfaceRef& wall : sceneView.opaqueWalls)
 	{
@@ -693,7 +856,15 @@ void BuildMaterials(const SceneView& sceneView, MaterialBridgeData& outMaterials
 	{
 		AppendSurfaceMaterial(sprite, textureLookup, outMaterials);
 	}
+	outMaterials.buildStats.materialRowsMs = std::chrono::duration<double, std::milli>(
+		std::chrono::steady_clock::now() - materialRowsStart).count();
 
-	BuildPaletteLookup(outMaterials);
+	const auto paletteStart = std::chrono::steady_clock::now();
+	const bool paletteBuilt = BuildPaletteLookup(outMaterials);
+	outMaterials.buildStats.paletteMs = std::chrono::duration<double, std::milli>(
+		std::chrono::steady_clock::now() - paletteStart).count();
+	outMaterials.buildStats.paletteBuilds = paletteBuilt ? 1u : 0u;
+	outMaterials.buildStats.paletteReuses = paletteBuilt ? 0u : 1u;
+	outMaterials.buildStats.paletteBytesBuilt = paletteBuilt ? outMaterials.paletteLookup.size() : 0u;
 }
 }

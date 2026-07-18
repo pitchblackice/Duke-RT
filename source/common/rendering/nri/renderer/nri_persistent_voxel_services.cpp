@@ -6,6 +6,8 @@
 #include "nri_voxel_compute_meshing.h"
 #include "../system/nri_renderdevice.h"
 #include "../scene/nri_material_bridge.h"
+#include "../scene/nri_hash.h"
+#include "../../../engine/perf_capture.h"
 #include "hw_voxels.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "mapinfo.h"
@@ -43,15 +45,43 @@ namespace
 	{
 		uint32_t width = 0;
 		uint32_t height = 0;
-		std::vector<uint8_t> bytes;
+		nri_scene::ImmutableBytePayload bytes;
+	};
+
+	struct PersistentVoxelMaterialEventIdentity
+	{
+		uint64_t materialKey = 0;
+		uint64_t validatedSignature = 0;
+
+		bool operator==(const PersistentVoxelMaterialEventIdentity& other) const
+		{
+			return materialKey == other.materialKey && validatedSignature == other.validatedSignature;
+		}
+	};
+
+	struct PersistentVoxelMaterialEventIdentityHash
+	{
+		size_t operator()(const PersistentVoxelMaterialEventIdentity& identity) const
+		{
+			return (size_t)nri_scene::HashCombine64(identity.materialKey, identity.validatedSignature);
+		}
 	};
 
 	struct PersistentVoxelMaterialClosureServiceState
 	{
+		struct MaterialEvent
+		{
+			uint64_t eventId = 0;
+			uint64_t payloadSignature = 0;
+			uint64_t producerFrame = 0;
+			uint32_t queuedSlot = UINT32_MAX;
+		};
+
 		uint64_t buildSerial = 0;
 		NRIPersistentVoxelMaterialClosureRegistry registry;
 		NRIPersistentVoxelMaterialClosureTelemetry telemetry = {};
 		std::unordered_map<uint64_t, PersistentVoxelPalettePayload> palettes;
+		std::unordered_map<PersistentVoxelMaterialEventIdentity, MaterialEvent, PersistentVoxelMaterialEventIdentityHash> materialEvents;
 	};
 
 	std::unordered_map<NRIRenderer*, PersistentVoxelMaterialClosureServiceState> gPersistentVoxelMaterialClosureStates;
@@ -100,13 +130,158 @@ namespace
 		return gPersistentVoxelMaterialClosureStates[&renderer];
 	}
 
-	void EnsurePersistentVoxelMaterialClosureBuildSerial(NRIRenderer& renderer, uint64_t buildSerial)
+	uint64_t PersistentVoxelMaterialEventFrame(uint64_t frameIndex)
+	{
+		return (uint64_t)frameIndex + 1u;
+	}
+
+	void EndPersistentVoxelMaterialEvent(
+		PersistentVoxelMaterialClosureServiceState& state,
+		uint64_t frameIndex,
+		uint64_t materialKey,
+		uint64_t validatedSignature,
+		PerfCompactFirstUseState resultState)
+	{
+		const PersistentVoxelMaterialEventIdentity identity = { materialKey, validatedSignature };
+		const auto event = state.materialEvents.find(identity);
+		if (event == state.materialEvents.end())
+		{
+			return;
+		}
+		PerfCompactFirstUseRecord record = {};
+		record.eventId = event->second.eventId;
+		record.materialKey = materialKey;
+		record.validatedSignature = validatedSignature;
+		record.rendererFrame = PersistentVoxelMaterialEventFrame(frameIndex);
+		record.producerFrame = event->second.producerFrame;
+		record.publicationFrame = record.rendererFrame;
+		record.queuedSlot = event->second.queuedSlot;
+		record.domain = PerfCompactFirstUseDomain::Material;
+		record.stage = PerfCompactFirstUseStage::Publication;
+		record.state = resultState;
+		record.flags = PerfCompactFirstUseEnd;
+		PerfCompactCaptureNoteFirstUse(record);
+		state.materialEvents.erase(event);
+	}
+
+	void FailPersistentVoxelMaterialPayloadEvents(
+		PersistentVoxelMaterialClosureServiceState& state,
+		uint64_t frameIndex,
+		uint64_t payloadSignature)
+	{
+		std::vector<PersistentVoxelMaterialEventIdentity> failedEvents;
+		for (const auto& pair : state.materialEvents)
+		{
+			if (pair.second.payloadSignature == payloadSignature)
+			{
+				failedEvents.push_back(pair.first);
+			}
+		}
+		for (const PersistentVoxelMaterialEventIdentity& identity : failedEvents)
+		{
+			EndPersistentVoxelMaterialEvent(
+				state,
+				frameIndex,
+				identity.materialKey,
+				identity.validatedSignature,
+				PerfCompactFirstUseState::Failed);
+		}
+	}
+
+	void CancelPersistentVoxelMaterialEvents(
+		PersistentVoxelMaterialClosureServiceState& state,
+		uint64_t frameIndex)
+	{
+		while (!state.materialEvents.empty())
+		{
+			const PersistentVoxelMaterialEventIdentity identity = state.materialEvents.begin()->first;
+			EndPersistentVoxelMaterialEvent(
+				state,
+				frameIndex,
+				identity.materialKey,
+				identity.validatedSignature,
+				PerfCompactFirstUseState::Cancelled);
+		}
+	}
+
+	void NotePersistentVoxelMaterialRegistration(
+		PersistentVoxelMaterialClosureServiceState& state,
+		uint64_t frameIndex,
+		uint32_t queuedSlot,
+		uint64_t materialKey,
+		uint64_t validatedSignature,
+		const nri_scene::MaterialBridgeData& materials,
+		NRIPersistentVoxelMaterialClosureSource source,
+		const NRIPersistentVoxelMaterialClosureResult& result)
+	{
+		if (source != NRIPersistentVoxelMaterialClosureSource::RuntimeUnknown)
+		{
+			return;
+		}
+		const PersistentVoxelMaterialEventIdentity identity = { materialKey, validatedSignature };
+		if (!result.reusedSeed && state.materialEvents.find(identity) == state.materialEvents.end())
+		{
+			PerfCompactFirstUseRecord begin = {};
+			begin.materialKey = materialKey;
+			begin.validatedSignature = validatedSignature;
+			begin.textureKey = !materials.textures.empty() ? materials.textures.front().key : 0;
+			begin.rendererFrame = PersistentVoxelMaterialEventFrame(frameIndex);
+			begin.producerFrame = begin.rendererFrame;
+			begin.bytes = (uint64_t)materials.materials.size() * sizeof(nri_scene::MaterialData);
+			begin.cpuMs = materials.buildStats.materialRowsMs;
+			begin.queuedSlot = queuedSlot;
+			begin.count = (uint32_t)materials.materials.size();
+			begin.domain = PerfCompactFirstUseDomain::Material;
+			begin.stage = PerfCompactFirstUseStage::MaterialRows;
+			begin.state = result.state == NRIPersistentVoxelMaterialClosureState::Pending ?
+				PerfCompactFirstUseState::Pending : PerfCompactFirstUseState::Instant;
+			begin.flags = PerfCompactFirstUseBegin;
+			const uint64_t eventId = PerfCompactCaptureNoteFirstUse(begin);
+			if (eventId != 0)
+			{
+				state.materialEvents.emplace(
+					identity,
+					PersistentVoxelMaterialClosureServiceState::MaterialEvent{
+						eventId, result.payloadSignature, begin.producerFrame, queuedSlot });
+				if (materials.buildStats.paletteBuilds != 0)
+				{
+					PerfCompactFirstUseRecord palette = begin;
+					palette.eventId = eventId;
+					palette.stage = PerfCompactFirstUseStage::Palette;
+					palette.state = PerfCompactFirstUseState::Instant;
+					palette.flags = 0;
+					palette.cpuMs = materials.buildStats.paletteMs;
+					palette.bytes = materials.buildStats.paletteBytesBuilt;
+					palette.count = materials.buildStats.paletteBuilds;
+					PerfCompactCaptureNoteFirstUse(palette);
+				}
+			}
+		}
+
+		if (result.state == NRIPersistentVoxelMaterialClosureState::Ready)
+		{
+			EndPersistentVoxelMaterialEvent(
+				state, frameIndex, materialKey, validatedSignature, PerfCompactFirstUseState::Ready);
+		}
+		else if (result.state == NRIPersistentVoxelMaterialClosureState::Failed ||
+			result.state == NRIPersistentVoxelMaterialClosureState::Deferred)
+		{
+			EndPersistentVoxelMaterialEvent(
+				state, frameIndex, materialKey, validatedSignature, PerfCompactFirstUseState::Failed);
+		}
+	}
+
+	void EnsurePersistentVoxelMaterialClosureBuildSerial(
+		NRIRenderer& renderer,
+		uint64_t buildSerial,
+		uint64_t frameIndex)
 	{
 		PersistentVoxelMaterialClosureServiceState& state = GetPersistentVoxelMaterialClosureState(renderer);
 		if (state.buildSerial == buildSerial)
 		{
 			return;
 		}
+		CancelPersistentVoxelMaterialEvents(state, frameIndex);
 		state = {};
 		state.buildSerial = buildSerial;
 		state.telemetry.buildSerial = buildSerial;
@@ -256,9 +431,15 @@ namespace
 class NRIPersistentVoxelServiceFactory
 {
 public:
+	static uint64_t FirstUseFrameIndex(const NRIRenderer& renderer)
+	{
+		return renderer.mFrameBuffer != nullptr ? renderer.mFrameBuffer->mFrameIndex : renderer.mFrameIndex;
+	}
+
 	static void ResetMaterialClosure(NRIRenderer& renderer, uint64_t buildSerial)
 	{
 		PersistentVoxelMaterialClosureServiceState& state = GetPersistentVoxelMaterialClosureState(renderer);
+		CancelPersistentVoxelMaterialEvents(state, FirstUseFrameIndex(renderer));
 		state = {};
 		state.buildSerial = buildSerial;
 		state.telemetry.buildSerial = buildSerial;
@@ -267,7 +448,7 @@ public:
 
 	static void RecordMaterialBuild(NRIRenderer& renderer)
 	{
-		EnsurePersistentVoxelMaterialClosureBuildSerial(renderer, renderer.mMapWorld.buildSerial);
+		EnsurePersistentVoxelMaterialClosureBuildSerial(renderer, renderer.mMapWorld.buildSerial, FirstUseFrameIndex(renderer));
 		PersistentVoxelMaterialClosureServiceState& state = GetPersistentVoxelMaterialClosureState(renderer);
 		const bool preloadPending =
 			renderer.mFrameBuffer != nullptr && renderer.mFrameBuffer->IsPathTracingLevelPreloadPending();
@@ -302,7 +483,7 @@ public:
 		NRIRenderer& renderer,
 		const NRISceneTextureClosureResult& result)
 	{
-		EnsurePersistentVoxelMaterialClosureBuildSerial(renderer, renderer.mMapWorld.buildSerial);
+		EnsurePersistentVoxelMaterialClosureBuildSerial(renderer, renderer.mMapWorld.buildSerial, FirstUseFrameIndex(renderer));
 		NRIPersistentVoxelMaterialClosureTelemetry& telemetry =
 			GetPersistentVoxelMaterialClosureState(renderer).telemetry;
 		telemetry.textureRequests++;
@@ -358,16 +539,20 @@ public:
 		NRIPersistentVoxelMaterialClosureSource source,
 		NRIPersistentVoxelMaterialClosureResult& outResult)
 	{
-		EnsurePersistentVoxelMaterialClosureBuildSerial(renderer, buildSerial);
+		EnsurePersistentVoxelMaterialClosureBuildSerial(renderer, buildSerial, FirstUseFrameIndex(renderer));
 		PersistentVoxelMaterialClosureServiceState& state = GetPersistentVoxelMaterialClosureState(renderer);
 		NRIPersistentVoxelMaterialSeed seed = {};
 		seed.materialKey = materialKey;
 		seed.validatedSignature = validatedSignature;
 		seed.paletteWidth = materials.paletteWidth;
 		seed.paletteHeight = materials.paletteHeight;
-		seed.paletteSignature = HashPersistentVoxelClosureBytes(
-			materials.paletteLookup.empty() ? nullptr : materials.paletteLookup.data(),
-			materials.paletteLookup.size());
+		seed.paletteSignature = materials.paletteLookup.signature();
+		if (seed.paletteSignature == 0)
+		{
+			seed.paletteSignature = HashPersistentVoxelClosureBytes(
+				materials.paletteLookup.empty() ? nullptr : materials.paletteLookup.data(),
+				materials.paletteLookup.size());
+		}
 		seed.materials.reserve(materials.materials.size());
 		for (const nri_scene::MaterialData& material : materials.materials)
 		{
@@ -420,7 +605,8 @@ public:
 
 		seed.ruleResultId = HashNRIPersistentVoxelMaterialRuleResult(seed);
 		seed.payloadSignature = HashNRIPersistentVoxelMaterialSeed(seed);
-		if (!materials.paletteLookup.empty() && seed.paletteSignature != 0)
+		if (!materials.paletteLookup.empty() && seed.paletteSignature != 0 &&
+			state.palettes.find(seed.paletteSignature) == state.palettes.end())
 		{
 			PersistentVoxelPalettePayload& palette = state.palettes[seed.paletteSignature];
 			palette.width = materials.paletteWidth;
@@ -428,6 +614,15 @@ public:
 			palette.bytes = materials.paletteLookup;
 		}
 		const bool ready = state.registry.Register(std::move(seed), outResult);
+		NotePersistentVoxelMaterialRegistration(
+			state,
+			FirstUseFrameIndex(renderer),
+			renderer.GetCurrentQueuedFrameIndex(),
+			materialKey,
+			validatedSignature,
+			materials,
+			source,
+			outResult);
 		if (source == NRIPersistentVoxelMaterialClosureSource::PreloadKnown)
 		{
 			state.telemetry.preloadSeeds++;
@@ -464,52 +659,82 @@ public:
 		nri_scene::MaterialBridgeData& outMaterials,
 		NRIPersistentVoxelMaterialClosureResult& outResult)
 	{
-		EnsurePersistentVoxelMaterialClosureBuildSerial(renderer, buildSerial);
+		EnsurePersistentVoxelMaterialClosureBuildSerial(renderer, buildSerial, FirstUseFrameIndex(renderer));
 		PersistentVoxelMaterialClosureServiceState& state = GetPersistentVoxelMaterialClosureState(renderer);
 		const NRIPersistentVoxelMaterialSeed* seed =
-			state.registry.FindReady(buildSerial, materialKey, validatedSignature, outResult);
+			state.registry.Find(buildSerial, materialKey, validatedSignature, outResult);
 		if (seed == nullptr)
 		{
 			return false;
 		}
+		NRIPersistentVoxelMaterialSeed refreshedSeed = *seed;
 
-		for (size_t textureIndex = 0; textureIndex < seed->textures.size(); ++textureIndex)
+		for (size_t textureIndex = 0; textureIndex < refreshedSeed.textures.size(); ++textureIndex)
 		{
-			const NRIPersistentVoxelTextureDependency& dependency = seed->textures[textureIndex];
+			NRIPersistentVoxelTextureDependency& dependency = refreshedSeed.textures[textureIndex];
 			if (dependency.state == NRIPersistentVoxelTextureClosureState::NotRequired)
 			{
 				continue;
 			}
 			NRISceneTextureClosureResult textureResult = {};
-			if (!renderer.mSceneTextures.QueryPreloadClosure(dependency.key, textureResult))
+			const bool runtimeClosure =
+				source == NRIPersistentVoxelMaterialClosureSource::RuntimeUnknown &&
+				renderer.mFrameBuffer != nullptr;
+			const bool textureReady = runtimeClosure ?
+				renderer.mSceneTextures.QueryRuntimeClosure(*renderer.mFrameBuffer, dependency.key, textureResult) :
+				renderer.mSceneTextures.QueryPreloadClosure(dependency.key, textureResult);
+			dependency.state = ConvertPersistentVoxelTextureClosureState(textureResult.state);
+			dependency.failure = ConvertPersistentVoxelTextureClosureFailure(textureResult.failure);
+			dependency.residencyIndex = textureResult.residencyIndex;
+			dependency.descriptorReady = textureResult.descriptorReady;
+			state.telemetry.textureRequests++;
+			if (!textureReady)
 			{
-				outResult.state = NRIPersistentVoxelMaterialClosureState::Stale;
-				outResult.textures[textureIndex].state = NRIPersistentVoxelTextureClosureState::Failed;
-				outResult.textures[textureIndex].failure =
-					ConvertPersistentVoxelTextureClosureFailure(textureResult.failure);
-				outResult.textures[textureIndex].descriptorReady = false;
+				if (textureResult.state == NRISceneTextureClosureState::Pending)
+				{
+					continue;
+				}
+				outResult = BuildNRIPersistentVoxelMaterialClosureResult(refreshedSeed, true);
+				FailPersistentVoxelMaterialPayloadEvents(
+					state, FirstUseFrameIndex(renderer), refreshedSeed.payloadSignature);
+				state.registry.Invalidate(materialKey, validatedSignature);
 				state.telemetry.textureFailures++;
 				return false;
 			}
-			outResult.textures[textureIndex].residencyIndex = textureResult.residencyIndex;
-			outResult.textures[textureIndex].descriptorReady = textureResult.descriptorReady;
-			state.telemetry.textureRequests++;
 			state.telemetry.textureReuses++;
 		}
+		outResult = BuildNRIPersistentVoxelMaterialClosureResult(refreshedSeed, true);
+		if (outResult.state != NRIPersistentVoxelMaterialClosureState::Ready)
+		{
+			return false;
+		}
+		NRIPersistentVoxelMaterialClosureResult promotedResult = {};
+		if (!state.registry.Register(refreshedSeed, promotedResult))
+		{
+			outResult = promotedResult;
+			return false;
+		}
+		outResult = promotedResult;
+		EndPersistentVoxelMaterialEvent(
+			state,
+			FirstUseFrameIndex(renderer),
+			materialKey,
+			validatedSignature,
+			PerfCompactFirstUseState::Ready);
 
 		outMaterials = {};
-		outMaterials.materials.reserve(seed->materials.size());
-		for (const NRIPersistentVoxelMaterialRowSeed& material : seed->materials)
+		outMaterials.materials.reserve(refreshedSeed.materials.size());
+		for (const NRIPersistentVoxelMaterialRowSeed& material : refreshedSeed.materials)
 		{
 			outMaterials.materials.push_back(BuildPersistentVoxelMaterialData(material));
 		}
-		outMaterials.lightMetadata.reserve(seed->lighting.size());
-		for (const NRIPersistentVoxelMaterialLightingSeed& metadata : seed->lighting)
+		outMaterials.lightMetadata.reserve(refreshedSeed.lighting.size());
+		for (const NRIPersistentVoxelMaterialLightingSeed& metadata : refreshedSeed.lighting)
 		{
 			outMaterials.lightMetadata.push_back(BuildPersistentVoxelMaterialLightingMetadata(metadata));
 		}
-		outMaterials.textures.resize(seed->textures.size());
-		for (const NRIPersistentVoxelTextureDependency& dependency : seed->textures)
+		outMaterials.textures.resize(refreshedSeed.textures.size());
+		for (const NRIPersistentVoxelTextureDependency& dependency : refreshedSeed.textures)
 		{
 			if (dependency.materialTextureIndex >= outMaterials.textures.size())
 			{
@@ -521,7 +746,7 @@ public:
 			upload.height = dependency.height;
 			upload.indexed = dependency.indexed;
 		}
-		const auto palette = state.palettes.find(seed->paletteSignature);
+		const auto palette = state.palettes.find(refreshedSeed.paletteSignature);
 		if (palette != state.palettes.end())
 		{
 			outMaterials.paletteWidth = palette->second.width;
@@ -530,8 +755,8 @@ public:
 		}
 		else
 		{
-			outMaterials.paletteWidth = seed->paletteWidth;
-			outMaterials.paletteHeight = seed->paletteHeight;
+			outMaterials.paletteWidth = refreshedSeed.paletteWidth;
+			outMaterials.paletteHeight = refreshedSeed.paletteHeight;
 		}
 
 		if (source == NRIPersistentVoxelMaterialClosureSource::PreloadKnown)
@@ -813,7 +1038,7 @@ public:
 
 	static bool PreloadResources(NRIRenderer& renderer)
 	{
-		EnsurePersistentVoxelMaterialClosureBuildSerial(renderer, renderer.mMapWorld.buildSerial);
+		EnsurePersistentVoxelMaterialClosureBuildSerial(renderer, renderer.mMapWorld.buildSerial, FirstUseFrameIndex(renderer));
 		std::vector<nri_scene::PrecachedVoxelVariantView> variants;
 		std::vector<nri_scene::PrecachedVoxelRawManifestView> rawVariants;
 		nri_scene::PrecachedVoxelRawManifestStats rawManifestStats = {};

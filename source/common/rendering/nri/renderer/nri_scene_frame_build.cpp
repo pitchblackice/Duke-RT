@@ -485,11 +485,13 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	auto& persistentVoxelGpuMaterials = mSelectPersistentVoxelGpuMaterialScratch;
 	auto& combinedGpuMaterials = mSelectCombinedGpuMaterialScratch;
 	auto& refreshedCombinedGpuMaterials = mSelectRefreshedCombinedGpuMaterialScratch;
+	auto& deferredTextureMaterialIndices = mSelectDeferredTextureMaterialIndexScratch;
 	capturedGpuMaterials.clear();
 	dynamicGpuMaterials.clear();
 	persistentVoxelGpuMaterials.clear();
 	combinedGpuMaterials.clear();
 	refreshedCombinedGpuMaterials.clear();
+	deferredTextureMaterialIndices.clear();
 	nri_scene::ClearGeometryRetainingCapacity(mSelectLocalPlayerReflectionGeometryScratch);
 	nri_scene::ClearGeometryRetainingCapacity(mSelectOverlayGeometryScratch);
 	nri_scene::ClearMaterialBridgeRetainingCapacity(mSelectOverlayMaterialBridgeScratch);
@@ -1230,7 +1232,9 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						combinedGpuMaterials,
 						false,
 						"static_map_overlay_combined",
-						&textureReuseInputs);
+						&textureReuseInputs,
+						NRISceneTextureMissPolicy::RuntimeAsyncDeferOverlay,
+						&deferredTextureMaterialIndices);
 				}();
 				dynamicGpuMaterials.clear();
 				persistentVoxelGpuMaterials.clear();
@@ -1614,6 +1618,17 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			else
 			{
 				LogFallback("PT runtime/dynamic overlay update failed; tracing the resident static world only.");
+				if (nri_ptdebug > 0)
+				{
+					Printf("NRI PT overlay fallback detail: frame=%u palette=%u textures=%u buffers=%u acceleration=%u primitives=%u persistent=%u\n",
+						mFrameIndex,
+						paletteReady ? 1u : 0u,
+						texturesReady ? 1u : 0u,
+						buffersReady ? 1u : 0u,
+						accelerationReady ? 1u : 0u,
+						(uint32_t)overlayGeometry.primitives.size(),
+						hasPersistentVoxelOverlay ? 1u : 0u);
+				}
 				if (mGpuSceneHasDynamicOverlay)
 				{
 					RestoreStaticTopLevelScene();
@@ -1825,6 +1840,17 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		refreshedCombinedGpuMaterials = refreshedMaterialSource.materials;
 		ApplyEmissiveMaterialOverrides(refreshedMaterialSource, refreshedCombinedGpuMaterials);
 		ApplyActorShadowMaterialOverrides(refreshedMaterialSource, refreshedCombinedGpuMaterials);
+		const uint32_t preservedPendingTextureMaterialCount = NRIPreservePendingTextureMaterialProxies(
+			combinedGpuMaterials,
+			refreshedCombinedGpuMaterials,
+			deferredTextureMaterialIndices);
+		if (preservedPendingTextureMaterialCount > 0 && nri_ptscenestats)
+		{
+			Printf(
+				"NRI PT scene textures: event=runtime_pending_preserve deferred_materials=%u preserved_materials=%u action=preserve-transparent-material-proxy\n",
+				(uint32_t)deferredTextureMaterialIndices.size(),
+				preservedPendingTextureMaterialCount);
+		}
 		if (!nri_material_policy::MaterialDataVectorEqual(refreshedCombinedGpuMaterials, combinedGpuMaterials))
 		{
 			const size_t staticMaterialCount = mStaticMapScene.gpuMaterials.size();
@@ -1847,7 +1873,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				combinedGpuMaterials.begin() + staticMaterialCount + persistentVoxelMaterialCount,
 				combinedGpuMaterials.end());
 			if (!UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials) ||
-				(persistentVoxelMaterialCount != 0 && !UploadPersistentVoxelArenaMaterialBuffers(persistentVoxelGpuMaterials)) ||
+				(persistentVoxelMaterialCount != 0 && !UploadPersistentVoxelArenaMaterialBuffers(persistentVoxelGpuMaterials, true)) ||
 				!NRISceneUploadManager::UpdateSceneDataSet(*this,
 					mStaticVertexBuffer,
 					mStaticIndexBuffer,

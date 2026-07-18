@@ -29,6 +29,7 @@
 #include "texinfo.h"
 #include "textures.h"
 #include "v_video.h"
+#include "perf_capture.h"
 #include <chrono>
 #include <algorithm>
 #include <cctype>
@@ -2734,6 +2735,21 @@ namespace
 	void TraceVoxelActorFirstUseFallback(const HWSprite& sprite, const VoxelActorCacheLookup& lookup, VoxelActorPendingReason reason)
 	{
 		EmitVoxelActorKeyTrace(sprite, lookup, "fallback-empty", reason);
+		if (lookup.stability != VoxelActorStability::New) return;
+		PerfCompactFirstUseRecord record = {};
+		record.actorLifecycleKey = lookup.identityKey;
+		record.sourceKey = ((uint64_t)(uint32_t)lookup.sourcePicnum << 32) |
+			(uint64_t)(uint32_t)lookup.resolvedVoxelIndex;
+		record.meshKey = lookup.meshKeyHash;
+		record.materialKey = lookup.materialKeyHash;
+		record.validatedSignature = lookup.signature;
+		record.rendererFrame = gVoxelActorCacheFrame;
+		record.producerFrame = gVoxelActorCacheFrame;
+		record.domain = PerfCompactFirstUseDomain::Actor;
+		record.stage = PerfCompactFirstUseStage::Request;
+		record.state = PerfCompactFirstUseState::Fallback;
+		record.flags = PerfCompactFirstUseBegin | PerfCompactFirstUseEnd;
+		PerfCompactCaptureNoteFirstUse(record);
 	}
 
 	VoxelActorCacheLookup TrackVoxelActorSignature(const HWSprite& sprite, FGameTexture* voxelTexture, const MaterialRef& material, SceneDebugStats& stats)

@@ -213,6 +213,8 @@ void ShowIntermission(MapRecord* fromMap, MapRecord* toMap, SummaryInfo* info, C
 
 	cutscene.completion = completion_;
 	cutscene.runner = CreateRunner();
+	cutscene.levelTransition = toMap != nullptr;
+	cutscene.retainedForLevelLoad = false;
 	GC::WriteBarrier(cutscene.runner);
 
 	// retrieve cluster relations for cluster-based cutscene.
@@ -257,6 +259,8 @@ void ShowIntermission(MapRecord* fromMap, MapRecord* toMap, SummaryInfo* info, C
 		{
 			runner->Destroy();
 			cutscene.runner = nullptr;
+			cutscene.levelTransition = false;
+			cutscene.retainedForLevelLoad = false;
 			if (cutscene.completion) cutscene.completion(false);
 			cutscene.completion = nullptr;
 			return;
@@ -267,7 +271,8 @@ void ShowIntermission(MapRecord* fromMap, MapRecord* toMap, SummaryInfo* info, C
 	{
 		if (runner) runner->Destroy();
 		cutscene.runner = nullptr;
+		cutscene.levelTransition = false;
+		cutscene.retainedForLevelLoad = false;
 		throw;
 	}
 }
-	
