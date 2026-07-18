@@ -1,10 +1,10 @@
 # LIGHTOVR Authoring Guide
 
-`LIGHTOVR` is Duke-RT's text overlay database for authored ray-traced lighting behavior. This guide covers the file format, load/reload behavior, and the current in-game light edit workflows.
+`LIGHTOVR` is Duke-RT's text overlay database for authored ray-traced lighting and smoke behavior. This guide covers the file format, load/reload behavior, smoke sources, and the current in-game light edit workflows.
 
 ## LIGHTOVR Authoring and Usage
 
-`LIGHTOVR` is the text overlay database for RT-authored lighting behavior. The parser scans all mounted root-level `LIGHTOVR` lumps, merges them in load order, and uses last-wins replacement for duplicate rule ids within the same scope.
+`LIGHTOVR` is the text overlay database for RT-authored lighting and smoke behavior. The parser scans all mounted root-level `LIGHTOVR` lumps, merges them in load order, and uses last-wins replacement for duplicate rule ids within the same scope.
 
 General workflow:
 
@@ -24,6 +24,12 @@ Current top-level `LIGHTOVR` blocks:
   Global actor-bound analytic light rule. This is the main authored point-light path for sprite-driven actors such as fires, rockets, and similar cases.
 - `muzzleflashrule <event_id>`
   Global event-driven muzzle-flash rule. This binds a weapon-fire event id to a transient analytic light definition.
+- `smokestyle <id>`
+  Global reusable smoke appearance and simplified-simulation preset.
+- `smokeactorrule <id>`
+  Global actor-bound smoke source. This binds a smoke style to a live actor class and controls one-shot, timed, or distance-spaced emission.
+- `smokeeventrule <event_id>`
+  Global event-driven smoke source for wired gameplay events such as muzzle blasts and hitscan impacts.
 - `map <mapname> { ... }`
   Map-local scope for persistent placed lights and overrides.
 
@@ -46,6 +52,12 @@ Current parser fields by block:
   `actorclass`, `shadowreceive`, `shadowcast`, `fullbright`, `emissivestableframes`, `activation`, `tile`, `type`, `color`, `intensity`, `radius`, `range`, `offset`, `nudgefromsurface`, `direction`, `flicker`, `random`, `localspace`
 - `muzzleflashrule`
   `color`, `intensity`, `intensityrandom`, `radius`, `radiusrandom`, `delayseconds`, `delayrandomseconds`, `durationseconds`, `durationrandomseconds`, `offset`
+- `smokestyle`
+  `density`, `extinction`, `albedo`, `anisotropy`, `radius`, `expansionvelocity`, `lifetime`, `densityhalflife`, `risevelocity`, `velocityrandom`, `velocityinherit`, `buoyancy`, `drag`, `turbulence`, `turbulencescale`, `temperature`, `momentumscale`, `coolinghalflife`
+- `smokeactorrule`
+  `actorclass`, `ownerclass`, `excludeownerclass`, `trigger`, `activation`, `emitterforeground`, `style`, `count`, `offset`, `spawnradius`, `densityscale`, `radiusscale`, `velocitycone`, `velocityscale`, `intervalseconds`, `starttime`, `startdistance`, `spacing`, `maxsegmentsperframe`
+- `smokeeventrule`
+  `style`, `count`, `offset`, `spawnradius`, `densityscale`, `radiusscale`, `velocitycone`, `velocityscale`, `normaloffset`, `direction`
 - `directional`
   `color`, `intensity`, `direction`, `angularsize`, `shadow`
 - `light`
@@ -62,6 +74,8 @@ Current parser fields by block:
 Current practical notes:
 
 - duplicate `actorrule` and `muzzleflashrule` ids are global and last-wins
+- duplicate `smokestyle`, `smokeactorrule`, and `smokeeventrule` ids are global, case-insensitive, and last-wins; smoke blocks belong at the root of `LIGHTOVR`, not inside a `map` block
+- smoke style references and actor class names must resolve; use `lightoverlay_dumpresolved` to diagnose inert rules
 - duplicate `directional`, `light`, and `actoroverride` ids are last-wins within the same map
 - actor and map analytic overlays are currently consumed as point lights on the PT path even if extra shape fields such as `range` or `direction` are authored
 - `light` `anchor position` and `offset` values are authored in Build/world coordinates; the NRI renderer converts them to path-tracing render coordinates internally
@@ -184,6 +198,293 @@ LIGHTOVR
     }
 }
 ```
+
+## Smoke Authoring
+
+Smoke authoring separates the medium from the source:
+
+- `smokestyle <id>` defines reusable optical properties, dissipation, and simplified motion.
+- `smokeactorrule <id>` emits a style from matching live actors.
+- `smokeeventrule <event_id>` emits a style when gameplay publishes a matching event.
+
+All three are global blocks directly inside `LIGHTOVR`; they are not valid inside a `map` block. IDs and style references are case-insensitive. Duplicate IDs use the last loaded definition. Multiple differently named actor rules may target the same actor class, in which case all matching rules emit.
+
+Smoke requires the NRI/PT renderer and `nri_ptsmoke true`. The same setting is exposed as **Smoke** under **Options → Display Options**. LIGHTOVR parsing and compact actor cadence state are CPU-side, but injection, sparse density/optical/velocity/temperature fields, simulation, lighting, dissipation, and residency stay on the GPU.
+
+### Minimal Actor Smoke Example
+
+This example creates a reusable fire-smoke style and emits it continuously from a visible `DukeFire` actor:
+
+```text
+LIGHTOVR
+{
+    smokestyle "example_fire_smoke"
+    {
+        density 2.0
+        extinction 0.008
+        albedo 0.48 0.46 0.44
+        anisotropy 0.10
+        radius 8.0
+        expansionvelocity 8.0
+        lifetime 12.0
+        densityhalflife 4.0
+        risevelocity 20.0
+        velocityrandom 8.0
+        velocityinherit 0.0
+        buoyancy 4.0
+        drag 0.20
+        turbulence 12.0
+        turbulencescale 32.0
+        temperature 4.0
+        momentumscale 1.0
+        coolinghalflife 4.0
+    }
+
+    smokeactorrule "example_fire_source"
+    {
+        actorclass "DukeFire"
+        trigger interval
+        activation surface
+        emitterforeground on
+        style "example_fire_smoke"
+        count 6
+        offset 0.0 0.0 -24.0
+        spawnradius 4.0
+        densityscale 1.5
+        radiusscale 1.5
+        velocityscale 0.0
+        intervalseconds 0.20
+        spacing 0.0
+        maxsegmentsperframe 4
+    }
+}
+```
+
+`activation surface` prevents a prewarmed but hidden fire from emitting until its actor surface has actually appeared. The negative third `offset` component moves the source visually upward because actor positions use Build/world coordinates, where Z increases downward. Positive `risevelocity` and `buoyancy` still mean upward smoke motion.
+
+### Smoke Style Fields
+
+Time and half-life values are seconds of smoke simulation time. Distances are engine world units, velocities are world units per second, and unitless values are identified below. Unless a maximum is listed, the parser accepts any finite value at or above the minimum.
+
+| Field | Default and accepted values | Effect |
+| --- | --- | --- |
+| `density <value>` | `1.0`, minimum `0` | Initial smoke mass/concentration. In grid mode this combines with rule `densityscale` and `count`. More density deposits more field concentration and makes the source optically thicker; it does not add gravity. |
+| `extinction <value>` | `0.04`, minimum `0` | Opacity per unit density. Raising extinction thickens smoke without directly increasing deposited mass or momentum. |
+| `albedo <r> <g> <b>` | `0.5 0.5 0.5`; each component clamps to `[0,1]` | RGB fraction of extinction that scatters light. Values near `0` absorb and look dark; values near `1` scatter more incident light. This is not an emissive color. |
+| `anisotropy <value>` | `0`; parser range `[-0.99,0.99]`, current runtime range `[-0.95,0.95]` | Henyey-Greenstein phase parameter: `0` is isotropic, positive values favor forward scattering, and negative values favor backward scattering. |
+| `radius <units>` | `8.0`, minimum `0.001` | Base source/carrier radius before rule `radiusscale`. In grid mode it participates in the deposition support radius. |
+| `expansionvelocity <units/s>` | `0`, minimum `0` | Grid mode injects outward radial momentum, widening the plume. Particle compatibility mode grows carrier radius linearly and dilutes density as volume increases. |
+| `lifetime <seconds>` | `2.0`, minimum `0.001` | Hard carrier expiration in particle compatibility mode. It is **not** a hard cutoff for the canonical sparse grid; use `densityhalflife` to control grid dissipation. |
+| `densityhalflife <seconds>` | `1.0`, minimum `0.001` | Time for density and optical properties to fall by half. This is the primary fade/dissipation control in sparse-grid mode. Longer values retain a plume; shorter values clear it faster. |
+| `risevelocity <units/s>` | `0`, minimum `0` | Direct positive-up launch velocity. In grid mode this is initial source momentum; thermal buoyancy supplies continuing rise. |
+| `velocityrandom <units/s>` | `0`, minimum `0` | Stochastic launch speed along a direction selected inside the rule's `velocitycone`. With no usable source axis, the direction is spherical. |
+| `velocityinherit <scale>` | `0`, minimum `0` | Fraction of the rule's source velocity inherited by the smoke. Use this for projectile momentum or a moving emitter. |
+| `buoyancy <scale>` | `0`, minimum `0` | Style thermal-buoyancy strength. In grid mode it combines with `temperature` and the global grid buoyancy setting to accelerate smoke upward. |
+| `drag <rate>` | `0`, minimum `0` | Exponential velocity damping. Low drag lets smoke coast and follow injected momentum; high drag rapidly removes organized motion. |
+| `turbulence <strength>` | `0`, minimum `0` | Strength of simplified turbulent motion. Grid mode uses a stable world-anchored curl field; particle mode uses changing random acceleration. |
+| `turbulencescale <units>` | `0`, minimum `0` | World-space wavelength of grid turbulence. Small values create tight variation; large values create broad bends and rolls. It is grid-oriented and does not change particle-mode random noise scale. |
+| `temperature <value>` | `1.0`, minimum `0` | Initial thermal content used by sparse-grid buoyancy. It has no independent optical effect and is grid-oriented. |
+| `momentumscale <scale>` | `1.0`, minimum `0` | Additional multiplier on inherited source momentum in sparse-grid mode. It does not multiply radial expansion, rise velocity, or stochastic launch speed. |
+| `coolinghalflife <seconds>` | `2.0`, minimum `0.001` | Time for thermal buoyancy to fall by half in sparse-grid mode. Longer values keep a hot plume rising farther. |
+
+Opacity is approximately driven by `density × densityscale × count × extinction`. Scattered brightness and tint additionally depend on `albedo`, lighting, and anisotropy. Increasing `radius`, `radiusscale`, or `spawnradius` spreads the source across more space, so local density may fall even when total deposited mass is unchanged.
+
+`nri_ptsmokerepresentation 0` selects the particle compatibility path, the default `1` selects the authoritative GPU sparse grid, and diagnostic value `2` runs the compare path with both representations. The grid's important differences from particle compatibility mode are:
+
+- `count` scales deposited mass; it is not a literal number of visible particles.
+- effective source support is the maximum of `spawnradius`, `radius × radiusscale`, and one grid cell, capped at 16 grid cells; those radii are not added together.
+- `lifetime` does not delete grid smoke. Grid smoke decays through `densityhalflife` and is eventually reclaimed after becoming inactive.
+- `expansionvelocity` is radial launch momentum rather than a continuously growing sphere.
+- `temperature`, `momentumscale`, `coolinghalflife`, and `turbulencescale` primarily describe grid behavior.
+
+### Actor Smoke Rules
+
+`smokeactorrule <id>` tracks each matching live actor independently. Actor, owner, and excluded-owner class matching includes descendants.
+
+| Field | Default and accepted values | Effect |
+| --- | --- | --- |
+| `actorclass <class>` | Empty; a resolvable class is required | Actor class that owns the source. An unresolved class makes the rule inert. |
+| `ownerclass <class>` | Empty | Optional direct-owner requirement. The actor emits only when `GetOwnerActor()` matches this class or a descendant. |
+| `excludeownerclass <class>` | Empty | Optional direct-owner exclusion. Matching owners suppress this rule. Useful when a generic carrier class is shared by several effects. |
+| `trigger <mode>` | `spawn`; `spawn` or `interval` | `spawn` emits once when eligible. `interval` emits once when eligible and then continues using spatial or timed cadence. |
+| `activation <mode>` | `immediate`; `immediate` or `surface` | `immediate` starts when the live actor/rule is first observed. `surface` waits until renderer appearance evidence exists, then latches; use it for hidden or scripted fire actors. |
+| `emitterforeground <state>` | `off`; `on` or `off` | With `on`, matching actor sprite/voxel pixels remain in front of smoke. This is a coarse actor mask: it suppresses **all** smoke at those pixels, not only smoke from this source. |
+| `style <id>` | Empty; a resolvable style is required | `smokestyle` used by emitted commands. An unresolved reference makes the rule inert. |
+| `count <integer>` | `1`; `[1,256]` | Particle carriers per source in particle mode; deposited-mass multiplier in grid mode. This is a strong source-density control and directly affects compatibility-mode particle work. |
+| `offset <x> <y> <z>` | `0 0 0` | Actor-local right, forward, and Build/world-Z offset. Negative Z moves visually upward; positive Z moves downward. |
+| `spawnradius <units>` | `0`, minimum `0` | Initial source spread. Particle centers are randomized inside this sphere; grid mode uses it as one candidate for deposition support. |
+| `densityscale <scale>` | `1`, minimum `0` | Per-rule multiplier on style density/mass. |
+| `radiusscale <scale>` | `1`, minimum `0` | Per-rule multiplier on style radius. |
+| `velocitycone <degrees>` | `0`; `[0,180]` | Half-angle of uniform solid-angle stochastic launch spread around the source velocity. `0` follows the axis; `180` permits a sphere. With a zero axis, launch directions are spherical. |
+| `velocityscale <scale>` | `1`, minimum `0` | Scales actor source velocity before style shaping. It supplies an impulse magnitude only when style `velocityinherit` is nonzero; it can still establish the cone axis when inheritance is zero. |
+| `intervalseconds <seconds>` | `0.1`, minimum `0.001` | Timed cadence for `trigger interval`, including the stationary fallback. Uses gameplay time, not smoke simulation timescale. |
+| `starttime <seconds>` | `0`, minimum `0` | Delay from activation before first emission. The actor must remain alive through the delay. Uses gameplay time and is independent of `nri_ptsmoketimescale`. |
+| `startdistance <units>` | `0`, minimum `0` | Cumulative actor travel required after activation. Useful for beginning projectile trails away from the player. |
+| `spacing <units>` | `0`, minimum `0` | When positive and the actor moves, emits at distance crossings instead of timed cadence. This makes trail density less dependent on projectile speed. Stationary frames fall back to `intervalseconds`. |
+| `maxsegmentsperframe <integer>` | `1`; `[1,256]` | Bounds interval/spacing emissions generated in one frame. If more crossings occurred, the newest crossings are kept and older ones are discarded rather than backfilled later. |
+
+`starttime` and `startdistance` advance concurrently after activation. If both are nonzero, both must pass and the later threshold crossing controls the first emission. Suppressed movement and interval time are not replayed as a catch-up burst. Reloading LIGHTOVR clears activation/cadence state, so each surviving actor begins again under the reloaded rule.
+
+Initial grid velocity is approximately:
+
+```text
+source velocity × velocityscale × velocityinherit × momentumscale
++ stochastic cone direction × velocityrandom
++ radial direction × expansionvelocity
++ upward risevelocity
+```
+
+Thermal buoyancy and turbulence then continue to modify the field while drag damps it and cooling reduces thermal rise.
+
+### Event Smoke Rules
+
+`smokeeventrule <event_id>` emits once for each matching gameplay event. The rule ID is the case-insensitive event ID; merely inventing a name does not create a gameplay producer.
+
+| Field | Default and accepted values | Effect |
+| --- | --- | --- |
+| `style <id>` | Empty; a resolvable style is required | Smoke style emitted by the event. |
+| `count <integer>` | `1`; `[1,256]` | Particle count or grid deposited-mass multiplier, as described for actor rules. |
+| `offset <x> <y> <z>` | `0 0 0` | Event-local right, forward, and producer-supplied third-basis offset. Current Duke weapon producers use positive Build Z for that third vector at level aim, so a negative third offset moves visually upward. With no basis, this offset is ignored. |
+| `spawnradius <units>` | `0`, minimum `0` | Initial event-source spread/support. |
+| `densityscale <scale>` | `1`, minimum `0` | Per-event multiplier on style density/mass. |
+| `radiusscale <scale>` | `1`, minimum `0` | Per-event multiplier on style radius. |
+| `velocitycone <degrees>` | `0`; `[0,180]` | Half-angle of stochastic launch spread around the selected direction. |
+| `velocityscale <units/s>` | `1`, minimum `0` | Magnitude of the event command direction before style `velocityinherit`; also establishes the cone axis for style `velocityrandom`. |
+| `normaloffset <units>` | `0`, signed | Moves a surface event along its supplied unit normal. Positive values move out of a hit surface; negative values move into it. Has no effect when the event has no normal. |
+| `direction <mode>` | `aim`; `aim`, `normal`, or `incoming` | Selects the command axis. `aim` uses event basis-forward, `normal` uses the outward surface normal, and `incoming` uses travel direction toward the hit. Missing normal/incoming data safely falls back to aim. |
+
+Currently wired Duke event IDs are:
+
+- `duke.pistol.primary`
+- `duke.shotgun.primary`
+- `duke.chaingun.primary`
+- `duke.grower.primary`
+- `duke.shrinker.primary`
+- `duke.devastator.primary`
+- `duke.freezer.primary`
+- `duke.flamethrower.primary`
+- `duke.rpg.primary`
+- `duke.hitscan.impact.wall`
+- `duke.hitscan.impact.plane`
+- `duke.hitscan.impact.actor`
+
+Muzzle events provide the player weapon basis. Hitscan impact events provide incoming direction and an outward-facing surface normal, making `direction normal` the usual choice for impact smoke.
+
+`velocityscale` alone does not necessarily make smoke faster. It scales the selected command direction; style `velocityinherit` controls how much of that command speed is inherited, while `velocityrandom` supplies stochastic launch speed around the command axis.
+
+### Common Smoke Recipes
+
+These source fragments assume that the referenced `example_*_smoke` styles have already been declared.
+
+Use distance spacing for a speed-independent rocket trail and `startdistance` to keep smoke away from the camera:
+
+```text
+smokeactorrule "example_rocket_trail"
+{
+    actorclass "DukeRPG"
+    trigger interval
+    style "example_trail_smoke"
+    count 10
+    offset 0.0 -5.0 0.0
+    spawnradius 2.0
+    densityscale 1.0
+    radiusscale 1.0
+    velocityscale 0.5
+    velocitycone 20.0
+    intervalseconds 0.04
+    startdistance 96.0
+    spacing 4.0
+    maxsegmentsperframe 8
+}
+```
+
+Use a one-shot actor rule for an explosion cloud. `starttime` can hand off visually from a fireball, but the actor must survive long enough to cross the gate:
+
+```text
+smokeactorrule "example_explosion_cloud"
+{
+    actorclass "DukeExplosion2"
+    trigger spawn
+    starttime 1.0
+    style "example_explosion_smoke"
+    count 64
+    spawnradius 16.0
+    densityscale 1.5
+    radiusscale 2.0
+    velocitycone 180.0
+}
+```
+
+Use an event rule with forward offset for muzzle smoke:
+
+```text
+smokeeventrule "duke.shotgun.primary"
+{
+    style "example_muzzle_smoke"
+    count 20
+    offset 0.0 16.0 0.0
+    spawnradius 4.0
+    densityscale 1.25
+    radiusscale 1.25
+    velocityscale 3.0
+    velocitycone 24.0
+    direction aim
+}
+```
+
+Use outward normal placement and direction so impact smoke does not begin inside a wall:
+
+```text
+smokeeventrule "duke.hitscan.impact.wall"
+{
+    style "example_impact_smoke"
+    count 12
+    normaloffset 3.0
+    spawnradius 2.0
+    densityscale 1.0
+    radiusscale 1.0
+    velocityscale 6.0
+    velocitycone 40.0
+    direction normal
+}
+```
+
+For a less uniform sustained fire column, combine positive `risevelocity`, `temperature`, and `buoyancy` with nonzero `velocityrandom`, `expansionvelocity`, and `turbulence`. Use moderate `drag`, a turbulence wavelength appropriate to the plume width, and a long enough `densityhalflife` for smoke to travel before fading. Global wind can bend every plume; style controls should supply the fire-specific rise and variation.
+
+### Reloading and Smoke Diagnostics
+
+- `lightoverlay_reload`
+  Reloads all mounted LIGHTOVR data. Smoke style layout, actor activation/cadence state, and the current smoke simulation epoch reset, so existing smoke disappears and active sources start over.
+- `lightoverlay_dump`
+  Prints parsed-rule summaries and source locations.
+- `lightoverlay_dumpresolved [mapname]`
+  Confirms that actor classes, owner filters, styles, and event rules resolved. Check this first when a source emits nothing.
+- `lightoverlay_dumpnormalized`
+  Prints canonical round-trippable syntax with all smoke defaults made explicit.
+- `nri_ptsmoke_test`
+  Queues one built-in synthetic smoke injection in front of the player.
+- `nri_ptsmoke_test <event_rule_id>`
+  Queues a local-player event for a resolved `smokeeventrule`. With a live local player, the synthetic event supplies a deterministic aim basis, incoming direction, and opposing surface normal so `normaloffset` and all direction modes can be tested without manufacturing a gameplay collision.
+- `nri_ptsmokestatus`
+  Prints current enable/route, representation, command, simulation, lighting, occupancy, and GPU-readback status.
+- `nri_ptsmokereset`
+  Clears current smoke and resets its simulation epoch.
+- `nri_ptsmoketrace 2`
+  Enables verbose actor activation/start-time deferral, actor emission position/velocity, and event-match logging. Return it to `0` after diagnosis.
+- `nri_ptsmokereadback true`
+  Enables additional GPU smoke counters used by status diagnostics. Leave it off for ordinary play.
+
+Common failure checks:
+
+- no smoke at all: confirm the Display Options Smoke toggle or `nri_ptsmoke`, the NRI renderer, and resolved style/class names
+- actor smoke begins behind unopened geometry: use `activation surface`
+- explosion smoke never appears: reduce `starttime` or use a longer-lived actor/event source
+- trail begins too near the player: add `startdistance` or `starttime`; use `spacing` for consistent distance density
+- grid smoke ends too slowly: reduce `densityhalflife`; changing `lifetime` affects only particle compatibility mode
+- smoke is too dark: raise `albedo` or verify that relevant point, directional, and emissive lighting reaches it; do not treat albedo as self-emission
+- plume is a uniform tube: add `velocityrandom`, `expansionvelocity`, and grid turbulence, then balance drag and half-life
+- the fire itself is hidden by its plume: use `emitterforeground on`, understanding that this actor mask wins over all smoke at those pixels
+- performance or capacity suffers: reduce source `count`, emission frequency, source radius, or the number of simultaneous emitters before increasing global smoke capacities
 
 ## Muzzle Flash Rule Breakdown
 
