@@ -153,9 +153,11 @@ struct NRIEmissivePrimitiveGpuData
 	uint32_t occurrenceKeyLo = 0;
 	uint32_t occurrenceKeyHi = 0;
 	uint32_t occurrenceGeneration = 0;
+	float boundsCenter[3] = {};
+	float boundsRadius = 0.0f;
 };
 
-static_assert(sizeof(NRIEmissivePrimitiveGpuData) == 64);
+static_assert(sizeof(NRIEmissivePrimitiveGpuData) == 80);
 
 struct NRIEmissiveMaterialResponseGpuData
 {
@@ -173,6 +175,9 @@ struct NRIEmissivePrimitiveDebugRecord
 	uint32_t primitiveIndex = UINT32_MAX;
 	uint32_t primitiveCount = 1;
 	uint32_t sceneInstanceIndex = UINT32_MAX;
+	uint32_t occurrenceKeyLo = 0;
+	uint32_t occurrenceKeyHi = 0;
+	uint32_t occurrenceGeneration = 0;
 	uint32_t materialIndex = UINT32_MAX;
 	uint32_t sourceFlags = 0;
 	uint32_t sourceRuleId = 0;
@@ -183,6 +188,7 @@ struct NRIEmissivePrimitiveDebugRecord
 	int32_t actorIndex = -1;
 	int32_t sectorIndex = -1;
 	float center[3] = {};
+	float boundsRadius = 0.0f;
 	float primitiveArea = 0.0f;
 	float powerEstimate = 0.0f;
 	float selectionWeight = 0.0f;

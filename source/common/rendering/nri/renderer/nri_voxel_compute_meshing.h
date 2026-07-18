@@ -112,6 +112,7 @@ struct NRIVoxelComputeDirectPublishedMesh
 	uint32_t materialBase = 0;
 	uint32_t materialCount = 0;
 	NRIVoxelComputeDirectPublishBounds bounds;
+	float surfaceArea = 0.0f;
 };
 
 struct NRIVoxelComputeRawSourcePreloadStats

@@ -34,6 +34,8 @@ struct EmissivePrimitiveData
 	uint occurrenceKeyLo;
 	uint occurrenceKeyHi;
 	uint occurrenceGeneration;
+	float3 boundsCenter;
+	float boundsRadius;
 };
 
 struct EmissiveMaterialResponseData

@@ -6,17 +6,11 @@ bool SmokeGridLightCandidateSphere(EmissivePrimitiveData candidate, out float3 c
 {
 	center = 0.0;
 	radius = 0.0;
-	// Placed ranges retain complete support through the global tail. Building
-	// a conservative local bound for them requires scanning the entire
-	// transformed primitive range, never one representative face.
-	if (candidate.sceneInstanceIndex != 0xffffffffu || candidate.primitiveCount != 1u)
-		return false;
-	const PrimitiveData primitive = SmokeGetPrimitive(candidate.dataSource, candidate.primitiveIndex);
-	const float3 p0 = SmokeGetVertex(candidate.dataSource, primitive.indices.x).position;
-	const float3 p1 = SmokeGetVertex(candidate.dataSource, primitive.indices.y).position;
-	const float3 p2 = SmokeGetVertex(candidate.dataSource, primitive.indices.z).position;
-	center = (p0 + p1 + p2) / 3.0;
-	radius = max(length(p0 - center), max(length(p1 - center), length(p2 - center)));
+	// CPU candidate publication already owns conservative world-space bounds.
+	// Placed ranges use the transformed occurrence bound, avoiding a complete
+	// primitive-range scan for every candidate/brick pair.
+	center = candidate.boundsCenter;
+	radius = candidate.boundsRadius;
 	return all(isfinite(center)) && isfinite(radius) && radius >= 0.0;
 }
 

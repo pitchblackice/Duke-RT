@@ -102,6 +102,7 @@ void FillPersistentVoxelMeshBounds(const std::vector<nri_scene::SceneVertex>& ve
 	meshResource.boundsMax[0] = meshResource.boundsMax[1] = meshResource.boundsMax[2] = 0.0f;
 	meshResource.boundsCenterMagnitude = 0.0f;
 	meshResource.boundsMaxAbs = 0.0f;
+	meshResource.surfaceArea = 0.0f;
 	if (vertices.empty())
 	{
 		return;
@@ -131,6 +132,36 @@ void FillPersistentVoxelMeshBounds(const std::vector<nri_scene::SceneVertex>& ve
 			meshResource.boundsMax[axis] = std::max(meshResource.boundsMax[axis], value);
 			meshResource.boundsMaxAbs = std::max(meshResource.boundsMaxAbs, std::abs(value));
 		}
+	}
+	const float centerX = (meshResource.boundsMin[0] + meshResource.boundsMax[0]) * 0.5f;
+	const float centerY = (meshResource.boundsMin[1] + meshResource.boundsMax[1]) * 0.5f;
+	const float centerZ = (meshResource.boundsMin[2] + meshResource.boundsMax[2]) * 0.5f;
+	meshResource.boundsCenterMagnitude = std::sqrt(centerX * centerX + centerY * centerY + centerZ * centerZ);
+	meshResource.boundsValid = true;
+}
+
+void FillPersistentVoxelMeshBounds(
+	const NRIVoxelComputeDirectPublishBounds& bounds,
+	PersistentVoxelMeshVariantResource& meshResource)
+{
+	meshResource.boundsValid = false;
+	meshResource.boundsCenterMagnitude = 0.0f;
+	meshResource.boundsMaxAbs = 0.0f;
+	if (!bounds.valid)
+	{
+		return;
+	}
+	for (uint32_t axis = 0; axis < 3; ++axis)
+	{
+		if (!std::isfinite(bounds.min[axis]) || !std::isfinite(bounds.max[axis]) || bounds.min[axis] > bounds.max[axis])
+		{
+			return;
+		}
+		meshResource.boundsMin[axis] = bounds.min[axis];
+		meshResource.boundsMax[axis] = bounds.max[axis];
+		meshResource.boundsMaxAbs = std::max(
+			meshResource.boundsMaxAbs,
+			std::max(std::abs(bounds.min[axis]), std::abs(bounds.max[axis])));
 	}
 	const float centerX = (meshResource.boundsMin[0] + meshResource.boundsMax[0]) * 0.5f;
 	const float centerY = (meshResource.boundsMin[1] + meshResource.boundsMax[1]) * 0.5f;
@@ -2939,6 +2970,41 @@ NRIPersistentVoxelLightAppendStats NRIPersistentVoxelResidency::AppendSceneLight
 			sceneLights.MarkActorPublishedForOverlayActivation(actor.actorIndex);
 			stats.activationAnchors++;
 		}
+		if (voxelStatsEnabled)
+		{
+			const nri_scene::MaterialLightingMetadata* metadata = nullptr;
+			for (const nri_scene::MaterialLightingMetadata& candidateMetadata : actor.materialBridge.lightMetadata)
+			{
+				if (sceneLights.MaterialWouldEmit(candidateMetadata))
+				{
+					metadata = &candidateMetadata;
+					break;
+				}
+			}
+			if (metadata != nullptr || !actor.lightRecords.empty())
+			{
+				Printf("PERF pt voxel light material NRI: frame=%u actor=%d source_pic=%d voxel=%d actor_key=0x%llx mat_key=0x%llx instance=%u primitive_base=%u primitive_count=%u metadata=%u emits=%u records=%u texture_id=%u base_texture_id=%u material_flags=0x%x lighting_flags=0x%x emissive_mode=%u emissive_texture=%u emissive_intensity=%.3f\n",
+					frameIndex,
+					actor.actorIndex,
+					actor.sourcePicnum,
+					actor.resolvedVoxelIndex,
+					(unsigned long long)actor.identityKey,
+					(unsigned long long)actor.materialKeyHash,
+					actor.worldTlasInstanceIndex,
+					actor.primitiveOffset,
+					actor.primitiveCount,
+					metadata != nullptr ? 1u : 0u,
+					metadata != nullptr ? 1u : 0u,
+					(uint32_t)actor.lightRecords.size(),
+					metadata != nullptr ? metadata->textureId : 0u,
+					metadata != nullptr ? metadata->baseTextureId : 0u,
+					metadata != nullptr ? metadata->materialFlags : 0u,
+					metadata != nullptr ? metadata->lightingFlags : 0u,
+					metadata != nullptr ? metadata->emissiveMode : 0u,
+					metadata != nullptr ? metadata->emissiveTextureIndex : UINT32_MAX,
+					metadata != nullptr ? metadata->emissiveIntensity : 0.0f);
+			}
+		}
 		if (actor.lightRecords.empty())
 		{
 			continue;
@@ -4823,7 +4889,8 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				meshResource.vertexCount = directMesh.vertices.count;
 				meshResource.indexCount = directMesh.indices.count;
 				meshResource.primitiveCount = directMesh.primitives.count;
-				meshResource.boundsValid = false;
+				FillPersistentVoxelMeshBounds(directMesh.bounds, meshResource);
+				meshResource.surfaceArea = directMesh.surfaceArea;
 				meshResource.bakedTranslation[0] = 0.0f;
 				meshResource.bakedTranslation[1] = 0.0f;
 				meshResource.bakedTranslation[2] = 0.0f;
@@ -6530,32 +6597,17 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			}
 		}
 
-		auto persistentVoxelMaterialNeedsSurfaceRecord = [&](const nri_scene::MaterialBridgeData& materialBridge) -> bool
+		auto findPersistentVoxelEmissiveMaterial = [&](const nri_scene::MaterialBridgeData& materialBridge) -> uint32_t
 		{
-			for (const nri_scene::MaterialLightingMetadata& metadata : materialBridge.lightMetadata)
+			const uint32_t materialCount = (uint32_t)std::min(materialBridge.lightMetadata.size(), materialBridge.materials.size());
+			for (uint32_t materialIndex = 0; materialIndex < materialCount; ++materialIndex)
 			{
-				if (batchServices.MaterialWouldEmit(metadata))
+				if (batchServices.MaterialWouldEmit(materialBridge.lightMetadata[materialIndex]))
 				{
-					return true;
+					return materialIndex;
 				}
 			}
-			return false;
-		};
-		auto fillPersistentVoxelLightMaterial = [](SceneLightSystem::SurfaceRecord& record, const nri_scene::MaterialBridgeData& materialBridge)
-		{
-			if (!materialBridge.lightMetadata.empty())
-			{
-				record.material = materialBridge.lightMetadata[0];
-				return;
-			}
-			if (!materialBridge.materials.empty())
-			{
-				record.material.sectorIndex = materialBridge.materials[0].sectorIndex != UINT32_MAX ? (int32_t)materialBridge.materials[0].sectorIndex : -1;
-				record.material.paletteIndex = materialBridge.materials[0].paletteIndex;
-				record.material.materialFlags = materialBridge.materials[0].flags;
-				record.material.alpha = materialBridge.materials[0].alpha;
-				record.material.lightLevel = materialBridge.materials[0].lightLevel;
-			}
+			return UINT32_MAX;
 		};
 		auto transformPersistentVoxelLightCenter = [](const std::array<float, 12>& transform, const float source[3], float target[3])
 		{
@@ -6570,34 +6622,55 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			const float sz = std::sqrt(transform[2] * transform[2] + transform[6] * transform[6] + transform[10] * transform[10]);
 			return std::max(0.0f, std::max(sx, std::max(sy, sz)));
 		};
-		auto ensurePersistentVoxelMeshLightTemplate = [&](PersistentVoxelMeshVariantResource& meshResource, const nri_scene::SurfaceRef& surface, const nri_scene::MaterialBridgeData& materialBridge)
+		auto ensurePersistentVoxelMeshLightTemplate = [&](PersistentVoxelMeshVariantResource& meshResource, const nri_scene::SurfaceRef* surface, const nri_scene::MaterialBridgeData& materialBridge, uint32_t materialIndex)
 		{
 			if (meshResource.lightTemplateValid)
 			{
 				return;
 			}
-			const SceneLightSystem::SurfaceRecord templateRecord = batchServices.BuildSurfaceRecord(
-				surface,
-				materialBridge,
-				SceneLightRecordSource::PersistentVoxelScene,
-				0u,
-				0u);
-			meshResource.lightTemplateCenter[0] = templateRecord.center[0];
-			meshResource.lightTemplateCenter[1] = templateRecord.center[1];
-			meshResource.lightTemplateCenter[2] = templateRecord.center[2];
-			meshResource.lightTemplateBoundsRadius = templateRecord.boundsRadius;
-			meshResource.lightTemplateSurfaceArea = templateRecord.surfaceArea;
-			meshResource.lightTemplateValid = true;
+			if (surface != nullptr)
+			{
+				const SceneLightSystem::SurfaceRecord templateRecord = batchServices.BuildSurfaceRecord(
+					*surface,
+					materialBridge,
+					SceneLightRecordSource::PersistentVoxelScene,
+					materialIndex,
+					materialIndex);
+				meshResource.lightTemplateCenter[0] = templateRecord.center[0];
+				meshResource.lightTemplateCenter[1] = templateRecord.center[1];
+				meshResource.lightTemplateCenter[2] = templateRecord.center[2];
+				meshResource.lightTemplateBoundsRadius = templateRecord.boundsRadius;
+				meshResource.lightTemplateSurfaceArea = templateRecord.surfaceArea;
+				meshResource.lightTemplateValid = templateRecord.boundsRadius > 0.0f && templateRecord.surfaceArea > 0.0f;
+				return;
+			}
+			if (!meshResource.boundsValid)
+			{
+				return;
+			}
+
+			const float extentX = std::max(meshResource.boundsMax[0] - meshResource.boundsMin[0], 0.0f);
+			const float extentY = std::max(meshResource.boundsMax[1] - meshResource.boundsMin[1], 0.0f);
+			const float extentZ = std::max(meshResource.boundsMax[2] - meshResource.boundsMin[2], 0.0f);
+			for (uint32_t axis = 0; axis < 3; ++axis)
+			{
+				meshResource.lightTemplateCenter[axis] = (meshResource.boundsMin[axis] + meshResource.boundsMax[axis]) * 0.5f;
+			}
+			meshResource.lightTemplateBoundsRadius = 0.5f * std::sqrt(
+				extentX * extentX + extentY * extentY + extentZ * extentZ);
+			meshResource.lightTemplateSurfaceArea = meshResource.surfaceArea;
+			meshResource.lightTemplateValid =
+				meshResource.lightTemplateBoundsRadius > 0.0f && meshResource.lightTemplateSurfaceArea > 0.0f;
 		};
 		auto rebuildPersistentVoxelActorLightRecords = [&](PersistentVoxelBatch::ActorEntry& actor, PersistentVoxelMeshVariantResource& meshResource)
 		{
 			actor.lightRecords.clear();
-			if (!persistentVoxelMaterialNeedsSurfaceRecord(actor.materialBridge) || cacheEntry.surface == nullptr)
+			const uint32_t emissiveMaterialIndex = findPersistentVoxelEmissiveMaterial(actor.materialBridge);
+			if (emissiveMaterialIndex == UINT32_MAX)
 			{
 				return;
 			}
-			const nri_scene::SurfaceRef& sourceSurface = *cacheEntry.surface;
-			ensurePersistentVoxelMeshLightTemplate(meshResource, sourceSurface, actor.materialBridge);
+			ensurePersistentVoxelMeshLightTemplate(meshResource, cacheEntry.surface, actor.materialBridge, emissiveMaterialIndex);
 			if (!meshResource.lightTemplateValid)
 			{
 				return;
@@ -6605,13 +6678,14 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 
 			SceneLightSystem::SurfaceRecord record = {};
 			record.source = SceneLightRecordSource::PersistentVoxelScene;
-			record.materialIndex = 0u;
-			record.provenance = cacheEntry.lightSurface != nullptr ? cacheEntry.lightSurface->provenance : sourceSurface.provenance;
+			record.materialIndex = emissiveMaterialIndex;
+			record.material = actor.materialBridge.lightMetadata[emissiveMaterialIndex];
+			record.provenance = cacheEntry.lightSurface != nullptr ? cacheEntry.lightSurface->provenance :
+				(cacheEntry.surface != nullptr ? cacheEntry.surface->provenance : cacheEntry.materialSurface.provenance);
 			transformPersistentVoxelLightCenter(actor.instanceTransform, meshResource.lightTemplateCenter, record.center);
 			const float scale = persistentVoxelLightScale(actor.instanceTransform);
 			record.boundsRadius = meshResource.lightTemplateBoundsRadius * scale;
 			record.surfaceArea = meshResource.lightTemplateSurfaceArea * scale * scale;
-			fillPersistentVoxelLightMaterial(record, actor.materialBridge);
 			record.identityKey = SceneLightSystem::ComputeSurfaceIdentityKey(record.source, record.provenance, record.center);
 			actor.lightRecords.push_back(record);
 		};

@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <unordered_map>
 #include <unordered_set>
@@ -30,6 +31,74 @@ namespace
 	double DurationMs(std::chrono::steady_clock::time_point start, std::chrono::steady_clock::time_point end)
 	{
 		return std::chrono::duration<double, std::milli>(end - start).count();
+	}
+
+	struct DirectPublishGeometrySummary
+	{
+		NRIVoxelComputeDirectPublishBounds bounds;
+		float surfaceArea = 0.0f;
+	};
+
+	DirectPublishGeometrySummary BuildDirectPublishGeometrySummary(
+		const FVoxelRawMeshStats& stats,
+		const std::vector<NRIVoxelComputeSlabRecord>& slabs)
+	{
+		DirectPublishGeometrySummary summary = {};
+		if (stats.sizeX == 0u || stats.sizeY == 0u || stats.sizeZ == 0u ||
+			!std::isfinite(stats.pivotX) || !std::isfinite(stats.pivotY) || !std::isfinite(stats.pivotZ) ||
+			slabs.empty())
+		{
+			return summary;
+		}
+
+		// Keep this in lockstep with TransformVoxelPoint in the emit shaders. The
+		// raw archive already owns the occupied slabs, so publication can derive a
+		// tight local bound and exact exposed unit-face area without geometry readback.
+		for (const NRIVoxelComputeSlabRecord& slab : slabs)
+		{
+			if (slab.ZLength == 0u)
+			{
+				continue;
+			}
+			const float slabMin[3] = {
+				(float)slab.X - stats.pivotX,
+				stats.pivotZ - (float)(slab.ZTop + slab.ZLength),
+				stats.pivotY - (float)(slab.Y + 1)
+			};
+			const float slabMax[3] = {
+				(float)(slab.X + 1) - stats.pivotX,
+				stats.pivotZ - (float)slab.ZTop,
+				stats.pivotY - (float)slab.Y
+			};
+			if (!summary.bounds.valid)
+			{
+				for (uint32_t axis = 0; axis < 3; ++axis)
+				{
+					summary.bounds.min[axis] = slabMin[axis];
+					summary.bounds.max[axis] = slabMax[axis];
+				}
+				summary.bounds.valid = true;
+			}
+			else
+			{
+				for (uint32_t axis = 0; axis < 3; ++axis)
+				{
+					summary.bounds.min[axis] = std::min(summary.bounds.min[axis], slabMin[axis]);
+					summary.bounds.max[axis] = std::max(summary.bounds.max[axis], slabMax[axis]);
+				}
+			}
+
+			const uint32_t topBottomFaceCount = ((slab.CullMask >> 4u) & 1u) + ((slab.CullMask >> 5u) & 1u);
+			const uint32_t sideFaceCount =
+				(slab.CullMask & 1u) + ((slab.CullMask >> 1u) & 1u) +
+				((slab.CullMask >> 2u) & 1u) + ((slab.CullMask >> 3u) & 1u);
+			summary.surfaceArea += (float)topBottomFaceCount + (float)(sideFaceCount * slab.ZLength);
+		}
+		if (!(summary.surfaceArea > 0.0f) || !std::isfinite(summary.surfaceArea))
+		{
+			summary = {};
+		}
+		return summary;
 	}
 
 	uint64_t HashRawArchiveValue(uint64_t hash, uint64_t value)
@@ -145,6 +214,8 @@ namespace
 		uint64_t slabBytes = 0;
 		uint64_t faceBytes = 0;
 		uint64_t colorRunBytes = 0;
+		NRIVoxelComputeDirectPublishBounds bounds;
+		float surfaceArea = 0.0f;
 		bool uploadQueued = false;
 		bool uploaded = false;
 		bool failed = false;
@@ -192,6 +263,8 @@ namespace
 		NRIVoxelComputeDirectPublishRange vertices;
 		NRIVoxelComputeDirectPublishRange indices;
 		NRIVoxelComputeDirectPublishRange primitives;
+		NRIVoxelComputeDirectPublishBounds bounds;
+		float surfaceArea = 0.0f;
 		std::vector<PendingDirectPublishBinding> directBindings;
 		VoxelComputeAdmissionState admissionState = VoxelComputeAdmissionState::Counting;
 	};
@@ -516,6 +589,9 @@ namespace
 		CopySlabRecords(slabs, packedSlabs);
 		CopyColorRunRecords(*colorRuns, packedColorRuns);
 		entry.stats.contentHash = BuildRawArchiveContentHash(entry.stats, packedSlabs, packedColorRuns);
+		const DirectPublishGeometrySummary geometrySummary = BuildDirectPublishGeometrySummary(entry.stats, packedSlabs);
+		entry.bounds = geometrySummary.bounds;
+		entry.surfaceArea = geometrySummary.surfaceArea;
 		NRIVoxelComputeRawArchiveSourceRange range = {};
 		if (!state.rawArchivePlan.CommitSource(
 			RawSourceKey(model),
@@ -1283,6 +1359,8 @@ namespace
 					published.primitives.count = result.PrimitiveCount;
 					published.materialBase = binding.materialBase;
 					published.materialCount = binding.materialCount;
+					published.bounds = job.bounds;
+					published.surfaceArea = job.surfaceArea;
 					state.readyDirectPublishedMeshes[binding.directKey] = published;
 					state.failedDirectKeys.erase(binding.directKey);
 				}
@@ -2356,6 +2434,17 @@ void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t f
 		pending.vertices = queued.vertices;
 		pending.indices = queued.indices;
 		pending.primitives = queued.primitives;
+		if (jobArchive != nullptr)
+		{
+			pending.bounds = jobArchive->bounds;
+			pending.surfaceArea = jobArchive->surfaceArea;
+		}
+		else
+		{
+			const DirectPublishGeometrySummary geometrySummary = BuildDirectPublishGeometrySummary(queued.stats, queued.slabs);
+			pending.bounds = geometrySummary.bounds;
+			pending.surfaceArea = geometrySummary.surfaceArea;
+		}
 		pending.directBindings = queued.directBindings;
 		pending.admissionState = emit ? VoxelComputeAdmissionState::Emitting : VoxelComputeAdmissionState::Counting;
 		pendingJobs.push_back(pending);

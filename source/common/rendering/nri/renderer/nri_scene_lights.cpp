@@ -726,11 +726,12 @@ namespace
 		return 0.5f * std::sqrt(crossX * crossX + crossY * crossY + crossZ * crossZ);
 	}
 
-	void ComputePrimitiveCenter(const nri_scene::GeometryData& geometry, uint32_t primitiveIndex, float outCenter[3])
+	void ComputePrimitiveBounds(const nri_scene::GeometryData& geometry, uint32_t primitiveIndex, float outCenter[3], float& outRadius)
 	{
 		outCenter[0] = 0.0f;
 		outCenter[1] = 0.0f;
 		outCenter[2] = 0.0f;
+		outRadius = 0.0f;
 		if (primitiveIndex >= geometry.primitives.size())
 		{
 			return;
@@ -750,6 +751,13 @@ namespace
 		outCenter[0] = (a.position[0] + b.position[0] + c.position[0]) / 3.0f;
 		outCenter[1] = (a.position[1] + b.position[1] + c.position[1]) / 3.0f;
 		outCenter[2] = (a.position[2] + b.position[2] + c.position[2]) / 3.0f;
+		for (const auto* vertex : { &a, &b, &c })
+		{
+			const float dx = vertex->position[0] - outCenter[0];
+			const float dy = vertex->position[1] - outCenter[1];
+			const float dz = vertex->position[2] - outCenter[2];
+			outRadius = std::max(outRadius, std::sqrt(dx * dx + dy * dy + dz * dz));
+		}
 	}
 
 	uint64_t HashGeometryForEmissiveSampling(const nri_scene::GeometryData* geometry)
@@ -5174,7 +5182,9 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 			candidate.debug.materialResponseScale = materialResponseScale;
 			candidate.debug.sectorResponseApplied = sectorResponseApplied;
 			Copy3f(surface.emissiveColor, candidate.debug.emissiveColor);
-			ComputePrimitiveCenter(*geometry, localPrimitiveIndex, candidate.debug.center);
+			ComputePrimitiveBounds(*geometry, localPrimitiveIndex, candidate.gpu.boundsCenter, candidate.gpu.boundsRadius);
+			Copy3f(candidate.gpu.boundsCenter, candidate.debug.center);
+			candidate.debug.boundsRadius = candidate.gpu.boundsRadius;
 
 			candidate.gpu.stableKeyLo = (uint32_t)(candidate.debug.stableKey & 0xffffffffu);
 			candidate.gpu.stableKeyHi = (uint32_t)(candidate.debug.stableKey >> 32u);
@@ -5224,6 +5234,8 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 		candidate.gpu.occurrenceKeyLo = surface.occurrenceKeyLo;
 		candidate.gpu.occurrenceKeyHi = surface.occurrenceKeyHi;
 		candidate.gpu.occurrenceGeneration = surface.occurrenceGeneration;
+		Copy3f(surface.center, candidate.gpu.boundsCenter);
+		candidate.gpu.boundsRadius = std::max(surface.boundsRadius, 0.0f);
 		candidate.gpu.sourceFlags = surface.sourceFlags;
 		candidate.gpu.textureId = surface.textureId;
 		candidate.gpu.primitiveArea = std::max(surface.surfaceArea, 0.0f);
@@ -5239,6 +5251,9 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 		candidate.debug.primitiveIndex = candidate.gpu.primitiveIndex;
 		candidate.debug.primitiveCount = candidate.gpu.primitiveCount;
 		candidate.debug.sceneInstanceIndex = candidate.gpu.sceneInstanceIndex;
+		candidate.debug.occurrenceKeyLo = candidate.gpu.occurrenceKeyLo;
+		candidate.debug.occurrenceKeyHi = candidate.gpu.occurrenceKeyHi;
+		candidate.debug.occurrenceGeneration = candidate.gpu.occurrenceGeneration;
 		candidate.debug.materialIndex = surface.materialIndex;
 		candidate.debug.sourceFlags = surface.sourceFlags;
 		candidate.debug.sourceRuleId = surface.sourceRuleId;
@@ -5248,6 +5263,7 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 		candidate.debug.emissiveTextureIndex = surface.emissiveTextureIndex;
 		candidate.debug.actorIndex = surface.actorIndex;
 		candidate.debug.sectorIndex = surface.sectorIndex;
+		candidate.debug.boundsRadius = candidate.gpu.boundsRadius;
 		candidate.debug.primitiveArea = candidate.gpu.primitiveArea;
 		candidate.debug.powerEstimate = candidate.gpu.powerEstimate;
 		candidate.debug.selectionWeight = candidate.gpu.selectionWeight;
@@ -6588,7 +6604,7 @@ void SceneLightSystem::PrintEmissiveSurfaceDump(
 		const auto& record = *candidates[i].record;
 		const auto diagnosticIt = mEmissiveSurfaces.activeDiagnosticFlags.find(record.surfaceStableKey);
 		const uint32_t diagnosticFlags = diagnosticIt != mEmissiveSurfaces.activeDiagnosticFlags.end() ? diagnosticIt->second : SceneLightDiagnosticFlag_None;
-		Printf("NRI PT emissive gpu_index=%u near_rank=%u: primitive_key=0x%016llx surface_key=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s source=%s primitive=%u material=%u flags=0x%x rule=%u override_rule=%u actor=%d sector=%d sector_scale=%.3f reach_scale=%.3f sector_applied=%s material_response=%s material_scale=%.3f tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f sample_weight=%.3f pdf=%.6f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
+		Printf("NRI PT emissive gpu_index=%u near_rank=%u: primitive_key=0x%016llx surface_key=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s source=%s primitive=%u primitive_count=%u scene_instance=%u occurrence=0x%08x%08x generation=%u material=%u flags=0x%x rule=%u override_rule=%u actor=%d sector=%d sector_scale=%.3f reach_scale=%.3f sector_applied=%s material_response=%s material_scale=%.3f tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f sample_weight=%.3f pdf=%.6f center=(%.2f, %.2f, %.2f) bounds_radius=%.2f color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
 			candidates[i].gpuIndex,
 			i,
 			(unsigned long long)record.stableKey,
@@ -6599,6 +6615,11 @@ void SceneLightSystem::PrintEmissiveSurfaceDump(
 			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_PropertyChanged) != 0),
 			nri_diag::GetSceneDataSourceName(record.dataSource),
 			record.primitiveIndex,
+			record.primitiveCount,
+			record.sceneInstanceIndex,
+			record.occurrenceKeyHi,
+			record.occurrenceKeyLo,
+			record.occurrenceGeneration,
 			record.materialIndex,
 			record.sourceFlags,
 			record.sourceRuleId,
@@ -6620,6 +6641,7 @@ void SceneLightSystem::PrintEmissiveSurfaceDump(
 			record.center[0],
 			record.center[1],
 			record.center[2],
+			record.boundsRadius,
 			record.emissiveColor[0],
 			record.emissiveColor[1],
 			record.emissiveColor[2],

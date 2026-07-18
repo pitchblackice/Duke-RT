@@ -125,6 +125,7 @@ struct PersistentVoxelMeshVariantResource
 	float boundsMax[3] = {};
 	float boundsCenterMagnitude = 0.0f;
 	float boundsMaxAbs = 0.0f;
+	float surfaceArea = 0.0f;
 	float bakedTranslation[3] = {};
 	NRIBufferResource vertexBuffer;
 	NRIBufferResource indexBuffer;
