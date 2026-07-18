@@ -3754,6 +3754,18 @@ void SceneLightSystem::MarkActorPublishedForOverlayActivation(int32_t actorIndex
 	}
 }
 
+bool SceneLightSystem::HasActorAppearanceEvidence(int32_t actorIndex) const
+{
+	if (actorIndex < 0)
+	{
+		return false;
+	}
+
+	const auto surfaceIt = mSurfaceRecordIndex.spriteRecordsByActorIndex.find(actorIndex);
+	const bool hasSpriteSurface = surfaceIt != mSurfaceRecordIndex.spriteRecordsByActorIndex.end() && !surfaceIt->second.empty();
+	return hasSpriteSurface || IsActorPublishedForOverlayActivation(actorIndex);
+}
+
 bool SceneLightSystem::IsActorPublishedForOverlayActivation(int32_t actorIndex) const
 {
 	return actorIndex >= 0 && mPublishedActorOverlayIndices.find(actorIndex) != mPublishedActorOverlayIndices.end();

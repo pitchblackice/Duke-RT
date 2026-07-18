@@ -7,10 +7,13 @@
 #include <unordered_map>
 #include <vector>
 
+class SceneLightSystem;
+
 class NRISmokeEmitterSystem
 {
 public:
 	void Gather(uint32_t epoch, double gameplayTimeSeconds, const TArray<PathTracingWeaponLightEvent>& weaponEvents,
+		const SceneLightSystem& sceneLights,
 		std::vector<NRISmokeStyleGpu>& styles, std::vector<NRISmokeInjectionCommandGpu>& commands,
 		uint32_t& nextSerial, uint32_t traceMode);
 	void Reset();
@@ -34,6 +37,7 @@ private:
 		double previousTimeSeconds = 0.0;
 		float spacingRemainder = 0.0f;
 		double intervalRemainder = 0.0;
+		bool activationLatched = false;
 		bool emitted = false;
 		bool observed = false;
 	};

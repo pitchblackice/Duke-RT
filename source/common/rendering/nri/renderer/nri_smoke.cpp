@@ -894,7 +894,8 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 	prepareGridOwners();
 	const uint32_t previousGeneration = mEmitters.GetGeneration();
 	const double gameplayTimeSeconds = PlayClock > 0 ? (double)PlayClock * (1.0 / 120.0) : 0.0;
-	mEmitters.Gather(mStatus.simulationEpoch, gameplayTimeSeconds, weaponEvents, mStyles, mPendingCommands, mNextCommandSerial, mSettings.traceMode);
+	mEmitters.Gather(mStatus.simulationEpoch, gameplayTimeSeconds, weaponEvents, renderer.mSceneLights,
+		mStyles, mPendingCommands, mNextCommandSerial, mSettings.traceMode);
 	const bool styleLayoutInvalidated = previousGeneration != 0 && previousGeneration != mEmitters.GetGeneration();
 	if (styleLayoutInvalidated)
 	{

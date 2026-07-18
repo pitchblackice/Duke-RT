@@ -768,6 +768,7 @@ public:
 		const std::vector<SurfaceRecord>& records,
 		uint32_t materialIndexBase = 0);
 	void MarkActorPublishedForOverlayActivation(int32_t actorIndex);
+	bool HasActorAppearanceEvidence(int32_t actorIndex) const;
 	SurfaceRecord BuildSurfaceRecord(
 		const nri_scene::SurfaceRef& surface,
 		const nri_scene::MaterialBridgeData& materials,
