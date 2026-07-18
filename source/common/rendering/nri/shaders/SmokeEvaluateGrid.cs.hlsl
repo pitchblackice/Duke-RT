@@ -52,29 +52,89 @@ void SmokeRenderGridLoadCell(int3 cell, out float4 scalar, out float4 optical)
 	optical = fieldB ? gSmokeRenderGridOpticalB[cellIndex] : gSmokeRenderGridOpticalA[cellIndex];
 }
 
-void SmokeRenderGridSample(float3 worldPosition, float cellSize, out float4 scalar, out float4 optical)
+void SmokeRenderGridSample(float3 worldPosition, float cellSize,
+	out int3 lower, out float3 blend, out float4 scalarCorners[8], out float4 opticalCorners[8],
+	out float4 scalar, out float4 optical)
 {
 	const float3 gridPosition = worldPosition / cellSize - 0.5;
-	const int3 lower = (int3)floor(gridPosition);
-	const float3 blend = frac(gridPosition);
-	float4 s[8];
-	float4 o[8];
+	lower = (int3)floor(gridPosition);
+	blend = frac(gridPosition);
 	[unroll]
 	for (uint i = 0u; i < 8u; ++i)
 	{
 		const int3 offset = int3(i & 1u, (i >> 1u) & 1u, (i >> 2u) & 1u);
-		SmokeRenderGridLoadCell(lower + offset, s[i], o[i]);
+		SmokeRenderGridLoadCell(lower + offset, scalarCorners[i], opticalCorners[i]);
 	}
-	const float4 s00 = lerp(s[0], s[1], blend.x);
-	const float4 s10 = lerp(s[2], s[3], blend.x);
-	const float4 s01 = lerp(s[4], s[5], blend.x);
-	const float4 s11 = lerp(s[6], s[7], blend.x);
-	const float4 o00 = lerp(o[0], o[1], blend.x);
-	const float4 o10 = lerp(o[2], o[3], blend.x);
-	const float4 o01 = lerp(o[4], o[5], blend.x);
-	const float4 o11 = lerp(o[6], o[7], blend.x);
+	const float4 s00 = lerp(scalarCorners[0], scalarCorners[1], blend.x);
+	const float4 s10 = lerp(scalarCorners[2], scalarCorners[3], blend.x);
+	const float4 s01 = lerp(scalarCorners[4], scalarCorners[5], blend.x);
+	const float4 s11 = lerp(scalarCorners[6], scalarCorners[7], blend.x);
+	const float4 o00 = lerp(opticalCorners[0], opticalCorners[1], blend.x);
+	const float4 o10 = lerp(opticalCorners[2], opticalCorners[3], blend.x);
+	const float4 o01 = lerp(opticalCorners[4], opticalCorners[5], blend.x);
+	const float4 o11 = lerp(opticalCorners[6], opticalCorners[7], blend.x);
 	scalar = lerp(lerp(s00, s10, blend.y), lerp(s01, s11, blend.y), blend.z);
 	optical = lerp(lerp(o00, o10, blend.y), lerp(o01, o11, blend.y), blend.z);
+}
+
+bool SmokeRenderGridCorrelatedWorldSource(int3 lower, float3 blend,
+	float4 scalarCorners[8], float4 opticalCorners[8], float3 viewRay,
+	out float3 correlatedSource, out float3 lobes[6], out float confidence, out float3 phaseApplied)
+{
+	correlatedSource = 0.0;
+	[unroll] for (uint lobe = 0u; lobe < 6u; ++lobe) lobes[lobe] = 0.0;
+	confidence = 0.0;
+	phaseApplied = 0.0;
+	float weightSum = 0.0;
+	[unroll]
+	for (uint corner = 0u; corner < 8u; ++corner)
+	{
+		const uint3 offset = uint3(corner & 1u, (corner >> 1u) & 1u, (corner >> 2u) & 1u);
+		const float3 cornerWeight = lerp(1.0 - blend, blend, (float3)offset);
+		const float weight = cornerWeight.x * cornerWeight.y * cornerWeight.z;
+		if (weight <= 0.0)
+			continue;
+		uint cellIndex, generation;
+		if (!SmokeGridLightCellAddress(lower + (int3)offset, cellIndex, generation) ||
+			!SmokeGridLightCornerReachable(lower, offset))
+			continue;
+		const SmokeGridLightRecord record = SmokeGridLightLoadShadingRecord(cellIndex);
+		if (!SmokeGridLightRecordValid(record, generation, gSmokeConstants.SimulationEpoch))
+			continue;
+
+		const float4 cornerScalar = scalarCorners[corner];
+		const float4 cornerOptical = opticalCorners[corner];
+		const float anisotropy = cornerOptical.w > 1e-6 ?
+			clamp(cornerScalar.w / cornerOptical.w, -0.95, 0.95) : 0.0;
+		float3 cornerPhaseApplied = 0.0;
+		[unroll]
+		for (uint lobe = 0u; lobe < 6u; ++lobe)
+		{
+			const float3 mean = SmokeGridLightMean(record, lobe);
+			lobes[lobe] += mean * weight;
+			cornerPhaseApplied += mean * SmokeHenyeyGreenstein(
+				dot((float3)NRI_SMOKE_GRID_LIGHT_LOBE_AXES[lobe], viewRay), anisotropy);
+		}
+		phaseApplied += cornerPhaseApplied * weight;
+		confidence += SmokeGridLightConfidence(record) * weight;
+		weightSum += weight;
+
+		const float3 cornerIncident = SmokeGridClampControlledSource(
+			cornerPhaseApplied * gSmokeConstants.RadianceScale);
+		// Form sigma_s * Li at the authoritative sparse-grid cell. Multiplying
+		// independently reconstructed fields attenuates co-located sparse energy
+		// and creates false energy between unrelated density/light corners.
+		correlatedSource += weight * max(cornerOptical.rgb * gSmokeConstants.DensityScale, 0.0) * cornerIncident;
+	}
+	if (weightSum <= 0.0)
+		return false;
+	// Incident-domain debug views retain the established normalized light-field
+	// reconstruction. The physical source product above intentionally does not
+	// renormalize missing corners: absent or unreachable light is zero energy.
+	[unroll] for (uint lobe = 0u; lobe < 6u; ++lobe) lobes[lobe] /= weightSum;
+	confidence /= weightSum;
+	phaseApplied /= weightSum;
+	return true;
 }
 
 void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 scalar, out float4 optical, out float3 source)
@@ -117,28 +177,30 @@ void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 sca
 				const float3 samplePosition = SmokeWorldPosition(sampleUv, sampleViewDepth);
 				float4 sampleScalar;
 				float4 sampleOptical;
-				SmokeRenderGridSample(samplePosition, cellSize, sampleScalar, sampleOptical);
+				int3 gridLower;
+				float3 gridBlend;
+				float4 scalarCorners[8];
+				float4 opticalCorners[8];
+				SmokeRenderGridSample(samplePosition, cellSize, gridLower, gridBlend,
+					scalarCorners, opticalCorners, sampleScalar, sampleOptical);
 				integratedScalar += sampleScalar;
 				integratedOptical += sampleOptical;
 				if ((gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_WORLD_ENABLED) != 0u && any(sampleOptical.rgb > 0.0))
 				{
 					float3 lobes[6];
 					float confidence;
-					if (SmokeGridLightSample(samplePosition, cellSize, lobes, confidence))
+					float3 phaseApplied;
+					float3 correlatedSource;
+					const float3 viewRay = normalize(samplePosition - gSmokeConstants.CameraPosition);
+					if (SmokeRenderGridCorrelatedWorldSource(gridLower, gridBlend,
+						scalarCorners, opticalCorners, viewRay,
+						correlatedSource, lobes, confidence, phaseApplied))
 					{
-						const float anisotropy = sampleOptical.w > 1e-6 ? clamp(sampleScalar.w / sampleOptical.w, -0.95, 0.95) : 0.0;
-						const float3 viewRay = normalize(samplePosition - gSmokeConstants.CameraPosition);
-						float3 phaseApplied = 0.0;
 						float3 lobeSum = 0.0;
-						[unroll]
-						for (uint lobe = 0u; lobe < 6u; ++lobe)
-						{
-							lobeSum += lobes[lobe];
-							phaseApplied += lobes[lobe] * SmokeHenyeyGreenstein(dot((float3)NRI_SMOKE_GRID_LIGHT_LOBE_AXES[lobe], viewRay), anisotropy);
-						}
+						[unroll] for (uint lobe = 0u; lobe < 6u; ++lobe) lobeSum += lobes[lobe];
 						const float3 incidentContribution = SmokeGridClampControlledSource(
 							phaseApplied * gSmokeConstants.RadianceScale);
-						integratedSource += max(sampleOptical.rgb * gSmokeConstants.DensityScale, 0.0) * incidentContribution;
+						integratedSource += correlatedSource;
 						if (worldDebugMode == 1u) integratedWorldDebug += min(lobeSum * 0.05, 4.0);
 						else if (worldDebugMode == 2u) integratedWorldDebug += confidence.xxx;
 						else if (worldDebugMode == 3u) integratedWorldDebug += min(abs(lobes[0] - lobes[1]) + abs(lobes[2] - lobes[3]) + abs(lobes[4] - lobes[5]), 4.0);
