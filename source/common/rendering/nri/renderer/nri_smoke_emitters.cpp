@@ -4,6 +4,7 @@
 
 #include "coreactor.h"
 #include "lightoverlay.h"
+#include "lightoverlay_smoke_editor.h"
 #include "printf.h"
 
 #include <algorithm>
@@ -11,6 +12,8 @@
 
 namespace
 {
+	constexpr size_t kMapEmitterCommandCeiling = 192u;
+
 	void WorldToPathTracingPosition(const DVector3& worldPosition, float outPosition[3])
 	{
 		outPosition[0] = (float)worldPosition.X;
@@ -99,6 +102,9 @@ void NRISmokeEmitterSystem::Reset()
 {
 	mActorStates.clear();
 	mMapEmitterStates.clear();
+	mEditorPreviewState = {};
+	mEditorPreviewMapName = "";
+	mEditorPreviewRuleId = "";
 	mActiveMapName = "";
 	mGeneration = 0;
 }
@@ -115,6 +121,9 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 		mActiveMapName = resolved.activeMapName;
 		mActorStates.clear();
 		mMapEmitterStates.clear();
+		mEditorPreviewState = {};
+		mEditorPreviewMapName = "";
+		mEditorPreviewRuleId = "";
 	}
 	styles.clear();
 	styles.resize(std::max<uint32_t>(1u, resolved.smokeStyles.Size()));
@@ -368,27 +377,18 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 	for (auto it = mActorStates.begin(); it != mActorStates.end(); )
 		it = !it->second.observed ? mActorStates.erase(it) : std::next(it);
 
-	std::vector<uint32_t> mapEmittedPerRule;
-	std::vector<uint32_t> mapParticlesPerRule;
-	std::vector<uint32_t> mapSkippedPerRule;
-	std::vector<uint32_t> mapActivePerRule;
-	if (traceMode != 0)
+	struct MapEmissionStats
 	{
-		mapEmittedPerRule.resize(resolved.mapSmokeEmitterRules.Size());
-		mapParticlesPerRule.resize(resolved.mapSmokeEmitterRules.Size());
-		mapSkippedPerRule.resize(resolved.mapSmokeEmitterRules.Size());
-		mapActivePerRule.resize(resolved.mapSmokeEmitterRules.Size());
-	}
-	for (uint32_t ruleIndex = 0; ruleIndex < resolved.mapSmokeEmitterRules.Size(); ++ruleIndex)
+		uint32_t active = 0u;
+		uint32_t emitted = 0u;
+		uint32_t particles = 0u;
+		uint32_t skipped = 0u;
+	};
+	auto emitMapRule = [&](const ResolvedLightOverlayMapSmokeEmitterRule& rule,
+		MapEmitterState& state, const char* eventName) -> MapEmissionStats
 	{
-		const auto& rule = resolved.mapSmokeEmitterRules[ruleIndex];
-		if (!resolved.currentMapAvailable || !rule.styleResolved ||
-			rule.mapName.CompareNoCase(resolved.activeMapName) != 0)
-		{
-			continue;
-		}
-		if (traceMode != 0) mapActivePerRule[ruleIndex] = 1u;
-
+		MapEmissionStats stats = {};
+		stats.active = 1u;
 		DVector3 normal;
 		DVector3 axisU;
 		DVector3 axisV;
@@ -397,16 +397,14 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 		{
 			if (traceMode >= 2 && verbosePrinted < 32u)
 			{
-				Printf("NRI PT smoke emitter: event=map-ignored map=%s rule=%s reason=invalid-basis\n",
-					resolved.activeMapName.GetChars(), rule.id.GetChars());
+				Printf("NRI PT smoke emitter: event=%s-ignored map=%s rule=%s reason=invalid-basis\n",
+					eventName, resolved.activeMapName.GetChars(), rule.id.GetChars());
 				verbosePrinted++;
 			}
-			continue;
+			return stats;
 		}
 
-		MapEmitterState& state = mMapEmitterStates[ruleIndex];
 		uint32_t emitCount = 0u;
-		uint32_t skipped = 0u;
 		if (!state.emitted)
 		{
 			state.emitted = true;
@@ -423,8 +421,13 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			const uint32_t candidateCount = (uint32_t)std::floor(total / intervalSeconds);
 			state.intervalRemainder = std::fmod(total, intervalSeconds);
 			emitCount = std::min(candidateCount, rule.maxSegmentsPerFrame);
-			skipped = candidateCount - emitCount;
+			stats.skipped = candidateCount - emitCount;
 		}
+		const size_t availableCommands = commands.size() < kMapEmitterCommandCeiling ?
+			kMapEmitterCommandCeiling - commands.size() : 0u;
+		const uint32_t admittedCount = (uint32_t)std::min<size_t>(emitCount, availableCommands);
+		stats.skipped += emitCount - admittedCount;
+		emitCount = admittedCount;
 
 		const DVector3 center(rule.position[0], rule.position[1], rule.position[2]);
 		const DVector3 offsetCenter = center + normal * rule.offset;
@@ -446,15 +449,12 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			command.epoch = epoch;
 			command.shape = static_cast<uint32_t>(NRISmokeInjectionShape::Rectangle);
 			commands.push_back(command);
-			if (traceMode != 0)
-			{
-				mapEmittedPerRule[ruleIndex]++;
-				mapParticlesPerRule[ruleIndex] += command.count;
-			}
+			stats.emitted++;
+			stats.particles += command.count;
 			if (traceMode >= 2 && verbosePrinted < 32u)
 			{
-				Printf("NRI PT smoke emitter: event=map map=%s rule=%s command_serial=%u style=%u particles=%u render=(%.3f,%.3f,%.3f) velocity=(%.3f,%.3f,%.3f) axis_u=(%.3f,%.3f,%.3f) axis_v=(%.3f,%.3f,%.3f) shape=rectangle\n",
-					resolved.activeMapName.GetChars(), rule.id.GetChars(), command.serial, command.styleIndex, command.count,
+				Printf("NRI PT smoke emitter: event=%s map=%s rule=%s command_serial=%u style=%u particles=%u render=(%.3f,%.3f,%.3f) velocity=(%.3f,%.3f,%.3f) axis_u=(%.3f,%.3f,%.3f) axis_v=(%.3f,%.3f,%.3f) shape=rectangle\n",
+					eventName, resolved.activeMapName.GetChars(), rule.id.GetChars(), command.serial, command.styleIndex, command.count,
 					command.position[0], command.position[1], command.position[2],
 					command.velocity[0], command.velocity[1], command.velocity[2],
 					command.halfAxisU[0], command.halfAxisU[1], command.halfAxisU[2],
@@ -462,21 +462,75 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 				verbosePrinted++;
 			}
 		}
+		return stats;
+	};
+
+	MapSmokeEmitterEditorRuntimePreview editorPreview = {};
+	const bool hasEditorPreview = GetMapSmokeEmitterEditorRuntimePreview(editorPreview) && editorPreview.active &&
+		resolved.currentMapAvailable && editorPreview.rule.mapName.CompareNoCase(resolved.activeMapName) == 0;
+	for (uint32_t ruleIndex = 0; ruleIndex < resolved.mapSmokeEmitterRules.Size(); ++ruleIndex)
+	{
+		const auto& rule = resolved.mapSmokeEmitterRules[ruleIndex];
+		if (!resolved.currentMapAvailable || !rule.styleResolved ||
+			!rule.hasPosition || !rule.hasNormal || !rule.hasSize ||
+			rule.mapName.CompareNoCase(resolved.activeMapName) != 0)
+		{
+			continue;
+		}
+		if (hasEditorPreview && editorPreview.suppressPersistedRule &&
+			rule.mapName.CompareNoCase(editorPreview.rule.mapName) == 0 &&
+			rule.id.CompareNoCase(editorPreview.rule.id) == 0)
+		{
+			continue;
+		}
+		const MapEmissionStats stats = emitMapRule(rule, mMapEmitterStates[ruleIndex], "map");
 		if (traceMode != 0)
 		{
-			mapSkippedPerRule[ruleIndex] += skipped;
+			Printf("NRI PT smoke emitter: event=map-frame-summary map=%s rule=%s active=%u emitted=%u particles=%u skipped=%u interval=%.3f shape=rectangle\n",
+				resolved.activeMapName.GetChars(), rule.id.GetChars(), stats.active, stats.emitted,
+				stats.particles, stats.skipped, rule.intervalSeconds);
 		}
 	}
-	if (traceMode != 0)
+
+	if (hasEditorPreview)
 	{
-		for (uint32_t ruleIndex = 0; ruleIndex < resolved.mapSmokeEmitterRules.Size(); ++ruleIndex)
+		const ResolvedLightOverlaySmokeStyle* previewStyle = nullptr;
+		for (const auto& style : resolved.smokeStyles)
 		{
-			if (mapActivePerRule[ruleIndex] == 0u) continue;
-			const auto& rule = resolved.mapSmokeEmitterRules[ruleIndex];
-			Printf("NRI PT smoke emitter: event=map-frame-summary map=%s rule=%s active=%u emitted=%u particles=%u skipped=%u interval=%.3f shape=rectangle\n",
-				resolved.activeMapName.GetChars(), rule.id.GetChars(), mapActivePerRule[ruleIndex], mapEmittedPerRule[ruleIndex],
-				mapParticlesPerRule[ruleIndex], mapSkippedPerRule[ruleIndex], rule.intervalSeconds);
+			if (style.id.CompareNoCase(editorPreview.rule.styleId) == 0)
+			{
+				previewStyle = &style;
+				break;
+			}
 		}
+		if (previewStyle != nullptr && editorPreview.rule.hasPosition &&
+			editorPreview.rule.hasNormal && editorPreview.rule.hasSize)
+		{
+			if (mEditorPreviewMapName.CompareNoCase(editorPreview.rule.mapName) != 0 ||
+				mEditorPreviewRuleId.CompareNoCase(editorPreview.rule.id) != 0)
+			{
+				mEditorPreviewState = {};
+				mEditorPreviewMapName = editorPreview.rule.mapName;
+				mEditorPreviewRuleId = editorPreview.rule.id;
+			}
+			ResolvedLightOverlayMapSmokeEmitterRule previewRule = {};
+			static_cast<ParsedLightOverlayMapSmokeEmitterRule&>(previewRule) = editorPreview.rule;
+			previewRule.styleIndex = previewStyle->styleIndex;
+			previewRule.styleResolved = true;
+			const MapEmissionStats stats = emitMapRule(previewRule, mEditorPreviewState, "map-preview");
+			if (traceMode != 0)
+			{
+				Printf("NRI PT smoke emitter: event=map-preview-frame-summary map=%s rule=%s active=%u emitted=%u particles=%u skipped=%u interval=%.3f revision=%u shape=rectangle\n",
+					resolved.activeMapName.GetChars(), previewRule.id.GetChars(), stats.active, stats.emitted,
+					stats.particles, stats.skipped, previewRule.intervalSeconds, editorPreview.revision);
+			}
+		}
+	}
+	else
+	{
+		mEditorPreviewState = {};
+		mEditorPreviewMapName = "";
+		mEditorPreviewRuleId = "";
 	}
 
 	uint32_t eventCommands = 0;

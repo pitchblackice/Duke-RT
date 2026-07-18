@@ -55,4 +55,7 @@ private:
 	FString mActiveMapName;
 	std::unordered_map<Identity, ActorState, IdentityHash> mActorStates;
 	std::unordered_map<uint32_t, MapEmitterState> mMapEmitterStates;
+	MapEmitterState mEditorPreviewState;
+	FString mEditorPreviewMapName;
+	FString mEditorPreviewRuleId;
 };

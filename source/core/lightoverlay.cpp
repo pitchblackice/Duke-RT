@@ -987,9 +987,9 @@ namespace
 				else if (sc.Compare("size"))
 				{
 					sc.MustGetFloat();
-					rule.size[0] = std::clamp((float)sc.Float, 1.0f, 4096.0f);
+					rule.size[0] = std::clamp((float)sc.Float, 1.0f, 256.0f);
 					sc.MustGetFloat();
-					rule.size[1] = std::clamp((float)sc.Float, 1.0f, 4096.0f);
+					rule.size[1] = std::clamp((float)sc.Float, 1.0f, 256.0f);
 					rule.hasSize = true;
 				}
 				else if (sc.Compare("rotation")) { sc.MustGetFloat(); rule.rotation = (float)sc.Float; }

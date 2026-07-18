@@ -42,7 +42,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		const float3 randomDirection = SmokeSourceRandomDirection(randomState);
 		const float radialDistance = command.SpawnRadius * pow(SmokeRandom01(randomState), 1.0 / 3.0);
-		const float3 velocityDirection = SmokeSourceVelocityDirection(command.Velocity,
+		const float3 velocityAxis = SmokeInjectionVelocityAxis(command, halfAxisU, halfAxisV);
+		const float3 velocityDirection = SmokeSourceVelocityDirection(velocityAxis,
 			command.VelocityCone, randomDirection, randomState);
 
 		SmokeParticle particle;

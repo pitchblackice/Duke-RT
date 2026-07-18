@@ -1119,6 +1119,7 @@ set (PCH_SOURCES
 	core/g_mapinfo.cpp
 	core/lightoverlay.cpp
 	core/lightoverlay_editor.cpp
+	core/lightoverlay_smoke_editor.cpp
 	core/interpolate.cpp
 	core/inputstate.cpp
 	core/maphack.cpp

@@ -68,6 +68,7 @@
 #include "gamecontrol.h"
 #include "gameupdate.h"
 #include "lightoverlay_editor.h"
+#include "lightoverlay_smoke_editor.h"
 #include "c_console.h"
 #include "razemenu.h"
 #include "i_system.h"
@@ -1014,6 +1015,7 @@ static void GameTicker()
 void DrawOverlays()
 {
 	NetUpdate();			// send out any new accumulation
+	TickMapSmokeEmitterEditor();
 	TickActorLightEditor();
 
 	const auto overlayStart = Capture2DSnapshot();

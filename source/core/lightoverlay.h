@@ -365,7 +365,7 @@ struct ParsedLightOverlayMapSmokeEmitterRule
 	bool hasNormal = false;
 	float normal[3] = { 0.0f, 0.0f, -1.0f };
 	bool hasSize = false;
-	// Width and length are clamped to [1, 4096] Build/world units.
+	// Width and length are clamped to [1, 256] Build/world units.
 	float size[2] = { 1.0f, 1.0f };
 	float rotation = 0.0f;
 	float offset = 0.0f;

@@ -76,4 +76,33 @@ float3 SmokeInjectionClosestRectanglePoint(float3 position, float3 center,
 	return closest;
 }
 
+float3 SmokeInjectionVelocityAxis(SmokeInjectionCommand command,
+	float3 halfAxisU, float3 halfAxisV)
+{
+	const float3 velocity = all(isfinite(command.Velocity)) ? command.Velocity : 0.0;
+	if (dot(velocity, velocity) > 1e-8)
+		return velocity;
+	if (command.Shape == NRI_SMOKE_INJECTION_SHAPE_RECTANGLE)
+	{
+		// The Build-to-render transform reflects handedness, so V x U points
+		// along the transformed authored normal.
+		const float3 normal = cross(halfAxisV, halfAxisU);
+		const float normalLengthSquared = dot(normal, normal);
+		if (isfinite(normalLengthSquared) && normalLengthSquared > 1e-8)
+			return normal * rsqrt(normalLengthSquared);
+	}
+	return 0.0;
+}
+
+bool SmokeInjectionTraversalFits(uint3 extent, uint maximumElements)
+{
+	if (any(extent == 0u) || extent.x > maximumElements)
+		return false;
+	uint product = extent.x;
+	if (extent.y > maximumElements / product)
+		return false;
+	product *= extent.y;
+	return extent.z <= maximumElements / product;
+}
+
 #endif

@@ -27,6 +27,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const int3 maximumCell = (int3)floor((command.Position + sourceExtent) / cellSize);
 		const int3 minimumBrick = SmokeGridBrickCoordinate(minimumCell);
 		const int3 maximumBrick = SmokeGridBrickCoordinate(maximumCell);
+		const uint3 brickExtent = (uint3)(maximumBrick - minimumBrick + 1);
+		if (!SmokeInjectionTraversalFits(brickExtent, 4096u))
+			continue;
 		[loop] for (int z = minimumBrick.z; z <= maximumBrick.z; ++z)
 		[loop] for (int y = minimumBrick.y; y <= maximumBrick.y; ++y)
 		[loop] for (int x = minimumBrick.x; x <= maximumBrick.x; ++x)

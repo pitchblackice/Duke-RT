@@ -29,6 +29,8 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 	const int3 minimumCell = (int3)floor((command.Position - sourceExtent) / gSmokeGridConstants.CellSize);
 	const int3 maximumCell = (int3)floor((command.Position + sourceExtent) / gSmokeGridConstants.CellSize);
 	const uint3 extent = (uint3)(maximumCell - minimumCell + 1);
+	if (!SmokeInjectionTraversalFits(extent, 262144u))
+		return;
 	const uint cellCount = extent.x * extent.y * extent.z;
 	const float commandMass = max(style.Density * command.DensityScale, 0.0) * (float)min(command.Count, 256u);
 	const float inverseCellSize = rcp(max(gSmokeGridConstants.CellSize, 0.0001));
@@ -76,7 +78,8 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 			max(SmokeSourceFinite(style.CoolingHalfLife, 0.001), 0.001);
 		uint randomState = SmokeSourceCellSeed(command.Serial, cell);
 		const float3 randomDirection = SmokeSourceRandomDirection(randomState);
-		const float3 velocityDirection = SmokeSourceVelocityDirection(command.Velocity,
+		const float3 velocityAxis = SmokeInjectionVelocityAxis(command, halfAxisU, halfAxisV);
+		const float3 velocityDirection = SmokeSourceVelocityDirection(velocityAxis,
 			command.VelocityCone, randomDirection, randomState);
 		const float3 radialOffset = cellPosition - SmokeSourceFinite3(closestSourcePosition, cellPosition);
 		const float radialLengthSquared = dot(radialOffset, radialOffset);
