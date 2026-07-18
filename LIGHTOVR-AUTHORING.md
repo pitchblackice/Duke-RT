@@ -45,6 +45,8 @@ Current map-local blocks:
   Map-local override for emissive surfaces, used to tune intensity/reach scaling and bind an emitter to a sector-light signal.
 - `surfacelight <id>`
   Map-local PT-only visible fixture plus associated analytic point light, usually authored by aiming at a surface in emissive light edit mode and pressing `o`.
+- `smokeemitter <id>`
+  Map-local, always-active rectangular smoke source plane. It references a global smoke style and emits while its map is active.
 
 Current parser fields by block:
 
@@ -58,6 +60,8 @@ Current parser fields by block:
   `actorclass`, `ownerclass`, `excludeownerclass`, `trigger`, `activation`, `emitterforeground`, `style`, `count`, `offset`, `spawnradius`, `densityscale`, `radiusscale`, `velocitycone`, `velocityscale`, `intervalseconds`, `starttime`, `startdistance`, `spacing`, `maxsegmentsperframe`
 - `smokeeventrule`
   `style`, `count`, `offset`, `spawnradius`, `densityscale`, `radiusscale`, `velocitycone`, `velocityscale`, `normaloffset`, `direction`
+- `smokeemitter`
+  `style`, `position`, `normal`, `size`, `rotation`, `offset`, `count`, `intervalseconds`, `spawnradius`, `densityscale`, `radiusscale`, `velocityscale`, `velocitycone`, `maxsegmentsperframe`
 - `directional`
   `color`, `intensity`, `direction`, `angularsize`, `shadow`
 - `light`
@@ -75,11 +79,13 @@ Current practical notes:
 
 - duplicate `actorrule` and `muzzleflashrule` ids are global and last-wins
 - duplicate `smokestyle`, `smokeactorrule`, and `smokeeventrule` ids are global, case-insensitive, and last-wins; smoke blocks belong at the root of `LIGHTOVR`, not inside a `map` block
+- duplicate `smokeemitter` ids are case-insensitive and last-wins within the same map; map emitters reference a global `smokestyle`
 - smoke style references and actor class names must resolve; use `lightoverlay_dumpresolved` to diagnose inert rules
 - duplicate `directional`, `light`, and `actoroverride` ids are last-wins within the same map
 - actor and map analytic overlays are currently consumed as point lights on the PT path even if extra shape fields such as `range` or `direction` are authored
 - `light` `anchor position` and `offset` values are authored in Build/world coordinates; the NRI renderer converts them to path-tracing render coordinates internally
 - `surfacelight` `position` and `normal` are authored in path-tracing render coordinates because they are captured directly from the aimed PT surface probe
+- `smokeemitter` `position` and `normal` are authored in Build/world coordinates; the editor converts its aimed PT surface result before writing the rule
 - `actorrule fullbright on` forces matching actor sprite and voxel surfaces onto the PT fullbright material path so they ignore scene lighting and render at full brightness
 - `actorrule emissivestableframes <count>` delays sampled-emissive surface admission until matching actor geometry has been stable for that many consecutive frames; visual fullbright still applies immediately
 - `actorrule activation surface` is the default actor-owned analytic-light behavior and waits for a matching rendered surface before emitting, while `activation immediate` emits as soon as the live actor/rule exists
@@ -206,10 +212,11 @@ Smoke authoring separates the medium from the source:
 - `smokestyle <id>` defines reusable optical properties, dissipation, and simplified motion.
 - `smokeactorrule <id>` emits a style from matching live actors.
 - `smokeeventrule <event_id>` emits a style when gameplay publishes a matching event.
+- `smokeemitter <id>` emits a style continuously from a rectangular source plane while its containing map is active.
 
-All three are global blocks directly inside `LIGHTOVR`; they are not valid inside a `map` block. IDs and style references are case-insensitive. Duplicate IDs use the last loaded definition. Multiple differently named actor rules may target the same actor class, in which case all matching rules emit.
+The first three are global blocks directly inside `LIGHTOVR`; `smokeemitter` belongs inside a `map` block. IDs and style references are case-insensitive. Duplicate IDs use the last loaded definition within their scope. Multiple differently named actor rules may target the same actor class, in which case all matching rules emit.
 
-Smoke requires the NRI/PT renderer and `nri_ptsmoke true`. The same setting is exposed as **Smoke** under **Options → Display Options**. LIGHTOVR parsing and compact actor cadence state are CPU-side, but injection, sparse density/optical/velocity/temperature fields, simulation, lighting, dissipation, and residency stay on the GPU.
+Smoke requires the NRI/PT renderer and `nri_ptsmoke true`. The same setting is exposed as **Smoke** under **Options → Display Options**. LIGHTOVR parsing, compact cadence state, and injection-command scheduling are CPU-side; deposition, sparse density/optical/velocity/temperature fields, simulation, lighting, dissipation, and residency stay on the GPU.
 
 ### Minimal Actor Smoke Example
 
@@ -372,6 +379,91 @@ Muzzle events provide the player weapon basis. Hitscan impact events provide inc
 
 `velocityscale` alone does not necessarily make smoke faster. It scales the selected command direction; style `velocityinherit` controls how much of that command speed is inherited, while `velocityrandom` supplies stochastic launch speed around the command axis.
 
+### Map Smoke Emitters
+
+`smokeemitter <id>` is an always-active, map-local rectangular source plane. It begins emitting when its map becomes active and continues at the authored interval. Scripted or sector-driven activation is not currently supported.
+
+```text
+map "E1L1"
+{
+    smokeemitter "TrashFireSmoke01"
+    {
+        style "example_fire_smoke"
+        position 1024.0 2048.0 -128.0
+        normal 0.0 0.0 -1.0
+        size 48.0 32.0
+        rotation 0.0
+        offset 2.0
+        count 8
+        intervalseconds 0.15
+        spawnradius 2.0
+        densityscale 1.0
+        radiusscale 1.0
+        velocityscale 0.0
+        velocitycone 20.0
+        maxsegmentsperframe 2
+    }
+}
+```
+
+| Field | Default and accepted values | Effect |
+| --- | --- | --- |
+| `style <id>` | Empty; a resolvable global style is required | Smoke style emitted by the source. An unresolved reference leaves the emitter inert. |
+| `position <x> <y> <z>` | Required | Center of the unoffset source plane in Build/world coordinates. Build Z increases downward. |
+| `normal <x> <y> <z>` | Required and must be nonzero | Plane normal and default source-velocity direction. A zero/invalid basis leaves the rule inert. The editor writes a finite normalized, viewer-facing normal after converting the aimed PT surface to Build/world coordinates. |
+| `size <width> <length>` | Required; each component clamps to `[1,256]` | Full dimensions of the rectangular source plane. The total pulse mass does not increase with area, so a larger plane spreads the same emission more broadly. The bounded range prevents pathological sparse-grid traversal. |
+| `rotation <degrees>` | `0` | Rotates the rectangle around its normal. Zero uses a deterministic world-derived tangent basis, not the surface's texture axes or camera-screen horizontal. |
+| `offset <units>` | `0`, signed | Moves the source center along its normal. Positive values move away from the aimed surface; negative values move through it. |
+| `count <integer>` | `1`; `[1,256]` | Particle count in compatibility mode or total deposited-mass multiplier in grid mode. This remains total mass per pulse rather than mass per unit area. |
+| `intervalseconds <seconds>` | `0.1`, minimum `0.001` | Gameplay-time delay between emission pulses. It is independent of `nri_ptsmoketimescale`. |
+| `spawnradius <units>` | `0`, minimum `0` | Adds spherical positional spread and supplies grid-kernel thickness around the plane. |
+| `densityscale <scale>` | `1`, minimum `0` | Per-emitter multiplier on style density/total pulse mass. |
+| `radiusscale <scale>` | `1`, minimum `0` | Per-emitter multiplier on style radius and grid support. |
+| `velocityscale <units/s>` | `0`, minimum `0` | Source-command speed along the plane normal before style `velocityinherit`. The style's rise, random velocity, expansion, buoyancy, and turbulence remain independent. |
+| `velocitycone <degrees>` | `0`; `[0,180]` | Half-angle for stochastic style velocity around the plane normal. |
+| `maxsegmentsperframe <integer>` | `1`; `[1,256]` | Bounds cadence catch-up after a slow frame. The newest crossings are retained and discarded crossings are not replayed later. |
+
+Grid mode deposits one normalized kernel over the oriented rectangle rather than expanding it into CPU-generated point sources. Enlarging the plane therefore increases the number of sparse cells touched and may cost more GPU work, but it does not increase CPU commands or routine GPU-to-CPU traffic. Particle compatibility mode samples carrier positions uniformly across the rectangle before applying `spawnradius`.
+
+#### Map Smoke Emitter Edit Mode
+
+The map smoke emitter editor stages map-local rectangular emitters against an aimed PT surface. It uses the same loose, writable `LIGHTOVR` selection as the light editors and starts disabled every launch. Only one LIGHTOVR editor mode may be active at a time. Before editing, use `nri_ptactorlighteditwritable` to verify the destination path and keep the writable file under version control or make a backup: commit/delete normalize and replace the complete writable file, so comments, hand formatting, and original ordering are not preserved.
+
+Placement requires an active NRI/PT renderer, a center-screen PT surface hit, and at least one resolved `smokestyle`. Visible preview smoke additionally requires `nri_ptsmoke true`.
+
+Enable it in a live map with:
+
+```text
+nri_ptmapsmokeeditmode 1
+```
+
+While the mode is enabled:
+
+- `p` places a fresh, uniquely named 32 by 32 default draft on the aimed surface, offset one unit along its viewer-facing normal
+- `Ctrl+p` creates a fresh uniquely named clone at the newly aimed surface and copies every active-draft field, including values authored only in text; it does not move or replace the original rule
+- left/right arrow decreases/increases rectangle width in 4-unit steps
+- down/up arrow decreases/increases rectangle length in 4-unit steps
+- mouse wheel down/up rotates the plane around its normal in 15-degree steps
+- `<` and `>` decrease/increase its signed height above the surface in 2-unit steps; unshifted `,` and `.` work as well
+- `;` and `'` decrease/increase total emission count by one
+- `j` and `k` decrease/increase the interval by 0.025 seconds
+- `[` and `]` cycle resolved smoke styles
+- `o` cycles through persisted emitters on the current map and stages the selected rule for editing
+- `Enter` serializes the merged normalized database over the complete writable loose file, then reloads; editing an archive-backed selection creates an effective loose override rather than changing its archive
+- `Escape` cancels the active draft without writing; when no draft exists, normal Escape handling continues
+- `Delete` discards an uncommitted draft or, without confirmation, removes a selected rule owned by the writable loose overlay; archive/other-source rules cannot be deleted, and removing a loose last-wins rule may reveal an older same-ID definition after reload
+- `l` cancels the current draft and reloads `LIGHTOVR` from disk without writing
+
+Every staged adjustment prints the current editor-adjustable style, size, rotation, signed height, count, and interval. The normal smoke runtime provides emitted smoke as a live preview using the same rectangular GPU injection path as a committed emitter; there is not yet a plane gizmo. Previously deposited smoke remains after an adjustment unless it naturally dissipates or `nri_ptsmokereset` is used. Selecting a persisted rule temporarily suppresses its committed instance so the preview does not double its output. `o` currently cycles persisted emitters by rule order rather than selecting one by crosshair.
+
+The hotkeys do not edit `spawnradius`, `densityscale`, `radiusscale`, `velocityscale`, `velocitycone`, `maxsegmentsperframe`, the rule id, or a persisted rule's position/normal. Tune those in text and press `l` (or run `lightoverlay_reload`). To reposition a rule, clone it with `Ctrl+p`, commit the clone, then explicitly select and delete the original loose rule.
+
+Disable the editor with:
+
+```text
+nri_ptmapsmokeeditmode 0
+```
+
 ### Common Smoke Recipes
 
 These source fragments assume that the referenced `example_*_smoke` styles have already been declared.
@@ -470,7 +562,7 @@ For a less uniform sustained fire column, combine positive `risevelocity`, `temp
 - `nri_ptsmokereset`
   Clears current smoke and resets its simulation epoch.
 - `nri_ptsmoketrace 2`
-  Enables verbose actor activation/start-time deferral, actor emission position/velocity, and event-match logging. Return it to `0` after diagnosis.
+  Enables verbose actor activation/start-time deferral, actor emission position/velocity, map/map-preview emission, and event-match logging. Return it to `0` after diagnosis.
 - `nri_ptsmokereadback true`
   Enables additional GPU smoke counters used by status diagnostics. Leave it off for ordinary play.
 
