@@ -2515,6 +2515,10 @@ void NRIRenderDevice::BeginFrame()
 	{
 		return;
 	}
+	if (!ApplyPendingSwapChainRefresh())
+	{
+		return;
+	}
 	if (mGpuTiming != nullptr && mDevice != nullptr)
 	{
 		mGpuTiming->Prepare(mCore, *mDevice);
@@ -2867,21 +2871,60 @@ void NRIRenderDevice::Draw2D()
 	}
 }
 
-void NRIRenderDevice::SetVSync(bool vsync)
+void NRIRenderDevice::RequestSwapChainRefresh(const char* reason, bool forceRecreate)
 {
-	Super::SetVSync(vsync);
-
-	if (!mInitialized || mDevice == nullptr || mGraphicsQueue == nullptr)
+	if (!mInitialized || mShuttingDown || mDevice == nullptr || mGraphicsQueue == nullptr)
 	{
 		return;
 	}
 
-	mFrameGeneration.NoteReset("vsync-change");
+	if (!mSwapChainRefreshPending || (forceRecreate && !mSwapChainRefreshForceRecreate))
+	{
+		mSwapChainRefreshReason = reason != nullptr ? reason : "unspecified";
+	}
+	mSwapChainRefreshPending = true;
+	mSwapChainRefreshForceRecreate = mSwapChainRefreshForceRecreate || forceRecreate;
+	mSwapChainRefreshRequestCount++;
+}
+
+bool NRIRenderDevice::ApplyPendingSwapChainRefresh()
+{
+	if (!mSwapChainRefreshPending)
+	{
+		return true;
+	}
+
+	const bool forceRecreate = mSwapChainRefreshForceRecreate;
+	const uint32_t requestCount = mSwapChainRefreshRequestCount;
+	const FString reason = mSwapChainRefreshReason;
+	mSwapChainRefreshPending = false;
+	mSwapChainRefreshForceRecreate = false;
+	mSwapChainRefreshRequestCount = 0;
+	mSwapChainRefreshReason = "none";
+
+	Printf("NRI swapchain refresh: action=%s reason=%s coalesced=%u\n",
+		forceRecreate ? "recreate" : "reconcile",
+		reason.GetChars(),
+		requestCount);
+	if (!forceRecreate)
+	{
+		return true;
+	}
+
+	mFrameGeneration.NoteReset(reason.GetChars());
 	WaitForCommands(true);
 	if (!CreateSwapChain())
 	{
-		Printf(TEXTCOLOR_RED "NRI failed to recreate swapchain after vsync change.\n");
+		Printf(TEXTCOLOR_RED "NRI failed to apply deferred swapchain refresh '%s'.\n", reason.GetChars());
+		return false;
 	}
+	return true;
+}
+
+void NRIRenderDevice::SetVSync(bool vsync)
+{
+	Super::SetVSync(vsync);
+	RequestSwapChainRefresh("vsync-change", false);
 }
 
 bool NRIRenderDevice::ShouldRequestFrameGenerationLowLatencySwapChain() const
@@ -9384,10 +9427,12 @@ bool NRIRenderDevice::EnsureSwapChainSize()
 	const uint32_t width = (uint32_t)(std::max)(GetClientWidth(), 1);
 	const uint32_t height = (uint32_t)(std::max)(GetClientHeight(), 1);
 	const nri::SwapChainBits requestedFlags = GetEffectiveRequestedSwapChainFlags();
+	const uint8_t requestedTextureCount = GetRequestedSwapChainTextureCount();
 	if (!mSwapChainImages.empty() &&
 		mSwapChainImages[0].target.width == width &&
 		mSwapChainImages[0].target.height == height &&
 		mSwapChainFlags == requestedFlags &&
+		mSwapChainTextureCount == requestedTextureCount &&
 		mCreatedSwapChainFormat == resolvedOutputFormat)
 	{
 		return true;
@@ -9406,7 +9451,8 @@ bool NRIRenderDevice::EnsureSwapChainSize()
 	mFrameGeneration.NoteReset(
 		(!mSwapChainImages.empty() && (mSwapChainImages[0].target.width != width || mSwapChainImages[0].target.height != height)) ?
 			"swapchain-resize" :
-			(mSwapChainFlags != requestedFlags ? "swapchain-flags-change" : "swapchain-format-change"));
+			(mSwapChainFlags != requestedFlags ? "swapchain-flags-change" :
+				(mSwapChainTextureCount != requestedTextureCount ? "swapchain-texture-count-change" : "swapchain-format-change")));
 	WaitForCommands(true);
 	return CreateSwapChain();
 }
@@ -9630,15 +9676,8 @@ void NRIRenderDevice::EndFrameAndPresent()
 		if (IsFrameGenerationPresentPathActive() && presentResult != nri::Result::DEVICE_LOST)
 		{
 			mFrameGeneration.RequestNativeFallback("proxy-present-failed");
-			WaitForCommands(true);
-			if (CreateSwapChain())
-			{
-				Printf(TEXTCOLOR_YELLOW "NRI framegen present fallback: recreated the native swapchain path after proxy present failure.\n");
-			}
-			else
-			{
-				Printf(TEXTCOLOR_RED "NRI framegen present fallback failed to recreate the native swapchain path.\n");
-			}
+			RequestSwapChainRefresh("proxy-present-failed", true);
+			Printf(TEXTCOLOR_YELLOW "NRI framegen present fallback: scheduled native swapchain recreation for the next frame boundary.\n");
 		}
 	}
 	if (mCurrentQueuedFrameIndex < mQueuedFrames.size())
