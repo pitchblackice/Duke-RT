@@ -14,7 +14,7 @@ body:
     id: version
     attributes:
       label: Duke-RT version
-      description: Run `duke-rt.exe --version` or check the in-game console.
+      description: Check the version shown in the in-game console.
       placeholder: "Example: Duke-RT 1.12pre or Git commit 3175bd96d3"
     validations:
       required: true
