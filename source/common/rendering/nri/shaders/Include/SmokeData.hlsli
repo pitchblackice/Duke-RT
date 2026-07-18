@@ -1,6 +1,9 @@
 #ifndef NRI_SMOKE_DATA_HLSLI
 #define NRI_SMOKE_DATA_HLSLI
 
+#define NRI_SMOKE_INJECTION_SHAPE_SPHERE 0u
+#define NRI_SMOKE_INJECTION_SHAPE_RECTANGLE 1u
+
 struct SmokeStyle
 {
 	float3 Albedo;
@@ -35,7 +38,42 @@ struct SmokeInjectionCommand
 	float RadiusScale;
 	float VelocityCone;
 	uint Epoch;
-	uint2 Padding;
+	float3 HalfAxisU;
+	uint Shape;
+	float3 HalfAxisV;
+	uint3 Padding;
 };
+
+void SmokeInjectionRectangleHalfAxes(SmokeInjectionCommand command,
+	out float3 halfAxisU, out float3 halfAxisV)
+{
+	halfAxisU = 0.0;
+	halfAxisV = 0.0;
+	if (command.Shape != NRI_SMOKE_INJECTION_SHAPE_RECTANGLE)
+		return;
+
+	halfAxisU = all(isfinite(command.HalfAxisU)) ? command.HalfAxisU : 0.0;
+	halfAxisV = all(isfinite(command.HalfAxisV)) ? command.HalfAxisV : 0.0;
+	const float uLength = length(halfAxisU);
+	const float vLength = length(halfAxisV);
+	if (!isfinite(uLength) || uLength <= 1e-6)
+		halfAxisU = 0.0;
+	if (!isfinite(vLength) || vLength <= 1e-6)
+		halfAxisV = 0.0;
+}
+
+float3 SmokeInjectionClosestRectanglePoint(float3 position, float3 center,
+	float3 halfAxisU, float3 halfAxisV)
+{
+	const float3 offset = position - center;
+	float3 closest = center;
+	const float uLengthSquared = dot(halfAxisU, halfAxisU);
+	const float vLengthSquared = dot(halfAxisV, halfAxisV);
+	if (uLengthSquared > 1e-8)
+		closest += halfAxisU * clamp(dot(offset, halfAxisU) / uLengthSquared, -1.0, 1.0);
+	if (vLengthSquared > 1e-8)
+		closest += halfAxisV * clamp(dot(offset, halfAxisV) / vLengthSquared, -1.0, 1.0);
+	return closest;
+}
 
 #endif

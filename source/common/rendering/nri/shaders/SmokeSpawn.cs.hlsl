@@ -31,13 +31,22 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			InterlockedAdd(gSmokeControl[0].ActiveApprox, 1u);
 
 		uint randomState = SmokeHash(command.Serial ^ (i * 0x9e3779b9u));
+		float3 sourcePosition = command.Position;
+		float3 halfAxisU, halfAxisV;
+		SmokeInjectionRectangleHalfAxes(command, halfAxisU, halfAxisV);
+		if (command.Shape == NRI_SMOKE_INJECTION_SHAPE_RECTANGLE)
+		{
+			const float rectangleU = SmokeRandom01(randomState) * 2.0 - 1.0;
+			const float rectangleV = SmokeRandom01(randomState) * 2.0 - 1.0;
+			sourcePosition += halfAxisU * rectangleU + halfAxisV * rectangleV;
+		}
 		const float3 randomDirection = SmokeSourceRandomDirection(randomState);
 		const float radialDistance = command.SpawnRadius * pow(SmokeRandom01(randomState), 1.0 / 3.0);
 		const float3 velocityDirection = SmokeSourceVelocityDirection(command.Velocity,
 			command.VelocityCone, randomDirection, randomState);
 
 		SmokeParticle particle;
-		particle.Position = command.Position + randomDirection * radialDistance;
+		particle.Position = sourcePosition + randomDirection * radialDistance;
 		particle.Radius = max(style.Radius * command.RadiusScale, 0.001);
 		particle.Velocity = command.Velocity * style.VelocityInherit + velocityDirection * style.VelocityRandom;
 		particle.Age = 0.0;

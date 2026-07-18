@@ -20,8 +20,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			continue;
 		const SmokeStyle style = gSmokeGridStyles[command.StyleIndex];
 		const float radius = min(max(max(command.SpawnRadius, style.Radius * command.RadiusScale), cellSize), cellSize * 16.0);
-		const int3 minimumCell = (int3)floor((command.Position - radius) / cellSize);
-		const int3 maximumCell = (int3)floor((command.Position + radius) / cellSize);
+		float3 halfAxisU, halfAxisV;
+		SmokeInjectionRectangleHalfAxes(command, halfAxisU, halfAxisV);
+		const float3 sourceExtent = abs(halfAxisU) + abs(halfAxisV) + radius;
+		const int3 minimumCell = (int3)floor((command.Position - sourceExtent) / cellSize);
+		const int3 maximumCell = (int3)floor((command.Position + sourceExtent) / cellSize);
 		const int3 minimumBrick = SmokeGridBrickCoordinate(minimumCell);
 		const int3 maximumBrick = SmokeGridBrickCoordinate(maximumCell);
 		[loop] for (int z = minimumBrick.z; z <= maximumBrick.z; ++z)

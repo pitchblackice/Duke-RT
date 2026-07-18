@@ -66,6 +66,12 @@ struct NRISmokeStyleGpu
 	float coolingHalfLife = 2.0f;
 };
 
+enum class NRISmokeInjectionShape : uint32_t
+{
+	Sphere = 0,
+	Rectangle = 1,
+};
+
 struct NRISmokeInjectionCommandGpu
 {
 	float position[3] = {};
@@ -78,7 +84,10 @@ struct NRISmokeInjectionCommandGpu
 	float radiusScale = 1.0f;
 	float velocityCone = 0.0f;
 	uint32_t epoch = 0;
-	uint32_t padding[2] = {};
+	float halfAxisU[3] = {};
+	uint32_t shape = static_cast<uint32_t>(NRISmokeInjectionShape::Sphere);
+	float halfAxisV[3] = {};
+	uint32_t padding[3] = {};
 };
 
 struct NRISmokeControlGpu
@@ -254,7 +263,10 @@ struct NRISmokeEmissiveStorageGpu
 
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
 static_assert(sizeof(NRISmokeStyleGpu) == 80);
-static_assert(sizeof(NRISmokeInjectionCommandGpu) == 64);
+static_assert(sizeof(NRISmokeInjectionCommandGpu) == 96);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, halfAxisU) == 56);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, shape) == 68);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, halfAxisV) == 72);
 static_assert(sizeof(NRISmokeControlGpu) == 568);
 static_assert(sizeof(NRISmokeIndirectCacheGpu) == 32);
 static_assert(sizeof(NRISmokeDirectCacheGpu) == 40);
