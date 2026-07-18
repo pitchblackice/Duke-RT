@@ -738,9 +738,18 @@ float SmokeResolveEmissiveRadianceScale(EmissivePrimitiveData candidate, uint pr
 	// Candidate NEE applies a sector-response heuristic that may reach zero even
 	// while the sampled material remains visibly emissive. Smoke has no useful
 	// fallback once that source is discarded, so recover only this exact-zero
-	// case from the same per-primitive material-response table used by visible
-	// surface emission. Keep placed ranges conservative until their individual
-	// primitive response can be represented without ambiguity.
+	// case from the material response that remains after removing the sector
+	// heuristic. Persistent voxel ranges retain that response per occurrence;
+	// this preserves an explicit material-response zero without changing opaque
+	// NEE or treating a dark sector as an authored emitter shutdown.
+	const bool persistentPlacedRange =
+		candidate.dataSource == NRI_SMOKE_SCENE_DATA_SOURCE_PERSISTENT_VOXEL &&
+		candidate.sceneInstanceIndex != 0xffffffffu && candidate.primitiveCount > 0u;
+	if (persistentPlacedRange)
+	{
+		const float materialScale = max(candidate.materialResponseScale, 0.0);
+		return isfinite(materialScale) ? materialScale : 0.0;
+	}
 	if (candidate.sceneInstanceIndex != 0xffffffffu || candidate.primitiveCount != 1u)
 		return 0.0;
 	return SmokeGetEmissiveMaterialResponseScale(candidate.dataSource, primitiveIndex);

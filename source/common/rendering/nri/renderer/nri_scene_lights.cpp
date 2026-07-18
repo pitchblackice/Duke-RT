@@ -5155,6 +5155,7 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 			candidate.gpu.powerEstimate = basePowerEstimate * sectorResponseScale * materialResponseScale;
 			candidate.gpu.selectionWeight = basePowerEstimate * samplingScale * sectorReachScale * materialResponseScale;
 			candidate.gpu.emissionScale = sectorResponseScale * materialResponseScale;
+			candidate.gpu.materialResponseScale = std::max(materialResponseScale, 0.0f);
 			candidate.referenceProposalWeight = basePowerEstimate * samplingScale * sectorReachBound * materialResponseScale;
 			candidate.hasReferenceProposalWeight = sectorResponseEligible;
 
@@ -5242,6 +5243,7 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 		candidate.gpu.powerEstimate = std::max(surface.powerEstimate, 0.0f) * sectorResponseScale * materialResponseScale;
 		candidate.gpu.selectionWeight = std::max(surface.powerEstimate, 0.0f) * samplingScale * sectorReachScale * materialResponseScale;
 		candidate.gpu.emissionScale = sectorResponseScale * materialResponseScale;
+		candidate.gpu.materialResponseScale = std::max(materialResponseScale, 0.0f);
 		candidate.referenceProposalWeight = std::max(surface.powerEstimate, 0.0f) * samplingScale * sectorReachBound * materialResponseScale;
 		candidate.hasReferenceProposalWeight = sectorResponseEligible;
 

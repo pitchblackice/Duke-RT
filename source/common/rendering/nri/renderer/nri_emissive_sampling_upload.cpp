@@ -200,6 +200,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(
 			livePowerHash = HashEmissiveStabilityValue(livePowerHash, stableKey);
 			livePowerHash = HashEmissiveStabilityValue(livePowerHash, EmissiveStabilityFloatBits(emissivePrimitives[i].powerEstimate));
 			livePowerHash = HashEmissiveStabilityValue(livePowerHash, EmissiveStabilityFloatBits(emissivePrimitives[i].emissionScale));
+			livePowerHash = HashEmissiveStabilityValue(livePowerHash, EmissiveStabilityFloatBits(emissivePrimitives[i].materialResponseScale));
 			proposalWeightHash = HashEmissiveStabilityValue(proposalWeightHash, stableKey);
 			proposalWeightHash = HashEmissiveStabilityValue(proposalWeightHash, EmissiveStabilityFloatBits(emissivePrimitives[i].selectionWeight));
 		}

@@ -155,9 +155,11 @@ struct NRIEmissivePrimitiveGpuData
 	uint32_t occurrenceGeneration = 0;
 	float boundsCenter[3] = {};
 	float boundsRadius = 0.0f;
+	float materialResponseScale = 1.0f;
+	uint32_t reserved[3] = {};
 };
 
-static_assert(sizeof(NRIEmissivePrimitiveGpuData) == 80);
+static_assert(sizeof(NRIEmissivePrimitiveGpuData) == 96);
 
 struct NRIEmissiveMaterialResponseGpuData
 {

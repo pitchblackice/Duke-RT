@@ -36,6 +36,8 @@ struct EmissivePrimitiveData
 	uint occurrenceGeneration;
 	float3 boundsCenter;
 	float boundsRadius;
+	float materialResponseScale;
+	uint3 reserved;
 };
 
 struct EmissiveMaterialResponseData
