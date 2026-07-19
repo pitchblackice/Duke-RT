@@ -34,6 +34,8 @@ namespace
 	static constexpr float OffsetStep = 2.0f;
 	static constexpr float RotationStep = 15.0f;
 	static constexpr float IntervalStep = 0.025f;
+	static constexpr uint32_t OutlineColor = 0xffffff00u;
+	static constexpr uint8_t PassiveOutlineAlpha = 96;
 
 	struct MapSmokeEmitterEditorState
 	{
@@ -447,6 +449,44 @@ namespace
 		PrintDraft("Draft");
 		return true;
 	}
+
+	static void DrawMapSmokeEmitterRectangle(const ParsedLightOverlayMapSmokeEmitterRule& rule, uint8_t alpha)
+	{
+		LightOverlayMapSmokeEmitterRectangle rectangle = {};
+		if (!BuildLightOverlayMapSmokeEmitterRectangle(rule, rectangle))
+		{
+			return;
+		}
+		const DVector3 center(rectangle.center[0], rectangle.center[1], rectangle.center[2]);
+		const DVector3 axisU(rectangle.halfAxisU[0], rectangle.halfAxisU[1], rectangle.halfAxisU[2]);
+		const DVector3 axisV(rectangle.halfAxisV[0], rectangle.halfAxisV[1], rectangle.halfAxisV[2]);
+		const DVector3 corners[4] = {
+			center - axisU - axisV,
+			center + axisU - axisV,
+			center + axisU + axisV,
+			center - axisU + axisV
+		};
+		auto toRender = [](const DVector3& world, float output[3])
+		{
+			output[0] = (float)world.X;
+			output[1] = (float)-world.Z;
+			output[2] = (float)-world.Y;
+		};
+
+		for (int edge = 0; edge < 4; ++edge)
+		{
+			float renderStart[3] = {};
+			float renderEnd[3] = {};
+			toRender(corners[edge], renderStart);
+			toRender(corners[(edge + 1) % 4], renderEnd);
+			DVector2 screenStart;
+			DVector2 screenEnd;
+			if (screen->ProjectPathTracingEditorLine(renderStart, renderEnd, screenStart, screenEnd))
+			{
+				twod->AddLine(screenStart, screenEnd, &viewport3d, OutlineColor, alpha);
+			}
+		}
+	}
 }
 
 bool IsMapSmokeEmitterEditorEnabled()
@@ -477,53 +517,37 @@ void TickMapSmokeEmitterEditor()
 		GMapSmokeEditor.enabled = true;
 		SelectInitialStyle();
 		Printf(PRINT_LOW | PRINT_NOTIFY | PRINT_NOLOG,
-			"Map smoke edit mode enabled. p place, arrows size, ,/. height, ;/' count, j/k interval, [/] style, Enter commit, Escape cancel, l reload.\n");
+			"Map smoke edit mode enabled. All zones outlined; active draft pulses. p place, arrows size, ,/. height, ;/' count, j/k interval, [/] style, Enter commit, Escape cancel, l reload.\n");
 	}
 }
 
 void DrawMapSmokeEmitterEditorOverlay()
 {
 	FString mapName;
-	if (!IsMapSmokeEmitterEditorEnabled() || !GMapSmokeEditor.draftActive || screen == nullptr || twod == nullptr ||
-		!CurrentMapName(mapName) || GMapSmokeEditor.draft.mapName.CompareNoCase(mapName) != 0)
+	if (!IsMapSmokeEmitterEditorEnabled() || screen == nullptr || twod == nullptr || !CurrentMapName(mapName))
 	{
 		return;
 	}
 
-	LightOverlayMapSmokeEmitterRectangle rectangle = {};
-	if (!BuildLightOverlayMapSmokeEmitterRectangle(GMapSmokeEditor.draft, rectangle))
+	const bool draftOnCurrentMap = GMapSmokeEditor.draftActive &&
+		GMapSmokeEditor.draft.mapName.CompareNoCase(mapName) == 0;
+	const auto& resolved = GetResolvedLightOverlaySet();
+	for (const auto& rule : resolved.mapSmokeEmitterRules)
 	{
-		return;
-	}
-	const DVector3 center(rectangle.center[0], rectangle.center[1], rectangle.center[2]);
-	const DVector3 axisU(rectangle.halfAxisU[0], rectangle.halfAxisU[1], rectangle.halfAxisU[2]);
-	const DVector3 axisV(rectangle.halfAxisV[0], rectangle.halfAxisV[1], rectangle.halfAxisV[2]);
-	const DVector3 corners[4] = {
-		center - axisU - axisV,
-		center + axisU - axisV,
-		center + axisU + axisV,
-		center - axisU + axisV
-	};
-	auto toRender = [](const DVector3& world, float output[3])
-	{
-		output[0] = (float)world.X;
-		output[1] = (float)-world.Z;
-		output[2] = (float)-world.Y;
-	};
-
-	constexpr uint32_t OutlineColor = 0xffffff00u;
-	for (int edge = 0; edge < 4; ++edge)
-	{
-		float renderStart[3] = {};
-		float renderEnd[3] = {};
-		toRender(corners[edge], renderStart);
-		toRender(corners[(edge + 1) % 4], renderEnd);
-		DVector2 screenStart;
-		DVector2 screenEnd;
-		if (screen->ProjectPathTracingEditorLine(renderStart, renderEnd, screenStart, screenEnd))
+		if (rule.mapName.CompareNoCase(mapName) != 0 ||
+			(draftOnCurrentMap && GMapSmokeEditor.editingPersistedRule &&
+				rule.id.CompareNoCase(GMapSmokeEditor.draft.id) == 0))
 		{
-			twod->AddLine(screenStart, screenEnd, &viewport3d, OutlineColor, 255);
+			continue;
 		}
+		DrawMapSmokeEmitterRectangle(rule, PassiveOutlineAlpha);
+	}
+
+	if (draftOnCurrentMap)
+	{
+		const double pulse = 0.7 + 0.3 * std::sin(I_msTime() / 100.0);
+		const uint8_t activeAlpha = (uint8_t)std::clamp(pulse * 255.0, 0.0, 255.0);
+		DrawMapSmokeEmitterRectangle(GMapSmokeEditor.draft, activeAlpha);
 	}
 }
 
