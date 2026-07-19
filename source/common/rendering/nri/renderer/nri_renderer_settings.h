@@ -139,7 +139,7 @@ struct NRISmokeSettings
 	uint32_t directReferenceMode = 0;
 	bool volumeHistory = true;
 	uint32_t dlrrMode = 1;
-	bool indirect = true;
+	bool indirect = false;
 	uint32_t indirectCacheMode = 3;
 	bool multipleScatter = false;
 	float multipleScatterScale = 1.0f;
@@ -155,8 +155,8 @@ struct NRISmokeSettings
 	uint32_t traceMode = 0;
 	float froxelMaxDistance = 4096.0f;
 	float timeScale = 1.0f;
-	float wind[3] = {};
-	float densityScale = 1.0f;
+	float wind[3] = { 5.0f, 20.0f, 5.0f };
+	float densityScale = 5.0f;
 	float radianceScale = 1.0f;
 	float indirectScale = 1.0f;
 	uint32_t representation = 0;
