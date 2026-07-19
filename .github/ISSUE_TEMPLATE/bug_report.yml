@@ -1,126 +1,109 @@
-name: Bug Report
-description: File a Bug report
+name: Duke-RT Bug Report
+description: Report a reproducible problem with Duke-RT
 title: '[BUG] '
 labels: bug
-#assignees: 'anonymous@temp'
 
 body:
   - type: markdown
     attributes:
       value: |
-        ## Please fill out forms as cleanly as possible.
-        #### Make sure that you have
-        * properly edited & filled in the title of this bug report
+        Please search existing issues and test with the latest [Duke-RT release](https://github.com/postmemetic/Duke-RT/releases) before filing a report.
+
+        Duke-RT currently supports Duke Nukem 3D on Windows. Reports for other games or operating systems are outside the supported scope.
   - type: input
     id: version
     attributes:
-      label: Raze version
-      description: |
-        What version are you using?
-        Run `raze --version` or check in the console in game.
-        Make sure to update to latest [release](https://github.com/coelckers/Raze/releases) version and test again before continuing.
-      placeholder: "ex: Raze 1.0.0, Git version, Branch, other"
+      label: Duke-RT version
+      description: Check the version shown in the in-game console.
+      placeholder: "Example: Duke-RT 1.12pre or Git commit 3175bd96d3"
     validations:
-      required: false
+      required: true
   - type: dropdown
-    id: gameid
+    id: operating-system
     attributes:
-      label: Which game are you running with Raze?
-      multiple: false
-      options:
-        - Blood
-        - Duke Nukem 3D
-        - Exhumed/Powerslave
-        - NAM
-        - Redneck Rampage
-        - Shadow Warrior
-        - WW2 GI
-        - Other
-    validations:
-      required: false
-  - type: dropdown
-    id: OS
-    attributes:
-      label: What Operating System are you using?
-      multiple: false
+      label: Windows version
       options:
         - Windows 11
         - Windows 10
-        - Windows 8
-        - Windows 7
-        - Windows Other
-        - Mac OS
-        - Linux x86
-        - Linux x86_64
-        - Linux ARM (Raspberry Pi)
-        - Other
     validations:
-      required: false
+      required: true
   - type: input
-    id: os_detail
+    id: os-detail
     attributes:
-      label: Please describe your specific OS version
-      description: Other details
-      placeholder: "Windows 11 Home/Pro/Server/etc, Mac OSX version, Debian 10/11/etc, Ubuntu 18/20/etc, Arch, etc."
+      label: Windows edition and build
+      description: Include the edition and OS build shown by `winver`, if known.
+      placeholder: "Example: Windows 11 Pro, build 26100"
     validations:
       required: false
   - type: input
     id: hardware
     attributes:
-      label: Relevant hardware info
-      description: Hardware
-      placeholder: "CPU, GPU, device brand/model: e.g. Intel, AMD, Nvidia, etc"
+      label: Relevant hardware and driver information
+      description: Include your GPU model and driver version. Add CPU details when they may be relevant.
+      placeholder: "Example: NVIDIA RTX 5070 Ti, driver 576.80; AMD Ryzen 7 5800X"
     validations:
-      required: false
+      required: true
+  - type: dropdown
+    id: graphics-api
+    attributes:
+      label: Graphics API
+      description: Use the backend reported near the start of `duke-rt.log`.
+      options:
+        - Direct3D 12
+        - Vulkan
+        - Not sure
+    validations:
+      required: true
   - type: checkboxes
     id: checked
     attributes:
-      label: Have you checked that no other similar issue already exists?
-      description: Searched issues before creating report?
+      label: Existing issues
       options:
-        - label: I have searched and not found similar issues.
+        - label: I searched the existing issues and did not find the same problem.
           required: true
   - type: textarea
     id: description
     attributes:
-      label: A clear and concise description of what the bug is.
-      description: Describe what happens, what software were you running? _Include a saved game demonstrating the bug, or a screenshot if possible_
-      placeholder: "How & When does this occur?"
+      label: Bug description
+      description: Clearly describe what happened and what you expected. Attach screenshots, video, or a save game when useful.
+      placeholder: "What happened, and what should have happened instead?"
     validations:
       required: true
   - type: textarea
     id: steps
     attributes:
-      label: Steps to reproduce the behaviour.
-      description: How can we reproduce this?
-      placeholder: "Explain how to reproduce"
+      label: Steps to reproduce
+      description: Include the map, relevant settings, and the shortest reliable reproduction sequence.
       value: |
-        Explain how to reproduce
-        1. 
+        1.
         2.
         3.
     validations:
-      required: false
+      required: true
   - type: textarea
-    id: config_file
+    id: config-file
     attributes:
-      label: Your configuration
+      label: Duke-RT configuration
       description: |
-        Share the config file(s) you've been using to run the program. (`raze.ini`) 
-        Please avoid pasting the full config, _use attachments or links_
-      placeholder: "example: cl_autorun=true"
-      render: ini # syntax highlighting
+        Attach `duke-rt.ini` from `C:\Users\<user>\Documents\My Games\duke-rt\duke-rt.ini` or include only the relevant settings.
+        Remove any private information before uploading files.
+      placeholder: "Drag duke-rt.ini here, or paste the relevant settings."
     validations:
       required: false
   - type: textarea
     id: log
     attributes:
-      label: Provide a Log
-      description: Please avoid pasting the full log, _use attachments or links_
-      placeholder: "Copy & paste error log section or provide link"
+      label: Duke-RT log
+      description: |
+        Attach `duke-rt.log` from `C:\Users\<user>\Documents\My Games\duke-rt\duke-rt.log` after reproducing the problem.
+        Please upload the file instead of pasting the entire log into the issue.
+      placeholder: "Drag duke-rt.log here, or paste the relevant error lines."
     validations:
       required: false
-  - type: markdown
+  - type: textarea
+    id: additional-context
     attributes:
-      value: |
-        * Make sure you have properly filled in the title of this bug report
+      label: Additional context
+      description: Add any other details that may help reproduce or diagnose the problem.
+    validations:
+      required: false

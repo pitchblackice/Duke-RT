@@ -45,7 +45,7 @@
 #include "gamecontrol.h"
 #include "version.h"
 
-#define LASTRUNVERSION "6"
+#define LASTRUNVERSION "7"
 
 #if !defined _MSC_VER && !defined __APPLE__
 #include "i_system.h"  // for SHARE_DIR
@@ -431,6 +431,16 @@ void FGameConfigFile::DoGlobalSetup ()
 				setFloatCVar("nri_ptsectoremissionreachmax", 1.6f);
 				setFloatCVar("nri_ptsectoremissionmaterialmin", 0.0f);
 				setFloatCVar("nri_ptsectoremissionmaterialmax", 1.0f);
+			}
+			if (last < 7)
+			{
+				auto var = FindCVar("nri_nrddenoiser", nullptr);
+				if (var != nullptr && var->GetGenericRep(CVAR_Int).Int == 0)
+				{
+					UCVarValue v;
+					v.Int = 1;
+					var->SetGenericRep(v, CVAR_Int);
+				}
 			}
 		}
 	}

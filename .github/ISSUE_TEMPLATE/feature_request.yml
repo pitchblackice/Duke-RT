@@ -1,101 +1,49 @@
-name: Feature Request
-description: Suggest an idea (a new feature or other improvement) for this project
+name: Duke-RT Feature Request
+description: Suggest a Duke-RT feature or improvement
 title: '[Feature] '
 labels: enhancement
-#assignees: 'anonymous@temp'
 
 body:
   - type: markdown
     attributes:
       value: |
-        ## Please fill out forms as cleanly as possible.
-        #### Make sure that you have
-        * properly edited & filled in the title of this bug report
-  - type: input
-    id: version
+        Please search existing issues before suggesting a feature.
+
+        Duke-RT currently focuses on Duke Nukem 3D path tracing on Windows. Requests for other games or operating systems are outside the supported scope.
+  - type: checkboxes
+    id: checked
     attributes:
-      label: Raze version
-      description: |
-        What version are you using?
-        Run `raze --version` or check in the console in game.
-        Make sure to update to latest [release](https://github.com/coelckers/Raze/releases) version and test again before continuing.
-      placeholder: "ex: Raze 1.0.0, Git version, Branch, other"
-    validations:
-      required: false
-  - type: dropdown
-    id: gameid
-    attributes:
-      label: Which game are you running with Raze?
-      multiple: false
+      label: Existing requests
       options:
-        - Blood
-        - Duke Nukem 3D
-        - Exhumed/Powerslave
-        - NAM
-        - Redneck Rampage
-        - Shadow Warrior
-        - WW2 GI
-        - Other
-    validations:
-      required: false
-  - type: dropdown
-    id: OS
-    attributes:
-      label: What Operating System are you using?
-      multiple: false
-      options:
-        - Windows 11
-        - Windows 10
-        - Windows 8
-        - Windows 7
-        - Windows Other
-        - Mac OS
-        - Linux x86
-        - Linux x86_64
-        - Linux ARM (Raspberry Pi)
-        - Other
-    validations:
-      required: false
-  - type: input
-    id: other
-    attributes:
-      label: If Other OS, please describe
-      description: Other details
-      placeholder: "Windows, Mac OSX version, Debian, Ubuntu, Arch, etc."
-    validations:
-      required: false
+        - label: I searched the existing issues and did not find the same request.
+          required: true
   - type: textarea
-    id: related
+    id: problem
     attributes:
-      label: Is your feature request related to a problem? Please describe.
-      description: Related
-      placeholder: "Ex. I'm always frustrated when"
+      label: Problem or limitation
+      description: Describe the Duke-RT problem, limitation, or workflow this request would address.
+      placeholder: "What is difficult or missing today?"
     validations:
       required: true
   - type: textarea
     id: solution
     attributes:
-      label: Describe the solution you'd like
-      placeholder: "Ex. How can we make it better?"
+      label: Proposed solution
+      description: Describe the behavior or result you would like.
+      placeholder: "How should Duke-RT handle this?"
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe any workarounds or alternative approaches you have tried or considered.
     validations:
       required: false
   - type: textarea
-    id: alternative
+    id: additional-context
     attributes:
-      label: Describe alternatives you've considered
-      description: A clear and concise description of any alternative solutions or features you've considered.
-      placeholder: "Similar idea or software"
+      label: Additional context
+      description: Add screenshots, mockups, links, or other context that clarifies the request.
     validations:
       required: false
-  - type: textarea
-    id: additional
-    attributes:
-      label: Add any other context or screenshots about the feature request here.
-      description: Screenshots or Links?
-      placeholder: "Ex. Screenshot or Link"
-    validations:
-      required: false
-  - type: markdown
-    attributes:
-      value: |
-        * Make sure you have properly filled in the title of this feature request

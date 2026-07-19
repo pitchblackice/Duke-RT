@@ -56,11 +56,11 @@ namespace
 		return screen != nullptr && screen->Backend() == 4 ? static_cast<NRIRenderDevice*>(screen) : nullptr;
 	}
 
-	void RefreshActiveFrameGenerationSwapChain()
+	void RequestActiveFrameGenerationSwapChainRefresh()
 	{
 		if (NRIRenderDevice* frameBuffer = GetActiveNriRenderDeviceForCVar())
 		{
-			frameBuffer->SetVSync(vid_vsync);
+			frameBuffer->RequestSwapChainRefresh("framegen-settings-change", true);
 		}
 	}
 
@@ -273,7 +273,7 @@ CUSTOM_CVAR(Int, nri_ptswaptextures, 0, 0)
 
 	if (auto* frameBuffer = GetActiveNriRenderDeviceForCVar())
 	{
-		frameBuffer->SetVSync(vid_vsync);
+		frameBuffer->RequestSwapChainRefresh("debug-swapchain-policy-change", false);
 	}
 }
 
@@ -290,7 +290,7 @@ CUSTOM_CVAR(Int, nri_ptswapflags, -1, 0)
 
 	if (auto* frameBuffer = GetActiveNriRenderDeviceForCVar())
 	{
-		frameBuffer->SetVSync(vid_vsync);
+		frameBuffer->RequestSwapChainRefresh("debug-swapchain-policy-change", false);
 	}
 }
 
@@ -774,7 +774,7 @@ CUSTOM_CVAR(Int, nri_ptdebugmenu, 0, CVAR_GLOBALCONFIG)
 
 CVAR(Bool, nri_denoise, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_nrddenoiser, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_nrddenoiser, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_upscaler, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -1175,7 +1175,7 @@ CVAR(Bool, nri_validation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CUSTOM_CVAR(Bool, nri_framegen, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
-	RefreshActiveFrameGenerationSwapChain();
+	RequestActiveFrameGenerationSwapChainRefresh();
 }
 
 CUSTOM_CVAR(Int, nri_ptspherelongs, 256, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -1219,7 +1219,7 @@ CUSTOM_CVAR(Int, nri_framegenprovider, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 1;
 	}
 
-	RefreshActiveFrameGenerationSwapChain();
+	RequestActiveFrameGenerationSwapChainRefresh();
 }
 
 CUSTOM_CVAR(Int, nri_framegenui, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -1238,7 +1238,7 @@ CVAR(Bool, nri_framegenasync, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CUSTOM_CVAR(Bool, nri_framegenlatency, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
-	RefreshActiveFrameGenerationSwapChain();
+	RequestActiveFrameGenerationSwapChainRefresh();
 }
 
 CVAR(Int, nri_nrdmaxframes, 13, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

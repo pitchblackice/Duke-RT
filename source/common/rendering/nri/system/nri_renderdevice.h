@@ -85,6 +85,7 @@ public:
 	void Draw2D() override;
 	void WaitForCommands(bool finish) override;
 	void SetVSync(bool vsync) override;
+	void RequestSwapChainRefresh(const char* reason, bool forceRecreate);
 	void SetSaveBuffers(bool yes) override;
 	bool PrepareSavePicScene(int width, int height) override;
 	void FinishSavePicScene() override;
@@ -249,6 +250,7 @@ private:
 	bool CreateDevice();
 	bool CreateQueuedFrames();
 	bool CreateSwapChain();
+	bool ApplyPendingSwapChainRefresh();
 	void DestroyQueuedFrames();
 	void DestroySwapChain();
 	bool CreateRenderResources();
@@ -441,6 +443,10 @@ private:
 	uint64_t mNextCommandFenceValue = 1;
 	std::unordered_set<uint64_t> mAbandonedCommandFenceValues;
 	bool mFrameBegun = false;
+	bool mSwapChainRefreshPending = false;
+	bool mSwapChainRefreshForceRecreate = false;
+	uint32_t mSwapChainRefreshRequestCount = 0;
+	FString mSwapChainRefreshReason = "none";
 	bool mUsingSaveTarget = false;
 	bool mStandaloneSavePicFrame = false;
 	bool mPreloadCommandContextActive = false;
