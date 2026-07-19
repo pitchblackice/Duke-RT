@@ -218,6 +218,22 @@ The first three are global blocks directly inside `LIGHTOVR`; `smokeemitter` bel
 
 Smoke requires the NRI/PT renderer and `nri_ptsmoke true`. The same setting is exposed as **Smoke** under **Options → Display Options**. LIGHTOVR parsing, compact cadence state, and injection-command scheduling are CPU-side; deposition, sparse density/optical/velocity/temperature fields, simulation, lighting, dissipation, and residency stay on the GPU.
 
+### Authoring Workflow
+
+1. Define a global `smokestyle` with a unique ID. Start by tuning its optical controls (`density`, `extinction`, `albedo`, and `anisotropy`), then its lifetime and motion controls.
+2. Choose the source type that matches the effect. Reference the style by ID from that source; smoke styles are not nested inside source rules.
+3. Set source placement and cadence independently of the style. For example, use an actor-rule `offset` and `spacing` for a rocket trail, or a map emitter's `position`, `normal`, and `size` for a stationary fire bed.
+4. Mount the loose overlay and run `lightoverlay_reload`. Use `lightoverlay_dumpresolved` to confirm that class names and style references resolved.
+5. Generate the effect in game, then tune one category at a time: source amount/size, optical thickness, dissipation, and finally motion. Use `nri_ptsmokereset` between comparisons so old smoke does not obscure the result.
+
+| Desired source | Block to use | Typical use |
+| --- | --- | --- |
+| A live actor | `smokeactorrule <id>` | Rockets, fires, explosions, and other effects whose position or lifetime follows an actor. |
+| A gameplay event | `smokeeventrule <event_id>` | Muzzle smoke and impact puffs emitted by a wired weapon or collision event. |
+| A fixed map area | `map <mapname> { smokeemitter <id> { ... } }` | Persistent rectangular sources such as vents, fire beds, and environmental haze emitters. |
+
+The source rule controls **where, when, and how much** smoke is injected. The style controls **what that smoke looks like and how it moves or dissipates after injection**. Reusing one style across several source rules keeps their appearance consistent while allowing each source to have different offsets, cadence, density scaling, and radius scaling.
+
 ### Minimal Actor Smoke Example
 
 This example creates a reusable fire-smoke style and emits it continuously from a visible `DukeFire` actor:
