@@ -1082,6 +1082,7 @@ OptionMenu "VideoOptions" protected
 	Option "Bloom",								"nri_ptbloom",					"OnOff"
 	Option "Smoke",								"nri_ptsmoke",					"OnOff"
 	CVarStaticText "nri_settingsprofilewarning"
+	CVarStaticText "nri_ptsmokemenuwarning"
 	StaticText ""
 
 	ifnotgame(Blood, Exhumed)
