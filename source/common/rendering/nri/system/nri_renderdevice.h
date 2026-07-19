@@ -122,6 +122,8 @@ public:
 	void PrintPathTracingSurfaceProbeStatus() const override;
 	bool BuildPathTracingEmissiveLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const override;
 	bool BuildPathTracingSurfaceLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const override;
+	bool ProjectPathTracingEditorLine(const float renderStart[3], const float renderEnd[3],
+		DVector2& outStart, DVector2& outEnd) const override;
 	bool SetPathTracingEditorPointLight(const DVector3& worldPosition, const float color[3], float intensity, float radius) override;
 	void ClearPathTracingEditorPointLight() override;
 	void ConsumePathTracingWeaponLightEvents(TArray<PathTracingWeaponLightEvent>& outEvents);

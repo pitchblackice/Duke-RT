@@ -35,42 +35,6 @@ namespace
 		std::fill(command.halfAxisV, command.halfAxisV + 3, 0.0f);
 	}
 
-	bool BuildMapEmitterRectangleBasis(const float sourceNormal[3], float rotationDegrees,
-		float width, float height, DVector3& outNormal, DVector3& outAxisU, DVector3& outAxisV)
-	{
-		if (!std::isfinite(rotationDegrees) || !std::isfinite(width) || !std::isfinite(height))
-		{
-			return false;
-		}
-		outNormal = DVector3(sourceNormal[0], sourceNormal[1], sourceNormal[2]);
-		if (!std::isfinite(outNormal.X) || !std::isfinite(outNormal.Y) || !std::isfinite(outNormal.Z) ||
-			outNormal.isZero())
-		{
-			return false;
-		}
-		outNormal.MakeUnit();
-
-		const DVector3 reference = std::abs(outNormal.Z) < 0.999 ?
-			DVector3(0.0, 0.0, 1.0) : DVector3(0.0, 1.0, 0.0);
-		DVector3 baseU = reference ^ outNormal;
-		if (baseU.isZero())
-		{
-			return false;
-		}
-		baseU.MakeUnit();
-		DVector3 baseV = outNormal ^ baseU;
-		baseV.MakeUnit();
-
-		const double radians = (double)rotationDegrees * (3.14159265358979323846 / 180.0);
-		const double cosine = std::cos(radians);
-		const double sine = std::sin(radians);
-		const DVector3 rotatedU = baseU * cosine + baseV * sine;
-		const DVector3 rotatedV = baseV * cosine - baseU * sine;
-		outAxisU = rotatedU * (std::max(0.0f, width) * 0.5);
-		outAxisV = rotatedV * (std::max(0.0f, height) * 0.5);
-		return true;
-	}
-
 	bool ActorMatchesClass(const DCoreActor* actor, const PClassActor* actorClass)
 	{
 		return actor != nullptr && actorClass != nullptr && actor->GetClass() != nullptr &&
@@ -389,11 +353,8 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 	{
 		MapEmissionStats stats = {};
 		stats.active = 1u;
-		DVector3 normal;
-		DVector3 axisU;
-		DVector3 axisV;
-		if (!BuildMapEmitterRectangleBasis(rule.normal, rule.rotation, rule.size[0], rule.size[1],
-			normal, axisU, axisV))
+		LightOverlayMapSmokeEmitterRectangle rectangle = {};
+		if (!BuildLightOverlayMapSmokeEmitterRectangle(rule, rectangle))
 		{
 			if (traceMode >= 2 && verbosePrinted < 32u)
 			{
@@ -429,13 +390,15 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 		stats.skipped += emitCount - admittedCount;
 		emitCount = admittedCount;
 
-		const DVector3 center(rule.position[0], rule.position[1], rule.position[2]);
-		const DVector3 offsetCenter = center + normal * rule.offset;
+		const DVector3 center(rectangle.center[0], rectangle.center[1], rectangle.center[2]);
+		const DVector3 normal(rectangle.normal[0], rectangle.normal[1], rectangle.normal[2]);
+		const DVector3 axisU(rectangle.halfAxisU[0], rectangle.halfAxisU[1], rectangle.halfAxisU[2]);
+		const DVector3 axisV(rectangle.halfAxisV[0], rectangle.halfAxisV[1], rectangle.halfAxisV[2]);
 		const DVector3 velocity = normal * rule.velocityScale;
 		for (uint32_t emissionIndex = 0; emissionIndex < emitCount; ++emissionIndex)
 		{
 			NRISmokeInjectionCommandGpu command = {};
-			WorldToPathTracingPosition(offsetCenter, command.position);
+			WorldToPathTracingPosition(center, command.position);
 			WorldToPathTracingDirection(velocity, command.velocity);
 			WorldToPathTracingDirection(axisU, command.halfAxisU);
 			WorldToPathTracingDirection(axisV, command.halfAxisV);

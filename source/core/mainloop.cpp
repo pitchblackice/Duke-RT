@@ -1016,6 +1016,7 @@ void DrawOverlays()
 {
 	NetUpdate();			// send out any new accumulation
 	TickMapSmokeEmitterEditor();
+	DrawMapSmokeEmitterEditorOverlay();
 	TickActorLightEditor();
 
 	const auto overlayStart = Capture2DSnapshot();

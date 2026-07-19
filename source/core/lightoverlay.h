@@ -379,6 +379,18 @@ struct ParsedLightOverlayMapSmokeEmitterRule
 	uint32_t maxSegmentsPerFrame = 1;
 };
 
+struct LightOverlayMapSmokeEmitterRectangle
+{
+	float center[3] = {};
+	float normal[3] = {};
+	float halfAxisU[3] = {};
+	float halfAxisV[3] = {};
+};
+
+bool BuildLightOverlayMapSmokeEmitterRectangle(
+	const ParsedLightOverlayMapSmokeEmitterRule& rule,
+	LightOverlayMapSmokeEmitterRectangle& outRectangle);
+
 struct ParsedLightOverlaySourceFile
 {
 	FString sourceName;

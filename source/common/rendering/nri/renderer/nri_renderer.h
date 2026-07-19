@@ -2020,6 +2020,8 @@ public:
 	NRISurfaceProbeStatusSnapshot BuildSurfaceProbeStatusSnapshot() const;
 	bool BuildEmissiveLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const;
 	bool BuildSurfaceLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const;
+	bool ProjectEditorLineToScreen(const float renderStart[3], const float renderEnd[3],
+		float outStart[2], float outEnd[2]) const;
 	void PrintMapChunkDump(int32_t chunkIndex) const;
 	NRIMapChunkDumpSnapshot BuildMapChunkDumpSnapshot(int32_t chunkIndex) const;
 	void PrintMapChunkCompare(int32_t chunkIndex) const;

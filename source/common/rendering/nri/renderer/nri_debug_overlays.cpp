@@ -55,6 +55,130 @@ uint32_t NRIRenderer::GetRuntimeDebugSphereCount() const
 	return mDebugOverlays.GetRuntimeDebugSphereCount();
 }
 
+bool NRIRenderer::ProjectEditorLineToScreen(const float renderStart[3], const float renderEnd[3],
+	float outStart[2], float outEnd[2]) const
+{
+	if (renderStart == nullptr || renderEnd == nullptr || outStart == nullptr || outEnd == nullptr ||
+		mOutputWidth == 0u || mOutputHeight == 0u ||
+		!std::isfinite(mCurrentTanHalfFovX) || !std::isfinite(mCurrentTanHalfFovY) ||
+		mCurrentTanHalfFovX <= 1e-5f || mCurrentTanHalfFovY <= 1e-5f)
+	{
+		return false;
+	}
+
+	float points[2][3] = {
+		{ renderStart[0], renderStart[1], renderStart[2] },
+		{ renderEnd[0], renderEnd[1], renderEnd[2] }
+	};
+	auto depth = [&](const float point[3])
+	{
+		return (point[0] - mCurrentCameraPos[0]) * mCurrentCameraForward[0] +
+			(point[1] - mCurrentCameraPos[1]) * mCurrentCameraForward[1] +
+			(point[2] - mCurrentCameraPos[2]) * mCurrentCameraForward[2];
+	};
+	float depths[2] = { depth(points[0]), depth(points[1]) };
+	const float NearDepth = DFrameBuffer::GetZNear();
+	if (!std::isfinite(depths[0]) || !std::isfinite(depths[1]) ||
+		(depths[0] <= NearDepth && depths[1] <= NearDepth))
+	{
+		return false;
+	}
+	for (int endpoint = 0; endpoint < 2; ++endpoint)
+	{
+		if (depths[endpoint] > NearDepth)
+		{
+			continue;
+		}
+		const int other = 1 - endpoint;
+		const float denominator = depths[other] - depths[endpoint];
+		if (!std::isfinite(denominator) || std::abs(denominator) <= 1e-8f)
+		{
+			return false;
+		}
+		const float t = std::clamp((NearDepth - depths[endpoint]) / denominator, 0.0f, 1.0f);
+		for (int axis = 0; axis < 3; ++axis)
+		{
+			points[endpoint][axis] += (points[other][axis] - points[endpoint][axis]) * t;
+		}
+		depths[endpoint] = NearDepth;
+	}
+
+	auto project = [&](const float point[3], float viewDepth, float output[2])
+	{
+		const float relative[3] = {
+			point[0] - mCurrentCameraPos[0],
+			point[1] - mCurrentCameraPos[1],
+			point[2] - mCurrentCameraPos[2]
+		};
+		const float viewX = relative[0] * mCurrentCameraRight[0] +
+			relative[1] * mCurrentCameraRight[1] + relative[2] * mCurrentCameraRight[2];
+		const float viewY = relative[0] * mCurrentCameraUp[0] +
+			relative[1] * mCurrentCameraUp[1] + relative[2] * mCurrentCameraUp[2];
+		const float ndcX = viewX / (viewDepth * mCurrentTanHalfFovX);
+		const float ndcY = viewY / (viewDepth * mCurrentTanHalfFovY);
+		if (!std::isfinite(ndcX) || !std::isfinite(ndcY))
+		{
+			return false;
+		}
+		output[0] = (float)mSceneLeft + (ndcX * 0.5f + 0.5f) * (float)mOutputWidth;
+		output[1] = (float)mSceneTop + (0.5f - ndcY * 0.5f) * (float)mOutputHeight;
+		return std::isfinite(output[0]) && std::isfinite(output[1]);
+	};
+	if (!project(points[0], depths[0], outStart) || !project(points[1], depths[1], outEnd))
+	{
+		return false;
+	}
+
+	// Keep projected vertices bounded without changing the line slope. F2DDrawer applies a scissor
+	// when the line is submitted, but it intentionally does not clip its CPU-side vertices.
+	const float left = (float)mSceneLeft;
+	const float top = (float)mSceneTop;
+	const float right = left + (float)mOutputWidth;
+	const float bottom = top + (float)mOutputHeight;
+	const float deltaX = outEnd[0] - outStart[0];
+	const float deltaY = outEnd[1] - outStart[1];
+	float firstT = 0.0f;
+	float lastT = 1.0f;
+	auto clipBoundary = [&](float direction, float distance)
+	{
+		if (std::abs(direction) <= 1e-8f)
+		{
+			return distance >= 0.0f;
+		}
+		const float t = distance / direction;
+		if (direction < 0.0f)
+		{
+			if (t > lastT)
+			{
+				return false;
+			}
+			firstT = std::max(firstT, t);
+		}
+		else
+		{
+			if (t < firstT)
+			{
+				return false;
+			}
+			lastT = std::min(lastT, t);
+		}
+		return true;
+	};
+	if (!clipBoundary(-deltaX, outStart[0] - left) ||
+		!clipBoundary(deltaX, right - outStart[0]) ||
+		!clipBoundary(-deltaY, outStart[1] - top) ||
+		!clipBoundary(deltaY, bottom - outStart[1]))
+	{
+		return false;
+	}
+	const float originalStart[2] = { outStart[0], outStart[1] };
+	outStart[0] = originalStart[0] + deltaX * firstT;
+	outStart[1] = originalStart[1] + deltaY * firstT;
+	outEnd[0] = originalStart[0] + deltaX * lastT;
+	outEnd[1] = originalStart[1] + deltaY * lastT;
+	return true;
+}
+
 void NRIRenderer::NotifyDebugSphereTessellationChange()
 {
 	mDebugOverlays.InvalidateRuntimeDebugSphereTessellation();

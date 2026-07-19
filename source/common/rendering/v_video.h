@@ -424,6 +424,8 @@ public:
 	virtual void PrintPathTracingSurfaceProbeStatus() const;
 	virtual bool BuildPathTracingEmissiveLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const { outTarget = {}; return false; }
 	virtual bool BuildPathTracingSurfaceLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const { outTarget = {}; return false; }
+	virtual bool ProjectPathTracingEditorLine(const float renderStart[3], const float renderEnd[3],
+		DVector2& outStart, DVector2& outEnd) const { outStart = {}; outEnd = {}; return false; }
 	virtual bool SetPathTracingEditorPointLight(const DVector3& worldPosition, const float color[3], float intensity, float radius) { return false; }
 	virtual void ClearPathTracingEditorPointLight() {}
 

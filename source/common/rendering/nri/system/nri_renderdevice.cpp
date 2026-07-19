@@ -7397,6 +7397,44 @@ bool NRIRenderDevice::BuildPathTracingSurfaceLightEditTarget(PathTracingEmissive
 	return mRenderer->BuildSurfaceLightEditTarget(outTarget);
 }
 
+bool NRIRenderDevice::ProjectPathTracingEditorLine(const float renderStart[3], const float renderEnd[3],
+	DVector2& outStart, DVector2& outEnd) const
+{
+	outStart = {};
+	outEnd = {};
+	if (mRenderer == nullptr)
+	{
+		return false;
+	}
+
+	float projectedStart[2] = {};
+	float projectedEnd[2] = {};
+	if (!mRenderer->ProjectEditorLineToScreen(renderStart, renderEnd, projectedStart, projectedEnd))
+	{
+		return false;
+	}
+	if (mScreenViewport.width <= 0 || mScreenViewport.height <= 0)
+	{
+		return false;
+	}
+	const float targetHeight = mActiveTarget != nullptr
+		? (float)std::max<uint32_t>(mActiveTarget->height, 1u)
+		: (float)mScreenViewport.height;
+	const float screenLeft = (float)mScreenViewport.left;
+	const float screenTop = targetHeight - (float)mScreenViewport.top - (float)mScreenViewport.height;
+	const float logicalScaleX = (float)GetWidth() / (float)mScreenViewport.width;
+	const float logicalScaleY = (float)GetHeight() / (float)mScreenViewport.height;
+	auto toLogical = [&](const float projected[2])
+	{
+		return DVector2(
+			(projected[0] - screenLeft) * logicalScaleX,
+			(projected[1] - screenTop) * logicalScaleY);
+	};
+	outStart = toLogical(projectedStart);
+	outEnd = toLogical(projectedEnd);
+	return true;
+}
+
 void NRIRenderDevice::EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent& event)
 {
 	if (mLevelTransitionInProgress || event.eventId.IsEmpty())

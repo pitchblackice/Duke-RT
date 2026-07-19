@@ -10,11 +10,14 @@
 #include "d_gui.h"
 #include "filesystem.h"
 #include "gamestate.h"
+#include "gamefuncs.h"
 #include "i_time.h"
 #include "keydef.h"
 #include "lightoverlay_editor.h"
 #include "mapinfo.h"
 #include "printf.h"
+#include "v_2ddrawer.h"
+#include "v_draw.h"
 #include "v_video.h"
 
 EXTERN_CVAR(Bool, nri_ptactorlighteditmode)
@@ -475,6 +478,52 @@ void TickMapSmokeEmitterEditor()
 		SelectInitialStyle();
 		Printf(PRINT_LOW | PRINT_NOTIFY | PRINT_NOLOG,
 			"Map smoke edit mode enabled. p place, arrows size, ,/. height, ;/' count, j/k interval, [/] style, Enter commit, Escape cancel, l reload.\n");
+	}
+}
+
+void DrawMapSmokeEmitterEditorOverlay()
+{
+	FString mapName;
+	if (!IsMapSmokeEmitterEditorEnabled() || !GMapSmokeEditor.draftActive || screen == nullptr || twod == nullptr ||
+		!CurrentMapName(mapName) || GMapSmokeEditor.draft.mapName.CompareNoCase(mapName) != 0)
+	{
+		return;
+	}
+
+	LightOverlayMapSmokeEmitterRectangle rectangle = {};
+	if (!BuildLightOverlayMapSmokeEmitterRectangle(GMapSmokeEditor.draft, rectangle))
+	{
+		return;
+	}
+	const DVector3 center(rectangle.center[0], rectangle.center[1], rectangle.center[2]);
+	const DVector3 axisU(rectangle.halfAxisU[0], rectangle.halfAxisU[1], rectangle.halfAxisU[2]);
+	const DVector3 axisV(rectangle.halfAxisV[0], rectangle.halfAxisV[1], rectangle.halfAxisV[2]);
+	const DVector3 corners[4] = {
+		center - axisU - axisV,
+		center + axisU - axisV,
+		center + axisU + axisV,
+		center - axisU + axisV
+	};
+	auto toRender = [](const DVector3& world, float output[3])
+	{
+		output[0] = (float)world.X;
+		output[1] = (float)-world.Z;
+		output[2] = (float)-world.Y;
+	};
+
+	constexpr uint32_t OutlineColor = 0xffffff00u;
+	for (int edge = 0; edge < 4; ++edge)
+	{
+		float renderStart[3] = {};
+		float renderEnd[3] = {};
+		toRender(corners[edge], renderStart);
+		toRender(corners[(edge + 1) % 4], renderEnd);
+		DVector2 screenStart;
+		DVector2 screenEnd;
+		if (screen->ProjectPathTracingEditorLine(renderStart, renderEnd, screenStart, screenEnd))
+		{
+			twod->AddLine(screenStart, screenEnd, &viewport3d, OutlineColor, 255);
+		}
 	}
 }
 

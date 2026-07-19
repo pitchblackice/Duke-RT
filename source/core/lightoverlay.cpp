@@ -15,6 +15,7 @@
 #include "mapinfo.h"
 #include "printf.h"
 #include "sc_man.h"
+#include "vectors.h"
 
 namespace
 {
@@ -3001,6 +3002,56 @@ namespace
 		GResolvedLightOverlaySet = std::move(resolved);
 		return GResolvedLightOverlaySet;
 	}
+}
+
+bool BuildLightOverlayMapSmokeEmitterRectangle(
+	const ParsedLightOverlayMapSmokeEmitterRule& rule,
+	LightOverlayMapSmokeEmitterRectangle& outRectangle)
+{
+	outRectangle = {};
+	if (!rule.hasPosition || !rule.hasNormal || !rule.hasSize ||
+		!std::isfinite(rule.rotation) || !std::isfinite(rule.offset) ||
+		!std::isfinite(rule.size[0]) || !std::isfinite(rule.size[1]))
+	{
+		return false;
+	}
+
+	DVector3 center(rule.position[0], rule.position[1], rule.position[2]);
+	DVector3 normal(rule.normal[0], rule.normal[1], rule.normal[2]);
+	if (!std::isfinite(center.X) || !std::isfinite(center.Y) || !std::isfinite(center.Z) ||
+		!std::isfinite(normal.X) || !std::isfinite(normal.Y) || !std::isfinite(normal.Z) || normal.isZero())
+	{
+		return false;
+	}
+	normal.MakeUnit();
+
+	const DVector3 reference = std::abs(normal.Z) < 0.999 ?
+		DVector3(0.0, 0.0, 1.0) : DVector3(0.0, 1.0, 0.0);
+	DVector3 baseU = reference ^ normal;
+	if (baseU.isZero())
+	{
+		return false;
+	}
+	baseU.MakeUnit();
+	DVector3 baseV = normal ^ baseU;
+	baseV.MakeUnit();
+
+	const double radians = (double)rule.rotation * (3.14159265358979323846 / 180.0);
+	const double cosine = std::cos(radians);
+	const double sine = std::sin(radians);
+	const DVector3 halfAxisU = (baseU * cosine + baseV * sine) * (std::max(0.0f, rule.size[0]) * 0.5);
+	const DVector3 halfAxisV = (baseV * cosine - baseU * sine) * (std::max(0.0f, rule.size[1]) * 0.5);
+	center += normal * rule.offset;
+
+	const DVector3 values[] = { center, normal, halfAxisU, halfAxisV };
+	float* outputs[] = { outRectangle.center, outRectangle.normal, outRectangle.halfAxisU, outRectangle.halfAxisV };
+	for (int i = 0; i < 4; ++i)
+	{
+		outputs[i][0] = (float)values[i].X;
+		outputs[i][1] = (float)values[i].Y;
+		outputs[i][2] = (float)values[i].Z;
+	}
+	return true;
 }
 
 FString SerializeLightOverlayDatabase(const ParsedLightOverlayDatabase& database)

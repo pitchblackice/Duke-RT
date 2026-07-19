@@ -15,5 +15,6 @@ struct MapSmokeEmitterEditorRuntimePreview
 
 bool IsMapSmokeEmitterEditorEnabled();
 void TickMapSmokeEmitterEditor();
+void DrawMapSmokeEmitterEditorOverlay();
 bool MapSmokeEmitterEditorResponder(event_t* ev);
 bool GetMapSmokeEmitterEditorRuntimePreview(MapSmokeEmitterEditorRuntimePreview& outPreview);
