@@ -22,7 +22,7 @@ LIGHTOVR
         color 1.0 0.55 0.2
         intensity 6.0
         radius 128.0
-        offset 0.0 8.0 0.0
+        offset 0.0 0.0 0.0
         random -2.0 4.0
     }
 
@@ -95,6 +95,20 @@ LIGHTOVR
         flicker 16
     }
 
+    actorrule "MoreTrashFire-E1L1Dumpster"
+    {
+        actorclass "DukeFire"
+        shadowreceive off
+        shadowcast off
+        fullbright on
+        type "point"
+        color 1.0 0.55 0.2
+        intensity 6.0
+        radius 128.0
+        offset 0.0 48.0 0.0
+        random -2.0 4.0
+    }
+
     actorrule "OctabrainProjectile"
     {
         actorclass "DukeCoolExplosion1"
@@ -108,20 +122,6 @@ LIGHTOVR
         offset 0.0 0.0 0.0
         nudgefromsurface 16.0
         random -1.0 1.0
-    }
-
-    actorrule "MoreTrashFire"
-    {
-        actorclass "DukeFire"
-        shadowreceive off
-        shadowcast off
-        fullbright on
-        type "point"
-        color 1.0 0.55 0.2
-        intensity 6.0
-        radius 128.0
-        offset 0.0 8.0 0.0
-        random -2.0 4.0
     }
 
     actorrule "RPGFlight"
@@ -297,6 +297,285 @@ LIGHTOVR
         offset 0.0 8.0 0.0
     }
 
+    smokestyle "duke_explosion_smoke"
+    {
+        density 3.45
+        extinction 0.002
+        albedo 0.34 0.32 0.3
+        anisotropy 0.15
+        radius 18.0
+        expansionvelocity 18.0
+        lifetime 5.0
+        densityhalflife 2.2
+        risevelocity 9.0
+        velocityrandom 12.0
+        velocityinherit 0.0
+        buoyancy 2.0
+        drag 0.45
+        turbulence 2.5
+        turbulencescale 52.0
+        temperature 1.0
+        momentumscale 1.0
+        coolinghalflife 2.0
+    }
+
+    smokestyle "duke_fire_smoke"
+    {
+        density 3.0
+        extinction 0.008
+        albedo 0.3 0.29 0.28
+        anisotropy 0.12
+        radius 7.0
+        expansionvelocity 10.0
+        lifetime 18.0
+        densityhalflife 6.0
+        risevelocity 32.0
+        velocityrandom 20.0
+        velocityinherit 0.0
+        buoyancy 7.0
+        drag 0.05
+        turbulence 42.0
+        turbulencescale 24.0
+        temperature 5.5
+        momentumscale 1.0
+        coolinghalflife 5.0
+    }
+
+    smokestyle "duke_impact_smoke"
+    {
+        density 3.2
+        extinction 0.004
+        albedo 0.4 0.39 0.38
+        anisotropy 0.08
+        radius 5.0
+        expansionvelocity 5.0
+        lifetime 3.5
+        densityhalflife 1.8
+        risevelocity 2.5
+        velocityrandom 3.0
+        velocityinherit 1.0
+        buoyancy 0.8
+        drag 1.1
+        turbulence 1.4
+        turbulencescale 14.0
+        temperature 1.0
+        momentumscale 1.0
+        coolinghalflife 2.0
+    }
+
+    smokestyle "duke_muzzle_smoke"
+    {
+        density 1.2
+        extinction 0.004
+        albedo 0.44 0.43 0.42
+        anisotropy 0.1
+        radius 5.0
+        expansionvelocity 3.0
+        lifetime 1.35
+        densityhalflife 0.55
+        risevelocity 0.0
+        velocityrandom 0.0
+        velocityinherit 6.0
+        buoyancy 0.0
+        drag 1.2
+        turbulence 1.0
+        turbulencescale 18.0
+        temperature 0.0
+        momentumscale 1.0
+        coolinghalflife 1.0
+    }
+
+    smokestyle "duke_trail_smoke"
+    {
+        density 1.2
+        extinction 0.004
+        albedo 0.42 0.44 0.46
+        anisotropy -0.1
+        radius 10.0
+        expansionvelocity 2.0
+        lifetime 12.0
+        densityhalflife 5.5
+        risevelocity 5.0
+        velocityrandom 2.0
+        velocityinherit 0.2
+        buoyancy 1.5
+        drag 0.7
+        turbulence 10.2
+        turbulencescale 2.0
+        temperature 1.0
+        momentumscale 1.0
+        coolinghalflife 2.0
+    }
+
+    smokestyle "ground_mood_smoke"
+    {
+        density 1.6
+        extinction 0.0035
+        albedo 0.9 0.9 0.9
+        anisotropy 0.05
+        radius 12.0
+        expansionvelocity 2.5
+        lifetime 18.0
+        densityhalflife 9.0
+        risevelocity 0.5
+        velocityrandom 2.5
+        velocityinherit 0.25
+        buoyancy 0.15
+        drag 0.35
+        turbulence 5.0
+        turbulencescale 56.0
+        temperature 0.5
+        momentumscale 1.0
+        coolinghalflife 2.0
+    }
+
+    smokeactorrule "duke_explosion_cloud"
+    {
+        actorclass "DukeExplosion2"
+        trigger spawn
+        activation immediate
+        emitterforeground off
+        style "duke_explosion_smoke"
+        count 72
+        offset 0.0 0.0 -48.0
+        spawnradius 18.0
+        densityscale 1.5
+        radiusscale 2.5
+        velocitycone 180.0
+        velocityscale 1.0
+        intervalseconds 0.1
+        starttime 0.5
+        startdistance 0.0
+        spacing 0.0
+        maxsegmentsperframe 1
+    }
+
+    smokeactorrule "duke_fire_sustained"
+    {
+        actorclass "DukeFire"
+        trigger interval
+        activation surface
+        emitterforeground on
+        style "duke_fire_smoke"
+        count 9
+        offset 0.0 0.0 0.0
+        spawnradius 4.0
+        densityscale 3.0
+        radiusscale 3.0
+        velocitycone 0.0
+        velocityscale 0.0
+        intervalseconds 0.28
+        starttime 0.0
+        startdistance 0.0
+        spacing 0.0
+        maxsegmentsperframe 12
+    }
+
+    smokeactorrule "duke_rpg_trail_continuous"
+    {
+        actorclass "DukeRPG"
+        trigger interval
+        activation immediate
+        emitterforeground off
+        style "duke_trail_smoke"
+        count 14
+        offset 0.0 -5.0 1.0
+        spawnradius 2.0
+        densityscale 1.0
+        radiusscale 1.0
+        velocitycone 22.0
+        velocityscale 0.5
+        intervalseconds 0.04
+        starttime 0.0
+        startdistance 96.0
+        spacing 4.0
+        maxsegmentsperframe 8
+    }
+
+    smokeeventrule "duke.chaingun.primary"
+    {
+        style "duke_muzzle_smoke"
+        count 6
+        offset 0.0 32.0 5.0
+        spawnradius 1.5
+        densityscale 1
+        radiusscale 0.025
+        velocitycone 10.0
+        velocityscale 1.8
+        normaloffset 0.0
+        direction aim
+    }
+
+    smokeeventrule "duke.hitscan.impact.plane"
+    {
+        style "duke_impact_smoke"
+        count 14
+        offset 0.0 0.0 0.0
+        spawnradius 2.0
+        densityscale 1.1
+        radiusscale 0.95
+        velocitycone 42.0
+        velocityscale 7.0
+        normaloffset 3.0
+        direction normal
+    }
+
+    smokeeventrule "duke.hitscan.impact.wall"
+    {
+        style "duke_impact_smoke"
+        count 16
+        offset 0.0 0.0 0.0
+        spawnradius 2.5
+        densityscale 1.2
+        radiusscale 1.0
+        velocitycone 38.0
+        velocityscale 8.0
+        normaloffset 3.0
+        direction normal
+    }
+
+    smokeeventrule "duke.pistol.primary"
+    {
+        style "duke_muzzle_smoke"
+        count 10
+        offset 0.0 32.0 5.0
+        spawnradius 2.0
+        densityscale 1
+        radiusscale 0.025
+        velocitycone 14.0
+        velocityscale 2.0
+        normaloffset 0.0
+        direction aim
+    }
+
+    smokeeventrule "duke.shotgun.primary"
+    {
+        style "duke_muzzle_smoke"
+        count 22
+        offset 0.0 32.0 5.0
+        spawnradius 4.0
+        densityscale 1.5
+        radiusscale 0.05
+        velocitycone 22.0
+        velocityscale 2.4
+        normaloffset 0.0
+        direction aim
+    }
+
+    smokeeventrule "nri.smoke.test"
+    {
+        style "duke_muzzle_smoke"
+        count 10
+        offset 0.0 16.0 0.0
+        spawnradius 2.0
+        densityscale 1.25
+        radiusscale 1.1
+        velocitycone 14.0
+        velocityscale 2.0
+        normaloffset 0.0
+        direction aim
+    }
+
     emissivematerialresponse "SectorLinkedPanels"
     {
         texture "#00124.png"
@@ -352,6 +631,74 @@ LIGHTOVR
             color 1.0 1.0 1.0
             intensity 0.4
             radius 600.0
+        }
+        smokeemitter "FarWindow"
+        {
+            style "ground_mood_smoke"
+            position 389.249 3274.0 -180.0
+            normal -0.0 0.0 -1.0
+            size 13.0 60.0
+            rotation 0.0
+            offset 3.0
+            count 3
+            intervalseconds 0.3
+            spawnradius 0.0
+            densityscale 0.8
+            radiusscale 1.0
+            velocityscale 0.0
+            velocitycone 0.0
+            maxsegmentsperframe 1
+        }
+        smokeemitter "NearWindow"
+        {
+            style "ground_mood_smoke"
+            position 388.595 3144.68 -180.0
+            normal -0.0 0.0 -1.0
+            size 12.0 52.0
+            rotation 0.0
+            offset 3.0
+            count 3
+            intervalseconds 0.3
+            spawnradius 0.0
+            densityscale 0.8
+            radiusscale 1.0
+            velocityscale 0.0
+            velocitycone 0.0
+            maxsegmentsperframe 1
+        }
+        smokeemitter "RoofLong"
+        {
+            style "ground_mood_smoke"
+            position -1439.08 706.21 -580.0
+            normal -0.0 0.0 -1.0
+            size 64.0 256.0
+            rotation 345.0
+            offset 1.0
+            count 20
+            intervalseconds 0.2
+            spawnradius 0.0
+            densityscale 1.0
+            radiusscale 1.0
+            velocityscale 0.0
+            velocitycone 0.0
+            maxsegmentsperframe 1
+        }
+        smokeemitter "RoofSquare"
+        {
+            style "ground_mood_smoke"
+            position -1525.1 873.021 -580.0
+            normal 0.0 -0.0 -1.0
+            size 56.0 128.0
+            rotation 330.0
+            offset 1.0
+            count 8
+            intervalseconds 0.2
+            spawnradius 0.0
+            densityscale 1.0
+            radiusscale 1.0
+            velocityscale 0.0
+            velocitycone 0.0
+            maxsegmentsperframe 1
         }
         surfacelight "SecretClosetOverhead"
         {
