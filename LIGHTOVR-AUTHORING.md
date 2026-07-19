@@ -470,7 +470,9 @@ While the mode is enabled:
 - `Delete` discards an uncommitted draft or, without confirmation, removes a selected rule owned by the writable loose overlay; archive/other-source rules cannot be deleted, and removing a loose last-wins rule may reveal an older same-ID definition after reload
 - `l` cancels the current draft and reloads `LIGHTOVR` from disk without writing
 
-Every staged adjustment prints the current editor-adjustable style, size, rotation, signed height, count, and interval. A yellow outline marks the active rectangle in space and updates with its size, rotation, and offset. The outline is a crisp post-scene editor overlay: it is clipped to the 3D viewport and remains visible through smoke and map geometry rather than participating in scene depth, lighting, ray tracing, denoising, or upscaling. It disappears when the draft is cancelled, committed, deleted, reloaded, or the mode is disabled.
+Every staged adjustment prints the current editor-adjustable style, size, rotation, signed height, count, and interval. While edit mode is enabled, every geometrically valid effective `smokeemitter` on the current map appears as a subdued yellow rectangle. The active new, cloned, or selected draft pulses; when editing a persisted rule, its staged geometry replaces the static outline so size, rotation, and offset changes do not leave a stale rectangle underneath. Cancelling, committing, deleting, or reloading removes the pulsing draft state, while the resulting persisted current-map rectangles remain visible until the mode is disabled.
+
+The outlines are crisp post-scene editor overlays. They are clipped to the 3D viewport and remain visible through smoke and map geometry rather than participating in scene depth, lighting, ray tracing, denoising, or upscaling. Effective rules with unresolved styles are still outlined when their rectangle geometry is valid, which makes a broken authoring location discoverable even though it cannot emit smoke.
 
 The normal smoke runtime also provides emitted smoke as a live preview using the same rectangle geometry as a committed emitter. Previously deposited smoke remains after an adjustment unless it naturally dissipates or `nri_ptsmokereset` is used. Selecting a persisted rule temporarily suppresses its committed instance so the preview does not double its output. `o` currently cycles persisted emitters by rule order rather than selecting one by crosshair.
 
@@ -558,6 +560,52 @@ smokeeventrule "duke.hitscan.impact.wall"
     direction normal
 }
 ```
+
+Use a long density half-life, low thermal lift, gentle expansion, and broad turbulence for slow ground-level mood smoke that remains responsive to colored lighting:
+
+```text
+smokestyle "example_ground_mood_smoke"
+{
+    density 1.6
+    extinction 0.0035
+    albedo 0.52 0.52 0.50
+    anisotropy 0.05
+    radius 12.0
+    expansionvelocity 2.5
+    lifetime 18.0
+    densityhalflife 9.0
+    risevelocity 0.5
+    velocityrandom 2.5
+    velocityinherit 0.25
+    buoyancy 0.15
+    drag 0.35
+    turbulence 5.0
+    turbulencescale 56.0
+    temperature 0.5
+    momentumscale 1.0
+    coolinghalflife 2.0
+}
+
+map "E1L1"
+{
+    smokeemitter "example_ground_mood_zone"
+    {
+        style "example_ground_mood_smoke"
+        position 1024.0 2048.0 -128.0
+        normal 0.0 0.0 -1.0
+        size 96.0 64.0
+        offset 4.0
+        count 24
+        intervalseconds 0.35
+        spawnradius 4.0
+        velocityscale 2.0
+        velocitycone 75.0
+        maxsegmentsperframe 2
+    }
+}
+```
+
+The nonzero `velocityscale` supplies an upward normal axis, but `velocityinherit 0.25` keeps that organized motion slow. `velocityrandom` and expansion spread the cloud while broad turbulence prevents a uniform sheet. For a rectangle with twice the area, roughly double `count` to preserve local thickness because count is total pulse mass. Global wind is still shared by every style; keep `nri_ptsmokewindy` near zero (roughly `0` to `2`) when testing a ground-hugging result.
 
 For a less uniform sustained fire column, combine positive `risevelocity`, `temperature`, and `buoyancy` with nonzero `velocityrandom`, `expansionvelocity`, and `turbulence`. Use moderate `drag`, a turbulence wavelength appropriate to the plume width, and a long enough `densityhalflife` for smoke to travel before fading. Global wind can bend every plume; style controls should supply the fire-specific rise and variation.
 
