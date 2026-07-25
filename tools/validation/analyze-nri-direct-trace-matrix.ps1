@@ -70,7 +70,7 @@ function Get-WorkloadShape {
         "fast_emissive_shadow", "visible_chunk_gate"
     )
     if ($IncludeOccurrence -and [int]$Row.schema -ge 3) {
-        $fields += @("voxel_occurrences", "voxel_instance_prims", "voxel_occurrence_control")
+        $fields += "voxel_occurrence_control"
     }
     return ($fields | ForEach-Object {
         if (-not $Row.ContainsKey($_)) { throw "Trace workload row is missing identity field '$_'." }
@@ -96,11 +96,13 @@ function Read-Run {
     if ($targetFrameMs -le 0.0) { throw "Entry $($Entry.sequence) has no positive targetFrameMs." }
 
     $completion = @()
+    $loops = @()
     $gpu = @()
     $workloads = @()
     $voxelGpu = @()
     foreach ($line in [System.IO.File]::ReadLines((Resolve-Path -LiteralPath $Entry.logPath).Path)) {
         if ($line.StartsWith("PERF compact capture complete:", [StringComparison]::Ordinal)) { $completion += ,(Read-Pairs $line) }
+        elseif ($line.StartsWith("PERF loop trace:", [StringComparison]::Ordinal) -and $line.Contains(" compact=1 ")) { $loops += ,(Read-Pairs $line) }
         elseif ($line.StartsWith("PERF pt gpu timing NRI:", [StringComparison]::Ordinal) -and $line.Contains(" compact=1 ")) { $gpu += ,(Read-Pairs $line) }
         elseif ($line.StartsWith("PERF pt trace workload NRI:", [StringComparison]::Ordinal) -and $line.Contains(" compact=1 ")) { $workloads += ,(Read-Pairs $line) }
         elseif ($line.StartsWith("PERF pt voxel gpu timing NRI:", [StringComparison]::Ordinal) -and $line.Contains(" compact=1 ")) { $voxelGpu += ,(Read-Pairs $line) }
@@ -113,8 +115,8 @@ function Read-Run {
         throw "Entry $($Entry.sequence) compact capture did not close cleanly."
     }
     $requested = [int]$terminal.requested
-    if ($gpu.Count -ne $requested -or $workloads.Count -ne $requested -or $voxelGpu.Count -ne $requested) {
-        throw "Entry $($Entry.sequence) expected $requested GPU/workload/voxel rows; found $($gpu.Count)/$($workloads.Count)/$($voxelGpu.Count)."
+    if ($loops.Count -ne $requested -or $gpu.Count -ne $requested -or $workloads.Count -ne $requested) {
+        throw "Entry $($Entry.sequence) expected $requested loop/GPU/workload rows; found $($loops.Count)/$($gpu.Count)/$($workloads.Count)."
     }
 
     $gpuBySample = @{}
@@ -129,6 +131,22 @@ function Read-Run {
     }
     foreach ($sample in 0..($requested - 1)) {
         if (-not $gpuBySample.ContainsKey($sample)) { throw "Missing GPU sample $sample in entry $($Entry.sequence)." }
+    }
+
+    $loopBySample = @{}
+    $loopSampleByPresentation = @{}
+    foreach ($row in $loops) {
+        $sample = [int]$row.sample
+        if ($loopBySample.ContainsKey($sample)) { throw "Duplicate loop sample $sample in entry $($Entry.sequence)." }
+        if (-not $gpuBySample.ContainsKey($sample) -or [uint64]$row.frame -ne [uint64]$gpuBySample[$sample].frame) {
+            throw "Loop/GPU join failed at sample $sample in entry $($Entry.sequence)."
+        }
+        $presentationIdentity = "$([uint64]$row.epoch)/$([uint64]$row.presentation_gen)"
+        if ($loopSampleByPresentation.ContainsKey($presentationIdentity)) {
+            throw "Duplicate loop presentation identity $presentationIdentity in entry $($Entry.sequence)."
+        }
+        $loopBySample[$sample] = $row
+        $loopSampleByPresentation[$presentationIdentity] = $sample
     }
 
     $workloadBySample = @{}
@@ -165,25 +183,35 @@ function Read-Run {
         $baseShapes.Add((Get-WorkloadShape -Row $row))
     }
 
-    $voxelByRecord = @{}
+    $voxelBySample = @{}
     foreach ($row in $voxelGpu) {
+        if (-not $row.ContainsKey("record") -or -not $row.ContainsKey("presentation_gen") -or -not $row.ContainsKey("epoch")) {
+            throw "Voxel GPU timing row is missing deferred identity in entry $($Entry.sequence)."
+        }
         $record = [int]$row.record
-        if ($voxelByRecord.ContainsKey($record)) { throw "Duplicate voxel timing record $record in entry $($Entry.sequence)." }
-        if (-not $row.ContainsKey("presentation_gen") -or -not $row.ContainsKey("queued_slot") -or
-            [uint64]$row.presentation_gen -eq 0 -or [uint64]$row.epoch -ne [uint64]$terminal.epoch -or [int]$row.segment_valid -ne 1 -or
+        if ([uint64]$row.epoch -ne [uint64]$terminal.epoch) {
+            throw "Voxel GPU timing row at record $record has the wrong capture epoch in entry $($Entry.sequence)."
+        }
+        $presentationIdentity = "$([uint64]$row.epoch)/$([uint64]$row.presentation_gen)"
+        if (-not $loopSampleByPresentation.ContainsKey($presentationIdentity)) {
+            continue
+        }
+        $sample = [int]$loopSampleByPresentation[$presentationIdentity]
+        if ($voxelBySample.ContainsKey($sample)) { throw "Duplicate voxel timing sample $sample in entry $($Entry.sequence)." }
+        if (-not $row.ContainsKey("queued_slot") -or [uint64]$row.presentation_gen -eq 0 -or [int]$row.segment_valid -ne 1 -or
             [int]$row.invalid -ne 0 -or [int]$row.dropped -ne 0 -or [int]$row.scopes -ne ([int]$row.valid + [int]$row.invalid)) {
             throw "Invalid voxel GPU timing row at record $record in entry $($Entry.sequence)."
         }
-        if (-not $gpuBySample.ContainsKey($record) -or -not $workloadBySample.ContainsKey($record) -or
-            [uint64]$row.renderer_frame -ne [uint64]$workloadBySample[$record].renderer_frame -or
-            [Math]::Abs([double]$row.segment - [double]$gpuBySample[$record].segment) -gt 0.01) {
-            throw "Voxel timing identity join failed at record $record in entry $($Entry.sequence)."
+        if (-not $gpuBySample.ContainsKey($sample) -or -not $workloadBySample.ContainsKey($sample) -or
+            [Math]::Abs([double]$row.segment - [double]$gpuBySample[$sample].segment) -gt 0.01) {
+            throw "Voxel timing identity join failed at sample $sample (record $record) in entry $($Entry.sequence)."
         }
-        $voxelByRecord[$record] = $row
+        $voxelBySample[$sample] = $row
     }
-    foreach ($record in 0..($requested - 1)) {
-        if (-not $voxelByRecord.ContainsKey($record)) { throw "Missing voxel timing record $record in entry $($Entry.sequence)." }
-    }
+    $acceptedVoxelGpu = @(foreach ($sample in 0..($requested - 1)) {
+        if (-not $voxelBySample.ContainsKey($sample)) { throw "Missing voxel timing for compact sample $sample in entry $($Entry.sequence)." }
+        $voxelBySample[$sample]
+    })
 
     $settingsIdentity = @(Get-ExactCounts -Values $settingsKeys.ToArray())
     $shapeIdentity = @(Get-ExactCounts -Values $shapes.ToArray())
@@ -195,7 +223,7 @@ function Read-Run {
     $voxelFields = @("admission", "upload", "arena_copy", "classify", "scan", "emit", "finalize", "voxel_blas", "world_tlas")
     $voxelStats = [ordered]@{}
     foreach ($field in $voxelFields) {
-        $voxelStats[$field] = Get-Stats -Values ([double[]]@($voxelGpu | ForEach-Object { [double]$_[$field] }))
+        $voxelStats[$field] = Get-Stats -Values ([double[]]@($acceptedVoxelGpu | ForEach-Object { [double]$_[$field] }))
     }
     $populationStats = [ordered]@{}
     foreach ($field in @("runtime_lights", "light_tile_indices", "light_tile_max", "emissive_prims", "emissive_power")) {
@@ -220,14 +248,16 @@ function Read-Run {
         workloadPopulation = [pscustomobject]$populationStats
         voxelGpu = [pscustomobject]$voxelStats
         voxelGpuValidity = [pscustomobject]@{
-            rows = $voxelGpu.Count
-            scopes = (@($voxelGpu | ForEach-Object { [int]$_.scopes }) | Measure-Object -Sum).Sum
-            valid = (@($voxelGpu | ForEach-Object { [int]$_.valid }) | Measure-Object -Sum).Sum
-            invalid = (@($voxelGpu | ForEach-Object { [int]$_.invalid }) | Measure-Object -Sum).Sum
-            dropped = (@($voxelGpu | ForEach-Object { [int]$_.dropped }) | Measure-Object -Sum).Sum
+            rows = $acceptedVoxelGpu.Count
+            rawRows = $voxelGpu.Count
+            unmatchedRows = $voxelGpu.Count - $acceptedVoxelGpu.Count
+            scopes = (@($acceptedVoxelGpu | ForEach-Object { [int]$_.scopes }) | Measure-Object -Sum).Sum
+            valid = (@($acceptedVoxelGpu | ForEach-Object { [int]$_.valid }) | Measure-Object -Sum).Sum
+            invalid = (@($acceptedVoxelGpu | ForEach-Object { [int]$_.invalid }) | Measure-Object -Sum).Sum
+            dropped = (@($acceptedVoxelGpu | ForEach-Object { [int]$_.dropped }) | Measure-Object -Sum).Sum
         }
         rawGpu = $gpu
-        rawVoxelGpu = $voxelGpu
+        rawVoxelGpu = $acceptedVoxelGpu
         rawWorkloads = $workloads
     }
 }

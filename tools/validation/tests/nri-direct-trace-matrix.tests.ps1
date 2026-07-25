@@ -83,19 +83,23 @@ try {
         $summaryPath = Join-Path $directory "summary.json"
         [pscustomobject]@{ ok = $true } | ConvertTo-Json | Set-Content -LiteralPath $summaryPath -Encoding UTF8
         $lines = New-Object System.Collections.Generic.List[string]
+        $lines.Add("PERF pt voxel gpu timing NRI: renderer_frame=89 presentation_gen=90 queued_slot=0 segment=99.0 segment_valid=1 admission=0.0 upload=0.0 arena_copy=0.0 classify=0.0 scan=0.0 emit=0.0 finalize=0.0 voxel_blas=0.0 world_tlas=0.1 scopes=1 valid=1 invalid=0 dropped=0 compact=1 epoch=9 record=0")
         for ($sample = 0; $sample -lt 4; ++$sample) {
             $frame = 100 + $sample
+            $rendererFrame = 500 + $sample
             $segment = $BaseMs + $sample
             $trace = $segment - 2.0
             $scenario = Get-Content -LiteralPath $ScenarioPath -Raw | ConvertFrom-Json
             $expected = $scenario.directTraceMatrix.expectedTrace
             $occurrences = if ([int]$expected.voxel_occurrence_control -eq 1) { 0 } else { 136 }
-            $instancePrims = if ($occurrences -eq 0) { 0 } else { 5000000 }
-            $lines.Add("PERF pt trace workload NRI: frame=$frame nri_frame=$frame renderer_frame=$frame schema=3 settings_key=$SettingsKey workload_key=$WorkloadKey render_w=1920 render_h=1080 output_w=1920 output_h=1080 dispatch_x=240 dispatch_y=135 dispatch_z=1 light_bounces=$($expected.light_bounces) mirror_bounces=$($expected.mirror_bounces) portal_depth=$($expected.portal_depth) emissive_samples=$($expected.emissive_samples) emissive_requested=$($expected.emissive_requested) emissive_budget=$($expected.emissive_budget) indirect_requested=1 indirect_effective=1 indirect_active=1 hit_recon=1 runtime_lights=0 light_tiles_x=0 light_tiles_y=0 light_tile_size=64 light_tile_indices=0 light_tile_max=0 emissive_prims=280 emissive_power=458000.406 flags=4096 debug=0 bootstrap=0 upscaler=0 upscaler_mode=0 denoiser=1 direct_scene=0 directional=1 directional_shadow=1 split_shadow=1 fast_emissive_shadow=1 visible_chunk_gate=1 voxel_occurrences=$occurrences voxel_instance_prims=$instancePrims voxel_occurrence_control=$($expected.voxel_occurrence_control) compact=1 epoch=9 sample=$sample")
+            $instancePrims = if ($occurrences -eq 0) { 0 } else { 5000000 + $sample }
+            $sampleWorkloadKey = ([uint64]$WorkloadKey + [uint64]$sample).ToString()
+            $lines.Add("PERF pt trace workload NRI: frame=$frame nri_frame=$frame renderer_frame=$rendererFrame schema=3 settings_key=$SettingsKey workload_key=$sampleWorkloadKey render_w=1920 render_h=1080 output_w=1920 output_h=1080 dispatch_x=240 dispatch_y=135 dispatch_z=1 light_bounces=$($expected.light_bounces) mirror_bounces=$($expected.mirror_bounces) portal_depth=$($expected.portal_depth) emissive_samples=$($expected.emissive_samples) emissive_requested=$($expected.emissive_requested) emissive_budget=$($expected.emissive_budget) indirect_requested=1 indirect_effective=1 indirect_active=1 hit_recon=1 runtime_lights=0 light_tiles_x=0 light_tiles_y=0 light_tile_size=64 light_tile_indices=0 light_tile_max=0 emissive_prims=$(280 + $sample) emissive_power=$(458000.406 + $sample) flags=4096 debug=0 bootstrap=0 upscaler=0 upscaler_mode=0 denoiser=1 direct_scene=0 directional=1 directional_shadow=1 split_shadow=1 fast_emissive_shadow=1 visible_chunk_gate=1 voxel_occurrences=$occurrences voxel_instance_prims=$instancePrims voxel_occurrence_control=$($expected.voxel_occurrence_control) compact=1 epoch=9 sample=$sample")
             $lines.Add("PERF pt gpu timing NRI: frame=$frame nri_frame=$frame segment=$segment scene=$($segment - 0.1) trace=$trace trace_dispatch=$($trace - 0.01) denoise=1.5 compose=0.1 upscale=0.0 final=0.0 segments=1 invalid=0 dropped=0 resolved=1 expected=1 compact=1 epoch=9 sample=$sample")
-            $lines.Add("PERF pt voxel gpu timing NRI: renderer_frame=$frame presentation_gen=20 queued_slot=0 segment=$segment segment_valid=1 admission=0.0 upload=0.0 arena_copy=0.0 classify=0.0 scan=0.0 emit=0.0 finalize=0.0 voxel_blas=0.0 world_tlas=0.1 scopes=1 valid=1 invalid=0 dropped=0 compact=1 epoch=9 record=$sample")
+            $lines.Add("PERF loop trace: frame=$frame presentation_gen=$frame frame_ms=$segment compact=1 epoch=9 sample=$sample")
+            $lines.Add("PERF pt voxel gpu timing NRI: renderer_frame=$($frame - 1) presentation_gen=$frame queued_slot=0 segment=$segment segment_valid=1 admission=0.0 upload=0.0 arena_copy=0.0 classify=0.0 scan=0.0 emit=0.0 finalize=0.0 voxel_blas=0.0 world_tlas=0.1 scopes=1 valid=1 invalid=0 dropped=0 compact=1 epoch=9 record=$($sample + 1)")
         }
-        $lines.Add("PERF compact capture complete: status=complete requested=4 eligible=4 pending_gpu=0 dropped=0 epoch=9")
+        $lines.Add("PERF compact capture complete: status=complete requested=4 eligible=4 observed=5 pending_gpu=0 dropped=0 epoch=9")
         $lines | Set-Content -LiteralPath $logPath -Encoding UTF8
         return [pscustomobject]@{
             sequence = $Sequence; cycle = 1; profile = "fixture"; leg = $Leg; scenarioPath = $ScenarioPath
@@ -128,6 +132,10 @@ try {
     Assert-True ([double]$profile.deltasMs.fullMinusOmitDefault.completeGpu.p50 -eq 8.0) "Full/omit delta is wrong."
     Assert-True ([double]$profile.defaultFull.voxelGpu.world_tlas.p95 -eq 0.1) "Voxel timing summary is wrong."
     Assert-True ([int]$profile.defaultFull.voxelGpuValidity.valid -eq 4) "Voxel timing validity summary is wrong."
+    Assert-True (@($result.runs[0].workloadKeys).Count -eq 4) "Dynamic workload keys must be retained exactly."
+    Assert-True ([int]$result.runs[0].voxelGpuValidity.rows -eq 4) "Accepted voxel timing row count is wrong."
+    Assert-True ([int]$result.runs[0].voxelGpuValidity.rawRows -eq 5) "Raw voxel timing row count is wrong."
+    Assert-True ([int]$result.runs[0].voxelGpuValidity.unmatchedRows -eq 1) "Unmatched observed voxel timing row was not excluded."
 
     foreach ($scenarioPath in @($defaultFullPath, $candidateFullPath, $defaultOmitPath, $candidateOmitPath)) {
         $legacyScenario = Get-Content -LiteralPath $scenarioPath -Raw | ConvertFrom-Json
