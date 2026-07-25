@@ -1091,6 +1091,18 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 			continue;
 		}
 
+		// Shadow visibility only needs to know that this committed material does
+		// not block light. Reject it before barycentric/UV and alpha-sample work.
+		if (ignoreNoShadowCast && !MaterialCastsShadow(GetMaterialData(materialIndex, instanceData.dataSource)))
+		{
+			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
+			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
+			TraceShaderStatAdd(TRACE_STAT_REJECT_NO_SHADOW, 1u);
+			TraceShaderStatSource(TRACE_STAT_REJECT_STATIC, TRACE_STAT_REJECT_DYNAMIC, TRACE_STAT_REJECT_VOXEL, instanceData.dataSource);
+			accumulatedDistance = committedDistance;
+			continue;
+		}
+
 		const float2 bary = rayQuery.CommittedTriangleBarycentrics();
 		const float3 weights = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
 		const float2 uv = primitive.uv0 * weights.x + primitive.uv1 * weights.y + primitive.uv2 * weights.z;
@@ -1099,16 +1111,6 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
 			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
 			TraceShaderStatAdd(TRACE_STAT_REJECT_TRANSPARENT, 1u);
-			TraceShaderStatSource(TRACE_STAT_REJECT_STATIC, TRACE_STAT_REJECT_DYNAMIC, TRACE_STAT_REJECT_VOXEL, instanceData.dataSource);
-			accumulatedDistance = committedDistance;
-			continue;
-		}
-
-		if (ignoreNoShadowCast && !MaterialCastsShadow(GetMaterialData(materialIndex, instanceData.dataSource)))
-		{
-			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
-			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
-			TraceShaderStatAdd(TRACE_STAT_REJECT_NO_SHADOW, 1u);
 			TraceShaderStatSource(TRACE_STAT_REJECT_STATIC, TRACE_STAT_REJECT_DYNAMIC, TRACE_STAT_REJECT_VOXEL, instanceData.dataSource);
 			accumulatedDistance = committedDistance;
 			continue;
