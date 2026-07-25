@@ -354,6 +354,7 @@ namespace
 		uint64_t directBatchJobsDispatched = 0;
 		uint64_t directBatchReservationBytes = 0;
 		uint64_t directBatchOversizedExclusive = 0;
+		uint64_t diagnosticSidecarsSuppressed = 0;
 		std::unordered_set<uint64_t> queuedConsumeKeys;
 		std::unordered_set<uint64_t> pendingConsumeKeys;
 		std::unordered_set<uint64_t> failedConsumeKeys;
@@ -2196,13 +2197,27 @@ void QueueNRIVoxelComputeCountJob(
 		return;
 	}
 
+	RawVoxelSourceArchiveEntry* archivedSource = colorRuns != nullptr ? RecordRawSourceArchive(model, stats, *slabs, faces, colorRuns) : nullptr;
+	if (archivedSource != nullptr && ShouldDirectPublishNRIVoxelComputeMeshing())
+	{
+		VoxelComputeState& state = gVoxelComputeState;
+		state.diagnosticSidecarsSuppressed++;
+		if (IsTraceEnabled() && state.diagnosticSidecarsSuppressed == 1)
+		{
+			Printf(
+				"PERF pt voxel compute diagnostic NRI: action=suppress reason=production-direct archive_serial=%llu faces=%u primitives=%u bounded=1\n",
+				(unsigned long long)archivedSource->recordSerial,
+				stats.coalescedFaceCount,
+				stats.coalescedFaceCount * 2u);
+		}
+		return;
+	}
 	PendingVoxelComputeJob job = {};
 	job.model = model;
 	job.stats = stats;
 	job.cpuVertexCount = (uint32_t)cpuMesh.vertices.Size();
 	job.cpuIndexCount = (uint32_t)cpuMesh.indices.Size();
 	job.jobId = gVoxelComputeState.nextJobId++;
-	RawVoxelSourceArchiveEntry* archivedSource = colorRuns != nullptr ? RecordRawSourceArchive(model, stats, *slabs, faces, colorRuns) : nullptr;
 	if (archivedSource != nullptr)
 	{
 		CopyRawArchiveRecords(*archivedSource, job.slabs, job.colorRuns);
