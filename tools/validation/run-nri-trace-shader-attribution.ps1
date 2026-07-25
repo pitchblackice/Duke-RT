@@ -45,7 +45,9 @@ function New-AttributionScenario {
 
     $scenario.name = "current-direct-trace-large-voxel-shader-$($Leg.name)"
     $scenario.description = "Asynchronous TraceOpaque shader attribution derived from '$($Base.name)'; leg=$($Leg.name)."
-    $scenario.capture.loopTraceFrames = $collectionFrames + $compactFrames
+    # Compact capture overlaps the first part of the loop-trace window; it does not
+    # create an additional sequence of loop-trace rows.
+    $scenario.capture.loopTraceFrames = $collectionFrames
     $scenario.capture.runs = 1
     $scenario.capture.stopWhenLoopTraceFramesCaptured = $true
     $scenario.requiredPrefixes = @($Contract.requiredPrefixes)

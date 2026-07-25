@@ -70,7 +70,7 @@ try {
         Assert-True ((Get-CvarValue $scenario "nri_ptshaderstats") -eq "true") "Shader stats were not enabled."
         Assert-True ((Get-CvarValue $scenario "nri_ptgputiming") -eq "false") "Attribution scenario retained GPU timing."
         Assert-True ((Get-CvarValue $scenario "nri_ptvoxelcomputepreloadterminalcommand") -eq $scenario.traceShaderAttribution.terminalCommand) "Terminal command metadata drifted."
-        Assert-True ([int]$scenario.capture.loopTraceFrames -eq 100) "Bounded stop count must include attribution and compact rows."
+        Assert-True ([int]$scenario.capture.loopTraceFrames -eq 68) "Bounded stop count must cover the overlapping attribution plus drain window."
 
         $logPath = Join-Path $temporary ("$($generated.leg).log")
         $baseSummary = Join-Path $temporary ("$($generated.leg).base.json")
