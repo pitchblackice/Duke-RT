@@ -9,6 +9,7 @@
 #include "nri_upload_hash.h"
 #include "nri_world_tlas_policy.h"
 #include "../scene/nri_hash.h"
+#include "../system/nri_gpu_timing.h"
 #include "../system/nri_renderdevice.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
@@ -804,6 +805,7 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 	}
 	{
 		ScopedPtPerfTimer phaseTimer(renderer.mLastPerfShellTraceStats.worldTlasBuildMs);
+		NRIScopedGpuTiming worldTlasGpuTiming(renderer.mFrameBuffer, NRIGpuTimingScope::WorldTlas);
 		renderer.mFrameBuffer->mCore.CmdBeginAnnotation(*renderer.mFrameBuffer->mCommandBuffer, "Raze.WorldTLAS.Build", nri::BGRA_UNUSED);
 		renderer.mFrameBuffer->mRayTracing.CmdBuildTopLevelAccelerationStructures(*renderer.mFrameBuffer->mCommandBuffer, &tlasBuild, 1);
 		renderer.mFrameBuffer->mCore.CmdEndAnnotation(*renderer.mFrameBuffer->mCommandBuffer);
@@ -976,6 +978,7 @@ bool NRIAccelerationStructureManager::UpdateTopLevel(
 	tlasUpdate.scratchOffset = 0;
 	{
 		ScopedPtPerfTimer buildTimer(renderer.mLastPerfShellTraceStats.worldTlasBuildMs);
+		NRIScopedGpuTiming worldTlasGpuTiming(renderer.mFrameBuffer, NRIGpuTimingScope::WorldTlas);
 		renderer.mFrameBuffer->mCore.CmdBeginAnnotation(*renderer.mFrameBuffer->mCommandBuffer, "Raze.WorldTLAS.Update", nri::BGRA_UNUSED);
 		renderer.mFrameBuffer->mRayTracing.CmdBuildTopLevelAccelerationStructures(*renderer.mFrameBuffer->mCommandBuffer, &tlasUpdate, 1);
 		renderer.mFrameBuffer->mCore.CmdEndAnnotation(*renderer.mFrameBuffer->mCommandBuffer);

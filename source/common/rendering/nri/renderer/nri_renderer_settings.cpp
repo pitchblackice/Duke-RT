@@ -194,6 +194,7 @@ NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars()
 		(int32_t)(int)nri_ptvoxelexcludeindex3
 	};
 	settings.excludeMinPrimitives = (uint32_t)std::max(0, (int)nri_ptvoxelexcludeminprims);
+	settings.omitTlasOccurrences = (bool)nri_ptvoxelomitoccurrences;
 	return settings;
 }
 

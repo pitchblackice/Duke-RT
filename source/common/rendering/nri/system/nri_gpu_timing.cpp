@@ -10,6 +10,11 @@ CVAR(Bool, nri_ptgputiming, false, 0)
 
 namespace
 {
+	bool IsVoxelTimingScope(NRIGpuTimingScope scope)
+	{
+		return scope >= NRIGpuTimingScope::VoxelAdmission && scope <= NRIGpuTimingScope::WorldTlas;
+	}
+
 	double TimestampDeltaMs(uint64_t begin, uint64_t end, uint64_t frequency)
 	{
 		if (frequency == 0 || end < begin) return -1.0;
@@ -85,11 +90,32 @@ void NRIGpuTiming::RetireSlot(nri::CoreInterface& core, uint32_t slotIndex)
 	PerfCompactGpuTiming timing = {};
 	timing.segmentCount = 1;
 	timing.droppedScopes = slot.droppedScopes;
+	double voxelAdmissionMs = 0.0;
+	double voxelUploadMs = 0.0;
+	double voxelArenaCopyMs = 0.0;
+	double voxelClassifyMs = 0.0;
+	double voxelScanMs = 0.0;
+	double voxelEmitMs = 0.0;
+	double voxelFinalizeMs = 0.0;
+	double voxelBlasMs = 0.0;
+	double worldTlasMs = 0.0;
+	uint32_t voxelScopeCount = 0;
+	uint32_t validVoxelScopes = 0;
+	uint32_t invalidVoxelScopes = 0;
+	bool segmentValid = false;
 	const uint64_t readbackSize = (uint64_t)slot.querySize * slot.queryCount;
 	const uint8_t* mapped = static_cast<const uint8_t*>(core.MapBuffer(*slot.readback, 0, readbackSize));
 	if (mapped == nullptr)
 	{
 		timing.invalidPairs++;
+		for (uint32_t i = 0; i < slot.markerCount; ++i)
+		{
+			if (IsVoxelTimingScope(slot.markers[i].scope))
+			{
+				voxelScopeCount++;
+				invalidVoxelScopes++;
+			}
+		}
 	}
 	else
 	{
@@ -102,17 +128,25 @@ void NRIGpuTiming::RetireSlot(nri::CoreInterface& core, uint32_t slotIndex)
 		const double segmentMs = TimestampDeltaMs(
 			readTimestamp(slot.segmentBeginQuery), readTimestamp(slot.segmentEndQuery), mFrequencyHz);
 		if (segmentMs < 0.0) timing.invalidPairs++;
-		else timing.segmentMs = segmentMs;
+		else
+		{
+			timing.segmentMs = segmentMs;
+			segmentValid = true;
+		}
 
 		for (uint32_t i = 0; i < slot.markerCount; ++i)
 		{
 			const Marker& marker = slot.markers[i];
+			const bool voxelScope = IsVoxelTimingScope(marker.scope);
+			if (voxelScope) voxelScopeCount++;
 			const double value = TimestampDeltaMs(readTimestamp(marker.beginQuery), readTimestamp(marker.endQuery), mFrequencyHz);
 			if (value < 0.0)
 			{
 				timing.invalidPairs++;
+				if (voxelScope) invalidVoxelScopes++;
 				continue;
 			}
+			if (voxelScope) validVoxelScopes++;
 			switch (marker.scope)
 			{
 			case NRIGpuTimingScope::Scene: timing.sceneMs += value; break;
@@ -122,20 +156,52 @@ void NRIGpuTiming::RetireSlot(nri::CoreInterface& core, uint32_t slotIndex)
 			case NRIGpuTimingScope::Composition: timing.compositionMs += value; break;
 			case NRIGpuTimingScope::Upscale: timing.upscaleMs += value; break;
 			case NRIGpuTimingScope::Final: timing.finalMs += value; break;
+			case NRIGpuTimingScope::VoxelAdmission: voxelAdmissionMs += value; break;
+			case NRIGpuTimingScope::VoxelUpload: voxelUploadMs += value; break;
+			case NRIGpuTimingScope::VoxelArenaCopy: voxelArenaCopyMs += value; break;
+			case NRIGpuTimingScope::VoxelClassify: voxelClassifyMs += value; break;
+			case NRIGpuTimingScope::VoxelScan: voxelScanMs += value; break;
+			case NRIGpuTimingScope::VoxelEmit: voxelEmitMs += value; break;
+			case NRIGpuTimingScope::VoxelFinalize: voxelFinalizeMs += value; break;
+			case NRIGpuTimingScope::VoxelBlas: voxelBlasMs += value; break;
+			case NRIGpuTimingScope::WorldTlas: worldTlasMs += value; break;
 			default: break;
 			}
 		}
 		core.UnmapBuffer(*slot.readback);
 	}
+	Printf("PERF pt voxel gpu timing NRI: renderer_frame=%llu presentation_gen=%llu queued_slot=%u segment=%.6f segment_valid=%u admission=%.6f upload=%.6f arena_copy=%.6f classify=%.6f scan=%.6f emit=%.6f finalize=%.6f voxel_blas=%.6f world_tlas=%.6f scopes=%u valid=%u invalid=%u dropped=%u compact=1 epoch=%llu record=%u\n",
+		(unsigned long long)slot.rendererFrame,
+		(unsigned long long)slot.token.presentationGeneration,
+		slotIndex,
+		timing.segmentMs,
+		segmentValid ? 1u : 0u,
+		voxelAdmissionMs,
+		voxelUploadMs,
+		voxelArenaCopyMs,
+		voxelClassifyMs,
+		voxelScanMs,
+		voxelEmitMs,
+		voxelFinalizeMs,
+		voxelBlasMs,
+		worldTlasMs,
+		voxelScopeCount,
+		validVoxelScopes,
+		invalidVoxelScopes,
+		slot.droppedVoxelScopes,
+		(unsigned long long)slot.token.epoch,
+		slot.token.recordIndex);
 	PerfCompactCaptureResolveGpuSegment(slot.token, timing);
 	slot.pending = false;
 	slot.token = {};
 	slot.queryCount = 0;
 	slot.markerCount = 0;
 	slot.droppedScopes = 0;
+	slot.droppedVoxelScopes = 0;
+	slot.rendererFrame = 0;
 }
 
-void NRIGpuTiming::BeginSegment(nri::CoreInterface& core, nri::CommandBuffer& commandBuffer, uint32_t slotIndex)
+void NRIGpuTiming::BeginSegment(nri::CoreInterface& core, nri::CommandBuffer& commandBuffer, uint32_t slotIndex, uint64_t rendererFrame)
 {
 	if (!mPrepared || !nri_ptgputiming || !PerfCompactCaptureTimingActive() || slotIndex >= SlotCount) return;
 	Slot& slot = mSlots[slotIndex];
@@ -146,6 +212,8 @@ void NRIGpuTiming::BeginSegment(nri::CoreInterface& core, nri::CommandBuffer& co
 	slot.queryCount = 2;
 	slot.markerCount = 0;
 	slot.droppedScopes = 0;
+	slot.droppedVoxelScopes = 0;
+	slot.rendererFrame = rendererFrame;
 	slot.segmentBeginQuery = 0;
 	slot.segmentEndQuery = 1;
 	core.CmdEndQuery(commandBuffer, *slot.queryPool, slot.segmentBeginQuery);
@@ -160,6 +228,7 @@ uint32_t NRIGpuTiming::BeginScope(nri::CoreInterface& core, nri::CommandBuffer& 
 	if (slot.markerCount >= ScopeCapacity || slot.queryCount + 2 > QueryCapacity)
 	{
 		slot.droppedScopes++;
+		if (IsVoxelTimingScope(scope)) slot.droppedVoxelScopes++;
 		return UINT32_MAX;
 	}
 	const uint32_t markerIndex = slot.markerCount++;
@@ -193,6 +262,7 @@ void NRIGpuTiming::FinalizeSegment(nri::CoreInterface& core, nri::CommandBuffer&
 			core.CmdEndQuery(commandBuffer, *slot.queryPool, slot.markers[i].endQuery);
 			slot.markers[i].open = false;
 			slot.droppedScopes++;
+			if (IsVoxelTimingScope(slot.markers[i].scope)) slot.droppedVoxelScopes++;
 		}
 	}
 	core.CmdEndQuery(commandBuffer, *slot.queryPool, slot.segmentEndQuery);

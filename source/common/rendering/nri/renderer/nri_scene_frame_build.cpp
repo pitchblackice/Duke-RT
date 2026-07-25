@@ -459,6 +459,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		mWeaponEventBatch.Capture(*mFrameBuffer, mFrameIndex);
 	}
 	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
+	mLastPerfShellTraceStats.traceVoxelOccurrenceControl = persistentVoxelSettings.omitTlasOccurrences ? 1u : 0u;
 	const bool allowStaticMapScene = !bootstrapCapturedView && !rawTraceDirectScene && mMapWorld.valid;
 	nri_scene::SceneView& capturedSceneView = frame.capturedSceneView;
 	nri_scene::SceneView& dynamicSceneView = frame.dynamicSceneView;

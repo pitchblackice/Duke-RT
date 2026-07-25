@@ -64,6 +64,8 @@ struct PerfCompactNriStats
 	uint32_t traceUpscalerKind = 0, traceUpscalerMode = 0, traceDenoiserMode = 0;
 	uint32_t traceDirectScene = 0, traceDirectional = 0, traceDirectionalShadow = 0;
 	uint32_t traceSplitShadow = 0, traceFastEmissiveShadow = 0, traceVisibleChunkGate = 0;
+	uint32_t traceVoxelOccurrences = 0, traceVoxelOccurrenceControl = 0;
+	uint64_t traceVoxelInstancePrimitives = 0;
 	bool rendered = false;
 	bool valid = false;
 };

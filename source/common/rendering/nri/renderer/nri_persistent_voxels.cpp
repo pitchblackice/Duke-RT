@@ -2346,19 +2346,20 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 	{
 		PersistentVoxelBatch::ActorEntry& actor = *actorPtr;
 		persistentVoxelTlasCandidateCount++;
+		const bool omittedByDiagnostic = settings.omitTlasOccurrences;
 		const bool excludedByIndex = actor.resolvedVoxelIndex >= 0 &&
 			(actor.resolvedVoxelIndex == persistentVoxelExcludeIndex0 ||
 				actor.resolvedVoxelIndex == persistentVoxelExcludeIndex1 ||
 				actor.resolvedVoxelIndex == persistentVoxelExcludeIndex2);
 		const bool excludedByPrimitiveCount = persistentVoxelExcludeMinPrims > 0 &&
 			actor.primitiveCount >= persistentVoxelExcludeMinPrims;
-		if (excludedByIndex || excludedByPrimitiveCount)
+		if (omittedByDiagnostic || excludedByIndex || excludedByPrimitiveCount)
 		{
 			if (voxelStatsEnabled)
 			{
 				Printf("PERF pt voxel tlas NRI: frame=%u action=skip reason=%s actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx voxel=%d instance_id=%u primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u blas=0 tlas_ready=0 tlas_published=0 ready=0\n",
 					frameIndex,
-					excludedByIndex ? "excluded-index" : "excluded-prims",
+					omittedByDiagnostic ? "diagnostic-omit-all" : (excludedByIndex ? "excluded-index" : "excluded-prims"),
 					(unsigned long long)actor.identityKey,
 					(unsigned long long)actor.meshResourceKey,
 					(unsigned long long)actor.meshKeyHash,

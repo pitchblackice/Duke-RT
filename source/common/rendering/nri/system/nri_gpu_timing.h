@@ -17,6 +17,15 @@ enum class NRIGpuTimingScope : uint8_t
 	Composition,
 	Upscale,
 	Final,
+	VoxelAdmission,
+	VoxelUpload,
+	VoxelArenaCopy,
+	VoxelClassify,
+	VoxelScan,
+	VoxelEmit,
+	VoxelFinalize,
+	VoxelBlas,
+	WorldTlas,
 	Count
 };
 
@@ -25,12 +34,12 @@ class NRIGpuTiming
 public:
 	static constexpr uint32_t SlotCount = 3;
 	static constexpr uint32_t QueryCapacity = 64;
-	static constexpr uint32_t ScopeCapacity = 24;
+	static constexpr uint32_t ScopeCapacity = 31;
 
 	void Prepare(nri::CoreInterface& core, nri::Device& device);
 	void Destroy(nri::CoreInterface& core);
 	void RetireSlot(nri::CoreInterface& core, uint32_t slotIndex);
-	void BeginSegment(nri::CoreInterface& core, nri::CommandBuffer& commandBuffer, uint32_t slotIndex);
+	void BeginSegment(nri::CoreInterface& core, nri::CommandBuffer& commandBuffer, uint32_t slotIndex, uint64_t rendererFrame);
 	void FinalizeSegment(nri::CoreInterface& core, nri::CommandBuffer& commandBuffer);
 	void AbandonSlot(uint32_t slotIndex);
 	uint32_t BeginScope(nri::CoreInterface& core, nri::CommandBuffer& commandBuffer, NRIGpuTimingScope scope);
@@ -58,6 +67,8 @@ private:
 		uint32_t segmentBeginQuery = 0;
 		uint32_t segmentEndQuery = 0;
 		uint32_t droppedScopes = 0;
+		uint32_t droppedVoxelScopes = 0;
+		uint64_t rendererFrame = 0;
 		bool pending = false;
 	};
 

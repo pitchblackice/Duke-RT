@@ -43,6 +43,25 @@ namespace
 		return !!nri_ptshaderstats && ShouldTracePtPerf();
 	}
 
+	static NRITraceShaderStatsFenceServices BuildTraceShaderStatsFenceServices(NRIRenderDevice* device)
+	{
+		NRITraceShaderStatsFenceServices services = {};
+		services.user = device;
+		services.getRecordingCommandFenceValue = [](void* user) -> uint64_t
+		{
+			return user != nullptr ? static_cast<NRIRenderDevice*>(user)->GetRecordingCommandFenceValue() : 0;
+		};
+		services.isCommandFenceValueComplete = [](void* user, uint64_t fenceValue) -> bool
+		{
+			return user != nullptr && static_cast<NRIRenderDevice*>(user)->IsCommandFenceValueComplete(fenceValue);
+		};
+		services.isCommandFenceValueAbandoned = [](void* user, uint64_t fenceValue) -> bool
+		{
+			return user != nullptr && static_cast<NRIRenderDevice*>(user)->IsCommandFenceValueAbandoned(fenceValue);
+		};
+		return services;
+	}
+
 	class ScopedPtPerfTimer
 	{
 	public:
@@ -389,18 +408,11 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	ScopedPtPerfTimer traceOpaqueTimer(context.mLastPerfShellTraceStats.traceOpaqueMs);
 	{
 		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueReadbackMs);
-		NRITraceShaderStatsReadbackInput input = {};
-		input.enabled = (bool)nri_ptshaderstats;
-		input.boundSceneInstances = &context.mBoundSceneInstances;
-		input.staticPrimitiveCount = context.mSceneStats.staticPrimitiveCount;
-		input.dynamicPrimitiveCount = context.mSceneStats.dynamicPrimitiveCount;
-		input.persistentVoxelPrimitiveCount = context.mPersistentVoxels.BoundPrimitiveCount();
-		input.user = &context;
-		input.estimatePersistentVoxelPrimitiveCount = [](void* user, uint32_t primitiveOffset) -> uint32_t
-		{
-			return static_cast<NRIPassDispatchContext*>(user)->mPersistentVoxels.EstimatePrimitiveCountForInstanceOffset(primitiveOffset);
-		};
-		context.mTraceShaderStats.Readback(context.mResources.BuildResourceServices(), input, context.mLastPerfTraceShaderStats);
+		context.mTraceShaderStats.Readback(
+			context.mResources.BuildResourceServices(),
+			ShouldCollectTraceShaderStats(),
+			BuildTraceShaderStatsFenceServices(context.mResources.frameBuffer),
+			context.mLastPerfTraceShaderStats);
 		context.mExposureService.ReadbackAutoExposureStats();
 	}
 
@@ -592,7 +604,8 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		constants.StaticMaterialCount, constants.DynamicMaterialCount, constants.PortalCount,
 		constants.RuntimeLightCount, context.mSceneStats.runtimeLightTileSize,
 		context.mSceneStats.runtimeLightTileIndexCount, context.mSceneStats.runtimeLightMaxTileOccupancy,
-		context.mSceneStats.emissivePrimitiveCount, (uint32_t)resolvedMainUpscaler, (uint32_t)resolvedUpscalerMode
+		context.mSceneStats.emissivePrimitiveCount, (uint32_t)resolvedMainUpscaler, (uint32_t)resolvedUpscalerMode,
+		tracePerf.traceVoxelOccurrenceControl
 	};
 	for (uint64_t value : workloadValues) workloadKey = AppendTraceWorkloadHash(workloadKey, value);
 	uint32_t emissivePowerBits = 0;
@@ -612,7 +625,15 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	}
 	{
 		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueStatsCopyMs);
-		context.mTraceShaderStats.CopyForReadback(context.mResources.BuildResourceServices(), ShouldCollectTraceShaderStats(), (uint64_t)context.mFrame.frameIndex);
+		NRITraceShaderStatsCopyInput input = {};
+		input.enabled = ShouldCollectTraceShaderStats();
+		input.frameNumber = (uint64_t)context.mFrame.frameIndex;
+		input.fences = BuildTraceShaderStatsFenceServices(context.mResources.frameBuffer);
+		input.boundSceneInstances = &context.mBoundSceneInstances;
+		input.staticPrimitiveCount = context.mSceneStats.staticPrimitiveCount;
+		input.dynamicPrimitiveCount = context.mSceneStats.dynamicPrimitiveCount;
+		input.persistentVoxelPrimitiveCount = context.mPersistentVoxels.BoundPrimitiveCount();
+		context.mTraceShaderStats.CopyForReadback(context.mResources.BuildResourceServices(), input);
 	}
 	return true;
 }

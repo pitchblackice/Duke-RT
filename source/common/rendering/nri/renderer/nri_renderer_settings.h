@@ -94,6 +94,7 @@ struct NRIPersistentVoxelSettings
 	bool diagnosticsEnabled = false;
 	std::array<int32_t, 3> excludeIndices = { -1, -1, -1 };
 	uint32_t excludeMinPrimitives = 0;
+	bool omitTlasOccurrences = false;
 };
 
 struct NRIRuntimeMutationSettings

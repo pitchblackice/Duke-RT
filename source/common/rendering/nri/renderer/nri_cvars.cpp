@@ -1648,6 +1648,8 @@ CVAR(Int, nri_ptvoxelexcludeindex3, -1, 0)
 
 CVAR(Int, nri_ptvoxelexcludeminprims, 0, 0)
 
+CVAR(Bool, nri_ptvoxelomitoccurrences, false, 0)
+
 CVAR(Bool, nri_ptruntimeworklist, true, 0)
 
 CVAR(Int, nri_ptruntimeworklistsweepbudget, 32, 0)

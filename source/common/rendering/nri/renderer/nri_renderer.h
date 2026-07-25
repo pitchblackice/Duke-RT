@@ -1746,6 +1746,7 @@ public:
 		uint32_t traceSplitShadow = 0;
 		uint32_t traceFastEmissiveShadow = 0;
 		uint32_t traceVisibleChunkGate = 0;
+		uint32_t traceVoxelOccurrenceControl = 0;
 		uint32_t activePrimitiveCount = 0;
 		uint32_t dynamicPrimitiveCount = 0;
 		uint32_t activeMaterialCount = 0;
