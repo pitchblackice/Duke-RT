@@ -91,6 +91,7 @@ $resolvedLog = (Resolve-Path -LiteralPath $LogPath).Path
 $completionRows = [System.Collections.Generic.List[hashtable]]::new()
 $gpuRows = [System.Collections.Generic.List[hashtable]]::new()
 $voxelRows = [System.Collections.Generic.List[hashtable]]::new()
+$workloadRows = [System.Collections.Generic.List[hashtable]]::new()
 $admissionRows = [System.Collections.Generic.List[hashtable]]::new()
 $runtimeTailRows = [System.Collections.Generic.List[hashtable]]::new()
 
@@ -103,6 +104,9 @@ foreach ($line in [System.IO.File]::ReadLines($resolvedLog)) {
     }
     elseif ($line.StartsWith('PERF pt voxel gpu timing NRI:', [StringComparison]::Ordinal) -and $line.Contains(' compact=1 ')) {
         $voxelRows.Add((Read-Pairs $line))
+    }
+    elseif ($line.StartsWith('PERF pt trace workload NRI:', [StringComparison]::Ordinal) -and $line.Contains(' compact=1 ')) {
+        $workloadRows.Add((Read-Pairs $line))
     }
     elseif ($line.StartsWith('PERF pt voxel admission summary NRI:', [StringComparison]::Ordinal)) {
         $admissionRows.Add((Read-Pairs $line))
@@ -128,6 +132,7 @@ if ($completionPending -ne 0) { $errors.Add("compact pending_gpu is $completionP
 if ($completionDropped -ne 0) { $errors.Add("compact dropped is $completionDropped") }
 if ($gpuRows.Count -ne $requested) { $errors.Add("expected $requested complete-GPU rows, found $($gpuRows.Count)") }
 if ($voxelRows.Count -ne $requested) { $errors.Add("expected $requested voxel-GPU rows, found $($voxelRows.Count)") }
+if ($workloadRows.Count -ne $requested) { $errors.Add("expected $requested trace-workload rows, found $($workloadRows.Count)") }
 
 $gpuBySample = @{}
 $primaryInvalid = [uint64]0
@@ -151,6 +156,31 @@ if ($primaryInvalid -ne 0) { $errors.Add("complete-GPU invalid timestamps total 
 if ($primaryDropped -ne 0) { $errors.Add("complete-GPU dropped timestamps total $primaryDropped") }
 if ($primaryExpected -ne $primaryResolved) {
     $errors.Add("complete-GPU expected/resolved mismatch: $primaryExpected/$primaryResolved")
+}
+
+$workloadBySample = @{}
+$sampleByRuntimeFrame = @{}
+foreach ($row in $workloadRows) {
+    $sample = [int](Read-UInt64 $row 'sample' 'trace-workload row')
+    if ($workloadBySample.ContainsKey($sample)) { throw "Duplicate trace-workload sample $sample." }
+    if ((Read-UInt64 $row 'epoch' "trace-workload sample $sample") -ne $epoch) {
+        $errors.Add("trace-workload sample $sample has the wrong epoch")
+    }
+    $runtimeFrame = Read-UInt64 $row 'renderer_frame' "trace-workload sample $sample"
+    if ($sampleByRuntimeFrame.ContainsKey([string]$runtimeFrame)) {
+        throw "Duplicate trace-workload renderer_frame $runtimeFrame."
+    }
+    if (-not $gpuBySample.ContainsKey($sample)) {
+        $errors.Add("trace-workload sample $sample has no complete-GPU sample")
+    }
+    elseif ((Read-UInt64 $row 'frame' "trace-workload sample $sample") -ne
+            (Read-UInt64 $gpuBySample[$sample] 'frame' "complete-GPU sample $sample") -or
+        (Read-UInt64 $row 'nri_frame' "trace-workload sample $sample") -ne
+            (Read-UInt64 $gpuBySample[$sample] 'nri_frame' "complete-GPU sample $sample")) {
+        $errors.Add("trace-workload/complete-GPU identity mismatch at sample $sample")
+    }
+    $workloadBySample[$sample] = $row
+    $sampleByRuntimeFrame[[string]$runtimeFrame] = $sample
 }
 
 $stageFields = @('admission', 'upload', 'arena_copy', 'classify', 'scan', 'emit', 'finalize', 'voxel_blas', 'world_tlas')
@@ -192,6 +222,7 @@ if ($requested -gt 0) {
     foreach ($record in 0..($requested - 1)) {
         if (-not $gpuBySample.ContainsKey($record)) { $errors.Add("missing complete-GPU sample $record") }
         if (-not $voxelByRecord.ContainsKey($record)) { $errors.Add("missing voxel-GPU record $record") }
+        if (-not $workloadBySample.ContainsKey($record)) { $errors.Add("missing trace-workload sample $record") }
     }
 }
 if ($voxelSegmentInvalidRows -ne 0) { $errors.Add("voxel-GPU segment-invalid rows total $voxelSegmentInvalidRows") }
@@ -240,9 +271,11 @@ $runtimeFrameTargetMisses = 0
 $runtimeStageCorrelations = [ordered]@{}
 foreach ($field in $stageFields) { $runtimeStageCorrelations[$field] = 0 }
 foreach ($frame in $runtimeFrames) {
-    if (-not $voxelByRendererFrame.ContainsKey([string]$frame)) { continue }
+    if (-not $sampleByRuntimeFrame.ContainsKey([string]$frame)) { continue }
+    $sample = [int]$sampleByRuntimeFrame[[string]$frame]
+    if (-not $voxelByRecord.ContainsKey($sample)) { continue }
     $matchedRuntimeFrames++
-    $row = $voxelByRendererFrame[[string]$frame]
+    $row = $voxelByRecord[$sample]
     $hasWork = $false
     foreach ($field in $stageFields) {
         if ((Read-Double $row $field "voxel-GPU frame $frame") -gt 0.0) {
@@ -252,6 +285,10 @@ foreach ($frame in $runtimeFrames) {
     }
     if ($hasWork) { $runtimeFramesWithVoxelWork++ }
     if ((Read-Double $row 'segment' "voxel-GPU frame $frame") -gt $TargetMs) { $runtimeFrameTargetMisses++ }
+}
+if ($runtimeTailRows.Count -eq 0) { $errors.Add('no runtime-tail telemetry rows were found') }
+if ($matchedRuntimeFrames -ne $runtimeFrames.Count) {
+    $errors.Add("runtime-tail/workload frame bridge matched $matchedRuntimeFrames/$($runtimeFrames.Count) unique event frames")
 }
 
 $latencyStats = [ordered]@{}
@@ -301,6 +338,8 @@ $summary = [pscustomobject]@{
     }
     runtimeTailCorrelation = [pscustomobject]@{
         rows = $runtimeTailRows.Count
+        frameBridge = 'runtime-tail.frame -> trace-workload.renderer_frame -> compact sample/voxel record'
+        workloadRows = $workloadRows.Count
         actionCounts = $runtimeActionCounts
         uniqueEventFrames = $runtimeFrames.Count
         matchedVoxelGpuFrames = $matchedRuntimeFrames
@@ -313,7 +352,8 @@ $summary = [pscustomobject]@{
     notes = @(
         'Voxel admission is an aggregate scope that nests stage scopes; do not sum admission and child stages.',
         'All-frame distributions include zero when a valid frame recorded no scope for that stage.',
-        'Runtime-tail event correlation uses exact renderer-frame identity; admission summaries are aggregate-only because they have no frame key.'
+        'Runtime-tail event correlation uses trace-workload renderer-frame identity and its compact sample; voxel timing renderer_frame is a different backend frame domain.',
+        'Admission summaries are aggregate-only because they have no frame key.'
     )
     errors = $errors.ToArray()
 }
