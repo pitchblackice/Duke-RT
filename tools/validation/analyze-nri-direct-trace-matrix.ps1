@@ -17,20 +17,27 @@ function Read-Pairs {
 }
 
 function Get-Stats {
-    param([double[]]$Values)
+    param([double[]]$Values, [double]$TargetMs = 0.0)
     if ($Values.Count -eq 0) { throw "Cannot summarize an empty timing set." }
     $sorted = @($Values | Sort-Object)
     function Pick([double]$Percentile) {
         $index = [Math]::Ceiling($Percentile * $sorted.Count) - 1
         return [double]$sorted[[Math]::Max(0, [Math]::Min($sorted.Count - 1, $index))]
     }
-    return [pscustomobject]@{
+    $stats = [ordered]@{
         samples = $sorted.Count
         p50 = [Math]::Round((Pick 0.50), 3)
         p95 = [Math]::Round((Pick 0.95), 3)
         p99 = [Math]::Round((Pick 0.99), 3)
         max = [Math]::Round([double]$sorted[$sorted.Count - 1], 3)
     }
+    if ($TargetMs -gt 0.0) {
+        $overTarget = @($sorted | Where-Object { $_ -gt $TargetMs }).Count
+        $stats.targetMs = [Math]::Round($TargetMs, 3)
+        $stats.overTargetCount = $overTarget
+        $stats.overTargetPercent = [Math]::Round(100.0 * $overTarget / $sorted.Count, 3)
+    }
+    return [pscustomobject]$stats
 }
 
 function Get-ExactCounts {
@@ -56,9 +63,9 @@ function Get-WorkloadShape {
     param([hashtable]$Row, [switch]$IncludeOccurrence)
     $fields = @(
         "schema", "render_w", "render_h", "output_w", "output_h", "dispatch_x", "dispatch_y", "dispatch_z",
-        "indirect_requested", "indirect_effective", "indirect_active", "hit_recon", "runtime_lights",
-        "light_tiles_x", "light_tiles_y", "light_tile_size", "light_tile_indices", "light_tile_max",
-        "emissive_prims", "emissive_power", "flags", "debug", "bootstrap", "upscaler", "upscaler_mode",
+        "indirect_requested", "indirect_effective", "indirect_active", "hit_recon",
+        "light_tiles_x", "light_tiles_y", "light_tile_size",
+        "flags", "debug", "bootstrap", "upscaler", "upscaler_mode",
         "denoiser", "direct_scene", "directional", "directional_shadow", "split_shadow",
         "fast_emissive_shadow", "visible_chunk_gate"
     )
@@ -85,6 +92,8 @@ function Read-Run {
     $matrix = $scenario.directTraceMatrix
     if ([string]$matrix.leg -ne [string]$Entry.leg) { throw "Manifest/scenario leg mismatch for entry $($Entry.sequence)." }
     $minimumSchema = [int]$matrix.minimumWorkloadSchema
+    $targetFrameMs = [double]$matrix.targetFrameMs
+    if ($targetFrameMs -le 0.0) { throw "Entry $($Entry.sequence) has no positive targetFrameMs." }
 
     $completion = @()
     $gpu = @()
@@ -188,6 +197,10 @@ function Read-Run {
     foreach ($field in $voxelFields) {
         $voxelStats[$field] = Get-Stats -Values ([double[]]@($voxelGpu | ForEach-Object { [double]$_[$field] }))
     }
+    $populationStats = [ordered]@{}
+    foreach ($field in @("runtime_lights", "light_tile_indices", "light_tile_max", "emissive_prims", "emissive_power")) {
+        $populationStats[$field] = Get-Stats -Values ([double[]]@($workloads | ForEach-Object { [double]$_[$field] }))
+    }
     return [pscustomobject]@{
         sequence = [int]$Entry.sequence
         cycle = [int]$Entry.cycle
@@ -196,13 +209,15 @@ function Read-Run {
         traceClass = [string]$matrix.traceClass
         occurrenceMode = [string]$matrix.occurrenceMode
         samples = $requested
+        targetFrameMs = $targetFrameMs
         settingsKeys = $settingsIdentity
         workloadKeys = Get-ExactCounts -Values $workloadKeys.ToArray()
         workloadShape = $shapeIdentity[0].value
         baseWorkloadShape = $baseShapeIdentity[0].value
-        completeGpu = Get-Stats -Values ([double[]]@($gpu | ForEach-Object { [double]$_.segment }))
+        completeGpu = Get-Stats -Values ([double[]]@($gpu | ForEach-Object { [double]$_.segment })) -TargetMs $targetFrameMs
         scene = Get-Stats -Values ([double[]]@($gpu | ForEach-Object { [double]$_.scene }))
         traceDispatch = Get-Stats -Values ([double[]]@($gpu | ForEach-Object { [double]$_.trace_dispatch }))
+        workloadPopulation = [pscustomobject]$populationStats
         voxelGpu = [pscustomobject]$voxelStats
         voxelGpuValidity = [pscustomobject]@{
             rows = $voxelGpu.Count
@@ -213,6 +228,7 @@ function Read-Run {
         }
         rawGpu = $gpu
         rawVoxelGpu = $voxelGpu
+        rawWorkloads = $workloads
     }
 }
 
@@ -221,27 +237,34 @@ function Merge-Leg {
     $selected = @($Runs | Where-Object { $_.profile -eq $Profile -and $_.leg -eq $Leg })
     if ($selected.Count -eq 0) { throw "Matrix has no '$Profile/$Leg' entries." }
     $settings = @($selected | ForEach-Object { $_.settingsKeys[0].value } | Sort-Object -Unique)
+    $targets = @($selected | ForEach-Object { $_.targetFrameMs } | Sort-Object -Unique)
     $shapes = @($selected | ForEach-Object { $_.workloadShape } | Sort-Object -Unique)
     $baseShapes = @($selected | ForEach-Object { $_.baseWorkloadShape } | Sort-Object -Unique)
-    if ($settings.Count -ne 1 -or $shapes.Count -ne 1 -or $baseShapes.Count -ne 1) { throw "The '$Profile/$Leg' runs changed exact settings or workload-shape identity." }
+    if ($settings.Count -ne 1 -or $targets.Count -ne 1 -or $shapes.Count -ne 1 -or $baseShapes.Count -ne 1) { throw "The '$Profile/$Leg' runs changed target, settings, or workload-shape identity." }
     $gpu = @($selected | ForEach-Object { $_.rawGpu })
     $voxel = @($selected | ForEach-Object { $_.rawVoxelGpu })
     $voxelStats = [ordered]@{}
     foreach ($field in @("admission", "upload", "arena_copy", "classify", "scan", "emit", "finalize", "voxel_blas", "world_tlas")) {
         $voxelStats[$field] = Get-Stats -Values ([double[]]@($voxel | ForEach-Object { [double]$_[$field] }))
     }
+    $populationStats = [ordered]@{}
+    foreach ($field in @("runtime_lights", "light_tile_indices", "light_tile_max", "emissive_prims", "emissive_power")) {
+        $populationStats[$field] = Get-Stats -Values ([double[]]@($selected | ForEach-Object { $_.rawWorkloads } | ForEach-Object { [double]$_[$field] }))
+    }
     return [pscustomobject]@{
         profile = $Profile
         leg = $Leg
         runs = $selected.Count
         samples = $gpu.Count
+        targetFrameMs = [double]$targets[0]
         settingsKey = $settings[0]
         workloadKeys = Get-ExactCounts -Values ([string[]]@($selected | ForEach-Object { $_.workloadKeys | ForEach-Object { $_.value } }))
         workloadShape = $shapes[0]
         baseWorkloadShape = $baseShapes[0]
-        completeGpu = Get-Stats -Values ([double[]]@($gpu | ForEach-Object { [double]$_.segment }))
+        completeGpu = Get-Stats -Values ([double[]]@($gpu | ForEach-Object { [double]$_.segment })) -TargetMs ([double]$targets[0])
         scene = Get-Stats -Values ([double[]]@($gpu | ForEach-Object { [double]$_.scene }))
         traceDispatch = Get-Stats -Values ([double[]]@($gpu | ForEach-Object { [double]$_.trace_dispatch }))
+        workloadPopulation = [pscustomobject]$populationStats
         voxelGpu = [pscustomobject]$voxelStats
         voxelGpuValidity = [pscustomobject]@{
             rows = $voxel.Count
@@ -303,7 +326,7 @@ $summary = [pscustomobject]@{
     manifestPath = (Resolve-Path -LiteralPath $ManifestPath).Path
     generatedUtc = (Get-Date).ToUniversalTime().ToString("o")
     profiles = $profileSummaries
-    runs = @($runSummaries | Select-Object -Property sequence, cycle, profile, leg, samples, settingsKeys, workloadKeys, completeGpu, scene, traceDispatch, voxelGpu, voxelGpuValidity)
+    runs = @($runSummaries | Select-Object -Property sequence, cycle, profile, leg, samples, settingsKeys, workloadKeys, completeGpu, scene, traceDispatch, workloadPopulation, voxelGpu, voxelGpuValidity)
     notes = @(
         "Voxel admission is an aggregate/nesting scope; stage fields are attribution and are not summed into admission.",
         "A zero voxel stage with a valid row means no scope for that stage in the captured record."

@@ -7,12 +7,17 @@ function Assert-Match {
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "../../..")
 $frameBuild = Get-Content -Raw -LiteralPath (Join-Path $repoRoot "source/common/rendering/nri/renderer/nri_scene_frame_build.cpp")
+$persistentVoxels = Get-Content -Raw -LiteralPath (Join-Path $repoRoot "source/common/rendering/nri/renderer/nri_persistent_voxels.cpp")
 $dispatch = Get-Content -Raw -LiteralPath (Join-Path $repoRoot "source/common/rendering/nri/renderer/nri_pass_dispatch.cpp")
 $captureOwner = Get-Content -Raw -LiteralPath (Join-Path $repoRoot "source/common/rendering/nri/system/nri_perf_capture.cpp")
 $capture = Get-Content -Raw -LiteralPath (Join-Path $repoRoot "source/common/engine/perf_capture.cpp")
 
 Assert-Match $frameBuild 'traceVoxelOccurrenceControl\s*=\s*persistentVoxelSettings\.omitTlasOccurrences\s*\?\s*1u\s*:\s*0u' `
     'The frame snapshot must retain the diagnostic occurrence-control identity.'
+Assert-Match $frameBuild 'persistentVoxelInstancePrimitiveCount\s*=\s*persistentVoxelTlasStats\.instancePrimitiveCount' `
+    'Compact frame stats must use the primitive sum returned by TLAS append.'
+Assert-Match $persistentVoxels 'outStats\.instancePrimitiveCount\s*\+=\s*actor\.primitiveCount' `
+    'TLAS append must sum primitives for admitted voxel occurrences.'
 Assert-Match $dispatch 'workloadValues[\s\S]*?tracePerf\.traceVoxelOccurrenceControl' `
     'The workload key must distinguish the voxel-occurrence control.'
 Assert-Match $captureOwner 'traceVoxelOccurrences\s*=\s*shell\.sceneInstancePersistentVoxelCount[\s\S]*?traceVoxelInstancePrimitives\s*=\s*shell\.persistentVoxelInstancePrimitiveCount' `

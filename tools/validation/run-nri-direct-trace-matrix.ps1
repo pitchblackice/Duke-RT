@@ -52,6 +52,7 @@ function New-LegScenario {
         leg = $Leg.name
         traceClass = $Leg.traceClass
         occurrenceMode = $Leg.occurrenceMode
+        targetFrameMs = [double]$Profile.scenario.targetFrameMs
         minimumWorkloadSchema = 3
         expectedTrace = [pscustomobject]$Leg.expectedTrace
     }

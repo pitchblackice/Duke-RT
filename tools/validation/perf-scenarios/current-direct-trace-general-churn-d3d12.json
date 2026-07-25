@@ -3,6 +3,7 @@
   "backend": "d3d12",
   "description": "Current direct TraceOpaque path with a fully preloaded General Churn fixed view.",
   "directTraceProfile": "general-churn",
+  "targetFrameMs": 16.667,
   "commands": "+wait 45; load generalchurn01",
   "save": {
     "dir": "M:/Raze/tools/perf-saves/Duke.WorldTour",

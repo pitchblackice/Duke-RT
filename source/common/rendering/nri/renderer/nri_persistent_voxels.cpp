@@ -2764,6 +2764,7 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			}
 		}
 		outStats.instanceCount++;
+		outStats.instancePrimitiveCount += actor.primitiveCount;
 		if (meshResourceIt->second.meshBakeSpace != nri_scene::VoxelMeshBakeSpace::LocalSpace)
 		{
 			outStats.bakedFallbackInstanceCount++;

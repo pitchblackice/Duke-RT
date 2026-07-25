@@ -20,6 +20,7 @@ $largeVoxelScenarioPath = Join-Path $root "tools/validation/perf-scenarios/curre
 
 $runnerText = Get-Content -LiteralPath $runner -Raw
 Assert-True ($runnerText.Contains("run-nri-perf.ps1")) "Matrix must reuse the committed base runner."
+Assert-True ($runnerText.Contains("targetFrameMs")) "Matrix must preserve the scenario frame-time target."
 Assert-True (-not $runnerText.Contains("-AdditionalArgs")) "Matrix must not depend on the dirty AdditionalArgs runner extension."
 Assert-True (-not $runnerText.Contains("stopWhenPrefix")) "Matrix must not depend on the dirty terminal-prefix runner extension."
 
@@ -59,7 +60,7 @@ try {
         $isDefault = $TraceClass -eq "default"
         $isOmit = $OccurrenceMode -eq "omit"
         $matrixMetadata = [pscustomobject]@{
-            profile = "fixture"; leg = $Leg; traceClass = $TraceClass; occurrenceMode = $OccurrenceMode; minimumWorkloadSchema = 3
+            profile = "fixture"; leg = $Leg; traceClass = $TraceClass; occurrenceMode = $OccurrenceMode; targetFrameMs = 16.667; minimumWorkloadSchema = 3
             expectedTrace = [pscustomobject]@{
                 light_bounces = if ($isDefault) { 4 } else { 2 }
                 mirror_bounces = if ($isDefault) { 8 } else { 2 }
@@ -121,6 +122,7 @@ try {
     $profile = $result.profiles[0]
     Assert-True ([string]$profile.defaultFull.settingsKey -eq "18446744073709551601") "Exact uint64 settings key was not retained."
     Assert-True ([double]$profile.defaultFull.completeGpu.p50 -eq 21.0) "Default/full complete-GPU p50 is wrong."
+    Assert-True ([int]$profile.defaultFull.completeGpu.overTargetCount -eq 4) "Target-miss accounting is wrong."
     Assert-True ([double]$profile.candidateFull.traceDispatch.p99 -eq 10.99) "Candidate/full TraceDispatch p99 is wrong."
     Assert-True ([double]$profile.deltasMs.candidateMinusDefaultFull.completeGpu.p50 -eq -10.0) "Candidate/default delta is wrong."
     Assert-True ([double]$profile.deltasMs.fullMinusOmitDefault.completeGpu.p50 -eq 8.0) "Full/omit delta is wrong."

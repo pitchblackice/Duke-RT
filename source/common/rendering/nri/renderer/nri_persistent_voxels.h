@@ -896,6 +896,7 @@ struct NRIPersistentVoxelTlasBuildStats
 {
 	uint32_t sharedMeshResourceCount = 0;
 	uint32_t instanceCount = 0;
+	uint64_t instancePrimitiveCount = 0;
 	uint32_t bakedFallbackInstanceCount = 0;
 };
 

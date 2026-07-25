@@ -2060,7 +2060,8 @@ void NRIRenderer::OnLevelFirstFrameRelease()
 	if (runtimeCaptureFrames > 0)
 	{
 		perf_looptraceframes = runtimeCaptureFrames;
-		Printf("PERF pt voxel preload runtime tail capture NRI: build_serial=%llu frame=%u frames=%d\n",
+		perf_compactframes = runtimeCaptureFrames;
+		Printf("PERF pt voxel preload runtime tail capture NRI: build_serial=%llu frame=%u frames=%d compact=1\n",
 			(unsigned long long)mMapWorld.buildSerial,
 			mFrameIndex,
 			runtimeCaptureFrames);
