@@ -2,6 +2,7 @@
 
 #include "nri_frame_resources.h"
 #include "nri_resources.h"
+#include "nri_trace_stats_readback_policy.h"
 
 #include <array>
 #include <cstdint>
@@ -37,24 +38,54 @@ struct NRITraceShaderHotInstance
 
 struct NRITraceShaderStatsSnapshot
 {
+	struct ObserverStats
+	{
+		uint64_t copiesRequested = 0;
+		uint64_t copiesRecorded = 0;
+		uint64_t copiesDroppedBusy = 0;
+		uint64_t copiesDroppedNoFence = 0;
+		uint64_t readbacksPublished = 0;
+		uint64_t readbacksSuperseded = 0;
+		uint64_t readbacksAbandoned = 0;
+		uint64_t readbackMapFailures = 0;
+		uint64_t attributionRowsCopied = 0;
+		uint64_t attributionBytesCopied = 0;
+		uint32_t pendingReadbackCount = 0;
+	};
+
 	bool valid = false;
 	uint64_t frameNumber = 0;
 	std::array<uint32_t, NRI_TRACE_SHADER_STAT_COUNT> counters = {};
 	uint32_t hotInstanceCount = 0;
 	std::array<NRITraceShaderHotInstance, NRI_TRACE_SHADER_HOT_INSTANCE_COUNT> hotInstances = {};
+	ObserverStats observer = {};
 };
 
-struct NRITraceShaderStatsReadbackInput
+struct NRITraceShaderStatsFenceServices
 {
-	using EstimatePersistentVoxelPrimitiveCountFn = uint32_t (*)(void* user, uint32_t primitiveOffset);
+	using GetRecordingCommandFenceValueFn = uint64_t (*)(void* user);
+	using IsCommandFenceValueCompleteFn = bool (*)(void* user, uint64_t fenceValue);
+	using IsCommandFenceValueAbandonedFn = bool (*)(void* user, uint64_t fenceValue);
 
+	void* user = nullptr;
+	GetRecordingCommandFenceValueFn getRecordingCommandFenceValue = nullptr;
+	IsCommandFenceValueCompleteFn isCommandFenceValueComplete = nullptr;
+	IsCommandFenceValueAbandonedFn isCommandFenceValueAbandoned = nullptr;
+
+	uint64_t GetRecordingCommandFenceValue() const;
+	bool IsCommandFenceValueComplete(uint64_t fenceValue) const;
+	bool IsCommandFenceValueAbandoned(uint64_t fenceValue) const;
+};
+
+struct NRITraceShaderStatsCopyInput
+{
 	bool enabled = false;
+	uint64_t frameNumber = 0;
+	NRITraceShaderStatsFenceServices fences;
 	const std::vector<SceneInstanceData>* boundSceneInstances = nullptr;
 	uint32_t staticPrimitiveCount = 0;
 	uint32_t dynamicPrimitiveCount = 0;
 	uint32_t persistentVoxelPrimitiveCount = 0;
-	void* user = nullptr;
-	EstimatePersistentVoxelPrimitiveCountFn estimatePersistentVoxelPrimitiveCount = nullptr;
 };
 
 class NRITraceShaderStats
@@ -63,8 +94,12 @@ public:
 	bool Ensure(const NRIResourceServices& services);
 	void Destroy(const NRIResourceServices& services);
 	void ResetBuffer(const NRIResourceServices& services, bool enabled);
-	void CopyForReadback(const NRIResourceServices& services, bool enabled, uint64_t frameNumber);
-	void Readback(const NRIResourceServices& services, const NRITraceShaderStatsReadbackInput& input, NRITraceShaderStatsSnapshot& outStats);
+	void CopyForReadback(const NRIResourceServices& services, const NRITraceShaderStatsCopyInput& input);
+	void Readback(
+		const NRIResourceServices& services,
+		bool enabled,
+		const NRITraceShaderStatsFenceServices& fences,
+		NRITraceShaderStatsSnapshot& outStats);
 
 	nri::Descriptor* Descriptor() const { return mStatsBuffer.shaderView; }
 
@@ -76,9 +111,25 @@ private:
 		uint32_t stride,
 		nri::BufferUsageBits usage,
 		nri::MemoryLocation memoryLocation);
+	void ClearReadbackSlot(uint32_t slotIndex);
+	void UpdateObserverSnapshot(NRITraceShaderStatsSnapshot& outStats) const;
+
+	struct ReadbackSlot
+	{
+		NRIBufferResource buffer;
+		std::vector<NRITraceShaderInstanceAttribution> attribution;
+		uint64_t frameNumber = 0;
+		uint64_t fenceValue = 0;
+		uint64_t copySerial = 0;
+		bool pending = false;
+		bool initialized = false;
+	};
 
 	NRIBufferResource mStatsBuffer;
-	NRIBufferResource mReadbackBuffer;
 	NRIBufferResource mZeroBuffer;
-	uint64_t mPendingFrame = 0;
+	std::array<ReadbackSlot, NRI_TRACE_SHADER_READBACK_SLOT_COUNT> mReadbackSlots = {};
+	NRITraceShaderStatsSnapshot::ObserverStats mObserver = {};
+	uint64_t mNextCopySerial = 1;
+	uint64_t mReadbackConsumerFence = 0;
+	uint32_t mNextCopySlot = 0;
 };
