@@ -226,7 +226,7 @@ function Read-Run {
         $voxelStats[$field] = Get-Stats -Values ([double[]]@($acceptedVoxelGpu | ForEach-Object { [double]$_[$field] }))
     }
     $populationStats = [ordered]@{}
-    foreach ($field in @("runtime_lights", "light_tile_indices", "light_tile_max", "emissive_prims", "emissive_power")) {
+    foreach ($field in @("runtime_lights", "light_tile_indices", "light_tile_max", "emissive_prims", "emissive_power", "voxel_occurrences", "voxel_instance_prims")) {
         $populationStats[$field] = Get-Stats -Values ([double[]]@($workloads | ForEach-Object { [double]$_[$field] }))
     }
     return [pscustomobject]@{
@@ -278,7 +278,7 @@ function Merge-Leg {
         $voxelStats[$field] = Get-Stats -Values ([double[]]@($voxel | ForEach-Object { [double]$_[$field] }))
     }
     $populationStats = [ordered]@{}
-    foreach ($field in @("runtime_lights", "light_tile_indices", "light_tile_max", "emissive_prims", "emissive_power")) {
+    foreach ($field in @("runtime_lights", "light_tile_indices", "light_tile_max", "emissive_prims", "emissive_power", "voxel_occurrences", "voxel_instance_prims")) {
         $populationStats[$field] = Get-Stats -Values ([double[]]@($selected | ForEach-Object { $_.rawWorkloads } | ForEach-Object { [double]$_[$field] }))
     }
     return [pscustomobject]@{
