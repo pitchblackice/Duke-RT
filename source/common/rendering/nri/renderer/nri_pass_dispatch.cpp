@@ -1315,7 +1315,11 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 		std::memcpy(upscalerDesc.worldToViewMatrix, context.mFrame.currentWorldToView.data(), sizeof(upscalerDesc.worldToViewMatrix));
 		upscalerDesc.sharpness = Clamp01((float)nri_sharpness);
 		upscalerDesc.resetHistory = context.mFrame.resetHistory;
-		if (!context.mUpscalerService.DispatchMainUpscaler(mainKind, upscalerDesc))
+		const bool mainUpscalerDispatched = context.mUpscalerService.DispatchMainUpscaler(mainKind, upscalerDesc);
+		// NRI upscalers bind private descriptor pools while recording dispatches.
+		// Restore Raze's pool before any subsequent pass binds our descriptor sets.
+		context.mCommands.RestoreDescriptorPool();
+		if (!mainUpscalerDispatched)
 		{
 			return false;
 		}
@@ -1356,7 +1360,9 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 	Copy2(context.mFrame.currentJitter.data(), postDesc.cameraJitter);
 	postDesc.sharpness = Clamp01((float)nri_sharpness);
 	postDesc.resetHistory = context.mFrame.resetHistory;
-	if (!context.mUpscalerService.DispatchPostSharpen(postSharpenKind, postDesc))
+	const bool postSharpenDispatched = context.mUpscalerService.DispatchPostSharpen(postSharpenKind, postDesc);
+	context.mCommands.RestoreDescriptorPool();
+	if (!postSharpenDispatched)
 	{
 		return false;
 	}
