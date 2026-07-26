@@ -411,7 +411,7 @@ CVAR(Int, nri_ptvoxelcomputepreloadpeakpercent, 175, 0)
 
 CVAR(Int, nri_ptvoxelcomputepreloadminreservemb, 1024, 0)
 
-CVAR(Int, nri_ptvoxelblaspolicy, 0, 0)
+CVAR(Int, nri_ptvoxelblaspolicy, 3, 0)
 
 CVAR(Bool, nri_ptvoxelarenapresize, false, 0)
 
