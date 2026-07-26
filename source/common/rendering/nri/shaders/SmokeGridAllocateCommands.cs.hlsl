@@ -115,6 +115,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	gSmokeGridControl[0].AdmissionCapacityRejected = 0u;
 	gSmokeGridControl[0].AdmissionProbeRejected = 0u;
 	gSmokeGridControl[0].AdmissionInvalidRejected = 0u;
+	gSmokeGridControl[0].Generation = gSmokeGridConstants.SimulationEpoch;
+	gSmokeGridControl[0].FrameStamp = gSmokeGridConstants.FrameIndex;
 
 	uint sourceCount = 0u;
 	[loop]
