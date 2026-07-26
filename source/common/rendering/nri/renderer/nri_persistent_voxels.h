@@ -974,6 +974,8 @@ public:
 	bool PreSizeDirectGeometryArenas(
 		uint64_t buildSerial,
 		uint64_t uniqueGeometryBytes,
+		uint64_t plannedRuntimeTailBytes,
+		uint64_t largestKnownGeometryBytes,
 		int loadingTraceLevel,
 		const NRIPersistentVoxelAdmissionServices& services);
 	bool PreloadResources(

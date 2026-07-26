@@ -1,4 +1,5 @@
 #include "nri_persistent_voxels.h"
+#include "nri_persistent_voxel_geometry_arena_policy.h"
 #include "nri_persistent_voxel_pressure_policy.h"
 #include "nri_scene_instance_visibility.h"
 
@@ -9689,6 +9690,8 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 bool NRIPersistentVoxelResidency::PreSizeDirectGeometryArenas(
 	uint64_t buildSerial,
 	uint64_t uniqueGeometryBytes,
+	uint64_t plannedRuntimeTailBytes,
+	uint64_t largestKnownGeometryBytes,
 	int loadingTraceLevel,
 	const NRIPersistentVoxelAdmissionServices& services)
 {
@@ -9718,7 +9721,22 @@ bool NRIPersistentVoxelResidency::PreSizeDirectGeometryArenas(
 	{
 		return false;
 	}
-	const uint64_t primitiveCount = uniqueGeometryBytes / BytesPerPrimitive;
+	const NRIPersistentVoxelGeometryArenaPlan arenaPlan =
+		BuildNRIPersistentVoxelGeometryArenaPlan(
+			uniqueGeometryBytes,
+			plannedRuntimeTailBytes,
+			largestKnownGeometryBytes);
+	if (arenaPlan.overflow || arenaPlan.targetGeometryBytes == 0)
+	{
+		return false;
+	}
+	if (arenaPlan.targetGeometryBytes >
+		std::numeric_limits<uint64_t>::max() - (BytesPerPrimitive - 1ull))
+	{
+		return false;
+	}
+	const uint64_t primitiveCount =
+		(arenaPlan.targetGeometryBytes + BytesPerPrimitive - 1ull) / BytesPerPrimitive;
 	if (primitiveCount > std::numeric_limits<uint32_t>::max() / 3ull)
 	{
 		return false;
@@ -9758,8 +9776,14 @@ bool NRIPersistentVoxelResidency::PreSizeDirectGeometryArenas(
 	arenaPresizeBuildSerial = buildSerial;
 	if (loadingTraceLevel >= 1 || (int)nri_ptvoxelcomputetrace > 0)
 	{
-		Printf("PERF pt voxel arena presize NRI: build_serial=%llu primitives=%llu vertex_bytes=%llu index_bytes=%llu primitive_bytes=%llu total_bytes=%llu\n",
+		Printf("PERF pt voxel arena presize NRI: build_serial=%llu planned_bytes=%llu planned_runtime_tail_bytes=%llu late_alias_reserve_bytes=%llu reserve_bytes=%llu target_bytes=%llu capacity_bytes=%llu primitives=%llu vertex_bytes=%llu index_bytes=%llu primitive_bytes=%llu total_bytes=%llu\n",
 			(unsigned long long)buildSerial,
+			(unsigned long long)arenaPlan.plannedGeometryBytes,
+			(unsigned long long)arenaPlan.plannedRuntimeTailBytes,
+			(unsigned long long)arenaPlan.lateAliasReserveBytes,
+			(unsigned long long)arenaPlan.totalReserveBytes,
+			(unsigned long long)arenaPlan.targetGeometryBytes,
+			(unsigned long long)(primitiveCount * BytesPerPrimitive),
 			(unsigned long long)primitiveCount,
 			(unsigned long long)vertexBytes,
 			(unsigned long long)indexBytes,

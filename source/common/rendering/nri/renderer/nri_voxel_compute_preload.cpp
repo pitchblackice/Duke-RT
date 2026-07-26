@@ -1,5 +1,7 @@
 #include "nri_voxel_compute_preload.h"
 
+#include "nri_persistent_voxel_geometry_arena_policy.h"
+
 #include "nri_cvars.h"
 #include "nri_persistent_voxels.h"
 #include "nri_voxel_compute_meshing.h"
@@ -137,6 +139,7 @@ namespace
 		uint32_t skippedMaterialBudget = 0;
 		uint64_t admittedPairGeometryBytes = 0;
 		uint64_t uniqueGeometryBytes = 0;
+		uint64_t largestUniqueGeometryBytes = 0;
 		uint64_t uniqueSourceBytes = 0;
 		uint64_t runtimeWithheldUniqueGeometryBytes = 0;
 		uint64_t runtimeWithheldManifestHash = 1469598103934665603ull;
@@ -315,9 +318,14 @@ namespace
 				result.balancedLargeGeometryBytes += estimatedBytes;
 			}
 			selectedMaterialRows.insert(rawVariant.materialKeyHash);
-			if (result.uniqueMeshes.insert(binding.meshResourceKey).second && !runtimeWithheld)
+			if (result.uniqueMeshes.insert(binding.meshResourceKey).second)
 			{
-				result.uniqueGeometryBytes += estimatedBytes;
+				result.largestUniqueGeometryBytes =
+					std::max(result.largestUniqueGeometryBytes, estimatedBytes);
+				if (!runtimeWithheld)
+				{
+					result.uniqueGeometryBytes += estimatedBytes;
+				}
 			}
 			if (runtimeWithheld && result.runtimeWithheldMeshes.insert(binding.meshResourceKey).second)
 			{
@@ -711,6 +719,7 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 	stats.rawSelectedUniqueMaterials = (uint32_t)rawPlan.uniqueMaterials.size();
 	stats.rawSelectedUniqueTextures = (uint32_t)rawPlan.uniqueTextures.size();
 	stats.rawSelectedUniqueGeometryBytes = rawPlan.uniqueGeometryBytes;
+	stats.rawSelectedLargestUniqueGeometryBytes = rawPlan.largestUniqueGeometryBytes;
 	stats.rawSelectedUniqueSourceBytes = rawPlan.uniqueSourceBytes;
 	stats.manifestHash = rawPlan.manifestHash;
 	stats.currentTrackedBytes = currentTrackedBytes;
@@ -719,7 +728,29 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 	stats.estimatedPeakAdditionalBytes =
 		(rawPlan.uniqueGeometryBytes * (uint64_t)settings.peakEstimatePercent + 99ull) / 100ull +
 		rawPlan.uniqueSourceBytes;
-	stats.estimatedPeakTotalBytes = currentTrackedBytes + stats.estimatedPeakAdditionalBytes;
+	if (settings.strict)
+	{
+		const NRIPersistentVoxelGeometryArenaPlan arenaPlan =
+			BuildNRIPersistentVoxelGeometryArenaPlan(
+				rawPlan.uniqueGeometryBytes,
+				rawPlan.runtimeWithheldUniqueGeometryBytes,
+				rawPlan.largestUniqueGeometryBytes);
+		if (arenaPlan.overflow || arenaPlan.targetGeometryBytes >
+			std::numeric_limits<uint64_t>::max() - rawPlan.uniqueSourceBytes)
+		{
+			stats.estimatedPeakAdditionalBytes = std::numeric_limits<uint64_t>::max();
+		}
+		else
+		{
+			stats.estimatedPeakAdditionalBytes = std::max(
+				stats.estimatedPeakAdditionalBytes,
+				arenaPlan.targetGeometryBytes + rawPlan.uniqueSourceBytes);
+		}
+	}
+	stats.estimatedPeakTotalBytes =
+		stats.estimatedPeakAdditionalBytes > std::numeric_limits<uint64_t>::max() - currentTrackedBytes ?
+		std::numeric_limits<uint64_t>::max() :
+		currentTrackedBytes + stats.estimatedPeakAdditionalBytes;
 	stats.memoryGuardAvailable = localMemoryBudgetBytes != 0;
 	stats.memoryGuardHit =
 		stats.memoryGuardAvailable &&
@@ -756,7 +787,7 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 	if (ShouldEmitPreloadTrace(settings))
 	{
 		stats.emitted = true;
-		Printf("PERF pt voxel preload accounting NRI: level=%s build_serial=%llu frame=%u manifest_hash=0x%llx strict=%u candidate_bindings=%u admitted_bindings=%u cap_skipped_bindings=%u failed_bindings=%u unique_sources=%u unique_meshes=%u unique_materials=%u unique_textures=%u logical_pair_geometry_bytes=%llu unique_geometry_bytes=%llu unique_source_bytes=%llu current_tracked_bytes=%llu local_budget_bytes=%llu minimum_reserve_bytes=%llu estimated_peak_additional_bytes=%llu estimated_peak_total_bytes=%llu memory_guard_available=%u memory_guard_hit=%u peak_percent=%u\n",
+		Printf("PERF pt voxel preload accounting NRI: level=%s build_serial=%llu frame=%u manifest_hash=0x%llx strict=%u candidate_bindings=%u admitted_bindings=%u cap_skipped_bindings=%u failed_bindings=%u unique_sources=%u unique_meshes=%u unique_materials=%u unique_textures=%u logical_pair_geometry_bytes=%llu unique_geometry_bytes=%llu largest_unique_geometry_bytes=%llu unique_source_bytes=%llu current_tracked_bytes=%llu local_budget_bytes=%llu minimum_reserve_bytes=%llu estimated_peak_additional_bytes=%llu estimated_peak_total_bytes=%llu memory_guard_available=%u memory_guard_hit=%u peak_percent=%u\n",
 			levelName != nullptr ? levelName : "unknown",
 			(unsigned long long)buildSerial,
 			frameIndex,
@@ -772,6 +803,7 @@ NRIVoxelComputePreloadStats PlanNRIVoxelComputePreload(
 			stats.rawSelectedUniqueTextures,
 			(unsigned long long)stats.rawSelectedGeometryBytes,
 			(unsigned long long)stats.rawSelectedUniqueGeometryBytes,
+			(unsigned long long)stats.rawSelectedLargestUniqueGeometryBytes,
 			(unsigned long long)stats.rawSelectedUniqueSourceBytes,
 			(unsigned long long)stats.currentTrackedBytes,
 			(unsigned long long)stats.localMemoryBudgetBytes,

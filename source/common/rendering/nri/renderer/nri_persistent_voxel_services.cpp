@@ -1166,6 +1166,8 @@ public:
 				!renderer.mPersistentVoxels.PreSizeDirectGeometryArenas(
 					renderer.mMapWorld.buildSerial,
 					computePreloadStats.rawSelectedUniqueGeometryBytes,
+					computePreloadStats.rawRuntimeWithheldUniqueGeometryBytes,
+					computePreloadStats.rawSelectedLargestUniqueGeometryBytes,
 					(int)nri_ptloadingtrace,
 					BuildAdmissionServices(renderer)))
 			{
