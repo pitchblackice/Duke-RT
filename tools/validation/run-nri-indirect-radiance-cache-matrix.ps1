@@ -4,6 +4,10 @@ param(
 	[Parameter(Mandatory = $true)]
 	[ValidateSet(0, 1, 3)]
 	[int]$BlasPolicy,
+	[ValidateSet('exact', 'forced-miss', 'age-one')]
+	[string[]]$Modes = @('exact', 'forced-miss', 'age-one'),
+	[ValidateRange(2, 3)]
+	[int]$Cycles = 3,
 	[int]$Samples = 256,
 	[int]$WarmupSamples = 16,
 	[int]$TimeoutSeconds = 900,
@@ -88,6 +92,18 @@ if ($WarmupSamples -lt 1 -or $WarmupSamples -gt 2048 -or $Samples + $WarmupSampl
 	throw 'WarmupSamples must be positive and fit the fixed-capture bounds.'
 }
 
+$selectedModeNames = @($Modes | ForEach-Object { ([string]$_).ToLowerInvariant() })
+$uniqueModeNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($modeName in $selectedModeNames) {
+	if (-not $uniqueModeNames.Add($modeName)) { throw "Modes contains duplicate mode '$modeName'." }
+}
+foreach ($requiredMode in @('exact', 'forced-miss')) {
+	if (-not $uniqueModeNames.Contains($requiredMode)) { throw "Modes must include '$requiredMode'." }
+}
+if ($Cycles -ne $selectedModeNames.Count) {
+	throw "Cycles must equal the selected mode count ($($selectedModeNames.Count)) so every mode occupies every ordinal exactly once."
+}
+
 $base = Get-Content -LiteralPath (Resolve-Path -LiteralPath $ScenarioPath) -Raw | ConvertFrom-Json
 if (-not $OutputDirectory) {
 	$OutputDirectory = Join-Path (Get-Location) ('tools/logs/perf/gpu-time-slice4-cache-matrix/' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -98,12 +114,16 @@ if (-not $SummaryOutput) { $SummaryOutput = Join-Path $resolvedOutput 'summary.j
 $generatedDirectory = Join-Path $resolvedOutput 'generated-scenarios'
 New-Item -ItemType Directory -Force -Path $generatedDirectory | Out-Null
 
-$modes = @(
+$modeDefinitions = @(
 	[pscustomobject]@{ name = 'exact'; cache = $false; accept = $false },
 	[pscustomobject]@{ name = 'forced-miss'; cache = $true; accept = $false },
 	[pscustomobject]@{ name = 'age-one'; cache = $true; accept = $true }
 )
-$legs = @($modes | ForEach-Object { New-CacheScenario -Base $base -Mode $_ -Directory $generatedDirectory })
+$selectedModes = @($selectedModeNames | ForEach-Object {
+	$modeName = $_
+	@($modeDefinitions | Where-Object name -eq $modeName)[0]
+})
+$legs = @($selectedModes | ForEach-Object { New-CacheScenario -Base $base -Mode $_ -Directory $generatedDirectory })
 $runner = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'run-nri-perf.ps1')).Path
 $checker = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'check-nri-fixed-simulation-log.ps1')).Path
 $analyzer = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'analyze-nri-indirect-radiance-cache-matrix.ps1')).Path
@@ -111,8 +131,8 @@ $powershell = (Get-Process -Id $PID).Path
 $entries = [Collections.Generic.List[object]]::new()
 $sequence = 0
 
-# Three rotations put every mode once in each ordinal position.
-for ($cycle = 1; $cycle -le 3; ++$cycle) {
+# One rotation per mode puts every selected mode once in each ordinal position.
+for ($cycle = 1; $cycle -le $Cycles; ++$cycle) {
 	$start = (1 - $cycle + $legs.Count) % $legs.Count
 	for ($offset = 0; $offset -lt $legs.Count; ++$offset) {
 		$leg = $legs[($start + $offset) % $legs.Count]
@@ -143,7 +163,9 @@ for ($cycle = 1; $cycle -le 3; ++$cycle) {
 		})
 		[pscustomobject]@{
 			schema = 1
-			cycles = 3
+			modes = $selectedModeNames
+			modeCount = $legs.Count
+			cycles = $Cycles
 			samples = $Samples
 			warmupSamples = $WarmupSamples
 			blasPolicy = $BlasPolicy

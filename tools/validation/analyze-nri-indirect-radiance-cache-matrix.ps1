@@ -269,15 +269,61 @@ function Read-Entry([object]$Entry) {
 }
 
 $manifest = Get-Content -LiteralPath (Resolve-Path -LiteralPath $ManifestPath) -Raw | ConvertFrom-Json
-if ([int]$manifest.cycles -ne 3 -or @($manifest.entries).Count -ne 9) { throw 'Cache matrix must contain exactly three complete three-mode cycles.' }
-$runs = @($manifest.entries | ForEach-Object { Read-Entry $_ })
-foreach ($cycle in 1..3) {
-	$cycleRuns = @($runs | Where-Object cycle -eq $cycle | Sort-Object ordinal)
-	if ($cycleRuns.Count -ne 3 -or @($cycleRuns.mode | Sort-Object -Unique).Count -ne 3) { throw "Cycle $cycle is not a complete three-mode rotation." }
+$manifestProperties = @($manifest.PSObject.Properties.Name)
+foreach ($field in @('cycles', 'samples', 'warmupSamples', 'blasPolicy', 'entries')) {
+	if (-not $manifestProperties.Contains($field)) { throw "Cache matrix manifest is missing '$field'." }
 }
-foreach ($mode in @('exact', 'forced-miss', 'age-one')) {
+$manifestModes = if ($manifestProperties.Contains('modes')) {
+	@($manifest.modes | ForEach-Object { ([string]$_).ToLowerInvariant() })
+}
+else {
+	# Backward compatibility for the original schema-1 3x3 manifest.
+	@($manifest.entries | Where-Object { [int]$_.cycle -eq 1 } | Sort-Object { [int]$_.ordinal } | ForEach-Object { ([string]$_.mode).ToLowerInvariant() })
+}
+$allowedModes = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($mode in @('exact', 'forced-miss', 'age-one')) { [void]$allowedModes.Add($mode) }
+$uniqueManifestModes = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($mode in $manifestModes) {
+	if (-not $allowedModes.Contains($mode)) { throw "Cache matrix manifest contains unknown mode '$mode'." }
+	if (-not $uniqueManifestModes.Add($mode)) { throw "Cache matrix manifest contains duplicate mode '$mode'." }
+}
+foreach ($requiredMode in @('exact', 'forced-miss')) {
+	if (-not $uniqueManifestModes.Contains($requiredMode)) { throw "Cache matrix manifest must include '$requiredMode'." }
+}
+$modeCount = $manifestModes.Count
+$cycles = [int]$manifest.cycles
+if ($modeCount -lt 2 -or $modeCount -gt 3) { throw 'Cache matrix manifest must select two or three modes.' }
+if ($cycles -ne $modeCount) { throw "Cache matrix cycles ($cycles) must equal its mode count ($modeCount)." }
+if ($manifestProperties.Contains('modeCount') -and [int]$manifest.modeCount -ne $modeCount) {
+	throw 'Cache matrix manifest modeCount does not match its modes list.'
+}
+$expectedRunCount = $cycles * $modeCount
+if (@($manifest.entries).Count -ne $expectedRunCount) {
+	throw "Cache matrix must contain exactly $expectedRunCount runs for its balanced ${modeCount}x${cycles} rotation."
+}
+$runs = @($manifest.entries | ForEach-Object { Read-Entry $_ })
+$expectedSequence = 0
+foreach ($cycle in 1..$cycles) {
+	$cycleRuns = @($runs | Where-Object cycle -eq $cycle | Sort-Object ordinal)
+	if ($cycleRuns.Count -ne $modeCount -or @($cycleRuns.mode | Sort-Object -Unique).Count -ne $modeCount) {
+		throw "Cycle $cycle is not a complete $modeCount-mode rotation."
+	}
+	$start = (1 - $cycle + $modeCount) % $modeCount
+	for ($offset = 0; $offset -lt $modeCount; ++$offset) {
+		++$expectedSequence
+		$run = $cycleRuns[$offset]
+		$expectedMode = $manifestModes[($start + $offset) % $modeCount]
+		if ($run.ordinal -ne $offset + 1 -or $run.sequence -ne $expectedSequence -or $run.mode -ne $expectedMode) {
+			throw "Cycle $cycle ordinal $($offset + 1) does not match the declared balanced rotation."
+		}
+	}
+}
+foreach ($mode in $manifestModes) {
 	$ordinals = @($runs | Where-Object mode -eq $mode | ForEach-Object ordinal | Sort-Object -Unique)
-	if ($ordinals.Count -ne 3 -or ($ordinals -join ',') -ne '1,2,3') { throw "Mode '$mode' did not occupy every rotation ordinal exactly once." }
+	$expectedOrdinals = 1..$modeCount
+	if ($ordinals.Count -ne $modeCount -or ($ordinals -join ',') -ne ($expectedOrdinals -join ',')) {
+		throw "Mode '$mode' did not occupy every rotation ordinal exactly once."
+	}
 }
 
 $identity = @($runs | ForEach-Object {
@@ -288,7 +334,7 @@ if (@($runs.blasPolicy | Sort-Object -Unique).Count -ne 1 -or [int]$runs[0].blas
 	throw 'Cache matrix did not retain one explicit voxel BLAS policy.'
 }
 
-$legs = @($runs.mode | Sort-Object -Unique | ForEach-Object {
+$legs = @($manifestModes | ForEach-Object {
 	$mode = $_
 	$selected = @($runs | Where-Object mode -eq $mode)
 	$settings = @($selected.settingsKey | Sort-Object -Unique)
@@ -329,7 +375,9 @@ $summary = [pscustomobject][ordered]@{
 	schema = 1
 	manifestPath = (Resolve-Path -LiteralPath $ManifestPath).Path
 	generatedUtc = (Get-Date).ToUniversalTime().ToString('o')
-	cycles = 3
+	modes = $manifestModes
+	modeCount = $modeCount
+	cycles = $cycles
 	samplesPerRun = [int]$manifest.samples
 	warmupSamples = [int]$manifest.warmupSamples
 	blasPolicy = [int]$manifest.blasPolicy
@@ -341,4 +389,4 @@ $summary = [pscustomobject][ordered]@{
 $parent = Split-Path -Parent $SummaryOutput
 if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
 $summary | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $SummaryOutput -Encoding UTF8
-Write-Host "NRI indirect-radiance cache matrix passed: runs=$($runs.Count) identity=$($identity[0]) summary=$SummaryOutput"
+Write-Host "NRI indirect-radiance cache matrix passed: modes=$($manifestModes -join ',') cycles=$cycles runs=$($runs.Count) identity=$($identity[0]) summary=$SummaryOutput"
