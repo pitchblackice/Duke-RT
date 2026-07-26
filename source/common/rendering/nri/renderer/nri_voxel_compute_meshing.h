@@ -214,5 +214,6 @@ bool CopyNRIVoxelComputeRawSourceArchiveSnapshot(
 bool QueryNRIVoxelComputeRawSourceStats(FVoxelModel* model, FVoxelRawMeshStats& outStats);
 bool PreloadNRIVoxelComputeRawSource(FVoxelModel* model, NRIVoxelComputeRawSourcePreloadStats* outStats = nullptr);
 NRIVoxelComputeMemoryUsage GetNRIVoxelComputeMemoryUsage();
+uint32_t GetNRIVoxelComputeQueuedJobCount();
 void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t frameNumber);
 void DestroyNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer);

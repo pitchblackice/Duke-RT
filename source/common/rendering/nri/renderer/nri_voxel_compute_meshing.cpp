@@ -2221,6 +2221,11 @@ NRIVoxelComputeMemoryUsage GetNRIVoxelComputeMemoryUsage()
 	return usage;
 }
 
+uint32_t GetNRIVoxelComputeQueuedJobCount()
+{
+	return (uint32_t)gVoxelComputeState.queuedJobs.size();
+}
+
 void QueueNRIVoxelComputeCountJob(
 	FVoxelModel* model,
 	const FVoxelRawMeshStats& stats,

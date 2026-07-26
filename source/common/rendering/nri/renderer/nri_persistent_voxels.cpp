@@ -5523,7 +5523,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				return true;
 			}
 			const uint32_t maxDirectJobs = computeMaxJobs;
-			const uint32_t queuedDirectJobs = GetNRIVoxelComputeMemoryUsage().queuedJobCount;
+			const uint32_t queuedDirectJobs = GetNRIVoxelComputeQueuedJobCount();
 			if (maxDirectJobs != 0 && queuedDirectJobs >= maxDirectJobs)
 			{
 				entry.state = PersistentVoxelAdmissionState::Pending;
