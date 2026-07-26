@@ -922,6 +922,35 @@ uint64_t NRIPersistentVoxelTlasServices::GetAccelerationStructureHandle(const NR
 	return getAccelerationStructureHandle != nullptr ? getAccelerationStructureHandle(user, resource) : 0ull;
 }
 
+NRIVoxelRepresentationDecision NRIPersistentVoxelTlasServices::EvaluateRepresentation(
+	const NRIVoxelRepresentationFacts& facts) const
+{
+	if (evaluateRepresentation != nullptr)
+	{
+		return evaluateRepresentation(user, facts);
+	}
+
+	NRIVoxelRepresentationDecision decision = {};
+	decision.sourceIdentityKey = facts.sourceIdentityKey;
+	decision.meshResourceKey = facts.meshResourceKey;
+	decision.materialKeyHash = facts.materialKeyHash;
+	decision.actorIndex = facts.actorIndex;
+	decision.resolvedVoxelIndex = facts.resolvedVoxelIndex;
+	decision.primitiveCount = facts.primitiveCount;
+	decision.retainedFrameAge = facts.retainedFrameAge;
+	decision.requestedWorkloadMask = facts.workloadMask;
+	decision.exactWorkloadMask = facts.workloadMask;
+	decision.primaryWorkloadMask = (uint8_t)(facts.workloadMask & (uint8_t)NRI_TLAS_MASK_MAIN);
+	decision.shadowWorkloadMask = (uint8_t)(facts.workloadMask & (uint8_t)NRI_TLAS_MASK_SHADOW);
+	decision.reflectionWorkloadMask = (uint8_t)(facts.workloadMask & (uint8_t)NRI_TLAS_MASK_REFLECTION);
+	decision.giWorkloadMask = (uint8_t)(facts.workloadMask & (uint8_t)NRI_TLAS_MASK_GI);
+	decision.emissiveWorkloadMask = (uint8_t)(facts.workloadMask & (uint8_t)NRI_TLAS_MASK_EMISSIVE);
+	decision.debugWorkloadMask = (uint8_t)(facts.workloadMask & (uint8_t)NRI_TLAS_MASK_DEBUG);
+	decision.capturedThisFrame = facts.capturedThisFrame;
+	decision.routedThroughSharedBlas = facts.routedThroughSharedBlas;
+	return decision;
+}
+
 NRIPersistentVoxelOverlayStats NRIPersistentVoxelResidency::BuildOverlayStats() const
 {
 	NRIPersistentVoxelOverlayStats stats = {};
@@ -2575,6 +2604,42 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			persistentVoxelTlasMissingSkipCount++;
 			persistentVoxelTlasMissingSkipPrimitiveCount += actor.primitiveCount;
 			continue;
+		}
+
+		NRIVoxelRepresentationFacts representationFacts = {};
+		representationFacts.sourceIdentityKey = actor.identityKey;
+		representationFacts.meshResourceKey = actor.meshResourceKey;
+		representationFacts.materialKeyHash = actor.materialKeyHash;
+		representationFacts.actorIndex = actor.actorIndex;
+		representationFacts.resolvedVoxelIndex = actor.resolvedVoxelIndex;
+		representationFacts.primitiveCount = actor.primitiveCount;
+		representationFacts.retainedFrameAge = actorRetainedFrameAge;
+		representationFacts.workloadMask = (uint8_t)persistentVoxelInstance.mask;
+		representationFacts.capturedThisFrame = actor.capturedThisFrame;
+		representationFacts.routedThroughSharedBlas = routedThroughSharedBlas;
+		representationFacts.boundsValid = meshResourceIt->second.boundsValid;
+		for (uint32_t axis = 0u; axis < 3u; ++axis)
+		{
+			representationFacts.boundsMin[axis] = meshResourceIt->second.boundsMin[axis];
+			representationFacts.boundsMax[axis] = meshResourceIt->second.boundsMax[axis];
+		}
+		representationFacts.transform = actor.instanceTransform;
+		const NRIVoxelRepresentationDecision representationDecision =
+			services.EvaluateRepresentation(representationFacts);
+		const bool exactRepresentationInvariant =
+			representationDecision.representation == NRIVoxelRepresentationKind::Exact &&
+			representationDecision.exactWorkloadMask == representationFacts.workloadMask &&
+			representationDecision.proxyWorkloadMask == 0u;
+		if (!exactRepresentationInvariant && voxelStatsEnabled)
+		{
+			Printf("PERF pt voxel representation invariant NRI: frame=%u actor_key=0x%llx actor=%d requested_mask=0x%x exact_mask=0x%x proxy_mask=0x%x representation=%s action=force-exact\n",
+				frameIndex,
+				(unsigned long long)actor.identityKey,
+				actor.actorIndex,
+				(uint32_t)representationFacts.workloadMask,
+				(uint32_t)representationDecision.exactWorkloadMask,
+				(uint32_t)representationDecision.proxyWorkloadMask,
+				GetNRIVoxelRepresentationKindName(representationDecision.representation));
 		}
 		SceneInstanceData sceneInstance = {};
 		sceneInstance.primitiveBase = actor.primitiveOffset;

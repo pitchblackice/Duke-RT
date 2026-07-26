@@ -2035,6 +2035,7 @@ public:
 	const PerfShellTraceStats& GetLastPerfShellTraceStats() const { return mLastPerfShellTraceStats; }
 	const PerfResourceTraceStats& GetLastPerfResourceTraceStats() const { return mLastPerfResourceTraceStats; }
 	const PerfTraceShaderStats& GetLastPerfTraceShaderStats() const { return mLastPerfTraceShaderStats; }
+	const NRIVoxelRepresentationSnapshot& GetVoxelRepresentationSnapshot() const { return mVoxelRepresentationPolicy.GetSnapshot(); }
 	NRISE29FloorDeformerRouteFrameStats GetSE29FloorDeformerRouteFrameStats() const;
 	NRIMapMaterialOnlyRouteFrameStats GetMapMaterialOnlyRouteFrameStats() const;
 	nri_scene::PTMapMaterialStateVariantStats GetMapMaterialVariantStats() const;
@@ -2811,6 +2812,7 @@ private:
 	NRISurfaceLightOverlayCache mSurfaceLightOverlayCache;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	NRIPersistentVoxelResidency mPersistentVoxels;
+	NRIVoxelRepresentationPolicy mVoxelRepresentationPolicy;
 	StateCommitDomainGenerations mLastStateCommitDomainGenerations = {};
 	bool mHasLastStateCommitDomainGenerations = false;
 	nri_material_policy::ActorMaterialOverrideCache mActorMaterialOverrideCache = {};

@@ -13,6 +13,7 @@
 #include "nri_scene_lights.h"
 #include "nri_scene_instance_visibility.h"
 #include "nri_voxel_compute_meshing.h"
+#include "nri_voxel_representation_policy.h"
 
 #include "../scene/nri_geometry_bridge.h"
 #include "../scene/nri_material_bridge.h"
@@ -885,11 +886,14 @@ struct NRIPersistentVoxelMaterialUploadServices
 struct NRIPersistentVoxelTlasServices
 {
 	using GetAccelerationStructureHandleFn = uint64_t (*)(void* user, const NRIAccelerationStructureResource& resource);
+	using EvaluateRepresentationFn = NRIVoxelRepresentationDecision (*)(void* user, const NRIVoxelRepresentationFacts& facts);
 
 	void* user = nullptr;
 	GetAccelerationStructureHandleFn getAccelerationStructureHandle = nullptr;
+	EvaluateRepresentationFn evaluateRepresentation = nullptr;
 
 	uint64_t GetAccelerationStructureHandle(const NRIAccelerationStructureResource& resource) const;
+	NRIVoxelRepresentationDecision EvaluateRepresentation(const NRIVoxelRepresentationFacts& facts) const;
 };
 
 struct NRIPersistentVoxelTlasBuildStats
