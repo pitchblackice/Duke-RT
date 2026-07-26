@@ -63,6 +63,26 @@ function Get-Distribution([double[]]$Values)
     }
 }
 
+function Get-FrameCohortSummary([object[]]$Frames, [double]$Target, [double]$GuardedEnvelope)
+{
+    return [pscustomobject]@{
+        samples = $Frames.Count
+        completeGpuMs = Get-Distribution ([double[]]@($Frames | ForEach-Object complete))
+        traceDispatchMs = Get-Distribution ([double[]]@($Frames | ForEach-Object trace))
+        smokeMs = Get-Distribution ([double[]]@($Frames | ForEach-Object smoke))
+        voxelAdmissionMs = Get-Distribution ([double[]]@($Frames | ForEach-Object admission))
+        smokeHeadroomMs = Get-Distribution ([double[]]@($Frames | ForEach-Object smokeHeadroom))
+        postSmokeSlackMs = Get-Distribution ([double[]]@($Frames | ForEach-Object postSmokeSlack))
+        misses = [pscustomobject]@{
+            target = @($Frames | Where-Object { $_.complete -gt $Target }).Count
+            guardedEnvelope = @($Frames | Where-Object { $_.complete -gt $GuardedEnvelope }).Count
+            withoutSmoke = @($Frames | Where-Object { $_.preSmoke -gt $Target }).Count
+            withoutAdmission = @($Frames | Where-Object { ($_.complete - $_.admission) -gt $Target }).Count
+            withoutSmokeOrAdmission = @($Frames | Where-Object { ($_.preSmoke - $_.admission) -gt $Target }).Count
+        }
+    }
+}
+
 if ($TargetMs -le 0 -or $GuardedEnvelopeMs -le 0) { throw 'Timing targets must be positive.' }
 
 $stageNames = @('admission', 'upload', 'arena_copy', 'classify', 'scan', 'emit', 'finalize', 'voxel_blas', 'world_tlas')
@@ -142,22 +162,22 @@ foreach ($inputPath in $LogPath)
         }
     }
 
+    if ($frames.Count -eq 0)
+    {
+        $errors.Add("${resolved}: no joined compact GPU timing samples")
+    }
+
+    $logSummary = Get-FrameCohortSummary -Frames $frames.ToArray() -Target $TargetMs -GuardedEnvelope $GuardedEnvelopeMs
     $perLog.Add([pscustomobject]@{
         path = $resolved
-        samples = $frames.Count
-        completeGpuMs = Get-Distribution ([double[]]@($frames | ForEach-Object complete))
-        traceDispatchMs = Get-Distribution ([double[]]@($frames | ForEach-Object trace))
-        smokeMs = Get-Distribution ([double[]]@($frames | ForEach-Object smoke))
-        voxelAdmissionMs = Get-Distribution ([double[]]@($frames | ForEach-Object admission))
-        smokeHeadroomMs = Get-Distribution ([double[]]@($frames | ForEach-Object smokeHeadroom))
-        postSmokeSlackMs = Get-Distribution ([double[]]@($frames | ForEach-Object postSmokeSlack))
-        misses = [pscustomobject]@{
-            target = @($frames | Where-Object { $_.complete -gt $TargetMs }).Count
-            guardedEnvelope = @($frames | Where-Object { $_.complete -gt $GuardedEnvelopeMs }).Count
-            withoutSmoke = @($frames | Where-Object { $_.preSmoke -gt $TargetMs }).Count
-            withoutAdmission = @($frames | Where-Object { ($_.complete - $_.admission) -gt $TargetMs }).Count
-            withoutSmokeOrAdmission = @($frames | Where-Object { ($_.preSmoke - $_.admission) -gt $TargetMs }).Count
-        }
+        samples = $logSummary.samples
+        completeGpuMs = $logSummary.completeGpuMs
+        traceDispatchMs = $logSummary.traceDispatchMs
+        smokeMs = $logSummary.smokeMs
+        voxelAdmissionMs = $logSummary.voxelAdmissionMs
+        smokeHeadroomMs = $logSummary.smokeHeadroomMs
+        postSmokeSlackMs = $logSummary.postSmokeSlackMs
+        misses = $logSummary.misses
     })
 }
 
@@ -171,14 +191,10 @@ foreach ($stage in $stageNames)
     }
 }
 
-$pooledHeadroom = [double[]]@($allFrames | ForEach-Object smokeHeadroom)
-$pooledMisses = [pscustomobject]@{
-    target = @($allFrames | Where-Object { $_.complete -gt $TargetMs }).Count
-    guardedEnvelope = @($allFrames | Where-Object { $_.complete -gt $GuardedEnvelopeMs }).Count
-    withoutSmoke = @($allFrames | Where-Object { $_.preSmoke -gt $TargetMs }).Count
-    withoutAdmission = @($allFrames | Where-Object { ($_.complete - $_.admission) -gt $TargetMs }).Count
-    withoutSmokeOrAdmission = @($allFrames | Where-Object { ($_.preSmoke - $_.admission) -gt $TargetMs }).Count
-}
+$pooledFrames = $allFrames.ToArray()
+$pooledSummary = Get-FrameCohortSummary -Frames $pooledFrames -Target $TargetMs -GuardedEnvelope $GuardedEnvelopeMs
+$admissionFrames = [object[]]@($pooledFrames | Where-Object { $_.admission -gt 0.0 })
+$admissionSummary = Get-FrameCohortSummary -Frames $admissionFrames -Target $TargetMs -GuardedEnvelope $GuardedEnvelopeMs
 $summary = [pscustomobject]@{
     ok = $errors.Count -eq 0
     schema = 1
@@ -186,19 +202,23 @@ $summary = [pscustomobject]@{
     guardedEnvelopeMs = $GuardedEnvelopeMs
     logs = $perLog.ToArray()
     pooled = [pscustomobject]@{
-        samples = $allFrames.Count
-        completeGpuMs = Get-Distribution ([double[]]@($allFrames | ForEach-Object complete))
-        traceDispatchMs = Get-Distribution ([double[]]@($allFrames | ForEach-Object trace))
-        smokeMs = Get-Distribution ([double[]]@($allFrames | ForEach-Object smoke))
-        voxelAdmissionMs = Get-Distribution ([double[]]@($allFrames | ForEach-Object admission))
-        smokeHeadroomMs = Get-Distribution $pooledHeadroom
-        postSmokeSlackMs = Get-Distribution ([double[]]@($allFrames | ForEach-Object postSmokeSlack))
-        misses = $pooledMisses
+        samples = $pooledSummary.samples
+        completeGpuMs = $pooledSummary.completeGpuMs
+        traceDispatchMs = $pooledSummary.traceDispatchMs
+        smokeMs = $pooledSummary.smokeMs
+        voxelAdmissionMs = $pooledSummary.voxelAdmissionMs
+        smokeHeadroomMs = $pooledSummary.smokeHeadroomMs
+        postSmokeSlackMs = $pooledSummary.postSmokeSlackMs
+        misses = $pooledSummary.misses
+        cohorts = [pscustomobject]@{
+            voxelAdmissionActive = $admissionSummary
+        }
         stageTimingsMs = [pscustomobject]$stageSummary
     }
     notes = @(
         'smokeHeadroom is computed per frame as target - (complete GPU - measured smoke); percentiles are not subtracted.',
         'Voxel admission is inclusive. Child stages are attribution only and are not added to admission.',
+        'voxelAdmissionActive contains only frames whose inclusive admission timestamp is greater than zero.',
         'Smoke and voxel rows join to compact GPU rows by epoch/record -> epoch/sample.'
     )
     errors = $errors.ToArray()
