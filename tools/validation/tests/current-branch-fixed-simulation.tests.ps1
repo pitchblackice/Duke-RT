@@ -31,6 +31,7 @@ Assert-True ($ticker -ge 0 -and $armBoundary -gt $ticker -and $loadBoundary -gt 
 Assert-True ($captureHeader -match 'fixedSimulationReturn[\s\S]*?fixedSimulationSuppressedTailTicks') 'compact contract lacks fixed-capture identity'
 Assert-True ($captureOwner -match 'fixed_return=%d fixed_tail_suppressed=%u') 'compact rows lack fixed-capture identity'
 Assert-True ($mainloop -match 'fixed_return=%d fixed_tail_suppressed=%u') 'ordinary rows lack fixed-capture identity'
+Assert-True ($captureOwner -match 'CUSTOM_CVAR\(Int, perf_compactwarmupframes, 0, 0\)[\s\S]*?perf_compactwarmupframes = \(int\)perf_compactwarmupframes - 1;[\s\S]*?if \(gCapture.state == CaptureState::Idle && \(int\)perf_compactframes > 0\)') 'fixed-state warmup must precede compact sample zero'
 
 Assert-True ($cvars -match 'CVAR\(String, nri_ptvoxelcomputepreloadreleasecommand, "", 0\)') 'strict release command must be session-only'
 Assert-True ($preload -match 'ArmStrictPreloadFirstFrameReleaseCommand[\s\S]*?reason=strict-complete') 'strict closure must arm the first-frame command'

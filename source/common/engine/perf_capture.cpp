@@ -13,6 +13,15 @@ CUSTOM_CVAR(Int, perf_compactframes, 0, 0)
 	else if (self > 2048) self = 2048;
 }
 
+// Delay the next compact capture by a bounded number of presentations. This
+// lets a fixed-simulation oracle settle every queued renderer lane before its
+// first accepted sample without thawing the simulation clock.
+CUSTOM_CVAR(Int, perf_compactwarmupframes, 0, 0)
+{
+	if (self < 0) self = 0;
+	else if (self > 2048) self = 2048;
+}
+
 namespace
 {
 	constexpr uint32_t MaxRecords = 4096;
@@ -327,10 +336,19 @@ void PerfCompactCaptureFlushIfReady()
 void PerfCompactCaptureBeginOuterFrame(uint64_t presentationGeneration)
 {
 	PerfCompactCaptureFlushIfReady();
+	if (gCapture.state == CaptureState::Idle &&
+		(int)perf_compactframes > 0 &&
+		(int)perf_compactwarmupframes > 0)
+	{
+		perf_compactwarmupframes = (int)perf_compactwarmupframes - 1;
+		gCapture.current = {};
+		return;
+	}
 	if (gCapture.state == CaptureState::Idle && (int)perf_compactframes > 0)
 	{
 		const uint32_t requested = (uint32_t)(int)perf_compactframes;
 		perf_compactframes = 0;
+		perf_compactwarmupframes = 0;
 		ResetCapture();
 		if (++gCapture.epoch == 0) gCapture.epoch = 1;
 		gCapture.requested = requested;

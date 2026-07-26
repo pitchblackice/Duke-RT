@@ -8,7 +8,7 @@
     "name": "generalchurn01"
   },
   "capture": {
-    "loopTraceFrames": 19,
+    "loopTraceFrames": 35,
     "timeoutSeconds": 300,
     "runs": 1,
     "stopWhenLoopTraceFramesCaptured": false,
@@ -60,7 +60,7 @@
       "+set", "nri_ptvoxelcomputepreloadmaxbytes", "0",
       "+set", "nri_ptvoxelcomputepreloadmaxmaterialrows", "0",
       "+set", "nri_ptvoxelcomputepreloadwatchdogms", "180000",
-      "+set", "nri_ptvoxelcomputepreloadreleasecommand", "set nri_ptloadingtrace 0; perf_looptraceframes 19; perf_fixedsimulationframes 16; perf_compactframes 16",
+      "+set", "nri_ptvoxelcomputepreloadreleasecommand", "set nri_ptloadingtrace 0; perf_looptraceframes 35; perf_fixedsimulationframes 32; perf_compactwarmupframes 16; perf_compactframes 16",
       "+set", "nri_ptloadingtrace", "1",
       "+set", "nri_pttraceframes", "0",
       "+set", "nri_ptscenestats", "false",
