@@ -38,7 +38,7 @@ Assert-True ([string]$occludedSave.sha256 -eq "75c598c0e4a9c99426a5e6b26b87f3e9b
 $expectedCommands = @{
     offscreen = "+wait 45; load smoke-offscreen; wait 35; closemenu; wait 1; centerview; wait 334; nri_ptsmokestatus; perf_compactframes 192"
     visible = "+wait 45; load smoke-offscreen; wait 35; closemenu; wait 1; centerview; wait 299; turnaround; wait 35; nri_ptsmokestatus; perf_compactframes 192"
-    reentry = "+wait 45; load smoke-offscreen; wait 35; closemenu; wait 1; centerview; wait 299; turnaround; wait 35; nri_ptsmokestatus; perf_compactframes 192"
+    reentry = "+wait 45; load smoke-offscreen; wait 35; closemenu; wait 1; centerview; wait 299; nri_ptsmokestatus; perf_compactframes 192; turnaround; wait 35; nri_ptsmokestatus"
     occluded = "+wait 45; load smoke-occluded; wait 35; closemenu; wait 335; nri_ptsmokestatus; perf_compactframes 192"
 }
 

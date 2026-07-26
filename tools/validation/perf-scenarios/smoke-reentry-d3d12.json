@@ -3,7 +3,7 @@
   "description": "E1L1 smoke remains behind the camera for 300 tics before an exact 180-degree turn and bounded reacquisition dwell.",
   "limitations": [ "The compact window characterizes the settled returned view; first-frame reacquisition remains an image/short-trace checkpoint." ],
   "smokeFixture": { "pose": "returned-after-offscreen", "smokeAgeTics": 335, "offscreenTics": 300, "reacquisitionTics": 35, "comparisonGroup": "offscreen-visible-reentry" },
-  "commands": "+wait 45; load smoke-offscreen; wait 35; closemenu; wait 1; centerview; wait 299; turnaround; wait 35; nri_ptsmokestatus; perf_compactframes 192",
+  "commands": "+wait 45; load smoke-offscreen; wait 35; closemenu; wait 1; centerview; wait 299; nri_ptsmokestatus; perf_compactframes 192; turnaround; wait 35; nri_ptsmokestatus",
   "save": { "dir": "M:/Raze/tools/perf-saves/Duke.WorldTour", "name": "smoke-offscreen" },
   "capture": { "loopTraceFrames": 192, "timeoutSeconds": 300, "runs": 3, "stopWhenLoopTraceFramesCaptured": false, "stopWhenPrefix": "PERF compact capture complete:", "stopWhenPrefixCount": 1 },
   "launch": {
