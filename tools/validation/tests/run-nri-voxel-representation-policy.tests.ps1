@@ -23,4 +23,11 @@ if ($LASTEXITCODE -ne 0)
 	throw "Voxel representation policy tests failed with exit code $LASTEXITCODE."
 }
 
+$sceneFrameBuild = Get-Content -LiteralPath (Join-Path $sourceDir 'nri_scene_frame_build.cpp') -Raw
+if ($sceneFrameBuild -notmatch 'if\s*\(!inputs\.preserveHistory\)[\s\S]{0,1800}mVoxelRepresentationPolicy\.BeginFrame' -or
+	$sceneFrameBuild -notmatch 'if\s*\(!inputs\.preserveHistory\)[\s\S]{0,500}persistentVoxelTlasServices\.evaluateRepresentation')
+{
+	throw 'Voxel representation decisions must remain main-view-only so offscreen history-preserving builds cannot replace the camera or duplicate the snapshot.'
+}
+
 Write-Host 'Voxel representation policy tests passed.'
