@@ -55,6 +55,8 @@ private:
 		NRIBufferResource controlReadback;
 		bool readbackPending = false;
 		bool readbackInitialized = false;
+		uint64_t readbackRendererFrame = UINT64_MAX;
+		uint32_t readbackEpoch = 0;
 	};
 
 	bool EnsureResources(const NRISmokeGridServices& services, uint32_t cellCapacity, bool filterRequested,

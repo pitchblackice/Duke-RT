@@ -81,6 +81,41 @@ function Get-SmokeGridStatusRows {
     )
 }
 
+function Assert-SmokeTimingWorkJoin {
+    param([string]$LogPath, [string]$CaseId)
+
+    $timingFrames = @(
+        Select-String -LiteralPath $LogPath -Pattern '^PERF pt smoke gpu timing NRI: ' |
+            ForEach-Object { ConvertFrom-StatusLine -Line $_.Line } |
+            ForEach-Object { [uint64]$_.renderer_frame }
+    )
+    $workRows = @(
+        Select-String -LiteralPath $LogPath -Pattern '^PERF pt smoke work NRI: ' |
+            ForEach-Object { ConvertFrom-StatusLine -Line $_.Line }
+    )
+    if ($timingFrames.Count -lt 192 -or $workRows.Count -lt $timingFrames.Count) {
+        throw "smoke fixture '$CaseId' has incomplete timing/work rows: timing=$($timingFrames.Count) work=$($workRows.Count)"
+    }
+
+    $workFrames = @{}
+    foreach ($row in $workRows) {
+        if ([string]$row.joined -cne '1' -or
+            [string]$row.grid_renderer_frame -cne [string]$row.world_renderer_frame -or
+            [string]$row.grid_renderer_frame -cne [string]$row.view_renderer_frame) {
+            throw "smoke fixture '$CaseId' has an internally unjoined workload row: $LogPath"
+        }
+        $frame = [uint64]$row.grid_renderer_frame
+        if ($workFrames.ContainsKey($frame)) {
+            throw "smoke fixture '$CaseId' has duplicate workload identity renderer_frame=$frame"
+        }
+        $workFrames[$frame] = $true
+    }
+    $missing = @($timingFrames | Where-Object { -not $workFrames.ContainsKey($_) })
+    if ($missing.Count -ne 0) {
+        throw "smoke fixture '$CaseId' cannot join $($missing.Count) timing rows to workload identity; first=$($missing[0])"
+    }
+}
+
 function Get-RequiredStatusUInt64 {
     param([hashtable]$Status, [string]$Name, [string]$Context)
 
@@ -283,6 +318,7 @@ foreach ($item in $selected) {
     $pressureExpected = $item.id -in @("saturation", "rpg-overload")
     $expectedBricks = if ($pressureExpected) { [uint64]64 } else { [uint64]512 }
     foreach ($runLog in $runLogs) {
+        Assert-SmokeTimingWorkJoin -LogPath $runLog.FullName -CaseId $item.id
         Assert-SmokeGridStatus -LogPath $runLog.FullName -CaseId $item.id `
             -ExpectedBricks $expectedBricks -PressureExpected $pressureExpected
         if ($item.id -eq "saturation") {

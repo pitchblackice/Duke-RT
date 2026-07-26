@@ -17,6 +17,7 @@ $smokeOwner = Read-Source 'source\common\rendering\nri\renderer\nri_smoke.cpp'
 
 Assert-Match $timingHeader 'QueryCapacity\s*=\s*192[\s\S]*ScopeCapacity\s*=\s*95' 'Step 0 timing capacity must cover eight smoke substeps plus base and voxel timing.'
 Assert-Match $gridHeader 'NRIRenderDevice\* gpuTimingDevice' 'Focused grid owners must use the existing render-device timing service.'
+Assert-Match $gridHeader 'uint64_t rendererFrame' 'Smoke readbacks must retain the render-device frame used by GPU timing.'
 Assert-Match $timingOwner 'CmdCopyQueries' 'Generic timing must retain asynchronous GPU query readback.'
 if ($timingOwner -match '(?m)\b(Wait|WaitForFenceValue|WaitForCommands|DeviceWaitIdle|QueueWaitIdle)\s*\(') {
     throw 'Generic timing must not add a CPU wait.'
@@ -61,6 +62,7 @@ Assert-Match $gridOwner 'SmokeGridDeposit[\s\S]*NRISmokeGridPass::Deposit[\s\S]*
 Assert-Match $gridOwner 'SmokeGridHalo[\s\S]*AllocateHalo[\s\S]*SmokeGridSimulate[\s\S]*AdvectVelocity[\s\S]*AdvectFields[\s\S]*SmokeGridRebuild[\s\S]*NRISmokeGridPass::Rebuild' 'Halo, simulation, and rebuild timing must remain exclusive and ordered.'
 Assert-Match $worldOwner 'SmokeWorldActive[\s\S]*Prepare[\s\S]*BuildActive[\s\S]*SmokeWorldLink[\s\S]*BuildLinks[\s\S]*SmokeWorldProposal[\s\S]*BuildProposals[\s\S]*SmokeWorldSeed[\s\S]*Seed[\s\S]*SmokeWorldTemporal[\s\S]*Temporal' 'World-light timing scopes are incomplete or out of order.'
 Assert-Match $smokeOwner 'SmokeViewPrepare[\s\S]*SmokeMaterialize[\s\S]*EvaluateGrid[\s\S]*SmokeViewPoint[\s\S]*LightPoint[\s\S]*SmokeViewDirectional[\s\S]*LightDirectional[\s\S]*SmokeViewDirectReuse[\s\S]*SmokeIntegrate[\s\S]*Integrate[\s\S]*SmokeReconstruction[\s\S]*ResolveVolume[\s\S]*TemporalVolume[\s\S]*Composite' 'View smoke timing scopes are incomplete or out of order.'
-Assert-Match $smokeOwner 'PERF pt smoke work NRI:[\s\S]*joined=%u[\s\S]*grid_deposition_cells_total=[\s\S]*grid_deposition_cells_delta=[\s\S]*world_link_rays=[\s\S]*view_frame=%u[\s\S]*view_direct_receiver_samples=' 'Step 0 compact work telemetry is incomplete.'
+Assert-Match $smokeOwner 'PERF pt smoke work NRI:[\s\S]*observe_renderer_frame=%llu[\s\S]*joined=%u[\s\S]*grid_renderer_frame=%llu[\s\S]*grid_deposition_cells_total=[\s\S]*grid_deposition_cells_delta=[\s\S]*world_renderer_frame=%llu[\s\S]*world_link_rays=[\s\S]*view_renderer_frame=%llu[\s\S]*view_direct_receiver_samples=' 'Step 0 compact work telemetry is incomplete.'
+Assert-Match $smokeOwner 'PerfCompactCaptureTimingActive\(\) \|\| PerfCompactCaptureReadbackDrainActive\(\)' 'Smoke workload rows must drain through the final queued GPU timing identities.'
 
 Write-Host 'Smoke performance Step 0 contract validation passed.'

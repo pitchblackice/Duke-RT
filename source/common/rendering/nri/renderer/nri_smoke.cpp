@@ -99,6 +99,7 @@ NRISmokeGridServices NRISmokeSystem::BuildGridServices(NRIRenderer& renderer) co
 	services.graphicsAPI = renderer.mFrameBuffer->GetSelectedAPI();
 	services.queuedFrameCount = std::max(1u, (uint32_t)renderer.mFrameBuffer->mQueuedFrames.size());
 	services.queuedFrameIndex = renderer.mFrameBuffer->mCurrentQueuedFrameIndex;
+	services.rendererFrame = renderer.mFrameBuffer->mFrameIndex;
 	services.user = &renderer;
 	services.loadShaderBlob = &NRISmokeSystem::LoadGridShaderBlob;
 	services.waitForCommands = &NRISmokeSystem::WaitForGridCommands;
@@ -1046,17 +1047,18 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 		mStatus.maximumDepthSpan = 0u;
 		mStatus.maximumCandidatesPerFroxel = 0u;
 	}
-	if (mSettings.readback && PerfCompactCaptureTimingActive())
+	if (mSettings.readback && (PerfCompactCaptureTimingActive() || PerfCompactCaptureReadbackDrainActive()))
 	{
 		const NRISmokeGridStatusSnapshot& gridWork = mGrid.GetStatusSnapshot();
 		const NRISmokeGridLightingStatusSnapshot& worldWork = mGridLighting.GetStatusSnapshot();
 		const bool joined = gridWork.gpuStatsValid && worldWork.gpuStatsValid && mStatus.gpuStatsValid &&
-			gridWork.gpu.frameStamp == worldWork.gpu.frameStamp &&
-			gridWork.gpu.frameStamp == mStatus.gpuStatsFrame &&
+			gridWork.gpuRendererFrame == worldWork.gpuRendererFrame &&
+			gridWork.gpuRendererFrame == mStatus.gpuStatsFrame &&
 			gridWork.gpu.generation == worldWork.gpu.simulationEpoch &&
 			gridWork.gpu.generation == mStatus.gpuStatsEpoch;
-		Printf("PERF pt smoke work NRI: observe_frame=%u joined=%u grid_valid=%u grid_frame=%u grid_epoch=%u grid_delta_valid=%u grid_delta_interval=%u grid_resident=%u grid_free=%u grid_active_a=%u grid_active_b=%u grid_occupied=%u grid_empty=%u grid_allocated_total=%u grid_allocated_delta=%u grid_reclaimed_total=%u grid_reclaimed_delta=%u grid_allocation_failures_total=%u grid_allocation_failures_delta=%u grid_probe_failures_total=%u grid_probe_failures_delta=%u grid_commands_total=%u grid_commands_delta=%u grid_deposition_cells_total=%u grid_deposition_cells_delta=%u grid_deposition_rejected_total=%u grid_deposition_rejected_delta=%u grid_halo_total=%u grid_halo_delta=%u world_valid=%u world_frame=%u world_epoch=%u world_active=%u world_support_current=%u world_source_density=%u world_scheduled=%u world_samples=%u world_visible=%u world_physical_zero=%u world_missing=%u world_overflow=%u world_temporal_accepted=%u world_temporal_rejected=%u world_links_open=%u world_links_blocked=%u world_link_rays=%u world_proposal_lists=%u world_proposal_tested=%u world_proposal_accepted=%u view_valid=%u view_frame=%u view_epoch=%u view_occupied=%u view_occupied_overflow=%u view_point_froxels=%u view_point_shadow_rays=%u view_directional_froxels=%u view_directional_samples=%u view_directional_shadow_rays=%u view_direct_receiver_samples=%u view_direct_temporal_accepted=%u view_direct_temporal_rejected=%u view_direct_spatial_accepted=%u view_direct_spatial_rejected=%u compact=1\n",
-			renderer.mFrameIndex, joined ? 1u : 0u, gridWork.gpuStatsValid ? 1u : 0u, gridWork.gpu.frameStamp,
+		Printf("PERF pt smoke work NRI: observe_renderer_frame=%llu observe_frame=%u joined=%u grid_valid=%u grid_renderer_frame=%llu grid_frame=%u grid_epoch=%u grid_delta_valid=%u grid_delta_interval=%u grid_resident=%u grid_free=%u grid_active_a=%u grid_active_b=%u grid_occupied=%u grid_empty=%u grid_allocated_total=%u grid_allocated_delta=%u grid_reclaimed_total=%u grid_reclaimed_delta=%u grid_allocation_failures_total=%u grid_allocation_failures_delta=%u grid_probe_failures_total=%u grid_probe_failures_delta=%u grid_commands_total=%u grid_commands_delta=%u grid_deposition_cells_total=%u grid_deposition_cells_delta=%u grid_deposition_rejected_total=%u grid_deposition_rejected_delta=%u grid_halo_total=%u grid_halo_delta=%u world_valid=%u world_renderer_frame=%llu world_frame=%u world_epoch=%u world_active=%u world_support_current=%u world_source_density=%u world_scheduled=%u world_samples=%u world_visible=%u world_physical_zero=%u world_missing=%u world_overflow=%u world_temporal_accepted=%u world_temporal_rejected=%u world_links_open=%u world_links_blocked=%u world_link_rays=%u world_proposal_lists=%u world_proposal_tested=%u world_proposal_accepted=%u view_valid=%u view_renderer_frame=%llu view_epoch=%u view_occupied=%u view_occupied_overflow=%u view_point_froxels=%u view_point_shadow_rays=%u view_directional_froxels=%u view_directional_samples=%u view_directional_shadow_rays=%u view_direct_receiver_samples=%u view_direct_temporal_accepted=%u view_direct_temporal_rejected=%u view_direct_spatial_accepted=%u view_direct_spatial_rejected=%u compact=1\n",
+			(unsigned long long)renderer.mFrameBuffer->mFrameIndex, renderer.mFrameIndex, joined ? 1u : 0u,
+			gridWork.gpuStatsValid ? 1u : 0u, (unsigned long long)gridWork.gpuRendererFrame, gridWork.gpu.frameStamp,
 			gridWork.gpu.generation, gridWork.gpuFrameDeltaValid ? 1u : 0u, gridWork.gpuFrameDeltaInterval,
 			gridWork.gpu.residentCount, gridWork.gpu.freeCount, gridWork.gpu.activeCountA,
 			gridWork.gpu.activeCountB, gridWork.gpu.occupiedBricks, gridWork.gpu.emptyBricks,
@@ -1068,7 +1070,8 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 			gridWork.gpu.depositionCells, gridWork.gpuFrameDelta.depositionCells,
 			gridWork.gpu.depositionRejected, gridWork.gpuFrameDelta.depositionRejected,
 			gridWork.gpu.haloAllocations, gridWork.gpuFrameDelta.haloAllocations,
-			worldWork.gpuStatsValid ? 1u : 0u, worldWork.gpu.frameStamp, worldWork.gpu.simulationEpoch,
+			worldWork.gpuStatsValid ? 1u : 0u, (unsigned long long)worldWork.gpuRendererFrame,
+			worldWork.gpu.frameStamp, worldWork.gpu.simulationEpoch,
 			worldWork.gpu.activeCount, worldWork.gpu.supportCount, worldWork.gpu.sourceCount,
 			worldWork.gpu.scheduledCount, worldWork.gpu.samples, worldWork.gpu.visible,
 			worldWork.gpu.physicalZero, worldWork.gpu.missing, worldWork.gpu.overflowRejects,
@@ -1076,22 +1079,25 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 			worldWork.gpu.linksOpen, worldWork.gpu.linksBlocked,
 			worldWork.gpu.linksOpen + worldWork.gpu.linksBlocked, worldWork.gpu.proposalListsBuilt,
 			worldWork.gpu.proposalCandidatesTested, worldWork.gpu.proposalCandidatesAccepted,
-			mStatus.gpuStatsValid ? 1u : 0u, mStatus.gpuStatsFrame, mStatus.gpuStatsEpoch,
+			mStatus.gpuStatsValid ? 1u : 0u, (unsigned long long)mStatus.gpuStatsFrame, mStatus.gpuStatsEpoch,
 			mStatus.occupiedCount, mStatus.occupiedOverflow,
 			mStatus.pointFroxelsProcessed, mStatus.lightShadowRays, mStatus.directionalFroxelsProcessed,
 			mStatus.directionalSamples, mStatus.directionalShadowRays, mStatus.directReceiverSamples,
 			mStatus.directTemporalAccepted, mStatus.directTemporalRejected,
 			mStatus.directSpatialAccepted, mStatus.directSpatialRejected);
-		Printf("PERF pt smoke admission NRI: observe_frame=%u frame=%u gathered=%u uploaded=%u deferred=%u coalesced=%u expired=%u rejected=%u sources=%u interactive_gathered=%u interactive_uploaded=%u estimated_bricks_gathered=%llu estimated_bricks_uploaded=%llu closure=%u compact=1\n",
-			renderer.mFrameIndex, mStatus.admissionFrame, mStatus.admission.gathered, mStatus.admission.uploaded,
+		Printf("PERF pt smoke admission NRI: observe_renderer_frame=%llu observe_frame=%u renderer_frame=%llu frame=%u gathered=%u uploaded=%u deferred=%u coalesced=%u expired=%u rejected=%u sources=%u interactive_gathered=%u interactive_uploaded=%u estimated_bricks_gathered=%llu estimated_bricks_uploaded=%llu closure=%u compact=1\n",
+			(unsigned long long)renderer.mFrameBuffer->mFrameIndex, renderer.mFrameIndex,
+			(unsigned long long)mStatus.admissionRendererFrame, mStatus.admissionFrame,
+			mStatus.admission.gathered, mStatus.admission.uploaded,
 			mStatus.admission.boundedDeferred, mStatus.admission.coalesced, mStatus.admission.expired,
 			mStatus.admission.rejected, mStatus.admission.sourceCount,
 			mStatus.admission.interactiveGathered, mStatus.admission.interactiveUploaded,
 			(unsigned long long)mStatus.admission.estimatedBrickWorkGathered,
 			(unsigned long long)mStatus.admission.estimatedBrickWorkUploaded,
 			mStatus.admission.Closes() ? 1u : 0u);
-		Printf("PERF pt smoke grid admission NRI: observe_frame=%u valid=%u frame=%u epoch=%u sources=%u requested=%u existing=%u admitted=%u rejected=%u rejected_capacity=%u rejected_probe=%u rejected_invalid=%u compact=1\n",
-			renderer.mFrameIndex, gridWork.gpuStatsValid ? 1u : 0u, gridWork.gpu.frameStamp,
+		Printf("PERF pt smoke grid admission NRI: observe_renderer_frame=%llu observe_frame=%u valid=%u renderer_frame=%llu frame=%u epoch=%u sources=%u requested=%u existing=%u admitted=%u rejected=%u rejected_capacity=%u rejected_probe=%u rejected_invalid=%u compact=1\n",
+			(unsigned long long)renderer.mFrameBuffer->mFrameIndex, renderer.mFrameIndex,
+			gridWork.gpuStatsValid ? 1u : 0u, (unsigned long long)gridWork.gpuRendererFrame, gridWork.gpu.frameStamp,
 			gridWork.gpu.generation, gridWork.gpu.admissionSourceCount,
 			gridWork.gpu.admissionRequested, gridWork.gpu.admissionExisting,
 			gridWork.gpu.admissionAdmitted, gridWork.gpu.admissionRejected,
@@ -1099,8 +1105,9 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 			gridWork.gpu.admissionInvalidRejected);
 		for (const NRISmokeGridSourceStatusSnapshot& source : gridWork.sources)
 		{
-			Printf("PERF pt smoke grid source NRI: frame=%u epoch=%u source_id=%08x source_class=%u priority=%u commands=%u requested=%u existing=%u admitted=%u rejected_capacity=%u rejected_probe=%u rejected_invalid=%u deposition_cells=%u requested_mass_q=%u deposited_mass_q=%u rejected_mass_q=%u admitted_key_hash=%08x compact=1\n",
-				gridWork.gpu.frameStamp, gridWork.gpu.generation, source.sourceId,
+			Printf("PERF pt smoke grid source NRI: renderer_frame=%llu frame=%u epoch=%u source_id=%08x source_class=%u priority=%u commands=%u requested=%u existing=%u admitted=%u rejected_capacity=%u rejected_probe=%u rejected_invalid=%u deposition_cells=%u requested_mass_q=%u deposited_mass_q=%u rejected_mass_q=%u admitted_key_hash=%08x compact=1\n",
+				(unsigned long long)gridWork.gpuRendererFrame, gridWork.gpu.frameStamp,
+				gridWork.gpu.generation, source.sourceId,
 				source.sourceClass, source.priority, source.commands, source.requestedBricks,
 				source.existingHits, source.admittedNew, source.rejectedCapacity,
 				source.rejectedProbe, source.rejectedInvalid, source.depositionCells,
@@ -1166,6 +1173,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		}
 	}
 	mStatus.admissionFrame = renderer.mFrameIndex;
+	mStatus.admissionRendererFrame = renderer.mFrameBuffer->mFrameIndex;
 	CommandSlot& slot = mCommandSlots[std::min(renderer.mFrameBuffer->mCurrentQueuedFrameIndex, (uint32_t)mCommandSlots.size() - 1)];
 	const uint32_t commandCount = std::min((uint32_t)frameCommands->size(), kMaxCommands);
 	mStatus.commandsUploaded = commandCount;
@@ -2001,7 +2009,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		renderer.mFrameBuffer->mCore.CmdCopyBuffer(*renderer.mFrameBuffer->mCommandBuffer, *slot.controlReadback.buffer, 0, *mControl.buffer, 0, sizeof(NRISmokeControlGpu));
 		slot.readbackPending = true;
 		slot.readbackInitialized = true;
-		slot.readbackFrame = renderer.mFrameIndex;
+		slot.readbackFrame = renderer.mFrameBuffer->mFrameIndex;
 		slot.readbackEpoch = mStatus.simulationEpoch;
 		mControlCopyPending = true;
 	}
@@ -2069,6 +2077,7 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.dispatchedFrame = UINT32_MAX;
 	mStatus.resetReason = reason != nullptr ? reason : "unspecified";
 	mStatus.gpuStatsValid = false;
+	mStatus.gpuStatsFrame = UINT64_MAX;
 	mStatus.activeParticles = 0;
 	mStatus.spawnedParticles = 0;
 	mStatus.expiredParticles = 0;
@@ -2210,6 +2219,7 @@ void NRISmokeSystem::Reset(const char* reason)
 	mAdmissionScheduler.Reset();
 	mStatus.admission = {};
 	mStatus.admissionFrame = UINT32_MAX;
+	mStatus.admissionRendererFrame = UINT64_MAX;
 	mAccumulator = 0.0f;
 	mLastGameplaySeconds = -1.0;
 	mParticleSimulationSeconds = 0.0;

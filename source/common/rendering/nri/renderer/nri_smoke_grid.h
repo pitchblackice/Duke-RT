@@ -28,6 +28,7 @@ struct NRISmokeGridServices
 	nri::GraphicsAPI graphicsAPI = nri::GraphicsAPI::VK;
 	uint32_t queuedFrameCount = 0;
 	uint32_t queuedFrameIndex = 0;
+	uint64_t rendererFrame = 0;
 	void* user = nullptr;
 	LoadShaderBlobFn loadShaderBlob = nullptr;
 	WaitForCommandsFn waitForCommands = nullptr;
@@ -91,6 +92,7 @@ struct NRISmokeGridStatusSnapshot
 	bool initialized = false;
 	bool resourcesReady = false;
 	bool gpuStatsValid = false;
+	uint64_t gpuRendererFrame = UINT64_MAX;
 	uint32_t representation = 0;
 	uint32_t brickCapacity = 0;
 	uint32_t hashCapacity = 0;
@@ -144,6 +146,8 @@ private:
 		NRIBufferResource sourceReadback;
 		bool readbackPending = false;
 		bool readbackInitialized = false;
+		uint64_t readbackRendererFrame = UINT64_MAX;
+		uint32_t readbackEpoch = 0;
 	};
 
 	bool EnsureResources(const NRISmokeGridServices& services, const NRISmokeSettings& settings);

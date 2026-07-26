@@ -204,6 +204,7 @@ struct PerfCompactFirstUseRecord
 void PerfCompactCaptureBeginOuterFrame(uint64_t presentationGeneration);
 void PerfCompactCaptureFlushIfReady();
 bool PerfCompactCaptureTimingActive();
+bool PerfCompactCaptureReadbackDrainActive();
 PerfCompactCaptureToken PerfCompactCaptureGetCurrentToken();
 void PerfCompactCaptureNoteNri(const PerfCompactCaptureToken& token, const PerfCompactNriStats& stats);
 void PerfCompactCaptureNoteBoundary(const PerfCompactCaptureToken& token, const PerfCompactBoundaryStats& stats);

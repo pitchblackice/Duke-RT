@@ -27,6 +27,7 @@ namespace
 	constexpr uint32_t MaxRecords = 4096;
 	constexpr uint32_t MaxFirstUseRecords = 4096;
 	constexpr uint32_t MaxFirstUseDrainFrames = 32;
+	constexpr uint32_t MinReadbackDrainFrames = 3;
 
 	struct Record
 	{
@@ -58,6 +59,7 @@ namespace
 		uint32_t requested = 0, observed = 0, eligible = 0, pendingGpu = 0;
 		uint32_t firstUseCount = 0, firstUseDropped = 0, openFirstUseCount = 0;
 		uint32_t firstUseDrainFrames = 0;
+		uint32_t readbackDrainFrames = 0;
 		uint32_t rejectState = 0, rejectLevelRendered = 0, rejectNriActive = 0;
 		uint32_t rejectNriInvalid = 0, rejectNriNotRendered = 0, rejectBoundaryInvalid = 0;
 		uint32_t rejectNotPathTraced = 0, rejectPresent = 0, rejectFrameJoin = 0;
@@ -87,6 +89,7 @@ namespace
 		gCapture.firstUseDropped = 0;
 		gCapture.openFirstUseCount = 0;
 		gCapture.firstUseDrainFrames = 0;
+		gCapture.readbackDrainFrames = 0;
 		gCapture.rejectState = 0;
 		gCapture.rejectLevelRendered = 0;
 		gCapture.rejectNriActive = 0;
@@ -320,6 +323,7 @@ void PerfCompactCaptureFlushIfReady()
 {
 	if (gCapture.state != CaptureState::Draining && gCapture.state != CaptureState::Aborted) return;
 	if (gCapture.state == CaptureState::Draining && gCapture.pendingGpu != 0) return;
+	if (gCapture.state == CaptureState::Draining && gCapture.readbackDrainFrames < MinReadbackDrainFrames) return;
 	if (gCapture.state == CaptureState::Draining && gCapture.openFirstUseCount != 0)
 	{
 		if (gCapture.firstUseDrainFrames < MaxFirstUseDrainFrames) return;
@@ -336,10 +340,11 @@ void PerfCompactCaptureFlushIfReady()
 	FlushFirstUseRecords();
 	uint32_t firstUsePending = 0, firstUseDuplicates = 0, firstUseUnresolved = 0;
 	MeasureFirstUseClosure(firstUsePending, firstUseDuplicates, firstUseUnresolved);
-	Printf("PERF compact capture complete: epoch=%llu status=%s requested=%u eligible=%u observed=%u pending_gpu=%u dropped=0 first_use_records=%u first_use_pending=%u first_use_dropped=%u first_use_duplicates=%u first_use_unresolved=%u first_use_drain_frames=%u reject_state=%u reject_level_rendered=%u reject_nri_active=%u reject_nri_invalid=%u reject_nri_not_rendered=%u reject_boundary_invalid=%u reject_not_path_traced=%u reject_present=%u reject_frame_join=%u reason=%s\n",
+	Printf("PERF compact capture complete: epoch=%llu status=%s requested=%u eligible=%u observed=%u pending_gpu=%u dropped=0 readback_drain_frames=%u first_use_records=%u first_use_pending=%u first_use_dropped=%u first_use_duplicates=%u first_use_unresolved=%u first_use_drain_frames=%u reject_state=%u reject_level_rendered=%u reject_nri_active=%u reject_nri_invalid=%u reject_nri_not_rendered=%u reject_boundary_invalid=%u reject_not_path_traced=%u reject_present=%u reject_frame_join=%u reason=%s\n",
 		(unsigned long long)gCapture.epoch,
 		gCapture.state == CaptureState::Draining ? "complete" : "aborted",
 		gCapture.requested, gCapture.eligible, gCapture.observed, gCapture.pendingGpu,
+		gCapture.readbackDrainFrames,
 		gCapture.firstUseCount, firstUsePending, gCapture.firstUseDropped,
 		firstUseDuplicates, firstUseUnresolved, gCapture.firstUseDrainFrames,
 		gCapture.rejectState, gCapture.rejectLevelRendered, gCapture.rejectNriActive,
@@ -372,6 +377,8 @@ void PerfCompactCaptureBeginOuterFrame(uint64_t presentationGeneration)
 	}
 	const bool drainFirstUse = gCapture.state == CaptureState::Draining &&
 		gCapture.openFirstUseCount != 0 && gCapture.firstUseDrainFrames < MaxFirstUseDrainFrames;
+	if (gCapture.state == CaptureState::Draining && gCapture.readbackDrainFrames < MinReadbackDrainFrames)
+		gCapture.readbackDrainFrames++;
 	if (gCapture.state != CaptureState::Active && !drainFirstUse)
 	{
 		gCapture.current = {};
@@ -393,6 +400,13 @@ bool PerfCompactCaptureTimingActive()
 	return (gCapture.state == CaptureState::Active || gCapture.state == CaptureState::Draining) &&
 		(bool)gCapture.current;
 }
+
+bool PerfCompactCaptureReadbackDrainActive()
+{
+	return gCapture.state == CaptureState::Draining &&
+		(gCapture.pendingGpu != 0 || gCapture.readbackDrainFrames <= MinReadbackDrainFrames);
+}
+
 PerfCompactCaptureToken PerfCompactCaptureGetCurrentToken() { return PerfCompactCaptureTimingActive() ? gCapture.current : PerfCompactCaptureToken{}; }
 
 void PerfCompactCaptureNoteNri(const PerfCompactCaptureToken& token, const PerfCompactNriStats& stats)

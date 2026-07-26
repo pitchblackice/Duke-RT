@@ -249,9 +249,10 @@ void NRISmokeGridLighting::ConsumeReadback(const NRISmokeGridServices& services,
 		NRISmokeGridLightControlGpu gpu = {};
 		std::memcpy(&gpu, mapped, sizeof(gpu));
 		services.core->UnmapBuffer(*slot.controlReadback.buffer);
-		if (gpu.simulationEpoch == simulationEpoch)
+		if (slot.readbackEpoch == simulationEpoch && gpu.simulationEpoch == simulationEpoch)
 		{
 			mStatus.gpu = gpu;
+			mStatus.gpuRendererFrame = slot.readbackRendererFrame;
 			mStatus.gpuStatsValid = true;
 			mStatus.controlReadbackBytes += sizeof(gpu);
 		}
@@ -295,6 +296,8 @@ bool NRISmokeGridLighting::RecordControlReadback(const NRISmokeGridServices& ser
 	services.core->CmdBarrier(*services.commandBuffer, afterCopy);
 	slot.readbackPending = true;
 	slot.readbackInitialized = true;
+	slot.readbackRendererFrame = services.rendererFrame;
+	slot.readbackEpoch = mSimulationEpoch;
 	return true;
 }
 
@@ -562,6 +565,7 @@ void NRISmokeGridLighting::Reset(uint32_t simulationEpoch, const char* reason)
 	mNeedsClear = true;
 	mStatus.simulationEpoch = simulationEpoch;
 	mStatus.gpuStatsValid = false;
+	mStatus.gpuRendererFrame = UINT64_MAX;
 	mStatus.gpu = {};
 	mGridDescriptors.fill(nullptr);
 	mGridFieldPing = 0u;

@@ -43,6 +43,7 @@ struct NRISmokeStatusSnapshot
 	uint32_t commandsDropped = 0;
 	NRISmokeAdmissionSnapshot admission = {};
 	uint32_t admissionFrame = UINT32_MAX;
+	uint64_t admissionRendererFrame = UINT64_MAX;
 	uint32_t simulationSubsteps = 0;
 	uint32_t representationRequested = 0;
 	uint32_t representationEffective = 0;
@@ -96,7 +97,7 @@ struct NRISmokeStatusSnapshot
 	uint32_t indirectCacheModeEffective = 0;
 	uint64_t controlReadbackBytes = 0;
 	bool gpuStatsValid = false;
-	uint32_t gpuStatsFrame = UINT32_MAX;
+	uint64_t gpuStatsFrame = UINT64_MAX;
 	uint32_t gpuStatsEpoch = 0;
 	uint32_t activeParticles = 0;
 	uint32_t spawnedParticles = 0;
@@ -264,7 +265,7 @@ private:
 		bool readbackPending = false;
 		bool initialized = false;
 		bool readbackInitialized = false;
-		uint32_t readbackFrame = UINT32_MAX;
+		uint64_t readbackFrame = UINT64_MAX;
 		uint32_t readbackEpoch = 0;
 	};
 

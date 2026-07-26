@@ -147,6 +147,7 @@ struct NRISmokeGridLightingStatusSnapshot
 	bool initialized = false;
 	bool resourcesReady = false;
 	bool gpuStatsValid = false;
+	uint64_t gpuRendererFrame = UINT64_MAX;
 	bool filterRequested = false;
 	bool filterAllocated = false;
 	bool multipleScatterRequested = false;

@@ -361,7 +361,7 @@ void NRISmokeGrid::ConsumeReadback(const NRISmokeGridServices& services, uint32_
 		NRISmokeGridControlGpu next = {};
 		std::memcpy(&next, mapped, sizeof(next));
 		services.core->UnmapBuffer(*slot.controlReadback.buffer);
-		if (next.generation == simulationEpoch)
+		if (slot.readbackEpoch == simulationEpoch && next.generation == simulationEpoch)
 		{
 			const uint64_t sourceBytes = (uint64_t)SourceCapacity * sizeof(NRISmokeGridSourceStatsGpu);
 			const void* sourceMapped = services.core->MapBuffer(*slot.sourceReadback.buffer, 0, sourceBytes);
@@ -386,6 +386,7 @@ void NRISmokeGrid::ConsumeReadback(const NRISmokeGridServices& services, uint32_
 			const NRISmokeGridControlGpu previous = mStatus.gpu;
 			const bool consecutive = previous.generation == next.generation && previous.frameStamp + 1u == next.frameStamp;
 			mStatus.gpu = next;
+			mStatus.gpuRendererFrame = slot.readbackRendererFrame;
 			mStatus.gpuStatsValid = true;
 			mStatus.gpuFrameDeltaInterval = previous.generation == next.generation ? next.frameStamp - previous.frameStamp : 0u;
 			if (consecutive)
@@ -577,6 +578,8 @@ bool NRISmokeGrid::RecordControlReadback(const NRISmokeGridServices& services, c
 	services.core->CmdBarrier(*services.commandBuffer, afterCopy);
 	slot.readbackPending = true;
 	slot.readbackInitialized = true;
+	slot.readbackRendererFrame = services.rendererFrame;
+	slot.readbackEpoch = mResourceEpoch;
 	return true;
 }
 
@@ -751,6 +754,7 @@ void NRISmokeGrid::Reset(uint32_t simulationEpoch, const char* reason)
 	mStatus.activePing = 0;
 	mStatus.fieldPing = 0;
 	mStatus.gpuStatsValid = false;
+	mStatus.gpuRendererFrame = UINT64_MAX;
 	mStatus.gpu = {};
 	mStatus.sources.clear();
 	mStatus.resetReason = reason != nullptr ? reason : "unspecified";
@@ -766,6 +770,8 @@ void NRISmokeGrid::DestroyResources(const NRISmokeGridServices& services)
 		DestroyBuffer(services, slot.sourceReadback);
 		slot.readbackPending = false;
 		slot.readbackInitialized = false;
+		slot.readbackRendererFrame = UINT64_MAX;
+		slot.readbackEpoch = 0;
 	}
 	mResourceBrickCapacity = 0;
 	mResourceHashCapacity = 0;
