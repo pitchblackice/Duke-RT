@@ -1532,6 +1532,7 @@ void NRIRenderer::DestroyAccelerationStructures()
 	}
 	DestroyDynamicBottomLevelAccelerationStructures();
 	mPersistentVoxels.Reset("destroy-acceleration-structures", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildNRIPersistentVoxelResetServices(*this));
+	mVoxelRepresentationPolicy.Reset();
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 	mStaticAccelerationBuildSerial = 0;
 	mActiveTlasInstanceCount = 0;

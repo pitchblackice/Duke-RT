@@ -1865,6 +1865,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 			"level-unload",
 			(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats,
 			BuildNRIPersistentVoxelResetServices(*this));
+		mVoxelRepresentationPolicy.Reset();
 		mPersistentVoxels.CompactMaterialRangesForQuiescentLevelTransition(
 			"level-unload",
 			(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats);
@@ -2022,6 +2023,7 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 			"level-load",
 			(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats,
 			BuildNRIPersistentVoxelResetServices(*this));
+		mVoxelRepresentationPolicy.Reset();
 	}
 
 	mMapWorld = {};
