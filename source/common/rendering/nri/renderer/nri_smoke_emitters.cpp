@@ -1,5 +1,6 @@
 #include "nri_smoke_emitters.h"
 
+#include "nri_smoke_admission.h"
 #include "nri_scene_lights.h"
 
 #include "coreactor.h"
@@ -12,8 +13,6 @@
 
 namespace
 {
-	constexpr size_t kMapEmitterCommandCeiling = 192u;
-
 	void WorldToPathTracingPosition(const DVector3& worldPosition, float outPosition[3])
 	{
 		outPosition[0] = (float)worldPosition.X;
@@ -305,6 +304,9 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 				command.radiusScale = rule.radiusScale;
 				command.velocityCone = rule.velocityCone;
 				command.epoch = epoch;
+				command.sourceId = NRIMakeSmokeSourceId("actor", resolved.activeMapName.GetChars(),
+					rule.id.GetChars(), static_cast<uint32_t>(actor->GetIndex()));
+				command.sourceMetadata = NRIPackSmokeSourceMetadata(NRISmokeInjectionSourceClass::InteractiveActor);
 				SetPointSourceShape(command);
 				commands.push_back(command);
 				if (traceMode != 0)
@@ -314,9 +316,10 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 				}
 				if (traceMode >= 2 && verbosePrinted < 32u)
 				{
-					Printf("NRI PT smoke emitter: event=%s rule=%s class=%s actor=%d identity=%p serial=%u world=(%.3f,%.3f,%.3f) render=(%.3f,%.3f,%.3f) velocity=(%.3f,%.3f,%.3f) style=%u particles=%u\n",
+					Printf("NRI PT smoke emitter: event=%s rule=%s class=%s actor=%d identity=%p serial=%u source_id=%08x source_class=%u world=(%.3f,%.3f,%.3f) render=(%.3f,%.3f,%.3f) velocity=(%.3f,%.3f,%.3f) style=%u particles=%u\n",
 						rule.trigger == LightOverlaySmokeTrigger::Interval ? "interval" : "spawn",
 						rule.id.GetChars(), actor->GetClass()->TypeName.GetChars(), actor->GetIndex(), actor, command.serial,
+						command.sourceId, static_cast<uint32_t>(NRIGetSmokeSourceClass(command.sourceMetadata)),
 						emissionPosition.X + offset.X, emissionPosition.Y + offset.Y, emissionPosition.Z + offset.Z,
 						command.position[0], command.position[1], command.position[2],
 						command.velocity[0], command.velocity[1], command.velocity[2], command.styleIndex, command.count);
@@ -349,7 +352,8 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 		uint32_t skipped = 0u;
 	};
 	auto emitMapRule = [&](const ResolvedLightOverlayMapSmokeEmitterRule& rule,
-		MapEmitterState& state, const char* eventName) -> MapEmissionStats
+		MapEmitterState& state, const char* eventName,
+		NRISmokeInjectionSourceClass sourceClass) -> MapEmissionStats
 	{
 		MapEmissionStats stats = {};
 		stats.active = 1u;
@@ -384,17 +388,13 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			emitCount = std::min(candidateCount, rule.maxSegmentsPerFrame);
 			stats.skipped = candidateCount - emitCount;
 		}
-		const size_t availableCommands = commands.size() < kMapEmitterCommandCeiling ?
-			kMapEmitterCommandCeiling - commands.size() : 0u;
-		const uint32_t admittedCount = (uint32_t)std::min<size_t>(emitCount, availableCommands);
-		stats.skipped += emitCount - admittedCount;
-		emitCount = admittedCount;
-
 		const DVector3 center(rectangle.center[0], rectangle.center[1], rectangle.center[2]);
 		const DVector3 normal(rectangle.normal[0], rectangle.normal[1], rectangle.normal[2]);
 		const DVector3 axisU(rectangle.halfAxisU[0], rectangle.halfAxisU[1], rectangle.halfAxisU[2]);
 		const DVector3 axisV(rectangle.halfAxisV[0], rectangle.halfAxisV[1], rectangle.halfAxisV[2]);
 		const DVector3 velocity = normal * rule.velocityScale;
+		const uint32_t sourceId = NRIMakeSmokeSourceId(eventName,
+			resolved.activeMapName.GetChars(), rule.id.GetChars());
 		for (uint32_t emissionIndex = 0; emissionIndex < emitCount; ++emissionIndex)
 		{
 			NRISmokeInjectionCommandGpu command = {};
@@ -411,13 +411,17 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			command.velocityCone = rule.velocityCone;
 			command.epoch = epoch;
 			command.shape = static_cast<uint32_t>(NRISmokeInjectionShape::Rectangle);
+			command.sourceId = sourceId;
+			command.sourceMetadata = NRIPackSmokeSourceMetadata(sourceClass);
 			commands.push_back(command);
 			stats.emitted++;
 			stats.particles += command.count;
 			if (traceMode >= 2 && verbosePrinted < 32u)
 			{
-				Printf("NRI PT smoke emitter: event=%s map=%s rule=%s command_serial=%u style=%u particles=%u render=(%.3f,%.3f,%.3f) velocity=(%.3f,%.3f,%.3f) axis_u=(%.3f,%.3f,%.3f) axis_v=(%.3f,%.3f,%.3f) shape=rectangle\n",
-					eventName, resolved.activeMapName.GetChars(), rule.id.GetChars(), command.serial, command.styleIndex, command.count,
+				Printf("NRI PT smoke emitter: event=%s map=%s rule=%s command_serial=%u source_id=%08x source_class=%u style=%u particles=%u render=(%.3f,%.3f,%.3f) velocity=(%.3f,%.3f,%.3f) axis_u=(%.3f,%.3f,%.3f) axis_v=(%.3f,%.3f,%.3f) shape=rectangle\n",
+					eventName, resolved.activeMapName.GetChars(), rule.id.GetChars(), command.serial,
+					command.sourceId, static_cast<uint32_t>(NRIGetSmokeSourceClass(command.sourceMetadata)),
+					command.styleIndex, command.count,
 					command.position[0], command.position[1], command.position[2],
 					command.velocity[0], command.velocity[1], command.velocity[2],
 					command.halfAxisU[0], command.halfAxisU[1], command.halfAxisU[2],
@@ -446,7 +450,8 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 		{
 			continue;
 		}
-		const MapEmissionStats stats = emitMapRule(rule, mMapEmitterStates[ruleIndex], "map");
+		const MapEmissionStats stats = emitMapRule(rule, mMapEmitterStates[ruleIndex], "map",
+			NRISmokeInjectionSourceClass::AmbientMap);
 		if (traceMode != 0)
 		{
 			Printf("NRI PT smoke emitter: event=map-frame-summary map=%s rule=%s active=%u emitted=%u particles=%u skipped=%u interval=%.3f shape=rectangle\n",
@@ -480,7 +485,8 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			static_cast<ParsedLightOverlayMapSmokeEmitterRule&>(previewRule) = editorPreview.rule;
 			previewRule.styleIndex = previewStyle->styleIndex;
 			previewRule.styleResolved = true;
-			const MapEmissionStats stats = emitMapRule(previewRule, mEditorPreviewState, "map-preview");
+			const MapEmissionStats stats = emitMapRule(previewRule, mEditorPreviewState, "map-preview",
+				NRISmokeInjectionSourceClass::Diagnostic);
 			if (traceMode != 0)
 			{
 				Printf("NRI PT smoke emitter: event=map-preview-frame-summary map=%s rule=%s active=%u emitted=%u particles=%u skipped=%u interval=%.3f revision=%u shape=rectangle\n",
@@ -559,6 +565,9 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			command.radiusScale = rule.radiusScale;
 			command.velocityCone = rule.velocityCone;
 			command.epoch = epoch;
+			command.sourceId = NRIMakeSmokeSourceId("event", resolved.activeMapName.GetChars(),
+				rule.id.GetChars());
+			command.sourceMetadata = NRIPackSmokeSourceMetadata(NRISmokeInjectionSourceClass::InteractiveEvent);
 			SetPointSourceShape(command);
 			commands.push_back(command);
 			eventCommands++;
@@ -566,8 +575,9 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 
 			if (traceMode != 0 && verbosePrinted < 32u)
 			{
-				Printf("NRI PT smoke emitter: event=weapon rule=%s source_event=%s source_serial=%llu command_serial=%u style=%u particles=%u render=(%.3f,%.3f,%.3f) direction=(%.3f,%.3f,%.3f) cone=%.3f normal=%u incoming=%u\n",
+				Printf("NRI PT smoke emitter: event=weapon rule=%s source_event=%s source_serial=%llu command_serial=%u source_id=%08x source_class=%u style=%u particles=%u render=(%.3f,%.3f,%.3f) direction=(%.3f,%.3f,%.3f) cone=%.3f normal=%u incoming=%u\n",
 					rule.id.GetChars(), event.eventId.GetChars(), (unsigned long long)event.serial, command.serial,
+					command.sourceId, static_cast<uint32_t>(NRIGetSmokeSourceClass(command.sourceMetadata)),
 					command.styleIndex, command.count, command.position[0], command.position[1], command.position[2],
 					command.velocity[0], command.velocity[1], command.velocity[2], command.velocityCone,
 					event.hasSurfaceNormal ? 1u : 0u, event.hasIncomingDirection ? 1u : 0u);

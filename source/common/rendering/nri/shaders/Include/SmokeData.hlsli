@@ -3,6 +3,10 @@
 
 #define NRI_SMOKE_INJECTION_SHAPE_SPHERE 0u
 #define NRI_SMOKE_INJECTION_SHAPE_RECTANGLE 1u
+#define NRI_SMOKE_SOURCE_CLASS_AMBIENT 0u
+#define NRI_SMOKE_SOURCE_CLASS_INTERACTIVE_ACTOR 1u
+#define NRI_SMOKE_SOURCE_CLASS_INTERACTIVE_EVENT 2u
+#define NRI_SMOKE_SOURCE_CLASS_DIAGNOSTIC 3u
 
 struct SmokeStyle
 {
@@ -41,8 +45,20 @@ struct SmokeInjectionCommand
 	float3 HalfAxisU;
 	uint Shape;
 	float3 HalfAxisV;
-	uint3 Padding;
+	uint SourceId;
+	uint SourceSlot;
+	uint SourceMetadata;
 };
+
+uint SmokeInjectionSourceClass(SmokeInjectionCommand command)
+{
+	return command.SourceMetadata & 0xffu;
+}
+
+uint SmokeInjectionSourcePriority(SmokeInjectionCommand command)
+{
+	return (command.SourceMetadata >> 8u) & 0xffu;
+}
 
 void SmokeInjectionRectangleHalfAxes(SmokeInjectionCommand command,
 	out float3 halfAxisU, out float3 halfAxisV)

@@ -675,6 +675,8 @@ void NRISmokeSystem::AppendSyntheticCommand(NRIRenderer& renderer)
 	command.radiusScale = 1.5f;
 	command.serial = mNextCommandSerial++;
 	command.epoch = mStatus.simulationEpoch;
+	command.sourceId = NRIMakeSmokeSourceId("diagnostic", "runtime", "synthetic");
+	command.sourceMetadata = NRIPackSmokeSourceMetadata(NRISmokeInjectionSourceClass::Diagnostic);
 	mPendingCommands.push_back(command);
 }
 
@@ -1080,6 +1082,14 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 			mStatus.directionalSamples, mStatus.directionalShadowRays, mStatus.directReceiverSamples,
 			mStatus.directTemporalAccepted, mStatus.directTemporalRejected,
 			mStatus.directSpatialAccepted, mStatus.directSpatialRejected);
+		Printf("PERF pt smoke admission NRI: observe_frame=%u frame=%u gathered=%u uploaded=%u deferred=%u coalesced=%u expired=%u rejected=%u sources=%u interactive_gathered=%u interactive_uploaded=%u estimated_bricks_gathered=%llu estimated_bricks_uploaded=%llu closure=%u compact=1\n",
+			renderer.mFrameIndex, mStatus.admissionFrame, mStatus.admission.gathered, mStatus.admission.uploaded,
+			mStatus.admission.boundedDeferred, mStatus.admission.coalesced, mStatus.admission.expired,
+			mStatus.admission.rejected, mStatus.admission.sourceCount,
+			mStatus.admission.interactiveGathered, mStatus.admission.interactiveUploaded,
+			(unsigned long long)mStatus.admission.estimatedBrickWorkGathered,
+			(unsigned long long)mStatus.admission.estimatedBrickWorkUploaded,
+			mStatus.admission.Closes() ? 1u : 0u);
 	}
 	AppendSyntheticCommand(renderer);
 	return RecordSimulation(renderer);
@@ -1111,18 +1121,46 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	if (particleAuthority)
 		mParticleSimulationSeconds += (double)substeps * (double)step * (double)mSettings.timeScale;
 
+	const std::vector<NRISmokeInjectionCommandGpu>* frameCommands = &mPendingCommands;
+	if (gridAuthority && !particleAuthority)
+	{
+		mStatus.admission = mAdmissionScheduler.SelectGridCommands(mPendingCommands, kMaxCommands,
+			renderer.mFrameIndex, mSettings.gridCellSize, mSelectedGridCommands);
+		frameCommands = &mSelectedGridCommands;
+	}
+	else
+	{
+		mStatus.admission = {};
+		mStatus.admission.gathered = (uint32_t)mPendingCommands.size();
+		mStatus.admission.uploaded = std::min(mStatus.admission.gathered, kMaxCommands);
+		mStatus.admission.rejected = mStatus.admission.gathered - mStatus.admission.uploaded;
+		for (uint32_t i = 0; i < mStatus.admission.gathered; ++i)
+		{
+			const auto& command = mPendingCommands[i];
+			const uint32_t cost = NRIEstimateSmokeCommandBrickWork(command, mSettings.gridCellSize);
+			mStatus.admission.estimatedBrickWorkGathered += cost;
+			if (i < mStatus.admission.uploaded)
+				mStatus.admission.estimatedBrickWorkUploaded += cost;
+			if (NRIIsInteractiveSmokeSource(command.sourceMetadata))
+			{
+				mStatus.admission.interactiveGathered++;
+				if (i < mStatus.admission.uploaded) mStatus.admission.interactiveUploaded++;
+			}
+		}
+	}
+	mStatus.admissionFrame = renderer.mFrameIndex;
 	CommandSlot& slot = mCommandSlots[std::min(renderer.mFrameBuffer->mCurrentQueuedFrameIndex, (uint32_t)mCommandSlots.size() - 1)];
-	const uint32_t commandCount = std::min((uint32_t)mPendingCommands.size(), kMaxCommands);
+	const uint32_t commandCount = std::min((uint32_t)frameCommands->size(), kMaxCommands);
 	mStatus.commandsUploaded = commandCount;
 	mStatus.commandsUploadedTotal += commandCount;
 	mStatus.styleCount = (uint32_t)mStyles.size();
-	mStatus.commandsDropped += (uint32_t)mPendingCommands.size() - commandCount;
+	mStatus.commandsDropped += mStatus.admission.rejected;
 	if (commandCount > 0u && particleAuthority)
 	{
 		mMayHaveParticleSmoke = true;
 		for (uint32_t i = 0; i < commandCount; ++i)
 		{
-			const uint32_t styleIndex = mPendingCommands[i].styleIndex;
+			const uint32_t styleIndex = (*frameCommands)[i].styleIndex;
 			if (styleIndex < mStyles.size())
 				mLatestParticleDeathSeconds = std::max(mLatestParticleDeathSeconds,
 					mParticleSimulationSeconds + (double)std::max(mStyles[styleIndex].lifetime, 0.0f));
@@ -1139,7 +1177,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	}
 	mStatus.particleCommandsRouted = particleAuthority ? commandCount : 0u;
 	mStatus.gridCommandsRouted = gridAuthority ? commandCount : 0u;
-	if (commandCount > 0 && !UploadBytes(renderer, slot.upload, mPendingCommands.data(), (uint64_t)commandCount * sizeof(NRISmokeInjectionCommandGpu)))
+	if (commandCount > 0 && !UploadBytes(renderer, slot.upload, frameCommands->data(), (uint64_t)commandCount * sizeof(NRISmokeInjectionCommandGpu)))
 		return false;
 	if (!UploadBytes(renderer, slot.styleUpload, mStyles.data(), mStyles.size() * sizeof(NRISmokeStyleGpu)))
 		return false;
@@ -1327,6 +1365,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		storageBarrier();
 	}
 	mPendingCommands.clear();
+	mSelectedGridCommands.clear();
 	return true;
 }
 
@@ -2150,6 +2189,10 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.filterContinuationLimitExits = 0;
 	mStatus.filterResourceDowngrades = 0;
 	mPendingCommands.clear();
+	mSelectedGridCommands.clear();
+	mAdmissionScheduler.Reset();
+	mStatus.admission = {};
+	mStatus.admissionFrame = UINT32_MAX;
 	mAccumulator = 0.0f;
 	mLastGameplaySeconds = -1.0;
 	mParticleSimulationSeconds = 0.0;
@@ -2268,6 +2311,14 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.gridSimulationDispatches, mStatus.particleOpticalDispatches, mStatus.gridOpticalDispatches,
 		mStatus.particleCommandsRouted, mStatus.gridCommandsRouted);
 	mGrid.PrintStatus();
+	Printf("NRI PT smoke admission: gathered=%u uploaded=%u deferred=%u coalesced=%u expired=%u rejected=%u sources=%u interactive=%u/%u estimated_bricks=%llu/%llu closure=%s policy=cost-aware-source-round terminal_rejection=yes\n",
+		mStatus.admission.gathered, mStatus.admission.uploaded, mStatus.admission.boundedDeferred,
+		mStatus.admission.coalesced, mStatus.admission.expired, mStatus.admission.rejected,
+		mStatus.admission.sourceCount, mStatus.admission.interactiveUploaded,
+		mStatus.admission.interactiveGathered,
+		(unsigned long long)mStatus.admission.estimatedBrickWorkUploaded,
+		(unsigned long long)mStatus.admission.estimatedBrickWorkGathered,
+		mStatus.admission.Closes() ? "yes" : "no");
 	const NRISmokeGridLightingStatusSnapshot& world = mGridLighting.GetStatusSnapshot();
 	Printf("NRI PT smoke grid emissive: requested_backend=%u effective_backend=%u authority=%s ready=%s cells=%u ping=%u inner_ris_points=%u/%u target=%d field_mib=%.2f work_mib=%.2f links_mib=%.2f proposal_mib=%.3f filter=%s filter_mib=%.2f total_mib=%.2f proposal=%s field_readback=0\n",
 		world.requestedBackend, world.effectiveBackend, world.authority, world.resourcesReady ? "yes" : "no",

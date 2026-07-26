@@ -3,6 +3,7 @@
 #include "nri_renderer_settings.h"
 #include "nri_resources.h"
 #include "nri_smoke_authority.h"
+#include "nri_smoke_admission.h"
 #include "nri_smoke_contracts.h"
 #include "nri_smoke_emitters.h"
 #include "nri_smoke_grid.h"
@@ -40,6 +41,8 @@ struct NRISmokeStatusSnapshot
 	uint64_t commandsUploadedTotal = 0;
 	uint32_t styleCount = 0;
 	uint32_t commandsDropped = 0;
+	NRISmokeAdmissionSnapshot admission = {};
+	uint32_t admissionFrame = UINT32_MAX;
 	uint32_t simulationSubsteps = 0;
 	uint32_t representationRequested = 0;
 	uint32_t representationEffective = 0;
@@ -320,6 +323,8 @@ private:
 	NRISmokeGridLighting mGridLighting;
 	std::vector<NRISmokeStyleGpu> mStyles;
 	std::vector<NRISmokeInjectionCommandGpu> mPendingCommands;
+	std::vector<NRISmokeInjectionCommandGpu> mSelectedGridCommands;
+	NRISmokeAdmissionScheduler mAdmissionScheduler;
 	uint32_t mResourceParticleCapacity = 0;
 	uint32_t mResourceFroxelWidth = 0;
 	uint32_t mResourceFroxelHeight = 0;

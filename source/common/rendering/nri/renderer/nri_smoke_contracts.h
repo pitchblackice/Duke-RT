@@ -72,6 +72,14 @@ enum class NRISmokeInjectionShape : uint32_t
 	Rectangle = 1,
 };
 
+enum class NRISmokeInjectionSourceClass : uint32_t
+{
+	AmbientMap = 0,
+	InteractiveActor = 1,
+	InteractiveEvent = 2,
+	Diagnostic = 3,
+};
+
 struct NRISmokeInjectionCommandGpu
 {
 	float position[3] = {};
@@ -87,7 +95,9 @@ struct NRISmokeInjectionCommandGpu
 	float halfAxisU[3] = {};
 	uint32_t shape = static_cast<uint32_t>(NRISmokeInjectionShape::Sphere);
 	float halfAxisV[3] = {};
-	uint32_t padding[3] = {};
+	uint32_t sourceId = 0;
+	uint32_t sourceSlot = UINT32_MAX;
+	uint32_t sourceMetadata = 0;
 };
 
 struct NRISmokeControlGpu
@@ -267,6 +277,9 @@ static_assert(sizeof(NRISmokeInjectionCommandGpu) == 96);
 static_assert(offsetof(NRISmokeInjectionCommandGpu, halfAxisU) == 56);
 static_assert(offsetof(NRISmokeInjectionCommandGpu, shape) == 68);
 static_assert(offsetof(NRISmokeInjectionCommandGpu, halfAxisV) == 72);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, sourceId) == 84);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, sourceSlot) == 88);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, sourceMetadata) == 92);
 static_assert(sizeof(NRISmokeControlGpu) == 568);
 static_assert(sizeof(NRISmokeIndirectCacheGpu) == 32);
 static_assert(sizeof(NRISmokeDirectCacheGpu) == 40);
