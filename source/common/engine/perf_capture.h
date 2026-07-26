@@ -103,6 +103,7 @@ struct PerfCompactGpuTiming
 {
 	double segmentMs = 0.0, sceneMs = 0.0, traceMs = 0.0, traceDispatchMs = 0.0, denoiseMs = 0.0;
 	double compositionMs = 0.0, upscaleMs = 0.0, finalMs = 0.0;
+	double smokeSimulationMs = 0.0, smokeVolumeMs = 0.0;
 	uint32_t segmentCount = 0, invalidPairs = 0, droppedScopes = 0;
 };
 

@@ -273,11 +273,14 @@ namespace
 			nri.traceDirectScene, nri.traceDirectional, nri.traceDirectionalShadow,
 			nri.traceSplitShadow, nri.traceFastEmissiveShadow, nri.traceVisibleChunkGate,
 			(unsigned long long)gCapture.epoch, record.eligibleIndex);
-		Printf("PERF pt gpu timing NRI: frame=%llu nri_frame=%llu segment=%.3f scene=%.3f trace=%.3f trace_dispatch=%.3f denoise=%.3f compose=%.3f upscale=%.3f final=%.3f segments=%u invalid=%u dropped=%u resolved=%u expected=%u compact=1 epoch=%llu sample=%u\n",
+		Printf("PERF pt gpu timing NRI: frame=%llu nri_frame=%llu segment=%.3f scene=%.3f trace=%.3f trace_dispatch=%.3f denoise=%.3f compose=%.3f upscale=%.3f final=%.3f smoke_simulation=%.3f smoke_volume=%.3f smoke_total=%.3f segments=%u invalid=%u dropped=%u resolved=%u expected=%u compact=1 epoch=%llu sample=%u\n",
 			(unsigned long long)outer.traceFrame, (unsigned long long)nri.frame,
 			record.gpu.segmentMs, record.gpu.sceneMs,
 			record.gpu.traceMs, record.gpu.traceDispatchMs, record.gpu.denoiseMs, record.gpu.compositionMs,
-			record.gpu.upscaleMs, record.gpu.finalMs, record.gpu.segmentCount,
+			record.gpu.upscaleMs, record.gpu.finalMs,
+			record.gpu.smokeSimulationMs, record.gpu.smokeVolumeMs,
+			record.gpu.smokeSimulationMs + record.gpu.smokeVolumeMs,
+			record.gpu.segmentCount,
 			record.gpu.invalidPairs, record.gpu.droppedScopes, record.resolvedGpuSegments,
 			record.expectedGpuSegments, (unsigned long long)gCapture.epoch,
 			record.eligibleIndex);
@@ -407,6 +410,8 @@ void PerfCompactCaptureResolveGpuSegment(const PerfCompactCaptureToken& token, c
 	r.gpu.denoiseMs += timing.denoiseMs;
 	r.gpu.compositionMs += timing.compositionMs; r.gpu.upscaleMs += timing.upscaleMs;
 	r.gpu.finalMs += timing.finalMs; r.gpu.segmentCount += timing.segmentCount;
+	r.gpu.smokeSimulationMs += timing.smokeSimulationMs;
+	r.gpu.smokeVolumeMs += timing.smokeVolumeMs;
 	r.gpu.invalidPairs += timing.invalidPairs; r.gpu.droppedScopes += timing.droppedScopes;
 	if (gCapture.pendingGpu > 0) gCapture.pendingGpu--;
 }

@@ -2,6 +2,7 @@
 
 #include "nri_pass_dispatch.h"
 #include "nri_renderer.h"
+#include "../system/nri_gpu_timing.h"
 #include "../system/nri_renderdevice.h"
 #include "gamecontrol.h"
 #include "printf.h"
@@ -1043,6 +1044,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 {
 	if (mLastSimulatedFrame == renderer.mFrameIndex)
 		return true;
+	NRIScopedGpuTiming gpuTiming(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeSimulation);
 	mLastSimulatedFrame = renderer.mFrameIndex;
 	const NRISmokeAuthorityMode authorityMode = mAuthority.GetSnapshot().mode;
 	const bool particleAuthority = authorityMode == NRISmokeAuthorityMode::Particles || authorityMode == NRISmokeAuthorityMode::Compare;
@@ -1285,6 +1287,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 
 bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc& route)
 {
+	NRIScopedGpuTiming gpuTiming(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeVolume);
 	CommandSlot& slot = mCommandSlots[std::min(renderer.mFrameBuffer->mCurrentQueuedFrameIndex, (uint32_t)mCommandSlots.size() - 1)];
 	NRITextureResource& input = renderer.GetFrameTexture(route.inputSlot);
 	NRITextureResource& depth = renderer.GetFrameTexture(route.depthSlot);

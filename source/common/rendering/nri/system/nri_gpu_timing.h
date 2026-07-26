@@ -26,6 +26,8 @@ enum class NRIGpuTimingScope : uint8_t
 	VoxelFinalize,
 	VoxelBlas,
 	WorldTlas,
+	SmokeSimulation,
+	SmokeVolume,
 	Count
 };
 
@@ -33,8 +35,8 @@ class NRIGpuTiming
 {
 public:
 	static constexpr uint32_t SlotCount = 3;
-	static constexpr uint32_t QueryCapacity = 64;
-	static constexpr uint32_t ScopeCapacity = 31;
+	static constexpr uint32_t QueryCapacity = 128;
+	static constexpr uint32_t ScopeCapacity = 63;
 
 	void Prepare(nri::CoreInterface& core, nri::Device& device);
 	void Destroy(nri::CoreInterface& core);
@@ -68,6 +70,7 @@ private:
 		uint32_t segmentEndQuery = 0;
 		uint32_t droppedScopes = 0;
 		uint32_t droppedVoxelScopes = 0;
+		uint32_t droppedSmokeScopes = 0;
 		uint64_t rendererFrame = 0;
 		bool pending = false;
 	};
