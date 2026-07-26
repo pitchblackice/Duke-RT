@@ -7,6 +7,7 @@
 #include "nri_exposure.h"
 #include "nri_frame_graph.h"
 #include "nri_frame_resources.h"
+#include "nri_indirect_radiance_cache.h"
 #include "nri_nrd.h"
 #include "nri_persistent_voxels.h"
 #include "nri_pipeline_state.h"
@@ -2107,6 +2108,7 @@ public:
 	enum class PipelineSlot : uint32_t
 	{
 		TraceOpaque,
+		TraceOpaqueCache,
 		Composition,
 		TraceTransparent,
 		ExposureHistogramClear,
@@ -2145,6 +2147,7 @@ private:
 	friend class NRIAccelerationStructureManager;
 	friend class NRIDescriptorSetManager;
 	friend class NRIFrameResources;
+	friend NRIIndirectRadianceCacheServices BuildNRIIndirectRadianceCacheServices(NRIRenderer& renderer);
 	friend class NRIPipelineStateManager;
 	friend class NRISmokeSystem;
 	friend class NRIPreloadCoordinator;
@@ -2649,6 +2652,7 @@ private:
 	std::unique_ptr<NRISmokeSystem> mSmoke;
 	NRIWeaponEventBatch mWeaponEventBatch;
 	nri::PipelineLayout* mPipelineLayout = nullptr;
+	nri::PipelineLayout* mIndirectRadianceCachePipelineLayout = nullptr;
 	nri::PipelineLayout* mTaaPipelineLayout = nullptr;
 	nri::PipelineLayout* mPresentPipelineLayout = nullptr;
 	nri::PipelineLayout* mExposurePipelineLayout = nullptr;
@@ -2722,6 +2726,8 @@ private:
 	NRIBufferResource mVisibleChunkBuffer;
 	NRIBufferResource mVisibleFlatPlaneBuffer;
 	NRITraceShaderStats mTraceShaderStats;
+	NRIIndirectRadianceCache mIndirectRadianceCache;
+	NRIIndirectRadianceCacheTelemetrySnapshot mLastIndirectRadianceCacheTelemetry = {};
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mResidentStaticBlasScratchBuffer;
 	NRIBufferResource mEmissiveTopLevelScratchBuffer;

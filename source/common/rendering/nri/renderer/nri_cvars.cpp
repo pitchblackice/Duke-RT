@@ -203,6 +203,7 @@ CVAR(Bool, nri_ptscenedataring, true, 0)
 CVAR(Bool, nri_ptscenedataringtrace, false, 0)
 
 CVAR(Bool, nri_ptemissivestabilitytrace, false, 0)
+CVAR(Bool, nri_ptindirectradiancecache, false, 0)
 
 CVAR(Bool, nri_ptwaitpresent, true, 0)
 

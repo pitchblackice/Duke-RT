@@ -3,6 +3,9 @@
 #include "Include/RaytracingShared.hlsli"
 #include "Include/AnalyticLightSampling.hlsli"
 #include "Include/DirectionalLightSampling.hlsli"
+#if defined(NRI_INDIRECT_RADIANCE_CACHE)
+#include "Include/IndirectRadianceCacheTrace.hlsli"
+#endif
 
 uint Hash32(uint value)
 {
@@ -700,6 +703,14 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 		}
 		const MaterialData bounceMaterial = GetMaterialData(bounceHit.materialIndex, bounceHit.dataSource);
 		const bool bounceReceivesShadow = MaterialReceivesShadow(bounceMaterial);
+#if defined(NRI_INDIRECT_RADIANCE_CACHE)
+		if (bounce == 0u && bounceCount > 1u)
+		{
+			float3 ignoredCachedRadiance = 0.0;
+			TryReadIndirectRadianceCache(bounceHit, bounceMaterial, ignoredCachedRadiance);
+			InterlockedAdd(gIndirectRadianceCacheTelemetry[NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_EXACT_FALLBACK], 1u);
+		}
+#endif
 		if ((bounceMaterial.flags & (MATERIAL_FLAG_MIRROR | MATERIAL_FLAG_PORTAL)) != 0)
 		{
 			break;

@@ -1,6 +1,7 @@
 #include "nri_pass_dispatch.h"
 
 #include "nri_descriptor_sets.h"
+#include "nri_pipeline_state.h"
 #include "nri_scene_upload.h"
 #include "nri_smoke.h"
 #include "../system/nri_renderdevice.h"
@@ -30,6 +31,14 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext(bool mainViewEligib
 		service.getPipeline = [](void* user, PipelineSlot slot) -> nri::Pipeline*
 		{
 			return static_cast<NRIRenderer*>(user)->GetPipeline(slot);
+		};
+		service.ensureIndirectRadianceCachePipeline = [](void* user) -> bool
+		{
+			return NRIPipelineStateManager::EnsureIndirectRadianceCachePipeline(*static_cast<NRIRenderer*>(user));
+		};
+		service.getIndirectRadianceCachePipelineLayout = [](void* user) -> nri::PipelineLayout*
+		{
+			return static_cast<NRIRenderer*>(user)->mIndirectRadianceCachePipelineLayout;
 		};
 		return service;
 	};
@@ -239,6 +248,92 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext(bool mainViewEligib
 		return service;
 	};
 
+	auto buildIndirectRadianceCacheService = [&]()
+	{
+		NRIPassDispatchContext::IndirectRadianceCacheService service = {};
+		service.user = this;
+		service.prepare = [](void* user, bool enabled) -> NRIIndirectRadianceCachePrepareResult
+		{
+			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			if (!enabled)
+			{
+				return renderer->mIndirectRadianceCache.Prepare(
+					BuildNRIIndirectRadianceCacheServices(*renderer), false, {});
+			}
+			if (!renderer->mTraceShaderStats.Ensure(renderer->BuildResourceServices()) ||
+				!NRIPipelineStateManager::EnsureIndirectRadianceCachePipeline(*renderer))
+			{
+				return {};
+			}
+
+			auto combine = [](uint64_t hash, uint64_t value) -> uint64_t
+			{
+				return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6u) + (hash >> 2u));
+			};
+			NRIIndirectRadianceCacheCompatibilityInput compatibility = {};
+			compatibility.valid =
+				renderer->mMapWorld.valid &&
+				renderer->mStaticMapScene.valid &&
+				renderer->mSceneInstancePayloadCacheValid &&
+				renderer->mLastWorldTlasInstancePayloadHash != 0;
+			compatibility.mapIdentity = renderer->mMapWorld.valid ? renderer->mMapWorld.buildSerial : 0;
+			compatibility.staticSceneIdentity = combine(
+				combine(
+					combine(renderer->mStaticVertexBuffer.payloadHash, renderer->mStaticIndexBuffer.payloadHash),
+					renderer->mStaticPrimitiveBuffer.payloadHash),
+				renderer->mWorldBlasContentGeneration);
+			compatibility.portalRouteIdentity = combine(renderer->mPortalPayloadHash, renderer->mSkyEnvironment.ActiveKey());
+			compatibility.materialIdentity = combine(
+				renderer->mStaticMaterialBuffer.payloadHash,
+				renderer->mMaterialBuffer.payloadHash);
+			compatibility.mutationIdentity = combine(
+				combine(
+					combine(renderer->mVertexBuffer.payloadHash, renderer->mIndexBuffer.payloadHash),
+					renderer->mPrimitiveBuffer.payloadHash),
+				renderer->mSceneInstancePayloadHash);
+			compatibility.voxelOccurrenceIdentity = combine(
+				renderer->mLastWorldTlasInstancePayloadHash,
+				renderer->mLastWorldTlasSceneInstancePayloadHash);
+			compatibility.lightingIdentity = combine(
+				combine(
+					combine(renderer->mRuntimeLightPayloadHash, renderer->mEmissiveSamplingPayloadHash),
+					renderer->mSectorLightingPayloadHash),
+				renderer->mDirectionalLightState.stateHash);
+			return renderer->mIndirectRadianceCache.Prepare(
+				BuildNRIIndirectRadianceCacheServices(*renderer), true, compatibility);
+		};
+		service.recordPendingClear = [](void* user) -> bool
+		{
+			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			return renderer->mIndirectRadianceCache.RecordPendingClear(
+				BuildNRIIndirectRadianceCacheServices(*renderer));
+		};
+		service.advanceFrame = [](void* user)
+		{
+			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			renderer->mIndirectRadianceCache.AdvanceFrame(BuildNRIIndirectRadianceCacheServices(*renderer));
+		};
+		service.copyTelemetry = [](void* user, uint64_t frameNumber)
+		{
+			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			renderer->mIndirectRadianceCache.CopyTelemetryForReadback(
+				BuildNRIIndirectRadianceCacheServices(*renderer), frameNumber);
+		};
+		service.readbackTelemetry = [](void* user, bool enabled)
+		{
+			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			renderer->mIndirectRadianceCache.ReadbackTelemetry(
+				BuildNRIIndirectRadianceCacheServices(*renderer),
+				enabled,
+				renderer->mLastIndirectRadianceCacheTelemetry);
+		};
+		service.getTelemetry = [](void* user) -> const NRIIndirectRadianceCacheTelemetrySnapshot&
+		{
+			return static_cast<NRIRenderer*>(user)->mLastIndirectRadianceCacheTelemetry;
+		};
+		return service;
+	};
+
 	init.textures = buildTextureService();
 	init.pipelines = buildPipelineService();
 	init.descriptors = buildDescriptorService();
@@ -249,6 +344,7 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext(bool mainViewEligib
 	init.upscalerService = buildUpscalerService();
 	init.selfTest = buildSelfTestService();
 	init.smokeService = buildSmokeService();
+	init.indirectRadianceCacheService = buildIndirectRadianceCacheService();
 	init.pipelineLayout = &mPipelineLayout;
 	init.taaPipelineLayout = &mTaaPipelineLayout;
 	init.presentPipelineLayout = &mPresentPipelineLayout;

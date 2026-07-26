@@ -1754,6 +1754,7 @@ void NRIRenderer::Shutdown()
 
 	mNrd.Shutdown();
 	mUpscaler.Shutdown(*mFrameBuffer);
+	mIndirectRadianceCache.Destroy(BuildResourceServices());
 	DestroyNRIVoxelComputeMeshingDiagnostics(*this);
 	DestroyAccelerationStructures();
 	ClearRuntimePointLights();
@@ -1788,6 +1789,11 @@ void NRIRenderer::Shutdown()
 	{
 		mFrameBuffer->mCore.DestroyPipelineLayout(mPipelineLayout);
 		mPipelineLayout = nullptr;
+	}
+	if (mIndirectRadianceCachePipelineLayout != nullptr)
+	{
+		mFrameBuffer->mCore.DestroyPipelineLayout(mIndirectRadianceCachePipelineLayout);
+		mIndirectRadianceCachePipelineLayout = nullptr;
 	}
 	if (mTaaPipelineLayout != nullptr)
 	{

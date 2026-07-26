@@ -10,6 +10,7 @@ struct HitData
 	uint primitiveIndex;
 	uint portalIndex;
 	uint instanceId;
+	uint pathFlags;
 	float2 barycentrics;
 	float distance;
 	float3 position;
@@ -25,6 +26,8 @@ static const uint PORTAL_TRAVERSAL_CLASS_NONE = 0u;
 static const uint PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
 static const uint PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
 static const uint PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
+static const uint HIT_PATH_FLAG_REFLECTION = 1u;
+static const uint HIT_PATH_FLAG_SPACE_TRANSFER = 2u;
 static const float TRACE_MIN_DISTANCE = 1e-4;
 static const float TRACE_FILTER_CONTINUE_BIAS = 1e-6;
 static const uint TRACE_FILTER_SKIP_LIMIT = 64u;
@@ -1144,6 +1147,7 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 	float3 origin = startOrigin;
 	float3 direction = startDirection;
 	float remainingDistance = maxDistance;
+	uint pathFlags = 0u;
 
 	[loop]
 	for (uint continuationStep = 0u; continuationStep < 32u; ++continuationStep)
@@ -1161,6 +1165,7 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 
 		if (reflectivePortal && mirrorBudget > 0u)
 		{
+			pathFlags |= HIT_PATH_FLAG_REFLECTION;
 			remainingDistance = max(remainingDistance - hitData.distance, 0.0);
 			origin = hitData.position + hitData.normal * 0.05;
 			direction = reflect(direction, hitData.normal);
@@ -1174,6 +1179,7 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 
 		if (transferPortal && portalBudget > 0u)
 		{
+			pathFlags |= HIT_PATH_FLAG_SPACE_TRANSFER;
 			remainingDistance = max(remainingDistance - hitData.distance, 0.0);
 			origin = hitData.position + direction * 0.05 + portalData.delta;
 			exitDirection = direction;
@@ -1182,6 +1188,7 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 			continue;
 		}
 
+		hitData.pathFlags = pathFlags;
 		exitDirection = direction;
 		return true;
 	}

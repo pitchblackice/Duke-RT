@@ -414,6 +414,30 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 			BuildTraceShaderStatsFenceServices(context.mResources.frameBuffer),
 			context.mLastPerfTraceShaderStats);
 		context.mExposureService.ReadbackAutoExposureStats();
+		context.mIndirectRadianceCacheService.ReadbackTelemetry(!!nri_ptindirectradiancecache);
+	}
+	if (ShouldTracePtPerf())
+	{
+		const NRIIndirectRadianceCacheTelemetrySnapshot& cache = context.mIndirectRadianceCacheService.GetTelemetry();
+		Printf("PERF pt indirect radiance cache NRI: frame=%u requested=%u mode=exact-miss valid=%u telemetry_frame=%llu lookups=%llu accepted=%llu forced_miss=%llu collision=%llu stale=%llu unsupported=%llu exact_fallback=%llu occupancy=%llu updates=%llu clears=%llu table_bytes=%llu total_bytes=%llu invalidation=0x%x pending_readbacks=%u\n",
+			context.mFrame.frameIndex,
+			(bool)nri_ptindirectradiancecache ? 1u : 0u,
+			cache.valid ? 1u : 0u,
+			(unsigned long long)cache.frameNumber,
+			(unsigned long long)cache.lookupCount,
+			(unsigned long long)cache.acceptedHitCount,
+			(unsigned long long)cache.forcedMissCount,
+			(unsigned long long)cache.collisionCount,
+			(unsigned long long)cache.staleGenerationCount,
+			(unsigned long long)cache.unsupportedRouteCount,
+			(unsigned long long)cache.exactFallbackCount,
+			(unsigned long long)cache.occupancy,
+			(unsigned long long)cache.updateCount,
+			(unsigned long long)cache.clearCount,
+			(unsigned long long)cache.tableMemoryBytes,
+			(unsigned long long)cache.totalMemoryBytes,
+			cache.invalidationMask,
+			cache.pendingReadbacks);
 	}
 
 	if (!context.mResources.UpdateReprojectionBuffer())
@@ -436,6 +460,18 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	context.mActiveIndirectSamplingMode =
 		context.mEffectiveIndirectSamplingMode != 0u &&
 		!context.mFrame.resetHistory ? 1u : 0u;
+	const bool indirectRadianceCacheRequested =
+		(bool)nri_ptindirectradiancecache &&
+		bootstrapMode == 0u &&
+		!directSceneTrace &&
+		traceSettings.lightBounceCount > 1u;
+	NRIIndirectRadianceCachePrepareResult indirectRadianceCache =
+		context.mIndirectRadianceCacheService.Prepare(indirectRadianceCacheRequested);
+	bool indirectRadianceCacheActive = indirectRadianceCache.active;
+	if (indirectRadianceCacheActive && !context.mIndirectRadianceCacheService.RecordPendingClear())
+	{
+		indirectRadianceCacheActive = false;
+	}
 	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars(context.mEffectiveIndirectSamplingMode);
 	const bool useTemporalJitter =
 		!nri_ptbootstrap &&
@@ -472,6 +508,7 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		(nri_ptvisiblechunkgate ? NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS : 0u) |
 		(ShouldCollectTraceShaderStats() ? NRI_FLAG_TRACE_SHADER_STATS : 0u) |
 		(context.mActiveIndirectSamplingMode != 0u ? NRI_FLAG_PROBABILISTIC_INDIRECT : 0u) |
+		(indirectRadianceCacheActive ? NRI_FLAG_INDIRECT_RADIANCE_CACHE : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u) |
 		NRIPackTemporalJitterPhaseCount(jitterPhaseCount) |
 		PackVoxelNormalBlend8(nri_ptvoxelnormalblend);
@@ -532,7 +569,13 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	context.mOutputDescriptors[14] = context.mTextures.Get(NRIRenderer::FrameTextureSlot::DirectEmission).storageView;
 	context.mDescriptors.UpdateOutputSet();
 
-	context.mCommands.SetPipelineLayout(context.mPipelineLayout);
+	const nri::PipelineLayout* tracePipelineLayout = indirectRadianceCacheActive ?
+		context.mPipelines.GetIndirectRadianceCachePipelineLayout() : context.mPipelineLayout;
+	if (tracePipelineLayout == nullptr)
+	{
+		return false;
+	}
+	context.mCommands.SetPipelineLayout(const_cast<nri::PipelineLayout*>(tracePipelineLayout));
 	context.mCommands.SetRootConstants(&constants, sizeof(constants));
 	context.mSceneBinding.BindSceneRootDescriptors();
 	context.mCommands.SetDescriptorSet(0, context.mSamplerSet);
@@ -540,6 +583,10 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	context.mCommands.SetDescriptorSet(2, context.mSceneBinding.GetCurrentSceneDataSet());
 	context.mCommands.SetDescriptorSet(3, context.mFrameTextureSet);
 	context.mCommands.SetDescriptorSet(4, context.mOutputSet);
+	if (indirectRadianceCacheActive)
+	{
+		context.mCommands.SetDescriptorSet(NRI_INDIRECT_RADIANCE_CACHE_SET_INDEX, indirectRadianceCache.descriptorSet);
+	}
 	const uint32_t dispatchX = GetDispatchSize(context.mFrame.renderWidth);
 	const uint32_t dispatchY = GetDispatchSize(context.mFrame.renderHeight);
 	const uint32_t dispatchZ = 1;
@@ -616,7 +663,8 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueCommandMs);
 		context.mTraceShaderStats.ResetBuffer(context.mResources.BuildResourceServices(), ShouldCollectTraceShaderStats());
 		context.mCommands.core->CmdBeginAnnotation(*context.mCommands.commandBuffer, "Raze.TraceOpaque.Dispatch", nri::BGRA_UNUSED);
-		context.mCommands.SetPipeline(context.mPipelines.Get(NRIRenderer::PipelineSlot::TraceOpaque));
+		context.mCommands.SetPipeline(context.mPipelines.Get(
+			indirectRadianceCacheActive ? NRIRenderer::PipelineSlot::TraceOpaqueCache : NRIRenderer::PipelineSlot::TraceOpaque));
 		{
 			NRIScopedGpuTiming dispatchGpuTiming(context.mResources.frameBuffer, NRIGpuTimingScope::TraceDispatch);
 			context.mCommands.Dispatch(dispatchX, dispatchY, dispatchZ);
@@ -634,6 +682,11 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		input.dynamicPrimitiveCount = context.mSceneStats.dynamicPrimitiveCount;
 		input.persistentVoxelPrimitiveCount = context.mPersistentVoxels.BoundPrimitiveCount();
 		context.mTraceShaderStats.CopyForReadback(context.mResources.BuildResourceServices(), input);
+		if (indirectRadianceCacheActive)
+		{
+			context.mIndirectRadianceCacheService.CopyTelemetry((uint64_t)context.mFrame.frameIndex);
+			context.mIndirectRadianceCacheService.AdvanceFrame();
+		}
 	}
 	return true;
 }
