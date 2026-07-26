@@ -2598,9 +2598,11 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 		actor.worldTlasInstanceIndex = persistentVoxelInstance.instanceId;
 		if (actor.indirectOnly && ((int)perf_looptraceframes > 0 || (int)nri_pttraceframes > 0 || voxelStatsEnabled))
 		{
-			Printf("PERF pt local player voxel instance NRI: frame=%u actor=%d actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx material_key=0x%llx instance_id=%u mask=0x%x metadata=0x%x primary_visible=%u captured=%u retained_age=%llu blas=1\n",
+			Printf("PERF pt local player voxel instance NRI: frame=%u actor=%d voxel=%d prims=%u actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx material_key=0x%llx instance_id=%u mask=0x%x metadata=0x%x primary_visible=%u captured=%u retained_age=%llu blas=1\n",
 				frameIndex,
 				actor.actorIndex,
+				actor.resolvedVoxelIndex,
+				actor.primitiveCount,
 				(unsigned long long)actor.identityKey,
 				(unsigned long long)actor.meshResourceKey,
 				(unsigned long long)actor.meshKeyHash,
