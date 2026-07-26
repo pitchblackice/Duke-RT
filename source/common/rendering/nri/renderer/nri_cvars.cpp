@@ -1644,6 +1644,14 @@ CVAR(Bool, nri_ptvoxelsharedblasloading, false, 0)
 
 CVAR(Bool, nri_ptvoxelsharedblasroute, false, 0)
 
+CVAR(Bool, nri_ptvoxelshadowproxybuild, false, 0)
+
+CVAR(Bool, nri_ptvoxelshadowproxyroute, false, 0)
+
+CVAR(Int, nri_ptvoxelshadowproxybuilds, 1, 0)
+
+CVAR(Int, nri_ptvoxelshadowproxytransitions, 8, 0)
+
 CVAR(Int, nri_ptvoxelexcludeindex, -1, 0)
 
 CVAR(Int, nri_ptvoxelexcludeindex2, -1, 0)

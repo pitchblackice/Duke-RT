@@ -63,6 +63,22 @@ namespace
 		return facts.actorIndex >= 0 ? (uint64_t)(uint32_t)facts.actorIndex + 1ull : facts.sourceIdentityKey;
 	}
 
+	uint64_t HashCompatibility(uint64_t hash, uint64_t value)
+	{
+		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6u) + (hash >> 2u));
+	}
+
+	uint64_t BuildProxyCompatibilityKey(const NRIVoxelRepresentationFacts& facts)
+	{
+		uint64_t key = HashCompatibility(facts.sourceIdentityKey, facts.meshResourceKey);
+		key = HashCompatibility(key, facts.materialKeyHash);
+		key = HashCompatibility(key, (uint64_t)(uint32_t)facts.resolvedVoxelIndex);
+		key = HashCompatibility(key, facts.workloadMask);
+		key = HashCompatibility(key, facts.shadowProxyCompatibilityKey);
+		key = HashCompatibility(key, facts.shadowProxyPrimitiveCount);
+		return key;
+	}
+
 	NRIVoxelProjectedBounds ProjectBounds(
 		const NRIVoxelRepresentationFrameInput& frame,
 		const NRIVoxelRepresentationFacts& facts,
@@ -220,6 +236,7 @@ void NRIVoxelRepresentationPolicy::BeginFrame(const NRIVoxelRepresentationFrameI
 	mSnapshot.decisions.clear();
 	mSnapshot.mapBuildSerial = input.mapBuildSerial;
 	mSnapshot.frameIndex = input.frameIndex;
+	mTransitionsThisFrame = 0;
 }
 
 NRIVoxelRepresentationDecision NRIVoxelRepresentationPolicy::EvaluateExact(
@@ -254,6 +271,9 @@ NRIVoxelRepresentationDecision NRIVoxelRepresentationPolicy::EvaluateExact(
 
 	HysteresisState& state = mHysteresis[decision.decisionIdentity];
 	const bool sameSource = state.valid && state.sourceIdentityKey == facts.sourceIdentityKey;
+	const uint64_t proxyCompatibilityKey = BuildProxyCompatibilityKey(facts);
+	const bool sameProxyCompatibility = sameSource &&
+		state.proxyCompatibilityKey == proxyCompatibilityKey;
 	const bool consecutiveFrame = sameSource && state.lastFrameIndex + 1u == mFrame.frameIndex;
 	const bool sameFrame = sameSource && state.lastFrameIndex == mFrame.frameIndex;
 	if (!sameFrame)
@@ -263,28 +283,94 @@ NRIVoxelRepresentationDecision NRIVoxelRepresentationPolicy::EvaluateExact(
 			consecutiveFrame && decision.projectedBounds.valid ?
 				state.consecutiveProjectedFrames + 1u :
 				(decision.projectedBounds.valid ? 1u : 0u);
+		const bool proxyObservationReady =
+			mFrame.shadowProxyRouteEnabled &&
+			facts.shadowProxyCertified &&
+			facts.shadowProxyReady &&
+			facts.shadowProxyPrimitiveCount != 0u &&
+			facts.shadowProxyPrimitiveCount <= facts.primitiveCount &&
+			(facts.workloadMask & (uint8_t)NRI_TLAS_MASK_SHADOW) != 0u;
+		state.consecutiveProxyReadyFrames =
+			consecutiveFrame && sameProxyCompatibility && proxyObservationReady ?
+				state.consecutiveProxyReadyFrames + 1u :
+				(proxyObservationReady ? 1u : 0u);
+		if (!sameProxyCompatibility || !proxyObservationReady)
+		{
+			state.usingProxy = false;
+		}
 		state.lastFrameIndex = mFrame.frameIndex;
 		state.sourceIdentityKey = facts.sourceIdentityKey;
+		state.proxyCompatibilityKey = proxyCompatibilityKey;
 		state.valid = true;
 	}
 	decision.framesInExactState = state.framesInExactState;
 	decision.consecutiveProjectedFrames = state.consecutiveProjectedFrames;
+	decision.consecutiveProxyReadyFrames = state.consecutiveProxyReadyFrames;
 	decision.transitionCount = state.transitionCount;
 	decision.hysteresisObservationReady =
 		decision.consecutiveProjectedFrames >= HysteresisObservationFrameCount;
-	// Slice 4.4 is deliberately observational. A valid projection and mature
-	// hysteresis sample never authorize a representation transition.
-	decision.proxyEligible = false;
-	decision.proxyReady = false;
-	decision.transitionReady = false;
+	decision.proxyEligible = facts.shadowProxyCertified &&
+		facts.shadowProxyPrimitiveCount != 0u &&
+		facts.shadowProxyPrimitiveCount <= facts.primitiveCount &&
+		(facts.workloadMask & (uint8_t)NRI_TLAS_MASK_SHADOW) != 0u;
+	decision.proxyReady = decision.proxyEligible && facts.shadowProxyReady;
+	decision.transitionReady = decision.proxyReady &&
+		decision.consecutiveProxyReadyFrames >= HysteresisObservationFrameCount;
+	if (facts.shadowProxyCertified)
+	{
+		if (facts.workloadMask != 0u && !mFrame.shadowProxyRouteEnabled)
+		{
+			decision.reason = NRIVoxelRepresentationReason::ProxyDisabled;
+		}
+		else if (!decision.proxyEligible && facts.workloadMask != 0u)
+		{
+			decision.reason = NRIVoxelRepresentationReason::ProxyUncertified;
+		}
+		else if (!decision.proxyReady)
+		{
+			decision.reason = NRIVoxelRepresentationReason::ProxyNotReady;
+		}
+		else if (!decision.transitionReady)
+		{
+			decision.reason = NRIVoxelRepresentationReason::ProxyHysteresis;
+		}
+		else
+		{
+			const bool needsTransition = !state.usingProxy;
+			const bool transitionAllowed = !needsTransition ||
+				mTransitionsThisFrame < mFrame.shadowProxyTransitionsPerFrame;
+			if (transitionAllowed)
+			{
+				if (needsTransition)
+				{
+					state.usingProxy = true;
+					state.transitionCount++;
+					mTransitionsThisFrame++;
+				}
+				decision.representation = NRIVoxelRepresentationKind::ExactWithCertifiedShadowProxy;
+				decision.exactWorkloadMask = (uint8_t)(facts.workloadMask & ~(uint8_t)NRI_TLAS_MASK_SHADOW);
+				decision.proxyWorkloadMask = (uint8_t)(facts.workloadMask & (uint8_t)NRI_TLAS_MASK_SHADOW);
+				decision.reason = NRIVoxelRepresentationReason::CertifiedShadowProxy;
+			}
+			else
+			{
+				decision.reason = NRIVoxelRepresentationReason::ProxyTransitionLimited;
+				mSnapshot.proxyTransitionLimitedCount++;
+			}
+		}
+	}
+	decision.transitionCount = state.transitionCount;
 
 	mSnapshot.decisionCount++;
-	mSnapshot.exactDecisionCount++;
+	mSnapshot.exactDecisionCount += decision.representation == NRIVoxelRepresentationKind::Exact ? 1u : 0u;
+	mSnapshot.proxyDecisionCount += decision.representation == NRIVoxelRepresentationKind::ExactWithCertifiedShadowProxy ? 1u : 0u;
 	mSnapshot.exactPrimitiveCount += facts.primitiveCount;
 	mSnapshot.projectedDecisionCount += decision.projectedBounds.valid ? 1u : 0u;
 	mSnapshot.viewportIntersectionCount += decision.projectedBounds.intersectsViewport ? 1u : 0u;
 	mSnapshot.hysteresisObservationReadyCount += decision.hysteresisObservationReady ? 1u : 0u;
 	mSnapshot.proxyReadyCount += decision.proxyReady ? 1u : 0u;
+	mSnapshot.proxyEligibleCount += decision.proxyEligible ? 1u : 0u;
+	mSnapshot.proxyPrimitiveCount += decision.proxyWorkloadMask != 0u ? facts.shadowProxyPrimitiveCount : 0u;
 	AccumulateMaskCounts(decision, mSnapshot);
 	mSnapshot.decisions.push_back(decision);
 	return decision;
@@ -296,6 +382,7 @@ void NRIVoxelRepresentationPolicy::Reset()
 	mSnapshot = {};
 	mHysteresis.clear();
 	mHasFrame = false;
+	mTransitionsThisFrame = 0;
 }
 
 const char* GetNRIVoxelRepresentationKindName(NRIVoxelRepresentationKind kind)
@@ -303,6 +390,7 @@ const char* GetNRIVoxelRepresentationKindName(NRIVoxelRepresentationKind kind)
 	switch (kind)
 	{
 	case NRIVoxelRepresentationKind::Exact: return "exact";
+	case NRIVoxelRepresentationKind::ExactWithCertifiedShadowProxy: return "exact+certified-shadow-proxy";
 	default: return "unknown";
 	}
 }
@@ -317,6 +405,12 @@ const char* GetNRIVoxelRepresentationReasonName(NRIVoxelRepresentationReason rea
 	case NRIVoxelRepresentationReason::InvalidTransform: return "invalid-transform";
 	case NRIVoxelRepresentationReason::ProjectionUnavailable: return "projection-unavailable";
 	case NRIVoxelRepresentationReason::BehindCamera: return "behind-camera";
+	case NRIVoxelRepresentationReason::ProxyDisabled: return "proxy-disabled";
+	case NRIVoxelRepresentationReason::ProxyUncertified: return "proxy-uncertified";
+	case NRIVoxelRepresentationReason::ProxyNotReady: return "proxy-not-ready";
+	case NRIVoxelRepresentationReason::ProxyHysteresis: return "proxy-hysteresis";
+	case NRIVoxelRepresentationReason::ProxyTransitionLimited: return "proxy-transition-limited";
+	case NRIVoxelRepresentationReason::CertifiedShadowProxy: return "certified-shadow-proxy";
 	default: return "unknown";
 	}
 }

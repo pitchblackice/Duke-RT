@@ -90,6 +90,10 @@ struct NRIPersistentVoxelSettings
 	uint32_t sharedBlasBuildsPerFrame = 0;
 	bool sharedBlasLoadingWarmupEnabled = false;
 	bool sharedBlasRouteEnabled = false;
+	bool shadowProxyBuildEnabled = false;
+	bool shadowProxyRouteEnabled = false;
+	uint32_t shadowProxyBuildsPerFrame = 0;
+	uint32_t shadowProxyTransitionsPerFrame = 0;
 	bool transformKeyed = false;
 	bool diagnosticsEnabled = false;
 	std::array<int32_t, 3> excludeIndices = { -1, -1, -1 };

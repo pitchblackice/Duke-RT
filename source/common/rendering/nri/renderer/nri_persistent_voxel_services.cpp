@@ -1075,6 +1075,13 @@ public:
 		{
 			return BarrierBuildInputs(static_cast<NRIRenderer&>(*static_cast<NRIRenderer*>(user)), vertexBuffer, indexBuffer);
 		};
+		services.ensureStructuredBuffer = [](void* user, NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* reason, int uploadKind) -> bool
+		{
+			NRIRenderer& renderer = *static_cast<NRIRenderer*>(user);
+			SceneBufferDebugStats* stats = uploadKind == ResidentUploadKind_Index ?
+				&renderer.mIndexBufferStats : &renderer.mVertexBufferStats;
+			return renderer.EnsureResidentStructuredBuffer(resource, *stats, data, size, stride, usage, after, reason, uploadKind);
+		};
 		return services;
 	}
 

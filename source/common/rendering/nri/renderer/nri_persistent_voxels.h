@@ -7,6 +7,7 @@
 #include "nri_persistent_voxel_material_range_allocator.h"
 #include "nri_frame_resources.h"
 #include "nri_persistent_voxel_shared_blas.h"
+#include "nri_persistent_voxel_shadow_proxy.h"
 #include "nri_renderer_settings.h"
 #include "nri_resources.h"
 #include "nri_runtime_mutation.h"
@@ -79,6 +80,7 @@ struct PersistentVoxelBatch
 
 struct PersistentVoxelMeshVariantResource
 {
+	FVoxelModel* sourceModel = nullptr;
 	uint64_t resourceKey = 0;
 	uint64_t meshKeyHash = 0;
 	uint64_t geometrySignature = 0;
@@ -111,6 +113,7 @@ struct PersistentVoxelMeshVariantResource
 	int32_t priority = 0;
 	uint64_t residentBytes = 0;
 	bool tlasPublished = false;
+	bool shadowProxyPrimitiveSemanticsCertified = false;
 	bool directComputePublished = false;
 	NRIVoxelComputeDirectPublishOutputKind directComputeOutputKind = NRIVoxelComputeDirectPublishOutputKind::None;
 	NRIVoxelComputeDirectPublishFailure directComputeFailure = NRIVoxelComputeDirectPublishFailure::None;
@@ -131,6 +134,7 @@ struct PersistentVoxelMeshVariantResource
 	NRIBufferResource vertexBuffer;
 	NRIBufferResource indexBuffer;
 	NRIAccelerationStructureResource accelerationStructure;
+	NRIVoxelShadowProxyResource shadowProxy;
 };
 
 struct PersistentVoxelMaterialVariantResource
@@ -508,6 +512,7 @@ struct NRIPersistentVoxelAccelerationBuildStats
 	uint32_t builds = 0;
 	uint32_t uniqueMeshBuilds = 0;
 	uint32_t instances = 0;
+	NRIVoxelShadowProxyBuildStats shadowProxy;
 };
 
 struct NRIPersistentVoxelAccelerationServices
@@ -523,10 +528,12 @@ struct NRIPersistentVoxelAccelerationServices
 		uint32_t primitiveCount,
 		NRIAccelerationStructureResource& outAccelerationStructure);
 	using BarrierBuildInputsFn = bool (*)(void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer);
+	using EnsureStructuredBufferFn = bool (*)(void* user, NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* reason, int uploadKind);
 
 	void* user = nullptr;
 	BuildBottomLevelFn buildBottomLevel = nullptr;
 	BarrierBuildInputsFn barrierBuildInputs = nullptr;
+	EnsureStructuredBufferFn ensureStructuredBuffer = nullptr;
 
 	bool BuildBottomLevel(
 		const NRIBufferResource& vertexBuffer,
@@ -538,6 +545,7 @@ struct NRIPersistentVoxelAccelerationServices
 		uint32_t primitiveCount,
 		NRIAccelerationStructureResource& outAccelerationStructure) const;
 	bool BarrierBuildInputs(const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) const;
+	bool EnsureStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* reason, int uploadKind) const;
 };
 
 struct NRIPersistentVoxelDescriptorSnapshot
@@ -585,6 +593,9 @@ struct NRIPersistentVoxelMemoryUsage
 	uint64_t privateIndexBytes = 0;
 	uint64_t directBlasBytes = 0;
 	uint64_t sharedBlasBytes = 0;
+	uint64_t shadowProxyVertexBytes = 0;
+	uint64_t shadowProxyIndexBytes = 0;
+	uint64_t shadowProxyBlasBytes = 0;
 	uint64_t materialLogicalBytes = 0;
 	uint64_t admissionTransientBufferBytes = 0;
 	uint64_t admissionTransientAsBytes = 0;
@@ -603,6 +614,10 @@ struct NRIPersistentVoxelStatusSnapshot
 	uint64_t zeroRefResourceBytes = 0;
 	uint32_t zeroRefMeshResourceCount = 0;
 	uint32_t zeroRefMaterialResourceCount = 0;
+	uint32_t shadowProxyResidentCount = 0;
+	uint32_t shadowProxyFailedCount = 0;
+	uint64_t shadowProxyPrimitiveCount = 0;
+	uint64_t shadowProxyResidentBytes = 0;
 	uint32_t activeInstanceCount = 0;
 	uint32_t instancePrimitiveCount = 0;
 	uint32_t instanceMaterialCount = 0;
@@ -902,6 +917,9 @@ struct NRIPersistentVoxelTlasBuildStats
 	uint32_t instanceCount = 0;
 	uint64_t instancePrimitiveCount = 0;
 	uint32_t bakedFallbackInstanceCount = 0;
+	uint32_t shadowProxyInstanceCount = 0;
+	uint64_t shadowProxyPrimitiveCount = 0;
+	uint64_t exactShadowPrimitiveCountRemoved = 0;
 };
 
 struct NRIPersistentVoxelPreloadStatus

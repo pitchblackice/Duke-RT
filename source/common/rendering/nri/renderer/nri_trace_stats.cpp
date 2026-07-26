@@ -286,7 +286,8 @@ void NRITraceShaderStats::CopyForReadback(
 				0,
 				instance.dataSource,
 				instance.metadata0,
-				instance.metadata1
+				instance.metadata1,
+				DecodeNRIVoxelShadowProxyPrimitiveCount(instance.visibilityChunk)
 			});
 		}
 		ResolveNRITraceShaderAttributionPrimitiveCounts(
@@ -455,6 +456,7 @@ void NRITraceShaderStats::Readback(
 		hot.primitiveCount = instance.primitiveCount;
 		hot.metadata0 = instance.metadata0;
 		hot.metadata1 = instance.metadata1;
+		hot.shadowProxy = instance.explicitPrimitiveCount != 0u;
 		hot.committed = candidate.committed;
 		hot.accepted = candidate.accepted;
 		hot.primaryCommitted = outStats.counters[NRI_TRACE_SHADER_INSTANCE_KIND_COMMITTED_BASE + 0u * NRI_TRACE_SHADER_INSTANCE_BUCKET_COUNT + candidate.instanceId];

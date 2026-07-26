@@ -473,6 +473,8 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		voxelRepresentationFrame.cameraUp = { mCurrentCameraUp[0], mCurrentCameraUp[1], mCurrentCameraUp[2] };
 		voxelRepresentationFrame.tanHalfFovX = mCurrentTanHalfFovX;
 		voxelRepresentationFrame.tanHalfFovY = mCurrentTanHalfFovY;
+		voxelRepresentationFrame.shadowProxyRouteEnabled = persistentVoxelSettings.shadowProxyRouteEnabled;
+		voxelRepresentationFrame.shadowProxyTransitionsPerFrame = persistentVoxelSettings.shadowProxyTransitionsPerFrame;
 		mVoxelRepresentationPolicy.BeginFrame(voxelRepresentationFrame);
 	}
 	const bool allowStaticMapScene = !bootstrapCapturedView && !rawTraceDirectScene && mMapWorld.valid;

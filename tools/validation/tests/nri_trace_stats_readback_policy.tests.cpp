@@ -36,7 +36,7 @@ int main()
 {
 	Require(NRI_TRACE_SHADER_READBACK_SLOT_COUNT == 3,
 		"trace stats must match the triple-buffered frame shell");
-	Require(sizeof(NRITraceShaderInstanceAttribution) == 20,
+	Require(sizeof(NRITraceShaderInstanceAttribution) == 24,
 		"frame-correct attribution rows must remain compact");
 
 	std::array<NRITraceShaderReadbackSlotObservation, 3> slots = {};
@@ -58,6 +58,7 @@ int main()
 		{ 5, 0, 1, 300, 0 },
 		{ 0, 0, 0, 101, 0 },
 		{ 20, 0, 2, 201, 0 },
+		{ 20, 0, 2, 203, 0, 4 },
 		{ 30, 0, 2, 202, 0 },
 		{ 40, 0, 0, 102, 0 },
 		{ 1, 0, 9, 900, 0 },
@@ -68,6 +69,8 @@ int main()
 	Require(FindRow(rows, 200).primitiveCount == 10 && FindRow(rows, 201).primitiveCount == 10 &&
 		FindRow(rows, 202).primitiveCount == 10,
 		"reused voxel geometry bases must retain the same bounded primitive estimate");
+	Require(FindRow(rows, 203).primitiveCount == 4,
+		"certified proxy rows must preserve their explicit primitive count across a duplicate exact base");
 	Require(FindRow(rows, 300).primitiveCount == 4,
 		"the final source range must end at its captured primitive total");
 	Require(FindRow(rows, 102).primitiveCount == 0 && FindRow(rows, 900).primitiveCount == 0,

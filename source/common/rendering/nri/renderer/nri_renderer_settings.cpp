@@ -182,6 +182,10 @@ NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars()
 	settings.sharedBlasBuildsPerFrame = (int)nri_ptvoxelsharedblasbuilds <= 0 ? 0u : (uint32_t)(int)nri_ptvoxelsharedblasbuilds;
 	settings.sharedBlasLoadingWarmupEnabled = (bool)nri_ptvoxelsharedblasloading;
 	settings.sharedBlasRouteEnabled = (bool)nri_ptvoxelsharedblasroute;
+	settings.shadowProxyBuildEnabled = (bool)nri_ptvoxelshadowproxybuild;
+	settings.shadowProxyRouteEnabled = (bool)nri_ptvoxelshadowproxyroute;
+	settings.shadowProxyBuildsPerFrame = (uint32_t)std::max(0, (int)nri_ptvoxelshadowproxybuilds);
+	settings.shadowProxyTransitionsPerFrame = (uint32_t)std::max(0, (int)nri_ptvoxelshadowproxytransitions);
 	settings.transformKeyed = (bool)nri_ptvoxeltransformkeyed;
 	settings.diagnosticsEnabled =
 		(bool)nri_voxelstats ||

@@ -26,6 +26,7 @@ struct NRITraceShaderHotInstance
 	uint32_t primitiveCount = 0;
 	uint32_t metadata0 = 0;
 	uint32_t metadata1 = 0;
+	bool shadowProxy = false;
 	uint32_t committed = 0;
 	uint32_t accepted = 0;
 	uint32_t primaryCommitted = 0;

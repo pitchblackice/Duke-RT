@@ -2022,6 +2022,53 @@ bool QueryNRIVoxelComputeRawSourceArchiveStats(FVoxelModel* model, FVoxelRawMesh
 	return true;
 }
 
+bool CopyNRIVoxelComputeRawSourceArchiveSnapshot(
+	FVoxelModel* model,
+	NRIVoxelComputeRawSourceArchiveSnapshot& outSnapshot)
+{
+	outSnapshot = {};
+	if (model == nullptr)
+	{
+		return false;
+	}
+
+	const VoxelComputeState& state = gVoxelComputeState;
+	const auto archived = state.rawSourceArchive.find(model);
+	if (archived == state.rawSourceArchive.end() || archived->second.failed)
+	{
+		return false;
+	}
+	const RawVoxelSourceArchiveEntry& entry = archived->second;
+	if (entry.stats.slabCount == 0 || entry.stats.coalescedFaceCount == 0 ||
+		entry.pageIndex >= state.rawArchivePages.size())
+	{
+		return false;
+	}
+	const RawVoxelSourceArchivePage& page = state.rawArchivePages[entry.pageIndex];
+	if ((uint64_t)entry.slabOffset + entry.slabCount > page.slabs.size())
+	{
+		return false;
+	}
+
+	outSnapshot.recordSerial = entry.recordSerial;
+	outSnapshot.contentHash = entry.stats.contentHash;
+	outSnapshot.sizeX = entry.stats.sizeX;
+	outSnapshot.sizeY = entry.stats.sizeY;
+	outSnapshot.sizeZ = entry.stats.sizeZ;
+	outSnapshot.exactFaceCount = entry.stats.coalescedFaceCount;
+	outSnapshot.exactPrimitiveCount = entry.stats.coalescedFaceCount * 2u;
+	outSnapshot.pivotX = entry.stats.pivotX;
+	outSnapshot.pivotY = entry.stats.pivotY;
+	outSnapshot.pivotZ = entry.stats.pivotZ;
+	outSnapshot.slabs.reserve(entry.slabCount);
+	for (uint32_t slabIndex = 0; slabIndex < entry.slabCount; ++slabIndex)
+	{
+		const NRIVoxelComputeSlabRecord& source = page.slabs[entry.slabOffset + slabIndex];
+		outSnapshot.slabs.push_back({ source.X, source.Y, source.ZTop, source.CullMask, source.ZLength });
+	}
+	return outSnapshot.slabs.size() == entry.slabCount;
+}
+
 bool QueryNRIVoxelComputeRawSourceStats(FVoxelModel* model, FVoxelRawMeshStats& outStats)
 {
 	outStats = {};

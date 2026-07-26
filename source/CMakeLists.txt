@@ -963,6 +963,8 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_persistent_voxel_pressure_policy.cpp
 	common/rendering/nri/renderer/nri_persistent_voxel_services.cpp
 	common/rendering/nri/renderer/nri_persistent_voxels.cpp
+	common/rendering/nri/renderer/nri_persistent_voxel_shadow_proxy.cpp
+	common/rendering/nri/renderer/nri_persistent_voxel_shadow_proxy_scene.cpp
 	common/rendering/nri/renderer/nri_voxel_representation_policy.cpp
 	common/rendering/nri/renderer/nri_pass_dispatch.cpp
 	common/rendering/nri/renderer/nri_pass_dispatch_context.cpp

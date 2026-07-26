@@ -10,6 +10,7 @@
 enum class NRIVoxelRepresentationKind : uint8_t
 {
 	Exact = 0,
+	ExactWithCertifiedShadowProxy,
 };
 
 enum class NRIVoxelRepresentationReason : uint8_t
@@ -20,6 +21,12 @@ enum class NRIVoxelRepresentationReason : uint8_t
 	InvalidTransform,
 	ProjectionUnavailable,
 	BehindCamera,
+	ProxyDisabled,
+	ProxyUncertified,
+	ProxyNotReady,
+	ProxyHysteresis,
+	ProxyTransitionLimited,
+	CertifiedShadowProxy,
 };
 
 struct NRIVoxelRepresentationFrameInput
@@ -34,6 +41,8 @@ struct NRIVoxelRepresentationFrameInput
 	std::array<float, 3> cameraUp = {};
 	float tanHalfFovX = 1.0f;
 	float tanHalfFovY = 1.0f;
+	bool shadowProxyRouteEnabled = false;
+	uint32_t shadowProxyTransitionsPerFrame = 0;
 };
 
 struct NRIVoxelRepresentationFacts
@@ -49,6 +58,10 @@ struct NRIVoxelRepresentationFacts
 	bool capturedThisFrame = false;
 	bool routedThroughSharedBlas = false;
 	bool boundsValid = false;
+	bool shadowProxyCertified = false;
+	bool shadowProxyReady = false;
+	uint32_t shadowProxyPrimitiveCount = 0;
+	uint64_t shadowProxyCompatibilityKey = 0;
 	std::array<float, 3> boundsMin = {};
 	std::array<float, 3> boundsMax = {};
 	std::array<float, 12> transform =
@@ -104,6 +117,7 @@ struct NRIVoxelRepresentationDecision
 	bool transitionReady = false;
 	uint32_t framesInExactState = 0;
 	uint32_t consecutiveProjectedFrames = 0;
+	uint32_t consecutiveProxyReadyFrames = 0;
 	uint32_t transitionCount = 0;
 	NRIVoxelProjectedBounds projectedBounds;
 };
@@ -119,6 +133,9 @@ struct NRIVoxelRepresentationSnapshot
 	uint32_t viewportIntersectionCount = 0;
 	uint32_t hysteresisObservationReadyCount = 0;
 	uint32_t proxyReadyCount = 0;
+	uint32_t proxyEligibleCount = 0;
+	uint32_t proxyTransitionLimitedCount = 0;
+	uint64_t proxyPrimitiveCount = 0;
 	uint32_t primaryOccurrenceCount = 0;
 	uint32_t shadowOccurrenceCount = 0;
 	uint32_t reflectionOccurrenceCount = 0;
@@ -145,7 +162,10 @@ private:
 		uint32_t lastFrameIndex = 0;
 		uint32_t framesInExactState = 0;
 		uint32_t consecutiveProjectedFrames = 0;
+		uint32_t consecutiveProxyReadyFrames = 0;
 		uint32_t transitionCount = 0;
+		uint64_t proxyCompatibilityKey = 0;
+		bool usingProxy = false;
 		bool valid = false;
 	};
 
@@ -153,6 +173,7 @@ private:
 	NRIVoxelRepresentationSnapshot mSnapshot = {};
 	std::unordered_map<uint64_t, HysteresisState> mHysteresis;
 	bool mHasFrame = false;
+	uint32_t mTransitionsThisFrame = 0;
 };
 
 const char* GetNRIVoxelRepresentationKindName(NRIVoxelRepresentationKind kind);
