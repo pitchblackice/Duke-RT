@@ -30,14 +30,13 @@ $analyzer = Get-Content -LiteralPath $analyzerPath -Raw
 Assert-True ($runner -match '\[Parameter\(Mandatory = \$true\)\][\s\S]*?\[ValidateSet\(0, 1, 3\)\][\s\S]*?\[int\]\$BlasPolicy') 'runner must require an explicit supported voxel BLAS policy'
 Assert-True ($runner -match "\[ValidateSet\('exact', 'forced-miss', 'age-one'\)\][\s\S]*?\[string\[\]\]\`$Modes = @\('exact', 'forced-miss', 'age-one'\)") 'runner must expose the three supported modes with the 3-mode default'
 Assert-True ($runner -match '\[ValidateRange\(2, 3\)\][\s\S]*?\[int\]\$Cycles = 3') 'runner must expose a validated three-cycle default'
-Assert-True ($runner -match '\[int\]\$Samples = 256[\s\S]*?\[int\]\$WarmupSamples = 16') 'runner must default to 16 warmup and 256 measured samples'
+Assert-True ($runner -match '\[int\]\$Samples = 256[\s\S]*?\[int\]\$WarmupSamples = 128') 'runner must default to 128 warmup and 256 measured samples'
 foreach ($contract in @(
 	"cl_interpolate = 'false'",
 	"nri_ptlightbounces = '2'",
 	"nri_ptmirrorbounces = '2'",
 	"nri_ptportaldepth = '3'",
 	"nri_ptemissivesamples = '1'",
-	"nri_ptvoxelexcludeindex = '390'",
 	'perf_fixedsimulationframes \$\(\$Samples \+ \$WarmupSamples\)',
 	'perf_compactwarmupframes \$WarmupSamples; perf_compactframes \$Samples',
 	"stopWhenPrefix -NotePropertyValue 'PERF compact capture complete:'",

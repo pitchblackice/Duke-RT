@@ -9,7 +9,7 @@ param(
 	[ValidateRange(2, 3)]
 	[int]$Cycles = 3,
 	[int]$Samples = 256,
-	[int]$WarmupSamples = 16,
+	[int]$WarmupSamples = 128,
 	[int]$TimeoutSeconds = 900,
 	[string]$OutputDirectory,
 	[string]$SummaryOutput
@@ -41,7 +41,6 @@ function New-CacheScenario([object]$Base, [object]$Mode, [string]$Directory) {
 		nri_ptemissivesamples = '1'
 		nri_ptemissiveprimarybudget = '2'
 		nri_ptvoxelomitoccurrences = 'false'
-		nri_ptvoxelexcludeindex = '390'
 		nri_ptvoxelblaspolicy = [string]$BlasPolicy
 		nri_ptvoxelblascompact = 'false'
 		nri_ptvoxelarenapresize = 'true'

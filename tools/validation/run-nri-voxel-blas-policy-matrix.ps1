@@ -3,7 +3,7 @@ param(
     [string]$RazePath = 'build/terminal-ninja/raze.exe',
     [int]$Cycles = 3,
     [int]$Samples = 256,
-    [int]$WarmupSamples = 16,
+    [int]$WarmupSamples = 128,
     [int[]]$Policies = @(0, 1, 3),
     [int]$CompactionPolicy = -1,
     [int]$TimeoutSeconds = 900,
@@ -38,8 +38,7 @@ function New-MatrixScenario([object]$Base, [int]$Policy, [bool]$Compact, [string
         nri_ptemissivesamples = '1'
         nri_ptemissiveprimarybudget = '2'
         nri_ptvoxelomitoccurrences = 'false'
-		nri_ptvoxelexcludeindex = '390'
-        nri_ptvoxelblaspolicy = [string]$Policy
+		nri_ptvoxelblaspolicy = [string]$Policy
         nri_ptvoxelblascompact = $Compact.ToString().ToLowerInvariant()
         nri_ptvoxelarenapresize = 'true'
         nri_ptvoxelcomputepreloadterminalcommand = 'set nri_ptloadingtrace 1'
