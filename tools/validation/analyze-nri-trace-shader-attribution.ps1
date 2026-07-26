@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$ManifestPath,
-    [Parameter(Mandatory = $true)][string]$SummaryOutput
+    [Parameter(Mandatory = $true)][string]$SummaryOutput,
+    [switch]$CandidateOnly
 )
 
 Set-StrictMode -Version Latest
@@ -307,15 +308,20 @@ $legNames = @($runSummaries.leg | Sort-Object -Unique)
 $legs = @($legNames | ForEach-Object { Merge-Leg -Runs $runSummaries -Leg $_ })
 $byName = @{}
 foreach ($leg in $legs) { $byName[$leg.leg] = $leg }
-if (-not $byName.ContainsKey("default-full") -or -not $byName.ContainsKey("default-omit")) {
+if (-not $CandidateOnly -and
+    (-not $byName.ContainsKey("default-full") -or -not $byName.ContainsKey("default-omit"))) {
     throw "Attribution comparison requires default-full and default-omit legs."
 }
-
-$comparisons = [ordered]@{
-    defaultFullMinusDefaultOmit = Get-P50Delta -Left $byName["default-full"] -Right $byName["default-omit"]
+if ($CandidateOnly -and ($legNames.Count -ne 1 -or -not $byName.ContainsKey("candidate-full"))) {
+    throw "Candidate-only attribution requires exactly one candidate-full leg."
 }
-if ($byName.ContainsKey("candidate-full")) {
-    $comparisons.candidateFullMinusDefaultFull = Get-P50Delta -Left $byName["candidate-full"] -Right $byName["default-full"]
+
+$comparisons = [ordered]@{}
+if (-not $CandidateOnly) {
+    $comparisons.defaultFullMinusDefaultOmit = Get-P50Delta -Left $byName["default-full"] -Right $byName["default-omit"]
+    if ($byName.ContainsKey("candidate-full")) {
+        $comparisons.candidateFullMinusDefaultFull = Get-P50Delta -Left $byName["candidate-full"] -Right $byName["default-full"]
+    }
 }
 
 $summary = [pscustomobject]@{
@@ -329,6 +335,7 @@ $summary = [pscustomobject]@{
     runs = @($runSummaries | Select-Object sequence, cycle, leg, settingsKey, workloadKeys, workloadSamples, observer, snapshotCount, hotSources)
     notes = @(
         "Shader counters are workload attribution, not GPU durations; use the stats-disabled authority matrix for GPU timing.",
+        "Candidate-only mode summarizes the accepted profile without comparing it to rejected trace settings.",
         "Busy and superseded readbacks are reported rather than hidden; no-fence, abandoned, and map failures are hard failures.",
         "Attribution metadata is copied per recorded snapshot and its cumulative row/byte cost is reported."
     )
