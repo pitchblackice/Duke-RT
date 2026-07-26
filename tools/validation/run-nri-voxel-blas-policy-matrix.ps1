@@ -38,6 +38,7 @@ function New-MatrixScenario([object]$Base, [int]$Policy, [bool]$Compact, [string
         nri_ptemissivesamples = '1'
         nri_ptemissiveprimarybudget = '2'
         nri_ptvoxelomitoccurrences = 'false'
+		nri_ptvoxelexcludeindex = '390'
         nri_ptvoxelblaspolicy = [string]$Policy
         nri_ptvoxelblascompact = $Compact.ToString().ToLowerInvariant()
         nri_ptvoxelarenapresize = 'true'

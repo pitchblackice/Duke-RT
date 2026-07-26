@@ -37,6 +37,7 @@ function New-CacheScenario([object]$Base, [object]$Mode, [string]$Directory) {
 		nri_ptemissivesamples = '1'
 		nri_ptemissiveprimarybudget = '2'
 		nri_ptvoxelomitoccurrences = 'false'
+		nri_ptvoxelexcludeindex = '390'
 		nri_ptvoxelblaspolicy = [string]$BlasPolicy
 		nri_ptvoxelblascompact = 'false'
 		nri_ptvoxelarenapresize = 'true'
