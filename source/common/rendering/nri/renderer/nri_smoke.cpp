@@ -94,6 +94,7 @@ NRISmokeGridServices NRISmokeSystem::BuildGridServices(NRIRenderer& renderer) co
 	services.core = &renderer.mFrameBuffer->mCore;
 	services.device = renderer.mFrameBuffer->mDevice;
 	services.commandBuffer = renderer.mFrameBuffer->mCommandBuffer;
+	services.gpuTimingDevice = renderer.mFrameBuffer;
 	services.descriptorPool = renderer.mFrameBuffer->mDescriptorPool;
 	services.graphicsAPI = renderer.mFrameBuffer->GetSelectedAPI();
 	services.queuedFrameCount = std::max(1u, (uint32_t)renderer.mFrameBuffer->mQueuedFrames.size());
@@ -722,12 +723,15 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 		CommandSlot& completedSlot = mCommandSlots[std::min(renderer.mFrameBuffer->mCurrentQueuedFrameIndex, (uint32_t)mCommandSlots.size() - 1)];
 		if (completedSlot.readbackPending && completedSlot.controlReadback.buffer != nullptr)
 		{
+			mStatus.gpuStatsValid = false;
 			const void* mapped = renderer.mFrameBuffer->mCore.MapBuffer(*completedSlot.controlReadback.buffer, 0, sizeof(NRISmokeControlGpu));
-			if (mapped != nullptr)
+			if (mapped != nullptr && completedSlot.readbackEpoch == mStatus.simulationEpoch)
 			{
 				const NRISmokeControlGpu control = *static_cast<const NRISmokeControlGpu*>(mapped);
 				renderer.mFrameBuffer->mCore.UnmapBuffer(*completedSlot.controlReadback.buffer);
 				mStatus.gpuStatsValid = true;
+				mStatus.gpuStatsFrame = completedSlot.readbackFrame;
+				mStatus.gpuStatsEpoch = completedSlot.readbackEpoch;
 				mStatus.activeParticles = control.activeApprox;
 				mStatus.spawnedParticles = control.spawned;
 				mStatus.expiredParticles = control.expired;
@@ -866,9 +870,13 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 				mStatus.filterResourceDowngrades = control.filterResourceDowngrades;
 				mStatus.controlReadbackBytes += sizeof(NRISmokeControlGpu);
 			}
+			else if (mapped != nullptr)
+				renderer.mFrameBuffer->mCore.UnmapBuffer(*completedSlot.controlReadback.buffer);
 			completedSlot.readbackPending = false;
 		}
 	}
+	if (!mSettings.readback)
+		mStatus.gpuStatsValid = false;
 	const bool worldLightingRequired = mSettings.representation != 0u &&
 		(mSettings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy ||
 		 mSettings.multipleScatter || mSettings.selfShadow);
@@ -1035,6 +1043,43 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 		mStatus.globalMaximumCellReferences = 0u;
 		mStatus.maximumDepthSpan = 0u;
 		mStatus.maximumCandidatesPerFroxel = 0u;
+	}
+	if (mSettings.readback && PerfCompactCaptureTimingActive())
+	{
+		const NRISmokeGridStatusSnapshot& gridWork = mGrid.GetStatusSnapshot();
+		const NRISmokeGridLightingStatusSnapshot& worldWork = mGridLighting.GetStatusSnapshot();
+		const bool joined = gridWork.gpuStatsValid && worldWork.gpuStatsValid && mStatus.gpuStatsValid &&
+			gridWork.gpu.frameStamp == worldWork.gpu.frameStamp &&
+			gridWork.gpu.frameStamp == mStatus.gpuStatsFrame &&
+			gridWork.gpu.generation == worldWork.gpu.simulationEpoch &&
+			gridWork.gpu.generation == mStatus.gpuStatsEpoch;
+		Printf("PERF pt smoke work NRI: observe_frame=%u joined=%u grid_valid=%u grid_frame=%u grid_epoch=%u grid_delta_valid=%u grid_delta_interval=%u grid_resident=%u grid_free=%u grid_active_a=%u grid_active_b=%u grid_occupied=%u grid_empty=%u grid_allocated_total=%u grid_allocated_delta=%u grid_reclaimed_total=%u grid_reclaimed_delta=%u grid_allocation_failures_total=%u grid_allocation_failures_delta=%u grid_probe_failures_total=%u grid_probe_failures_delta=%u grid_commands_total=%u grid_commands_delta=%u grid_deposition_cells_total=%u grid_deposition_cells_delta=%u grid_deposition_rejected_total=%u grid_deposition_rejected_delta=%u grid_halo_total=%u grid_halo_delta=%u world_valid=%u world_frame=%u world_epoch=%u world_active=%u world_support_current=%u world_source_density=%u world_scheduled=%u world_samples=%u world_visible=%u world_physical_zero=%u world_missing=%u world_overflow=%u world_temporal_accepted=%u world_temporal_rejected=%u world_links_open=%u world_links_blocked=%u world_link_rays=%u world_proposal_lists=%u world_proposal_tested=%u world_proposal_accepted=%u view_valid=%u view_frame=%u view_epoch=%u view_occupied=%u view_occupied_overflow=%u view_point_froxels=%u view_point_shadow_rays=%u view_directional_froxels=%u view_directional_samples=%u view_directional_shadow_rays=%u view_direct_receiver_samples=%u view_direct_temporal_accepted=%u view_direct_temporal_rejected=%u view_direct_spatial_accepted=%u view_direct_spatial_rejected=%u compact=1\n",
+			renderer.mFrameIndex, joined ? 1u : 0u, gridWork.gpuStatsValid ? 1u : 0u, gridWork.gpu.frameStamp,
+			gridWork.gpu.generation, gridWork.gpuFrameDeltaValid ? 1u : 0u, gridWork.gpuFrameDeltaInterval,
+			gridWork.gpu.residentCount, gridWork.gpu.freeCount, gridWork.gpu.activeCountA,
+			gridWork.gpu.activeCountB, gridWork.gpu.occupiedBricks, gridWork.gpu.emptyBricks,
+			gridWork.gpu.allocated, gridWork.gpuFrameDelta.allocated,
+			gridWork.gpu.reclaimed, gridWork.gpuFrameDelta.reclaimed,
+			gridWork.gpu.allocationFailures, gridWork.gpuFrameDelta.allocationFailures,
+			gridWork.gpu.probeFailures, gridWork.gpuFrameDelta.probeFailures,
+			gridWork.gpu.commandsProcessed, gridWork.gpuFrameDelta.commandsProcessed,
+			gridWork.gpu.depositionCells, gridWork.gpuFrameDelta.depositionCells,
+			gridWork.gpu.depositionRejected, gridWork.gpuFrameDelta.depositionRejected,
+			gridWork.gpu.haloAllocations, gridWork.gpuFrameDelta.haloAllocations,
+			worldWork.gpuStatsValid ? 1u : 0u, worldWork.gpu.frameStamp, worldWork.gpu.simulationEpoch,
+			worldWork.gpu.activeCount, worldWork.gpu.supportCount, worldWork.gpu.sourceCount,
+			worldWork.gpu.scheduledCount, worldWork.gpu.samples, worldWork.gpu.visible,
+			worldWork.gpu.physicalZero, worldWork.gpu.missing, worldWork.gpu.overflowRejects,
+			worldWork.gpu.temporalAccepted, worldWork.gpu.temporalRejected,
+			worldWork.gpu.linksOpen, worldWork.gpu.linksBlocked,
+			worldWork.gpu.linksOpen + worldWork.gpu.linksBlocked, worldWork.gpu.proposalListsBuilt,
+			worldWork.gpu.proposalCandidatesTested, worldWork.gpu.proposalCandidatesAccepted,
+			mStatus.gpuStatsValid ? 1u : 0u, mStatus.gpuStatsFrame, mStatus.gpuStatsEpoch,
+			mStatus.occupiedCount, mStatus.occupiedOverflow,
+			mStatus.pointFroxelsProcessed, mStatus.lightShadowRays, mStatus.directionalFroxelsProcessed,
+			mStatus.directionalSamples, mStatus.directionalShadowRays, mStatus.directReceiverSamples,
+			mStatus.directTemporalAccepted, mStatus.directTemporalRejected,
+			mStatus.directSpatialAccepted, mStatus.directSpatialRejected);
 	}
 	AppendSyntheticCommand(renderer);
 	return RecordSimulation(renderer);
@@ -1734,10 +1779,14 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	const bool renderParticles = authorityMode == NRISmokeAuthorityMode::Particles || authorityMode == NRISmokeAuthorityMode::Compare;
 	const bool renderGrid = authorityMode == NRISmokeAuthorityMode::Grid || authorityMode == NRISmokeAuthorityMode::Compare;
 	const uint64_t wideCellCount = renderParticles ? (uint64_t)kWideCellCount * mResourceFroxelDepth : 0u;
-	dispatch(NRISmokePass::Clear, Groups(std::max({ froxelCount, wideCellCount, (uint64_t)mResourceFroxelDepth })), 1, 1);
-	storageBarrier();
+	{
+		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeViewPrepare);
+		dispatch(NRISmokePass::Clear, Groups(std::max({ froxelCount, wideCellCount, (uint64_t)mResourceFroxelDepth })), 1, 1);
+		storageBarrier();
+	}
 	if (renderParticles)
 	{
+		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeCarrier);
 		dispatch(NRISmokePass::Bin, Groups(mResourceParticleCapacity), 1, 1);
 		mStatus.particleOpticalDispatches++;
 		storageBarrier();
@@ -1755,24 +1804,34 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	}
 	if (renderGrid)
 	{
+		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeMaterialize);
 		dispatch(NRISmokePass::EvaluateGrid, (mResourceFroxelWidth + 3) / 4,
 			(mResourceFroxelHeight + 3) / 4, (mResourceFroxelDepth + 3) / 4);
 		mStatus.gridOpticalDispatches++;
 		storageBarrier();
 	}
-	dispatch(NRISmokePass::LightPoint, Groups(froxelCount), 1, 1);
-	storageBarrier();
-	dispatch(NRISmokePass::LightDirectional, Groups(froxelCount), 1, 1);
-	storageBarrier();
+	{
+		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeViewPoint);
+		dispatch(NRISmokePass::LightPoint, Groups(froxelCount), 1, 1);
+		storageBarrier();
+	}
+	{
+		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeViewDirectional);
+		dispatch(NRISmokePass::LightDirectional, Groups(froxelCount), 1, 1);
+		storageBarrier();
+	}
 	if (renderGrid)
 	{
-		if (effectiveDirectReuseMode >= 1u)
 		{
-			dispatch(NRISmokePass::LightDirectTemporal, Groups(froxelCount), 1, 1);
+			NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeViewDirectReuse);
+			if (effectiveDirectReuseMode >= 1u)
+			{
+				dispatch(NRISmokePass::LightDirectTemporal, Groups(froxelCount), 1, 1);
+				storageBarrier();
+			}
+			dispatch(NRISmokePass::LightDirectSpatial, Groups(froxelCount), 1, 1);
 			storageBarrier();
 		}
-		dispatch(NRISmokePass::LightDirectSpatial, Groups(froxelCount), 1, 1);
-		storageBarrier();
 		mDirectHistoryValid = true;
 		mLastDirectFrame = renderer.mFrameIndex;
 		mLastDirectReuseMode = effectiveDirectReuseMode;
@@ -1792,6 +1851,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	const bool runLegacyEmissive = renderParticles || !worldEmissiveReady;
 	if (runLegacyEmissive)
 	{
+		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeViewEmissive);
 		dispatch(NRISmokePass::LightEmissiveInitial, Groups(froxelCount), 1, 1);
 		storageBarrier();
 		dispatch(NRISmokePass::LightEmissiveTemporal, Groups(froxelCount), 1, 1);
@@ -1822,6 +1882,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	}
 	if (mSettings.indirect && indirectResourcesReady && mSettings.indirectScale > 0.0f)
 	{
+		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeViewIndirect);
 		dispatch(NRISmokePass::LightIndirectReference, Groups(froxelCount), 1, 1);
 		storageBarrier();
 		if (effectiveIndirectCacheMode > 0u)
@@ -1845,15 +1906,21 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	{
 		mIndirectHistoryValid = false;
 	}
-	dispatch(NRISmokePass::Integrate, (mResourceFroxelWidth + 7) / 8, (mResourceFroxelHeight + 7) / 8, 1);
-	storageBarrier();
-	dispatch(NRISmokePass::ResolveVolume, (route.width + 7) / 8, (route.height + 7) / 8, 1);
-	renderer.mFrameBuffer->TransitionTexture(volumeCurrent, { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER });
-	renderer.mFrameBuffer->TransitionTexture(volumeCurrentMeta, { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER });
-	dispatch(NRISmokePass::TemporalVolume, (route.width + 7) / 8, (route.height + 7) / 8, 1);
-	renderer.mFrameBuffer->TransitionTexture(volumeHistoryWrite, { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER });
-	renderer.mFrameBuffer->TransitionTexture(volumeMetaWrite, { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER });
-	dispatch(NRISmokePass::Composite, (route.width + 7) / 8, (route.height + 7) / 8, 1);
+	{
+		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeIntegrate);
+		dispatch(NRISmokePass::Integrate, (mResourceFroxelWidth + 7) / 8, (mResourceFroxelHeight + 7) / 8, 1);
+		storageBarrier();
+	}
+	{
+		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeReconstruction);
+		dispatch(NRISmokePass::ResolveVolume, (route.width + 7) / 8, (route.height + 7) / 8, 1);
+		renderer.mFrameBuffer->TransitionTexture(volumeCurrent, { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER });
+		renderer.mFrameBuffer->TransitionTexture(volumeCurrentMeta, { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER });
+		dispatch(NRISmokePass::TemporalVolume, (route.width + 7) / 8, (route.height + 7) / 8, 1);
+		renderer.mFrameBuffer->TransitionTexture(volumeHistoryWrite, { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER });
+		renderer.mFrameBuffer->TransitionTexture(volumeMetaWrite, { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER });
+		dispatch(NRISmokePass::Composite, (route.width + 7) / 8, (route.height + 7) / 8, 1);
+	}
 	mVolumeHistoryValid = true;
 	mLastVolumeFrame = renderer.mFrameIndex;
 	mLastVolumeWidth = route.width;
@@ -1878,6 +1945,8 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		renderer.mFrameBuffer->mCore.CmdCopyBuffer(*renderer.mFrameBuffer->mCommandBuffer, *slot.controlReadback.buffer, 0, *mControl.buffer, 0, sizeof(NRISmokeControlGpu));
 		slot.readbackPending = true;
 		slot.readbackInitialized = true;
+		slot.readbackFrame = renderer.mFrameIndex;
+		slot.readbackEpoch = mStatus.simulationEpoch;
 		mControlCopyPending = true;
 	}
 	return true;
@@ -2209,6 +2278,20 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		(double)world.proposalBytes / (1024.0 * 1024.0),
 		world.filterDecision, (double)world.filterBytes / (1024.0 * 1024.0),
 		(double)world.totalBytes / (1024.0 * 1024.0), world.proposalDecision);
+	Printf("NRI PT smoke grid lighting work: gpu_stats=%s frame=%u epoch=%u active=%u support_current=%u source_density=%u scheduled=%u samples=%u visible=%u physical_zero=%u missing=%u structural_errors=%u overflow=%u temporal_accepted=%u temporal_rejected=%u maximum_age=%u links_open=%u links_blocked=%u topology_missing_tlas=%u topology_asymmetric=%u proposal_lists=%u proposal_tested=%u proposal_accepted=%u proposal_local=%u proposal_global=%u proposal_fallbacks=%u proposal_truncations=%u proposal_maximum=%u filter_accepted=%u filter_rejected=%u scatter_active=%u scatter_seeded=%u scatter_neighbor_tests=%u scatter_neighbors_accepted=%u scatter_neighbors_blocked=%u scatter_overflow=%u self_shadow_samples=%u self_shadow_steps=%u control_readback=%llu\n",
+		world.gpuStatsValid ? "valid" : "disabled", world.gpu.frameStamp, world.gpu.simulationEpoch,
+		world.gpu.activeCount, world.gpu.supportCount, world.gpu.sourceCount, world.gpu.scheduledCount,
+		world.gpu.samples, world.gpu.visible, world.gpu.physicalZero, world.gpu.missing,
+		world.gpu.structuralErrors, world.gpu.overflowRejects, world.gpu.temporalAccepted,
+		world.gpu.temporalRejected, world.gpu.maximumAge, world.gpu.linksOpen, world.gpu.linksBlocked,
+		world.gpu.topologyMissingTlas, world.gpu.topologyAsymmetric, world.gpu.proposalListsBuilt,
+		world.gpu.proposalCandidatesTested, world.gpu.proposalCandidatesAccepted,
+		world.gpu.proposalLocalSamples, world.gpu.proposalGlobalSamples, world.gpu.proposalFallbacks,
+		world.gpu.proposalTruncations, world.gpu.proposalMaximumCount, world.gpu.filterAccepted,
+		world.gpu.filterRejected, world.gpu.scatterActiveCount, world.gpu.scatterSeededCount,
+		world.gpu.scatterNeighborTests, world.gpu.scatterNeighborsAccepted, world.gpu.scatterNeighborsBlocked,
+		world.gpu.scatterActiveOverflow, world.gpu.selfShadowSamples, world.gpu.selfShadowSteps,
+		(unsigned long long)world.controlReadbackBytes);
 	Printf("NRI PT smoke multiple scattering: requested=%s allocated=%s effective=%s probes=%u iterations=%u final_ping=%u scale=%.3f seed_mib=%.3f bounce_mib=%.3f metadata_mib=%.3f active_mib=%.3f total_mib=%.3f decision=%s field_readback=0\n",
 		world.multipleScatterRequested ? "yes" : "no", world.multipleScatterAllocated ? "yes" : "no",
 		world.multipleScatterEffective ? "yes" : "no", world.scatterProbeCapacity, world.scatterIterations,

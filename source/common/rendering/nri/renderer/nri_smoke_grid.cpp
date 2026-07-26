@@ -1,5 +1,6 @@
 #include "nri_smoke_grid.h"
 
+#include "../system/nri_gpu_timing.h"
 #include "printf.h"
 
 #include <algorithm>
@@ -326,20 +327,51 @@ bool NRISmokeGrid::EnsureResources(const NRISmokeGridServices& services, const N
 	return true;
 }
 
-void NRISmokeGrid::ConsumeReadback(const NRISmokeGridServices& services)
+void NRISmokeGrid::ConsumeReadback(const NRISmokeGridServices& services, uint32_t simulationEpoch)
 {
 	if (mFrameSlots.empty() || services.core == nullptr)
 		return;
 	FrameSlot& slot = mFrameSlots[std::min(services.queuedFrameIndex, (uint32_t)mFrameSlots.size() - 1u)];
 	if (!slot.readbackPending || slot.controlReadback.buffer == nullptr)
 		return;
+	mStatus.gpuStatsValid = false;
+	mStatus.gpuFrameDeltaValid = false;
 	const void* mapped = services.core->MapBuffer(*slot.controlReadback.buffer, 0, sizeof(NRISmokeGridControlGpu));
 	if (mapped != nullptr)
 	{
-		std::memcpy(&mStatus.gpu, mapped, sizeof(mStatus.gpu));
+		NRISmokeGridControlGpu next = {};
+		std::memcpy(&next, mapped, sizeof(next));
 		services.core->UnmapBuffer(*slot.controlReadback.buffer);
-		mStatus.gpuStatsValid = true;
-		mStatus.controlReadbackBytes += sizeof(NRISmokeGridControlGpu);
+		if (next.generation == simulationEpoch)
+		{
+			const NRISmokeGridControlGpu previous = mStatus.gpu;
+			const bool consecutive = previous.generation == next.generation && previous.frameStamp + 1u == next.frameStamp;
+			mStatus.gpu = next;
+			mStatus.gpuStatsValid = true;
+			mStatus.gpuFrameDeltaInterval = previous.generation == next.generation ? next.frameStamp - previous.frameStamp : 0u;
+			if (consecutive)
+			{
+				auto& delta = mStatus.gpuFrameDelta;
+				delta = {};
+				delta.allocated = next.allocated - previous.allocated;
+				delta.reclaimed = next.reclaimed - previous.reclaimed;
+				delta.allocationFailures = next.allocationFailures - previous.allocationFailures;
+				delta.probeFailures = next.probeFailures - previous.probeFailures;
+				delta.commandsProcessed = next.commandsProcessed - previous.commandsProcessed;
+				delta.requestedMassQ = next.requestedMassQ - previous.requestedMassQ;
+				delta.depositedMassQ = next.depositedMassQ - previous.depositedMassQ;
+				delta.rejectedMassQ = next.rejectedMassQ - previous.rejectedMassQ;
+				delta.saturatedDeposits = next.saturatedDeposits - previous.saturatedDeposits;
+				delta.haloAllocations = next.haloAllocations - previous.haloAllocations;
+				delta.cflClamps = next.cflClamps - previous.cflClamps;
+				delta.backtraceClamps = next.backtraceClamps - previous.backtraceClamps;
+				delta.nanRejects = next.nanRejects - previous.nanRejects;
+				delta.depositionCells = next.depositionCells - previous.depositionCells;
+				delta.depositionRejected = next.depositionRejected - previous.depositionRejected;
+				mStatus.gpuFrameDeltaValid = true;
+			}
+			mStatus.controlReadbackBytes += sizeof(NRISmokeGridControlGpu);
+		}
 	}
 	slot.readbackPending = false;
 }
@@ -348,7 +380,12 @@ bool NRISmokeGrid::PrepareFrame(const NRISmokeGridServices& services, const NRIS
 	uint32_t frameIndex, uint32_t simulationEpoch)
 {
 	(void)frameIndex;
-	ConsumeReadback(services);
+	ConsumeReadback(services, simulationEpoch);
+	if (!settings.readback)
+	{
+		mStatus.gpuStatsValid = false;
+		mStatus.gpuFrameDeltaValid = false;
+	}
 	mStatus.requested = settings.enabled && settings.representation != 0u;
 	mStatus.representation = settings.representation;
 	if (!mStatus.requested)
@@ -551,6 +588,7 @@ bool NRISmokeGrid::RecordFrame(const NRISmokeGridServices& services, const NRISm
 
 	if (mNeedsClear || mResourceEpoch != frame.simulationEpoch)
 	{
+		NRIScopedGpuTiming timing(services.gpuTimingDevice, NRIGpuTimingScope::SmokeGridInitialize);
 		mActivePing = 0;
 		mFieldPing = 0;
 		constants.activePing = 0;
@@ -562,19 +600,26 @@ bool NRISmokeGrid::RecordFrame(const NRISmokeGridServices& services, const NRISm
 		mResourceEpoch = frame.simulationEpoch;
 	}
 
-	if (frame.commandCount > 0u)
 	{
-		// Allocation is a serial GPU control-plane pass. This avoids duplicate
-		// open-addressed claims while field population remains fully parallel.
-		Dispatch(services, constants, NRISmokeGridPass::AllocateCommands, 1u);
+		NRIScopedGpuTiming timing(services.gpuTimingDevice, NRIGpuTimingScope::SmokeGridAllocate);
+		if (frame.commandCount > 0u)
+		{
+			// Allocation is a serial GPU control-plane pass. This avoids duplicate
+			// open-addressed claims while field population remains fully parallel.
+			Dispatch(services, constants, NRISmokeGridPass::AllocateCommands, 1u);
+			StorageBarrier(services);
+		}
+	}
+	{
+		NRIScopedGpuTiming timing(services.gpuTimingDevice, NRIGpuTimingScope::SmokeGridInitialize);
+		Dispatch(services, constants, NRISmokeGridPass::BuildDispatch, 1u);
+		StorageBarrier(services);
+		DispatchIndirect(services, constants, NRISmokeGridPass::PrepareBricks);
 		StorageBarrier(services);
 	}
-	Dispatch(services, constants, NRISmokeGridPass::BuildDispatch, 1u);
-	StorageBarrier(services);
-	DispatchIndirect(services, constants, NRISmokeGridPass::PrepareBricks);
-	StorageBarrier(services);
 	if (frame.commandCount > 0u)
 	{
+		NRIScopedGpuTiming timing(services.gpuTimingDevice, NRIGpuTimingScope::SmokeGridDeposit);
 		Dispatch(services, constants, NRISmokeGridPass::Deposit, frame.commandCount);
 		StorageBarrier(services);
 		DispatchIndirect(services, constants, NRISmokeGridPass::ResolveDeposit);
@@ -583,23 +628,32 @@ bool NRISmokeGrid::RecordFrame(const NRISmokeGridServices& services, const NRISm
 
 	for (uint32_t step = 0; step < frame.simulationSubsteps; ++step)
 	{
-		// Allocation is deliberately one serial GPU control-plane dispatch. It
-		// snapshots and walks the current active list without CPU involvement.
-		Dispatch(services, constants, NRISmokeGridPass::AllocateHalo, 1u);
-		StorageBarrier(services);
-		TransitionDispatchToStorage(services);
-		Dispatch(services, constants, NRISmokeGridPass::BuildDispatch, 1u);
-		StorageBarrier(services);
-		DispatchIndirect(services, constants, NRISmokeGridPass::PrepareBricks);
-		StorageBarrier(services);
-		Dispatch(services, constants, NRISmokeGridPass::BeginRebuild, 1u);
-		StorageBarrier(services);
-		DispatchIndirect(services, constants, NRISmokeGridPass::AdvectVelocity);
-		StorageBarrier(services);
-		DispatchIndirect(services, constants, NRISmokeGridPass::AdvectFields);
-		StorageBarrier(services);
-		DispatchIndirect(services, constants, NRISmokeGridPass::Rebuild);
-		StorageBarrier(services);
+		{
+			NRIScopedGpuTiming timing(services.gpuTimingDevice, NRIGpuTimingScope::SmokeGridHalo);
+			// Allocation is deliberately one serial GPU control-plane dispatch. It
+			// snapshots and walks the current active list without CPU involvement.
+			Dispatch(services, constants, NRISmokeGridPass::AllocateHalo, 1u);
+			StorageBarrier(services);
+			TransitionDispatchToStorage(services);
+			Dispatch(services, constants, NRISmokeGridPass::BuildDispatch, 1u);
+			StorageBarrier(services);
+			DispatchIndirect(services, constants, NRISmokeGridPass::PrepareBricks);
+			StorageBarrier(services);
+		}
+		{
+			NRIScopedGpuTiming timing(services.gpuTimingDevice, NRIGpuTimingScope::SmokeGridSimulate);
+			Dispatch(services, constants, NRISmokeGridPass::BeginRebuild, 1u);
+			StorageBarrier(services);
+			DispatchIndirect(services, constants, NRISmokeGridPass::AdvectVelocity);
+			StorageBarrier(services);
+			DispatchIndirect(services, constants, NRISmokeGridPass::AdvectFields);
+			StorageBarrier(services);
+		}
+		{
+			NRIScopedGpuTiming timing(services.gpuTimingDevice, NRIGpuTimingScope::SmokeGridRebuild);
+			DispatchIndirect(services, constants, NRISmokeGridPass::Rebuild);
+			StorageBarrier(services);
+		}
 
 		mActivePing ^= 1u;
 		mFieldPing ^= 1u;
@@ -610,6 +664,7 @@ bool NRISmokeGrid::RecordFrame(const NRISmokeGridServices& services, const NRISm
 	TransitionDispatchToStorage(services);
 	if (frame.simulationSubsteps > 0u)
 	{
+		NRIScopedGpuTiming timing(services.gpuTimingDevice, NRIGpuTimingScope::SmokeGridRebuild);
 		// Publish the final ping/count for render evaluation. Without this last
 		// control update, the camera pass would sample the previous field.
 		Dispatch(services, constants, NRISmokeGridPass::BuildDispatch, 1u);
@@ -704,7 +759,7 @@ void NRISmokeGrid::PrintStatus() const
 	Printf("NRI PT smoke grid status: requested=%s representation=%u initialized=%s resources=%s "
 		"bricks=%u hash=%u cells=%u active_ping=%u field_ping=%u gpu_stats=%s "
 		"resident=%u resident_bytes=%llu active=%u/%u free=%u allocated=%u reclaimed=%u allocation_failures=%u "
-		"probe_failures=%u max_probe=%u commands=%u requested_mass_q=%u deposited_mass_q=%u "
+		"probe_failures=%u max_probe=%u commands=%u deposition_cells=%u deposition_rejected=%u requested_mass_q=%u deposited_mass_q=%u "
 		"rejected_mass_q=%u saturated=%u halo=%u occupied=%u empty=%u cfl_clamps=%u "
 		"backtrace_clamps=%u nan=%u field_hash=%08x%08x resident_mib=%.2f "
 		"field_readback=0 control_readback=%llu fallback=%s reset=%s\n",
@@ -716,7 +771,8 @@ void NRISmokeGrid::PrintStatus() const
 		mStatus.gpu.activeCountA, mStatus.gpu.activeCountB,
 		mStatus.gpu.freeCount, mStatus.gpu.allocated, mStatus.gpu.reclaimed,
 		mStatus.gpu.allocationFailures, mStatus.gpu.probeFailures, mStatus.gpu.maximumProbe,
-		mStatus.gpu.commandsProcessed, mStatus.gpu.requestedMassQ, mStatus.gpu.depositedMassQ,
+		mStatus.gpu.commandsProcessed, mStatus.gpu.depositionCells, mStatus.gpu.depositionRejected,
+		mStatus.gpu.requestedMassQ, mStatus.gpu.depositedMassQ,
 		mStatus.gpu.rejectedMassQ, mStatus.gpu.saturatedDeposits, mStatus.gpu.haloAllocations,
 		mStatus.gpu.occupiedBricks, mStatus.gpu.emptyBricks, mStatus.gpu.cflClamps,
 		mStatus.gpu.backtraceClamps, mStatus.gpu.nanRejects,

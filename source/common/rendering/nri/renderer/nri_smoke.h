@@ -93,6 +93,8 @@ struct NRISmokeStatusSnapshot
 	uint32_t indirectCacheModeEffective = 0;
 	uint64_t controlReadbackBytes = 0;
 	bool gpuStatsValid = false;
+	uint32_t gpuStatsFrame = UINT32_MAX;
+	uint32_t gpuStatsEpoch = 0;
 	uint32_t activeParticles = 0;
 	uint32_t spawnedParticles = 0;
 	uint32_t expiredParticles = 0;
@@ -259,6 +261,8 @@ private:
 		bool readbackPending = false;
 		bool initialized = false;
 		bool readbackInitialized = false;
+		uint32_t readbackFrame = UINT32_MAX;
+		uint32_t readbackEpoch = 0;
 	};
 
 	bool EnsureResources(NRIRenderer& renderer, uint32_t representation);

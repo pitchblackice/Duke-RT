@@ -28,6 +28,29 @@ enum class NRIGpuTimingScope : uint8_t
 	WorldTlas,
 	SmokeSimulation,
 	SmokeVolume,
+	SmokeGridAllocate,
+	SmokeGridInitialize,
+	SmokeGridDeposit,
+	SmokeGridHalo,
+	SmokeGridSimulate,
+	SmokeGridRebuild,
+	SmokeWorldActive,
+	SmokeWorldLink,
+	SmokeWorldProposal,
+	SmokeWorldSeed,
+	SmokeWorldTemporal,
+	SmokeWorldFilter,
+	SmokeWorldScatter,
+	SmokeCarrier,
+	SmokeViewPrepare,
+	SmokeMaterialize,
+	SmokeViewPoint,
+	SmokeViewDirectional,
+	SmokeViewDirectReuse,
+	SmokeViewEmissive,
+	SmokeViewIndirect,
+	SmokeIntegrate,
+	SmokeReconstruction,
 	Count
 };
 
@@ -35,8 +58,8 @@ class NRIGpuTiming
 {
 public:
 	static constexpr uint32_t SlotCount = 3;
-	static constexpr uint32_t QueryCapacity = 128;
-	static constexpr uint32_t ScopeCapacity = 63;
+	static constexpr uint32_t QueryCapacity = 192;
+	static constexpr uint32_t ScopeCapacity = 95;
 
 	void Prepare(nri::CoreInterface& core, nri::Device& device);
 	void Destroy(nri::CoreInterface& core);

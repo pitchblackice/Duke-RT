@@ -146,6 +146,7 @@ struct NRISmokeGridLightingStatusSnapshot
 	bool requested = false;
 	bool initialized = false;
 	bool resourcesReady = false;
+	bool gpuStatsValid = false;
 	bool filterRequested = false;
 	bool filterAllocated = false;
 	bool multipleScatterRequested = false;
@@ -178,6 +179,8 @@ struct NRISmokeGridLightingStatusSnapshot
 	uint64_t selfShadowFieldBytes = 0;
 	uint64_t filterBytes = 0;
 	uint64_t totalBytes = 0;
+	uint64_t controlReadbackBytes = 0;
+	NRISmokeGridLightControlGpu gpu = {};
 	const char* authority = "disabled";
 	const char* failureReason = "not-requested";
 	const char* filterDecision = "not-requested";

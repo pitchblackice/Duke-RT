@@ -5,6 +5,7 @@
 #include "nri_smoke_contracts.h"
 
 #include <array>
+#include <vector>
 
 struct NRISmokeGridLightingDirectSeedSnapshot
 {
@@ -49,12 +50,22 @@ public:
 	uint32_t GetFieldPing() const { return mFieldPing; }
 
 private:
+	struct FrameSlot
+	{
+		NRIBufferResource controlReadback;
+		bool readbackPending = false;
+		bool readbackInitialized = false;
+	};
+
 	bool EnsureResources(const NRISmokeGridServices& services, uint32_t cellCapacity, bool filterRequested,
 		bool multipleScatterRequested, bool selfShadowRequested);
 	bool CreateBuffer(const NRISmokeGridServices& services, NRIBufferResource& out, uint64_t size,
-		uint32_t stride, nri::BufferUsageBits usage);
+		uint32_t stride, nri::BufferUsageBits usage, nri::MemoryLocation location = nri::MemoryLocation::DEVICE,
+		bool storageView = true);
 	void DestroyBuffer(const NRISmokeGridServices& services, NRIBufferResource& resource);
 	void DestroyResources(const NRISmokeGridServices& services);
+	void ConsumeReadback(const NRISmokeGridServices& services, uint32_t simulationEpoch);
+	bool RecordControlReadback(const NRISmokeGridServices& services, const NRISmokeSettings& settings);
 	void Barrier(const NRISmokeGridServices& services);
 	void Dispatch(const NRISmokeGridServices& services, NRISmokeGridLightingPass pass,
 		NRISmokeConstants& constants, uint32_t groups, uint32_t iteration = 0u);
@@ -76,6 +87,7 @@ private:
 	NRIBufferResource mScatterActive;
 	NRIBufferResource mSelfShadowCurrent;
 	NRIBufferResource mSelfShadowHistory;
+	std::vector<FrameSlot> mFrameSlots;
 	uint32_t mResourceCellCapacity = 0;
 	uint32_t mResourceBrickCapacity = 0;
 	uint32_t mResourceScatterProbeCapacity = 0;

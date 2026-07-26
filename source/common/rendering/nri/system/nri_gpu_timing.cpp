@@ -17,8 +17,8 @@ namespace
 
 	bool IsSmokeTimingScope(NRIGpuTimingScope scope)
 	{
-		return scope == NRIGpuTimingScope::SmokeSimulation ||
-			scope == NRIGpuTimingScope::SmokeVolume;
+		return scope >= NRIGpuTimingScope::SmokeSimulation &&
+			scope <= NRIGpuTimingScope::SmokeReconstruction;
 	}
 
 	double TimestampDeltaMs(uint64_t begin, uint64_t end, uint64_t frequency)
@@ -187,6 +187,29 @@ void NRIGpuTiming::RetireSlot(nri::CoreInterface& core, uint32_t slotIndex)
 			case NRIGpuTimingScope::WorldTlas: worldTlasMs += value; break;
 			case NRIGpuTimingScope::SmokeSimulation: smokeSimulationMs += value; break;
 			case NRIGpuTimingScope::SmokeVolume: smokeVolumeMs += value; break;
+			case NRIGpuTimingScope::SmokeGridAllocate: timing.smokeGridAllocateMs += value; break;
+			case NRIGpuTimingScope::SmokeGridInitialize: timing.smokeGridInitializeMs += value; break;
+			case NRIGpuTimingScope::SmokeGridDeposit: timing.smokeGridDepositMs += value; break;
+			case NRIGpuTimingScope::SmokeGridHalo: timing.smokeGridHaloMs += value; break;
+			case NRIGpuTimingScope::SmokeGridSimulate: timing.smokeGridSimulateMs += value; break;
+			case NRIGpuTimingScope::SmokeGridRebuild: timing.smokeGridRebuildMs += value; break;
+			case NRIGpuTimingScope::SmokeWorldActive: timing.smokeWorldActiveMs += value; break;
+			case NRIGpuTimingScope::SmokeWorldLink: timing.smokeWorldLinkMs += value; break;
+			case NRIGpuTimingScope::SmokeWorldProposal: timing.smokeWorldProposalMs += value; break;
+			case NRIGpuTimingScope::SmokeWorldSeed: timing.smokeWorldSeedMs += value; break;
+			case NRIGpuTimingScope::SmokeWorldTemporal: timing.smokeWorldTemporalMs += value; break;
+			case NRIGpuTimingScope::SmokeWorldFilter: timing.smokeWorldFilterMs += value; break;
+			case NRIGpuTimingScope::SmokeWorldScatter: timing.smokeWorldScatterMs += value; break;
+			case NRIGpuTimingScope::SmokeCarrier: timing.smokeCarrierMs += value; break;
+			case NRIGpuTimingScope::SmokeViewPrepare: timing.smokeViewPrepareMs += value; break;
+			case NRIGpuTimingScope::SmokeMaterialize: timing.smokeMaterializeMs += value; break;
+			case NRIGpuTimingScope::SmokeViewPoint: timing.smokeViewPointMs += value; break;
+			case NRIGpuTimingScope::SmokeViewDirectional: timing.smokeViewDirectionalMs += value; break;
+			case NRIGpuTimingScope::SmokeViewDirectReuse: timing.smokeViewDirectReuseMs += value; break;
+			case NRIGpuTimingScope::SmokeViewEmissive: timing.smokeViewEmissiveMs += value; break;
+			case NRIGpuTimingScope::SmokeViewIndirect: timing.smokeViewIndirectMs += value; break;
+			case NRIGpuTimingScope::SmokeIntegrate: timing.smokeIntegrateMs += value; break;
+			case NRIGpuTimingScope::SmokeReconstruction: timing.smokeReconstructionMs += value; break;
 			default: break;
 			}
 		}
@@ -194,14 +217,41 @@ void NRIGpuTiming::RetireSlot(nri::CoreInterface& core, uint32_t slotIndex)
 	}
 	timing.smokeSimulationMs = smokeSimulationMs;
 	timing.smokeVolumeMs = smokeVolumeMs;
-	Printf("PERF pt smoke gpu timing NRI: renderer_frame=%llu presentation_gen=%llu queued_slot=%u segment=%.6f simulation=%.6f volume=%.6f total=%.6f scopes=%u valid=%u invalid=%u dropped=%u compact=1 epoch=%llu record=%u\n",
+	const double smokeTotalMs = smokeSimulationMs + smokeVolumeMs;
+	const double smokeDetailMs = timing.SmokeDetailTotalMs();
+	Printf("PERF pt smoke gpu timing NRI: renderer_frame=%llu presentation_gen=%llu queued_slot=%u segment=%.6f simulation=%.6f volume=%.6f total=%.6f detail_total=%.6f unattributed=%.6f grid_allocate=%.6f grid_initialize=%.6f grid_deposit=%.6f grid_halo=%.6f grid_simulate=%.6f grid_rebuild=%.6f world_active=%.6f world_link=%.6f world_proposal=%.6f world_seed=%.6f world_temporal=%.6f world_filter=%.6f world_scatter=%.6f carrier=%.6f view_prepare=%.6f materialize=%.6f view_point=%.6f view_directional=%.6f view_direct_reuse=%.6f view_emissive=%.6f view_indirect=%.6f integrate=%.6f reconstruction=%.6f scopes=%u valid=%u invalid=%u dropped=%u compact=1 epoch=%llu record=%u\n",
 		(unsigned long long)slot.rendererFrame,
 		(unsigned long long)slot.token.presentationGeneration,
 		slotIndex,
 		timing.segmentMs,
 		smokeSimulationMs,
 		smokeVolumeMs,
-		smokeSimulationMs + smokeVolumeMs,
+		smokeTotalMs,
+		smokeDetailMs,
+		smokeTotalMs - smokeDetailMs,
+		timing.smokeGridAllocateMs,
+		timing.smokeGridInitializeMs,
+		timing.smokeGridDepositMs,
+		timing.smokeGridHaloMs,
+		timing.smokeGridSimulateMs,
+		timing.smokeGridRebuildMs,
+		timing.smokeWorldActiveMs,
+		timing.smokeWorldLinkMs,
+		timing.smokeWorldProposalMs,
+		timing.smokeWorldSeedMs,
+		timing.smokeWorldTemporalMs,
+		timing.smokeWorldFilterMs,
+		timing.smokeWorldScatterMs,
+		timing.smokeCarrierMs,
+		timing.smokeViewPrepareMs,
+		timing.smokeMaterializeMs,
+		timing.smokeViewPointMs,
+		timing.smokeViewDirectionalMs,
+		timing.smokeViewDirectReuseMs,
+		timing.smokeViewEmissiveMs,
+		timing.smokeViewIndirectMs,
+		timing.smokeIntegrateMs,
+		timing.smokeReconstructionMs,
 		smokeScopeCount,
 		validSmokeScopes,
 		invalidSmokeScopes,

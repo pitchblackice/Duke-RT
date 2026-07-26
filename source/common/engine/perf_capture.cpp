@@ -273,13 +273,26 @@ namespace
 			nri.traceDirectScene, nri.traceDirectional, nri.traceDirectionalShadow,
 			nri.traceSplitShadow, nri.traceFastEmissiveShadow, nri.traceVisibleChunkGate,
 			(unsigned long long)gCapture.epoch, record.eligibleIndex);
-		Printf("PERF pt gpu timing NRI: frame=%llu nri_frame=%llu segment=%.3f scene=%.3f trace=%.3f trace_dispatch=%.3f denoise=%.3f compose=%.3f upscale=%.3f final=%.3f smoke_simulation=%.3f smoke_volume=%.3f smoke_total=%.3f segments=%u invalid=%u dropped=%u resolved=%u expected=%u compact=1 epoch=%llu sample=%u\n",
+		Printf("PERF pt gpu timing NRI: frame=%llu nri_frame=%llu segment=%.3f scene=%.3f trace=%.3f trace_dispatch=%.3f denoise=%.3f compose=%.3f upscale=%.3f final=%.3f smoke_simulation=%.3f smoke_volume=%.3f smoke_total=%.3f smoke_detail_total=%.3f smoke_grid_allocate=%.3f smoke_grid_initialize=%.3f smoke_grid_deposit=%.3f smoke_grid_halo=%.3f smoke_grid_simulate=%.3f smoke_grid_rebuild=%.3f smoke_world_active=%.3f smoke_world_link=%.3f smoke_world_proposal=%.3f smoke_world_seed=%.3f smoke_world_temporal=%.3f smoke_world_filter=%.3f smoke_world_scatter=%.3f smoke_carrier=%.3f smoke_view_prepare=%.3f smoke_materialize=%.3f smoke_view_point=%.3f smoke_view_directional=%.3f smoke_view_direct_reuse=%.3f smoke_view_emissive=%.3f smoke_view_indirect=%.3f smoke_integrate=%.3f smoke_reconstruction=%.3f segments=%u invalid=%u dropped=%u resolved=%u expected=%u compact=1 epoch=%llu sample=%u\n",
 			(unsigned long long)outer.traceFrame, (unsigned long long)nri.frame,
 			record.gpu.segmentMs, record.gpu.sceneMs,
 			record.gpu.traceMs, record.gpu.traceDispatchMs, record.gpu.denoiseMs, record.gpu.compositionMs,
 			record.gpu.upscaleMs, record.gpu.finalMs,
 			record.gpu.smokeSimulationMs, record.gpu.smokeVolumeMs,
 			record.gpu.smokeSimulationMs + record.gpu.smokeVolumeMs,
+			record.gpu.SmokeDetailTotalMs(),
+			record.gpu.smokeGridAllocateMs, record.gpu.smokeGridInitializeMs,
+			record.gpu.smokeGridDepositMs, record.gpu.smokeGridHaloMs,
+			record.gpu.smokeGridSimulateMs, record.gpu.smokeGridRebuildMs,
+			record.gpu.smokeWorldActiveMs, record.gpu.smokeWorldLinkMs,
+			record.gpu.smokeWorldProposalMs, record.gpu.smokeWorldSeedMs,
+			record.gpu.smokeWorldTemporalMs, record.gpu.smokeWorldFilterMs,
+			record.gpu.smokeWorldScatterMs, record.gpu.smokeCarrierMs,
+			record.gpu.smokeViewPrepareMs, record.gpu.smokeMaterializeMs,
+			record.gpu.smokeViewPointMs, record.gpu.smokeViewDirectionalMs,
+			record.gpu.smokeViewDirectReuseMs, record.gpu.smokeViewEmissiveMs,
+			record.gpu.smokeViewIndirectMs, record.gpu.smokeIntegrateMs,
+			record.gpu.smokeReconstructionMs,
 			record.gpu.segmentCount,
 			record.gpu.invalidPairs, record.gpu.droppedScopes, record.resolvedGpuSegments,
 			record.expectedGpuSegments, (unsigned long long)gCapture.epoch,
@@ -412,6 +425,29 @@ void PerfCompactCaptureResolveGpuSegment(const PerfCompactCaptureToken& token, c
 	r.gpu.finalMs += timing.finalMs; r.gpu.segmentCount += timing.segmentCount;
 	r.gpu.smokeSimulationMs += timing.smokeSimulationMs;
 	r.gpu.smokeVolumeMs += timing.smokeVolumeMs;
+	r.gpu.smokeGridAllocateMs += timing.smokeGridAllocateMs;
+	r.gpu.smokeGridInitializeMs += timing.smokeGridInitializeMs;
+	r.gpu.smokeGridDepositMs += timing.smokeGridDepositMs;
+	r.gpu.smokeGridHaloMs += timing.smokeGridHaloMs;
+	r.gpu.smokeGridSimulateMs += timing.smokeGridSimulateMs;
+	r.gpu.smokeGridRebuildMs += timing.smokeGridRebuildMs;
+	r.gpu.smokeWorldActiveMs += timing.smokeWorldActiveMs;
+	r.gpu.smokeWorldLinkMs += timing.smokeWorldLinkMs;
+	r.gpu.smokeWorldProposalMs += timing.smokeWorldProposalMs;
+	r.gpu.smokeWorldSeedMs += timing.smokeWorldSeedMs;
+	r.gpu.smokeWorldTemporalMs += timing.smokeWorldTemporalMs;
+	r.gpu.smokeWorldFilterMs += timing.smokeWorldFilterMs;
+	r.gpu.smokeWorldScatterMs += timing.smokeWorldScatterMs;
+	r.gpu.smokeCarrierMs += timing.smokeCarrierMs;
+	r.gpu.smokeViewPrepareMs += timing.smokeViewPrepareMs;
+	r.gpu.smokeMaterializeMs += timing.smokeMaterializeMs;
+	r.gpu.smokeViewPointMs += timing.smokeViewPointMs;
+	r.gpu.smokeViewDirectionalMs += timing.smokeViewDirectionalMs;
+	r.gpu.smokeViewDirectReuseMs += timing.smokeViewDirectReuseMs;
+	r.gpu.smokeViewEmissiveMs += timing.smokeViewEmissiveMs;
+	r.gpu.smokeViewIndirectMs += timing.smokeViewIndirectMs;
+	r.gpu.smokeIntegrateMs += timing.smokeIntegrateMs;
+	r.gpu.smokeReconstructionMs += timing.smokeReconstructionMs;
 	r.gpu.invalidPairs += timing.invalidPairs; r.gpu.droppedScopes += timing.droppedScopes;
 	if (gCapture.pendingGpu > 0) gCapture.pendingGpu--;
 }

@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+class NRIRenderDevice;
+
 // NRISmokeSystem is the renderer-private integration boundary. It assembles
 // this small service surface while it has legitimate access to the render
 // device, descriptor pool, and queued-frame state. Keeping those details out
@@ -21,6 +23,7 @@ struct NRISmokeGridServices
 	nri::CoreInterface* core = nullptr;
 	nri::Device* device = nullptr;
 	nri::CommandBuffer* commandBuffer = nullptr;
+	NRIRenderDevice* gpuTimingDevice = nullptr;
 	nri::DescriptorPool* descriptorPool = nullptr;
 	nri::GraphicsAPI graphicsAPI = nri::GraphicsAPI::VK;
 	uint32_t queuedFrameCount = 0;
@@ -78,6 +81,9 @@ struct NRISmokeGridStatusSnapshot
 	uint64_t residentBytes = 0;
 	uint64_t controlReadbackBytes = 0;
 	NRISmokeGridControlGpu gpu = {};
+	bool gpuFrameDeltaValid = false;
+	uint32_t gpuFrameDeltaInterval = 0;
+	NRISmokeGridControlGpu gpuFrameDelta = {};
 	std::string failureReason = "not-requested";
 	std::string resetReason = "initial";
 };
@@ -122,7 +128,7 @@ private:
 		uint32_t stride, nri::BufferUsageBits usage, nri::MemoryLocation location, bool storageView);
 	void DestroyBuffer(const NRISmokeGridServices& services, NRIBufferResource& resource);
 	void DestroyResources(const NRISmokeGridServices& services);
-	void ConsumeReadback(const NRISmokeGridServices& services);
+	void ConsumeReadback(const NRISmokeGridServices& services, uint32_t simulationEpoch);
 	void SetFailure(const char* reason);
 
 	void TransitionResourcesToStorage(const NRISmokeGridServices& services);
