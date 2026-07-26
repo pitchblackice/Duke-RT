@@ -48,7 +48,11 @@ Assert-True ($runner -match 'name = ''exact''; cache = \$false; accept = \$false
 Assert-True ($runner -match 'if \(\$Mode\.accept\)[\s\S]*?nri_ptindirectradiancecacheaccept') 'age-one must be the only leg that requests the future accept CVar'
 Assert-True ($runner -match '\$Cycles -ne \$selectedModeNames\.Count[\s\S]*?for \(\$cycle = 1; \$cycle -le \$Cycles; \+\+\$cycle\)[\s\S]*?\$start = \(1 - \$cycle \+ \$legs\.Count\) % \$legs\.Count') 'runner must validate and use a balanced selected-mode rotation'
 Assert-True ($runner -match 'modes = \$selectedModeNames[\s\S]*?modeCount = \$legs\.Count[\s\S]*?cycles = \$Cycles') 'runner manifest must declare its selected modes and dimensions'
-Assert-True ($analyzer -match 'baselineFrame = \$FirstNriFrame - 1[\s\S]*?endKey = \[string\]\$LastNriFrame') 'analyzer must join cumulative telemetry to exact compact boundaries'
+Assert-True (
+	$analyzer -match 'baselineFrame = \$FirstNriFrame - 1[\s\S]*?endKey = \[string\]\$LastNriFrame' -and
+	$analyzer -match 'firstRendererFrame = \[uint64\]\$orderedWorkloads\[0\]\.renderer_frame' -and
+	$analyzer -match 'Get-CacheWindow[\s\S]*?-FirstNriFrame \$firstRendererFrame -LastNriFrame \$lastRendererFrame'
+) 'analyzer must join cumulative telemetry to renderer-frame compact boundaries'
 Assert-True ($analyzer -match "mode -eq 'forced-miss'[\s\S]*?delta\.accepted[\s\S]*?delta\.exactFallback[\s\S]*?delta\.lookups") 'analyzer must reject forced-miss acceptance/fallback violations'
 Assert-True ($analyzer -match '\$cycles -ne \$modeCount[\s\S]*?\$expectedRunCount = \$cycles \* \$modeCount') 'analyzer must derive balanced matrix dimensions from the manifest'
 

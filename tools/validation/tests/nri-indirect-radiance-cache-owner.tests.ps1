@@ -18,6 +18,7 @@ $trace = Read-RepoFile 'source\common\rendering\nri\shaders\TraceOpaque.cs.hlsl'
 $pipelines = Read-RepoFile 'source\common\rendering\nri\renderer\nri_pipeline_state.cpp'
 $renderer = Read-RepoFile 'source\common\rendering\nri\renderer\nri_renderer.h'
 $dispatch = Read-RepoFile 'source\common\rendering\nri\renderer\nri_pass_dispatch.cpp'
+$dispatchFactory = Read-RepoFile 'source\common\rendering\nri\renderer\nri_pass_dispatch_factory.cpp'
 $cvars = Read-RepoFile 'source\common\rendering\nri\renderer\nri_cvars.cpp'
 $cmake = Read-RepoFile 'source\CMakeLists.txt'
 
@@ -29,6 +30,10 @@ Require ($ownerHeader -match 'mapIdentity[\s\S]*staticSceneIdentity[\s\S]*portal
 	'Compatibility input must expose explicit scene, route, material, mutation, voxel, and lighting identities.'
 Require ($owner -match 'CompareNRIIndirectRadianceCacheCompatibility[\s\S]*INVALID_MAP[\s\S]*INVALID_STATIC_SCENE[\s\S]*INVALID_PORTAL_ROUTE[\s\S]*INVALID_MATERIAL[\s\S]*INVALID_MUTATION[\s\S]*INVALID_VOXEL_OCCURRENCE[\s\S]*INVALID_LIGHTING') `
 	'Compatibility comparison must fail closed for every required generation.'
+Require ($dispatchFactory -match 'staticSceneIdentity[\s\S]{0,420}mStaticMapScene\.buildSerial') `
+	'Static cache compatibility must use the static-scene serial.'
+Require ($dispatchFactory -notmatch 'staticSceneIdentity[\s\S]{0,420}mWorldBlasContentGeneration') `
+	'Dynamic world-BLAS generations must not force a physical cache clear every frame.'
 Require ($ownerHeader -match 'MinimumEntryCount\s*=\s*131072[\s\S]*DefaultEntryCount\s*=\s*262144[\s\S]*MaximumEntryCount\s*=\s*262144') `
 	'Initial cache capacity must remain explicitly bounded.'
 Require ($contracts -match 'NRI_INDIRECT_RADIANCE_CACHE_RECORD_STRIDE\s*=\s*48') `

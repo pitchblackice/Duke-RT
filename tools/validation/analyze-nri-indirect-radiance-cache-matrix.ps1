@@ -220,6 +220,7 @@ function Read-Entry([object]$Entry) {
 		$gpuRow = $orderedGpu[$index]
 		$workload = $orderedWorkloads[$index]
 		foreach ($field in @('sample', 'nri_frame', 'segment', 'trace_dispatch', 'segments', 'invalid', 'dropped', 'resolved', 'expected')) { Require-Field $gpuRow $field 'GPU timing' }
+		Require-Field $workload 'renderer_frame' 'trace workload'
 		if ([int]$gpuRow.sample -ne $index -or [int]$gpuRow.invalid -ne 0 -or [int]$gpuRow.dropped -ne 0 -or
 			[int]$gpuRow.expected -lt 1 -or [int]$gpuRow.resolved -ne [int]$gpuRow.expected -or
 			[int]$gpuRow.segments -lt 1 -or [double]$gpuRow.segment -le 0.0 -or [double]$gpuRow.trace_dispatch -le 0.0) {
@@ -243,12 +244,12 @@ function Read-Entry([object]$Entry) {
 		throw "Sequence $($Entry.sequence) changed settings or normalized workload identity inside the fixed window."
 	}
 
-	$firstNriFrame = [uint64]$orderedGpu[0].nri_frame
-	$lastNriFrame = [uint64]$orderedGpu[-1].nri_frame
-	if ($lastNriFrame -ne $firstNriFrame + [uint64]$samples - 1) {
+	$firstRendererFrame = [uint64]$orderedWorkloads[0].renderer_frame
+	$lastRendererFrame = [uint64]$orderedWorkloads[-1].renderer_frame
+	if ($lastRendererFrame -ne $firstRendererFrame + [uint64]$samples - 1) {
 		throw "Sequence $($Entry.sequence) renderer frames are not contiguous."
 	}
-	$cache = Get-CacheWindow -Entry $Entry -Rows $cacheRows.ToArray() -FirstNriFrame $firstNriFrame -LastNriFrame $lastNriFrame
+	$cache = Get-CacheWindow -Entry $Entry -Rows $cacheRows.ToArray() -FirstNriFrame $firstRendererFrame -LastNriFrame $lastRendererFrame
 	return [pscustomobject][ordered]@{
 		sequence = [int]$Entry.sequence
 		cycle = [int]$Entry.cycle

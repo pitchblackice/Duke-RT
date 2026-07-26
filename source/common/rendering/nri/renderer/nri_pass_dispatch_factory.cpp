@@ -281,7 +281,7 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext(bool mainViewEligib
 				combine(
 					combine(renderer->mStaticVertexBuffer.payloadHash, renderer->mStaticIndexBuffer.payloadHash),
 					renderer->mStaticPrimitiveBuffer.payloadHash),
-				renderer->mWorldBlasContentGeneration);
+				renderer->mStaticMapScene.buildSerial);
 			compatibility.portalRouteIdentity = combine(renderer->mPortalPayloadHash, renderer->mSkyEnvironment.ActiveKey());
 			compatibility.materialIdentity = combine(
 				renderer->mStaticMaterialBuffer.payloadHash,
