@@ -1004,17 +1004,15 @@ float3 EvaluatePlainMirrorSurfaceGlint(HitData mirrorHit, float3 mirrorPlaneNorm
 		const RuntimePointLightData runtimeLight = gRuntimePointLights[runtimeLightIndex];
 		const float3 toLight = runtimeLight.position - mirrorHit.position;
 		const float lightDistanceSq = dot(toLight, toLight);
-		if (lightDistanceSq <= 0.0001)
+		const float lightRadiusSq = runtimeLight.radius * runtimeLight.radius;
+		if (runtimeLight.radius <= 0.0 ||
+			lightDistanceSq <= 0.0001 ||
+			lightDistanceSq >= lightRadiusSq)
 		{
 			continue;
 		}
 
 		const float lightDistance = sqrt(lightDistanceSq);
-		if (lightDistance >= runtimeLight.radius)
-		{
-			continue;
-		}
-
 		const float3 lightDir = toLight / lightDistance;
 		const float3 lightNormal = ResolveLightFacingShadingNormal(mirrorMaterial, mirrorPlaneNormal, lightDir);
 		const float lightFacing = saturate(dot(lightNormal, lightDir));
@@ -1317,16 +1315,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					const RuntimePointLightData runtimeLight = gRuntimePointLights[runtimeLightIndex];
 					const float3 toLightCenter = runtimeLight.position - hit.position;
 					const float centerLightDistanceSq = dot(toLightCenter, toLightCenter);
-					if (centerLightDistanceSq <= 0.0001)
+					const float lightRadiusSq = runtimeLight.radius * runtimeLight.radius;
+					if (runtimeLight.radius <= 0.0 ||
+						centerLightDistanceSq <= 0.0001 ||
+						centerLightDistanceSq >= lightRadiusSq)
 					{
 						continue;
 					}
 
 					const float centerLightDistance = sqrt(centerLightDistanceSq);
-					if (centerLightDistance >= runtimeLight.radius)
-					{
-						continue;
-					}
 					TraceShaderStatAdd(TRACE_STAT_RUNTIME_DISTANCE, 1u);
 
 					const float3 centerLightDir = toLightCenter / centerLightDistance;
