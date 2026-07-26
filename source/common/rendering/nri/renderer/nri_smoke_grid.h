@@ -66,6 +66,25 @@ struct NRISmokeGridFrameDesc
 	const nri::Descriptor* commandView = nullptr;
 };
 
+struct NRISmokeGridSourceStatusSnapshot
+{
+	uint32_t sourceId = 0;
+	uint32_t sourceClass = 0;
+	uint32_t priority = 0;
+	uint32_t commands = 0;
+	uint32_t requestedBricks = 0;
+	uint32_t existingHits = 0;
+	uint32_t admittedNew = 0;
+	uint32_t rejectedCapacity = 0;
+	uint32_t rejectedProbe = 0;
+	uint32_t rejectedInvalid = 0;
+	uint32_t depositionCells = 0;
+	uint32_t requestedMassQ = 0;
+	uint32_t depositedMassQ = 0;
+	uint32_t rejectedMassQ = 0;
+	uint32_t admittedKeyHash = 0;
+};
+
 struct NRISmokeGridStatusSnapshot
 {
 	bool requested = false;
@@ -80,10 +99,12 @@ struct NRISmokeGridStatusSnapshot
 	uint32_t fieldPing = 0;
 	uint64_t residentBytes = 0;
 	uint64_t controlReadbackBytes = 0;
+	uint64_t sourceReadbackBytes = 0;
 	NRISmokeGridControlGpu gpu = {};
 	bool gpuFrameDeltaValid = false;
 	uint32_t gpuFrameDeltaInterval = 0;
 	NRISmokeGridControlGpu gpuFrameDelta = {};
+	std::vector<NRISmokeGridSourceStatusSnapshot> sources;
 	std::string failureReason = "not-requested";
 	std::string resetReason = "initial";
 };
@@ -91,8 +112,9 @@ struct NRISmokeGridStatusSnapshot
 class NRISmokeGrid
 {
 public:
-	static constexpr uint32_t StorageDescriptorCount = 19u;
+	static constexpr uint32_t StorageDescriptorCount = 20u;
 	static constexpr uint32_t EvaluationDescriptorCount = 11u;
+	static constexpr uint32_t SourceCapacity = 256u;
 
 	// Pipeline and descriptor-set initialization is intentionally lazy. A grid
 	// failure must remain local so the particle backend can stay authoritative.
@@ -119,6 +141,7 @@ private:
 	{
 		nri::DescriptorSet* inputSet = nullptr;
 		NRIBufferResource controlReadback;
+		NRIBufferResource sourceReadback;
 		bool readbackPending = false;
 		bool readbackInitialized = false;
 	};
@@ -169,6 +192,7 @@ private:
 	NRIBufferResource mDeposit1;
 	NRIBufferResource mDeposit2;
 	NRIBufferResource mDeposit3;
+	NRIBufferResource mSourceStats;
 
 	uint32_t mResourceBrickCapacity = 0;
 	uint32_t mResourceHashCapacity = 0;

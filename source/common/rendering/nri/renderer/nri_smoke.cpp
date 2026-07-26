@@ -1090,6 +1090,23 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 			(unsigned long long)mStatus.admission.estimatedBrickWorkGathered,
 			(unsigned long long)mStatus.admission.estimatedBrickWorkUploaded,
 			mStatus.admission.Closes() ? 1u : 0u);
+		Printf("PERF pt smoke grid admission NRI: observe_frame=%u valid=%u frame=%u epoch=%u sources=%u requested=%u existing=%u admitted=%u rejected=%u rejected_capacity=%u rejected_probe=%u rejected_invalid=%u compact=1\n",
+			renderer.mFrameIndex, gridWork.gpuStatsValid ? 1u : 0u, gridWork.gpu.frameStamp,
+			gridWork.gpu.generation, gridWork.gpu.admissionSourceCount,
+			gridWork.gpu.admissionRequested, gridWork.gpu.admissionExisting,
+			gridWork.gpu.admissionAdmitted, gridWork.gpu.admissionRejected,
+			gridWork.gpu.admissionCapacityRejected, gridWork.gpu.admissionProbeRejected,
+			gridWork.gpu.admissionInvalidRejected);
+		for (const NRISmokeGridSourceStatusSnapshot& source : gridWork.sources)
+		{
+			Printf("PERF pt smoke grid source NRI: frame=%u epoch=%u source_id=%08x source_class=%u priority=%u commands=%u requested=%u existing=%u admitted=%u rejected_capacity=%u rejected_probe=%u rejected_invalid=%u deposition_cells=%u requested_mass_q=%u deposited_mass_q=%u rejected_mass_q=%u admitted_key_hash=%08x compact=1\n",
+				gridWork.gpu.frameStamp, gridWork.gpu.generation, source.sourceId,
+				source.sourceClass, source.priority, source.commands, source.requestedBricks,
+				source.existingHits, source.admittedNew, source.rejectedCapacity,
+				source.rejectedProbe, source.rejectedInvalid, source.depositionCells,
+				source.requestedMassQ, source.depositedMassQ, source.rejectedMassQ,
+				source.admittedKeyHash);
+		}
 	}
 	AppendSyntheticCommand(renderer);
 	return RecordSimulation(renderer);

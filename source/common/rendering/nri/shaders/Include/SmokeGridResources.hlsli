@@ -28,6 +28,7 @@ RWStructuredBuffer<int4> gSmokeGridDeposit0 : register(u15, space1);
 RWStructuredBuffer<int4> gSmokeGridDeposit1 : register(u16, space1);
 RWStructuredBuffer<int4> gSmokeGridDeposit2 : register(u17, space1);
 RWStructuredBuffer<int4> gSmokeGridDeposit3 : register(u18, space1);
+RWStructuredBuffer<SmokeGridSourceStats> gSmokeGridSourceStats : register(u19, space1);
 
 NRI_ROOT_CONSTANTS(SmokeGridConstants, gSmokeGridConstants, 0, 2);
 
@@ -244,6 +245,30 @@ bool SmokeGridFindOrAllocateBrickSerial(int3 coordinate, uint flags, out uint br
 		return newlyAllocated;
 	}
 	InterlockedAdd(gSmokeGridControl[0].ProbeFailures, 1u);
+	return false;
+}
+
+// The source-fair serial admission walk must distinguish a resident/NEW hit
+// from a new-key decision before it charges a source turn.
+bool SmokeGridFindBrickSerial(int3 coordinate, out uint brickIndex)
+{
+	brickIndex = 0xffffffffu;
+	if (gSmokeGridConstants.HashCapacity == 0u)
+		return false;
+	const uint mask = gSmokeGridConstants.HashCapacity - 1u;
+	const uint base = SmokeGridHashCoordinate(coordinate) & mask;
+	const uint probeLimit = min(NRI_SMOKE_GRID_HASH_PROBES, gSmokeGridConstants.HashCapacity);
+	[loop]
+	for (uint probe = 0u; probe < probeLimit; ++probe)
+	{
+		const uint slot = (base + probe) & mask;
+		const SmokeGridHashEntry entry = gSmokeGridHash[slot];
+		if (entry.State == NRI_SMOKE_GRID_EMPTY)
+			return false;
+		if ((entry.State == NRI_SMOKE_GRID_RESIDENT || entry.State == NRI_SMOKE_GRID_NEW) &&
+			SmokeGridValidateEntry(entry, coordinate, true, brickIndex))
+			return true;
+	}
 	return false;
 }
 

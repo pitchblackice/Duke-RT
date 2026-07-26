@@ -74,6 +74,34 @@ struct NRISmokeGridControlGpu
 	uint32_t activePing = 0;
 	uint32_t fieldPing = 0;
 	uint32_t cellSizeBits = 0;
+	uint32_t admissionSourceCount = 0;
+	uint32_t admissionRequested = 0;
+	uint32_t admissionExisting = 0;
+	uint32_t admissionAdmitted = 0;
+	uint32_t admissionRejected = 0;
+	uint32_t admissionCapacityRejected = 0;
+	uint32_t admissionProbeRejected = 0;
+	uint32_t admissionInvalidRejected = 0;
+};
+
+struct NRISmokeGridSourceStatsGpu
+{
+	uint32_t sourceId = 0;
+	uint32_t sourceClass = 0;
+	uint32_t priority = 0;
+	uint32_t commands = 0;
+	uint32_t requestedBricks = 0;
+	uint32_t existingHits = 0;
+	uint32_t admittedNew = 0;
+	uint32_t rejectedCapacity = 0;
+	uint32_t rejectedProbe = 0;
+	uint32_t rejectedInvalid = 0;
+	uint32_t depositionCells = 0;
+	uint32_t padding = 0;
+	uint32_t requestedMassQ = 0;
+	uint32_t depositedMassQ = 0;
+	uint32_t rejectedMassQ = 0;
+	uint32_t admittedKeyHash = 0;
 };
 
 struct NRISmokeGridDispatchGpu
@@ -124,6 +152,7 @@ struct NRISmokeGridConstants
 
 static_assert(sizeof(NRISmokeGridHashEntryGpu) == 32);
 static_assert(sizeof(NRISmokeGridBrickGpu) == 32);
-static_assert(sizeof(NRISmokeGridControlGpu) == 128);
+static_assert(sizeof(NRISmokeGridControlGpu) == 160);
+static_assert(sizeof(NRISmokeGridSourceStatsGpu) == 64);
 static_assert(sizeof(NRISmokeGridDispatchGpu) == 12);
 static_assert(sizeof(NRISmokeGridConstants) == 128);

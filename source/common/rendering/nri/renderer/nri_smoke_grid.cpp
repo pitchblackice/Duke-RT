@@ -55,20 +55,34 @@ namespace
 	};
 
 	static_assert(std::size(kPipelineNames) == 11u);
+
+	const char* SmokeSourceClassName(uint32_t sourceClass)
+	{
+		switch (sourceClass)
+		{
+		case 0u: return "ambient-map";
+		case 1u: return "interactive-actor";
+		case 2u: return "interactive-event";
+		case 3u: return "diagnostic";
+		default: return "unknown";
+		}
+	}
 }
 
 std::array<NRIBufferResource*, NRISmokeGrid::StorageDescriptorCount> NRISmokeGrid::StorageResources()
 {
 	return { &mControl, &mHash, &mBricks, &mFreeList, &mActiveA, &mActiveB, &mDispatchArgs,
 		&mScalarA, &mScalarB, &mVelocityA, &mVelocityB, &mOpticalA, &mOpticalB,
-		&mDynamicsA, &mDynamicsB, &mDeposit0, &mDeposit1, &mDeposit2, &mDeposit3 };
+		&mDynamicsA, &mDynamicsB, &mDeposit0, &mDeposit1, &mDeposit2, &mDeposit3,
+		&mSourceStats };
 }
 
 std::array<const NRIBufferResource*, NRISmokeGrid::StorageDescriptorCount> NRISmokeGrid::StorageResources() const
 {
 	return { &mControl, &mHash, &mBricks, &mFreeList, &mActiveA, &mActiveB, &mDispatchArgs,
 		&mScalarA, &mScalarB, &mVelocityA, &mVelocityB, &mOpticalA, &mOpticalB,
-		&mDynamicsA, &mDynamicsB, &mDeposit0, &mDeposit1, &mDeposit2, &mDeposit3 };
+		&mDynamicsA, &mDynamicsB, &mDeposit0, &mDeposit1, &mDeposit2, &mDeposit3,
+		&mSourceStats };
 }
 
 void NRISmokeGrid::SetFailure(const char* reason)
@@ -277,12 +291,17 @@ bool NRISmokeGrid::EnsureResources(const NRISmokeGridServices& services, const N
 		CreateBuffer(services, mDeposit0, cells * 16u, 16u, storage, nri::MemoryLocation::DEVICE, true) &&
 		CreateBuffer(services, mDeposit1, cells * 16u, 16u, storage, nri::MemoryLocation::DEVICE, true) &&
 		CreateBuffer(services, mDeposit2, cells * 16u, 16u, storage, nri::MemoryLocation::DEVICE, true) &&
-		CreateBuffer(services, mDeposit3, cells * 16u, 16u, storage, nri::MemoryLocation::DEVICE, true);
+		CreateBuffer(services, mDeposit3, cells * 16u, 16u, storage, nri::MemoryLocation::DEVICE, true) &&
+		CreateBuffer(services, mSourceStats, (uint64_t)SourceCapacity * sizeof(NRISmokeGridSourceStatsGpu),
+			sizeof(NRISmokeGridSourceStatsGpu), storage, nri::MemoryLocation::DEVICE, true);
 
 	for (FrameSlot& slot : mFrameSlots)
 	{
 		created = created && CreateBuffer(services, slot.controlReadback, sizeof(NRISmokeGridControlGpu),
 			sizeof(NRISmokeGridControlGpu), nri::BufferUsageBits::NONE, nri::MemoryLocation::HOST_READBACK, false);
+		created = created && CreateBuffer(services, slot.sourceReadback,
+			(uint64_t)SourceCapacity * sizeof(NRISmokeGridSourceStatsGpu), sizeof(NRISmokeGridSourceStatsGpu),
+			nri::BufferUsageBits::NONE, nri::MemoryLocation::HOST_READBACK, false);
 		slot.readbackPending = false;
 		slot.readbackInitialized = false;
 	}
@@ -321,7 +340,7 @@ bool NRISmokeGrid::EnsureResources(const NRISmokeGridServices& services, const N
 	for (const NRIBufferResource* resource : StorageResources())
 		mStatus.residentBytes += resource->memorySize;
 	for (const FrameSlot& slot : mFrameSlots)
-		mStatus.residentBytes += slot.controlReadback.memorySize;
+		mStatus.residentBytes += slot.controlReadback.memorySize + slot.sourceReadback.memorySize;
 	mStatus.resourcesReady = true;
 	mStatus.failureReason = "none";
 	return true;
@@ -332,7 +351,7 @@ void NRISmokeGrid::ConsumeReadback(const NRISmokeGridServices& services, uint32_
 	if (mFrameSlots.empty() || services.core == nullptr)
 		return;
 	FrameSlot& slot = mFrameSlots[std::min(services.queuedFrameIndex, (uint32_t)mFrameSlots.size() - 1u)];
-	if (!slot.readbackPending || slot.controlReadback.buffer == nullptr)
+	if (!slot.readbackPending || slot.controlReadback.buffer == nullptr || slot.sourceReadback.buffer == nullptr)
 		return;
 	mStatus.gpuStatsValid = false;
 	mStatus.gpuFrameDeltaValid = false;
@@ -344,6 +363,26 @@ void NRISmokeGrid::ConsumeReadback(const NRISmokeGridServices& services, uint32_
 		services.core->UnmapBuffer(*slot.controlReadback.buffer);
 		if (next.generation == simulationEpoch)
 		{
+			const uint64_t sourceBytes = (uint64_t)SourceCapacity * sizeof(NRISmokeGridSourceStatsGpu);
+			const void* sourceMapped = services.core->MapBuffer(*slot.sourceReadback.buffer, 0, sourceBytes);
+			if (sourceMapped == nullptr)
+			{
+				slot.readbackPending = false;
+				return;
+			}
+			const auto* rows = static_cast<const NRISmokeGridSourceStatsGpu*>(sourceMapped);
+			mStatus.sources.clear();
+			for (uint32_t sourceSlot = 0u; sourceSlot < std::min(next.admissionSourceCount, SourceCapacity); ++sourceSlot)
+			{
+				const auto& row = rows[sourceSlot];
+				if (row.sourceId == 0u || row.commands == 0u) continue;
+				mStatus.sources.push_back({ row.sourceId, row.sourceClass, row.priority, row.commands,
+					row.requestedBricks, row.existingHits, row.admittedNew, row.rejectedCapacity,
+					row.rejectedProbe, row.rejectedInvalid, row.depositionCells, row.requestedMassQ,
+					row.depositedMassQ, row.rejectedMassQ, row.admittedKeyHash });
+			}
+			services.core->UnmapBuffer(*slot.sourceReadback.buffer);
+			mStatus.sourceReadbackBytes += sourceBytes;
 			const NRISmokeGridControlGpu previous = mStatus.gpu;
 			const bool consecutive = previous.generation == next.generation && previous.frameStamp + 1u == next.frameStamp;
 			mStatus.gpu = next;
@@ -500,30 +539,41 @@ bool NRISmokeGrid::RecordControlReadback(const NRISmokeGridServices& services, c
 	if (!settings.readback || mFrameSlots.empty())
 		return true;
 	FrameSlot& slot = mFrameSlots[std::min(services.queuedFrameIndex, (uint32_t)mFrameSlots.size() - 1u)];
-	if (slot.controlReadback.buffer == nullptr)
+	if (slot.controlReadback.buffer == nullptr || slot.sourceReadback.buffer == nullptr)
 		return false;
 
-	nri::BufferBarrierDesc before[2] = {};
+	nri::BufferBarrierDesc before[4] = {};
 	before[0].buffer = mControl.buffer;
 	before[0].before = StorageAccess();
 	before[0].after = NRIResourceCopySourceAccess();
-	before[1].buffer = slot.controlReadback.buffer;
-	before[1].before = slot.readbackInitialized ? NRIResourceCopyDestinationAccess() : nri::AccessStage{};
-	before[1].after = NRIResourceCopyDestinationAccess();
+	before[1].buffer = mSourceStats.buffer;
+	before[1].before = StorageAccess();
+	before[1].after = NRIResourceCopySourceAccess();
+	before[2].buffer = slot.controlReadback.buffer;
+	before[2].before = slot.readbackInitialized ? NRIResourceCopyDestinationAccess() : nri::AccessStage{};
+	before[2].after = NRIResourceCopyDestinationAccess();
+	before[3].buffer = slot.sourceReadback.buffer;
+	before[3].before = slot.readbackInitialized ? NRIResourceCopyDestinationAccess() : nri::AccessStage{};
+	before[3].after = NRIResourceCopyDestinationAccess();
 	nri::BarrierDesc beforeCopy = {};
 	beforeCopy.buffers = before;
-	beforeCopy.bufferNum = 2;
+	beforeCopy.bufferNum = 4;
 	services.core->CmdBarrier(*services.commandBuffer, beforeCopy);
 	services.core->CmdCopyBuffer(*services.commandBuffer, *slot.controlReadback.buffer, 0,
 		*mControl.buffer, 0, sizeof(NRISmokeGridControlGpu));
+	services.core->CmdCopyBuffer(*services.commandBuffer, *slot.sourceReadback.buffer, 0,
+		*mSourceStats.buffer, 0, (uint64_t)SourceCapacity * sizeof(NRISmokeGridSourceStatsGpu));
 
-	nri::BufferBarrierDesc restore = {};
-	restore.buffer = mControl.buffer;
-	restore.before = NRIResourceCopySourceAccess();
-	restore.after = StorageAccess();
+	nri::BufferBarrierDesc restore[2] = {};
+	restore[0].buffer = mControl.buffer;
+	restore[0].before = NRIResourceCopySourceAccess();
+	restore[0].after = StorageAccess();
+	restore[1].buffer = mSourceStats.buffer;
+	restore[1].before = NRIResourceCopySourceAccess();
+	restore[1].after = StorageAccess();
 	nri::BarrierDesc afterCopy = {};
-	afterCopy.buffers = &restore;
-	afterCopy.bufferNum = 1;
+	afterCopy.buffers = restore;
+	afterCopy.bufferNum = 2;
 	services.core->CmdBarrier(*services.commandBuffer, afterCopy);
 	slot.readbackPending = true;
 	slot.readbackInitialized = true;
@@ -594,7 +644,7 @@ bool NRISmokeGrid::RecordFrame(const NRISmokeGridServices& services, const NRISm
 		constants.activePing = 0;
 		constants.fieldPing = 0;
 		Dispatch(services, constants, NRISmokeGridPass::Clear,
-			Groups(std::max(mResourceHashCapacity, mResourceBrickCapacity)));
+			Groups(std::max({ mResourceHashCapacity, mResourceBrickCapacity, SourceCapacity })));
 		StorageBarrier(services);
 		mNeedsClear = false;
 		mResourceEpoch = frame.simulationEpoch;
@@ -602,13 +652,9 @@ bool NRISmokeGrid::RecordFrame(const NRISmokeGridServices& services, const NRISm
 
 	{
 		NRIScopedGpuTiming timing(services.gpuTimingDevice, NRIGpuTimingScope::SmokeGridAllocate);
-		if (frame.commandCount > 0u)
-		{
-			// Allocation is a serial GPU control-plane pass. This avoids duplicate
-			// open-addressed claims while field population remains fully parallel.
-			Dispatch(services, constants, NRISmokeGridPass::AllocateCommands, 1u);
-			StorageBarrier(services);
-		}
+		// This serial control-plane pass also clears frame-local source rows.
+		Dispatch(services, constants, NRISmokeGridPass::AllocateCommands, 1u);
+		StorageBarrier(services);
 	}
 	{
 		NRIScopedGpuTiming timing(services.gpuTimingDevice, NRIGpuTimingScope::SmokeGridInitialize);
@@ -706,6 +752,7 @@ void NRISmokeGrid::Reset(uint32_t simulationEpoch, const char* reason)
 	mStatus.fieldPing = 0;
 	mStatus.gpuStatsValid = false;
 	mStatus.gpu = {};
+	mStatus.sources.clear();
 	mStatus.resetReason = reason != nullptr ? reason : "unspecified";
 }
 
@@ -716,6 +763,7 @@ void NRISmokeGrid::DestroyResources(const NRISmokeGridServices& services)
 	for (FrameSlot& slot : mFrameSlots)
 	{
 		DestroyBuffer(services, slot.controlReadback);
+		DestroyBuffer(services, slot.sourceReadback);
 		slot.readbackPending = false;
 		slot.readbackInitialized = false;
 	}
@@ -728,6 +776,7 @@ void NRISmokeGrid::DestroyResources(const NRISmokeGridServices& services)
 	mDispatchIsArgument = false;
 	mStatus.resourcesReady = false;
 	mStatus.residentBytes = 0;
+	mStatus.sources.clear();
 }
 
 void NRISmokeGrid::Shutdown(const NRISmokeGridServices& services)
@@ -762,7 +811,9 @@ void NRISmokeGrid::PrintStatus() const
 		"probe_failures=%u max_probe=%u commands=%u deposition_cells=%u deposition_rejected=%u requested_mass_q=%u deposited_mass_q=%u "
 		"rejected_mass_q=%u saturated=%u halo=%u occupied=%u empty=%u cfl_clamps=%u "
 		"backtrace_clamps=%u nan=%u field_hash=%08x%08x resident_mib=%.2f "
-		"field_readback=0 control_readback=%llu fallback=%s reset=%s\n",
+		"admission_sources=%u admission_requested=%u admission_existing=%u admission_admitted=%u "
+		"admission_rejected=%u admission_capacity_rejected=%u admission_probe_rejected=%u admission_invalid_rejected=%u "
+		"field_readback=0 control_readback=%llu source_readback=%llu fallback=%s reset=%s\n",
 		mStatus.requested ? "yes" : "no", mStatus.representation,
 		mStatus.initialized ? "yes" : "no", mStatus.resourcesReady ? "ready" : "unavailable",
 		mStatus.brickCapacity, mStatus.hashCapacity, mStatus.cellCapacity,
@@ -778,6 +829,20 @@ void NRISmokeGrid::PrintStatus() const
 		mStatus.gpu.backtraceClamps, mStatus.gpu.nanRejects,
 		mStatus.gpu.fieldHashHi, mStatus.gpu.fieldHashLo,
 		(double)mStatus.residentBytes / (1024.0 * 1024.0),
+		mStatus.gpu.admissionSourceCount, mStatus.gpu.admissionRequested,
+		mStatus.gpu.admissionExisting, mStatus.gpu.admissionAdmitted,
+		mStatus.gpu.admissionRejected, mStatus.gpu.admissionCapacityRejected,
+		mStatus.gpu.admissionProbeRejected, mStatus.gpu.admissionInvalidRejected,
 		(unsigned long long)mStatus.controlReadbackBytes,
+		(unsigned long long)mStatus.sourceReadbackBytes,
 		mStatus.failureReason.c_str(), mStatus.resetReason.c_str());
+	for (const NRISmokeGridSourceStatusSnapshot& source : mStatus.sources)
+	{
+		Printf("NRI PT smoke grid source: source_id=%08x source_class=%u class=%s priority=%u commands=%u requested_bricks=%u existing_hits=%u admitted_new=%u rejected_capacity=%u rejected_probe=%u rejected_invalid=%u deposition_cells=%u requested_mass_q=%u deposited_mass_q=%u rejected_mass_q=%u admitted_key_hash=%08x frame=%u epoch=%u\n",
+			source.sourceId, source.sourceClass, SmokeSourceClassName(source.sourceClass), source.priority,
+			source.commands, source.requestedBricks, source.existingHits, source.admittedNew,
+			source.rejectedCapacity, source.rejectedProbe, source.rejectedInvalid,
+			source.depositionCells, source.requestedMassQ, source.depositedMassQ,
+			source.rejectedMassQ, source.admittedKeyHash, mStatus.gpu.frameStamp, mStatus.gpu.generation);
+	}
 }

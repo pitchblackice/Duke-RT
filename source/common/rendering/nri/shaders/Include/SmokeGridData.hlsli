@@ -65,6 +65,34 @@ struct SmokeGridControl
 	uint ActivePing;
 	uint FieldPing;
 	uint CellSizeBits;
+	uint AdmissionSourceCount;
+	uint AdmissionRequested;
+	uint AdmissionExisting;
+	uint AdmissionAdmitted;
+	uint AdmissionRejected;
+	uint AdmissionCapacityRejected;
+	uint AdmissionProbeRejected;
+	uint AdmissionInvalidRejected;
+};
+
+struct SmokeGridSourceStats
+{
+	uint SourceId;
+	uint SourceClass;
+	uint Priority;
+	uint Commands;
+	uint RequestedBricks;
+	uint ExistingHits;
+	uint AdmittedNew;
+	uint RejectedCapacity;
+	uint RejectedProbe;
+	uint RejectedInvalid;
+	uint DepositionCells;
+	uint Padding;
+	uint RequestedMassQ;
+	uint DepositedMassQ;
+	uint RejectedMassQ;
+	uint AdmittedKeyHash;
 };
 
 struct SmokeGridConstants
