@@ -675,6 +675,13 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 	float3 origin = surfaceHit.position + surfaceHit.normal * 0.05;
 	float3 direction = SampleCosineHemisphere(surfaceHit.normal, rngState);
 	bool hasSecondaryHitDistance = false;
+#if defined(NRI_INDIRECT_RADIANCE_CACHE)
+	HitData cacheWriteHit = MakeEmptyHitData();
+	MaterialData cacheWriteMaterial = (MaterialData)0;
+	float3 cacheWriteThroughput = 0.0;
+	float3 cacheContinuationBaseline = 0.0;
+	bool cacheWritePending = false;
+#endif
 
 	[loop]
 	for (uint bounce = 0u; bounce < bounceCount; ++bounce)
@@ -703,14 +710,6 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 		}
 		const MaterialData bounceMaterial = GetMaterialData(bounceHit.materialIndex, bounceHit.dataSource);
 		const bool bounceReceivesShadow = MaterialReceivesShadow(bounceMaterial);
-#if defined(NRI_INDIRECT_RADIANCE_CACHE)
-		if (bounce == 0u && bounceCount > 1u)
-		{
-			float3 ignoredCachedRadiance = 0.0;
-			TryReadIndirectRadianceCache(bounceHit, bounceMaterial, ignoredCachedRadiance);
-			InterlockedAdd(gIndirectRadianceCacheTelemetry[NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_EXACT_FALLBACK], 1u);
-		}
-#endif
 		if ((bounceMaterial.flags & (MATERIAL_FLAG_MIRROR | MATERIAL_FLAG_PORTAL)) != 0)
 		{
 			break;
@@ -766,9 +765,41 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 			break;
 		}
 
+#if defined(NRI_INDIRECT_RADIANCE_CACHE)
+		if (bounce == 0u && bounceCount > 1u)
+		{
+			float3 cachedIncidentRadiance = 0.0;
+			if (TryReadIndirectRadianceCache(bounceHit, bounceMaterial, cachedIncidentRadiance))
+			{
+				indirectRadiance += throughput * cachedIncidentRadiance;
+				break;
+			}
+
+			InterlockedAdd(gIndirectRadianceCacheTelemetry[NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_EXACT_FALLBACK], 1u);
+			cacheWriteHit = bounceHit;
+			cacheWriteMaterial = bounceMaterial;
+			cacheWriteThroughput = throughput;
+			cacheContinuationBaseline = indirectRadiance;
+			cacheWritePending = true;
+		}
+#endif
+
 		origin = bounceHit.position + bounceHit.normal * 0.05;
 		direction = SampleCosineHemisphere(bounceHit.normal, rngState);
 	}
+
+#if defined(NRI_INDIRECT_RADIANCE_CACHE)
+	if (cacheWritePending &&
+		(gTraceConstants.Flags & NRI_FLAG_INDIRECT_RADIANCE_CACHE_ACCEPT) != 0u)
+	{
+		const float3 continuationRadiance = indirectRadiance - cacheContinuationBaseline;
+		const float3 demodulatedContinuation = float3(
+			cacheWriteThroughput.r > 1e-6 ? continuationRadiance.r / cacheWriteThroughput.r : 0.0,
+			cacheWriteThroughput.g > 1e-6 ? continuationRadiance.g / cacheWriteThroughput.g : 0.0,
+			cacheWriteThroughput.b > 1e-6 ? continuationRadiance.b / cacheWriteThroughput.b : 0.0);
+		WriteIndirectRadianceCache(cacheWriteHit, cacheWriteMaterial, demodulatedContinuation);
+	}
+#endif
 
 	return indirectRadiance;
 }

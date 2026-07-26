@@ -4,6 +4,13 @@
 static const uint NRI_INDIRECT_RADIANCE_CACHE_ENTRY_COUNT = 262144u;
 static const uint NRI_INDIRECT_RADIANCE_CACHE_ENTRY_MASK = NRI_INDIRECT_RADIANCE_CACHE_ENTRY_COUNT - 1u;
 
+uint IndirectRadianceCacheFrameMetadata(uint frameIndex)
+{
+	// Published generations are nonzero and even. The low bit remains available
+	// for the transient writer claim without colliding with a readable record.
+	return (((frameIndex & 0x3fffffffu) + 1u) << 1u);
+}
+
 uint IndirectRadianceCacheHash(uint value)
 {
 	value ^= value >> 16u;
@@ -75,7 +82,7 @@ IndirectRadianceCacheRecord BuildIndirectRadianceCacheRecord(
 	record.PackedNormalAndRoute = packedNormal;
 	record.MaterialFlags = material.flags ^ (material.materialClass << 24u) ^ (uint)quantizedPosition.z;
 	record.IncidentRadiance = incidentRadiance;
-	record.Metadata = gTraceConstants.FrameIndex + 1u;
+	record.Metadata = IndirectRadianceCacheFrameMetadata(gTraceConstants.FrameIndex);
 	return record;
 }
 
@@ -98,16 +105,22 @@ bool TryReadIndirectRadianceCache(
 {
 	incidentRadiance = 0.0;
 	InterlockedAdd(gIndirectRadianceCacheTelemetry[NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_LOOKUPS], 1u);
+	const bool acceptHistoricalRadiance =
+		(gTraceConstants.Flags & NRI_FLAG_INDIRECT_RADIANCE_CACHE_ACCEPT) != 0u;
 	if (!IsIndirectRadianceCacheEligible(hit, material))
 	{
 		InterlockedAdd(gIndirectRadianceCacheTelemetry[NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_UNSUPPORTED_ROUTE], 1u);
+		if (!acceptHistoricalRadiance)
+		{
+			InterlockedAdd(gIndirectRadianceCacheTelemetry[NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_FORCED_MISSES], 1u);
+		}
 		return false;
 	}
 
 	const IndirectRadianceCacheRecord reference = BuildIndirectRadianceCacheRecord(hit, material, 0.0);
 	const uint tableIndex = reference.StableKey.x & NRI_INDIRECT_RADIANCE_CACHE_ENTRY_MASK;
 	const IndirectRadianceCacheRecord candidate = gIndirectRadianceCachePrevious[tableIndex];
-	const uint expectedMetadata = gTraceConstants.FrameIndex;
+	const uint expectedMetadata = IndirectRadianceCacheFrameMetadata(gTraceConstants.FrameIndex - 1u);
 	if (candidate.Metadata != 0u && candidate.Metadata != expectedMetadata)
 	{
 		InterlockedAdd(gIndirectRadianceCacheTelemetry[NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_STALE_GENERATION], 1u);
@@ -118,7 +131,7 @@ bool TryReadIndirectRadianceCache(
 		InterlockedAdd(gIndirectRadianceCacheTelemetry[NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_COLLISIONS], 1u);
 	}
 
-	if ((gTraceConstants.Flags & NRI_FLAG_INDIRECT_RADIANCE_CACHE_ACCEPT) == 0u)
+	if (!acceptHistoricalRadiance)
 	{
 		InterlockedAdd(gIndirectRadianceCacheTelemetry[NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_FORCED_MISSES], 1u);
 		return false;
@@ -143,9 +156,34 @@ void WriteIndirectRadianceCache(HitData hit, MaterialData material, float3 incid
 	const IndirectRadianceCacheRecord record = BuildIndirectRadianceCacheRecord(hit, material, incidentRadiance);
 	const uint tableIndex = record.StableKey.x & NRI_INDIRECT_RADIANCE_CACHE_ENTRY_MASK;
 	const uint previousMetadata = gIndirectRadianceCacheCurrent[tableIndex].Metadata;
-	gIndirectRadianceCacheCurrent[tableIndex] = record;
+	const uint claimMetadata = record.Metadata | 1u;
+	if (previousMetadata == record.Metadata || previousMetadata == claimMetadata)
+	{
+		return;
+	}
+
+	uint observedMetadata = 0u;
+	InterlockedCompareExchange(
+		gIndirectRadianceCacheCurrent[tableIndex].Metadata,
+		previousMetadata,
+		claimMetadata,
+		observedMetadata);
+	if (observedMetadata != previousMetadata)
+	{
+		return;
+	}
+
+	gIndirectRadianceCacheCurrent[tableIndex].StableKey = record.StableKey;
+	gIndirectRadianceCacheCurrent[tableIndex].Compatibility = record.Compatibility;
+	gIndirectRadianceCacheCurrent[tableIndex].QuantizedWorldPosition = record.QuantizedWorldPosition;
+	gIndirectRadianceCacheCurrent[tableIndex].PackedNormalAndRoute = record.PackedNormalAndRoute;
+	gIndirectRadianceCacheCurrent[tableIndex].MaterialFlags = record.MaterialFlags;
+	gIndirectRadianceCacheCurrent[tableIndex].IncidentRadiance = record.IncidentRadiance;
+	DeviceMemoryBarrier();
+	uint ignoredMetadata = 0u;
+	InterlockedExchange(gIndirectRadianceCacheCurrent[tableIndex].Metadata, record.Metadata, ignoredMetadata);
 	InterlockedAdd(gIndirectRadianceCacheTelemetry[NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_UPDATES], 1u);
-	if (previousMetadata != record.Metadata)
+	if (previousMetadata == 0u)
 	{
 		InterlockedAdd(gIndirectRadianceCacheTelemetry[NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_OCCUPANCY], 1u);
 	}

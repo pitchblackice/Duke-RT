@@ -15,6 +15,7 @@ $contracts = Read-RepoFile 'source\common\rendering\nri\renderer\nri_shader_cont
 $shaderContract = Read-RepoFile 'source\common\rendering\nri\shaders\Include\IndirectRadianceCache.hlsli'
 $shared = Read-RepoFile 'source\common\rendering\nri\shaders\Include\Shared.hlsli'
 $trace = Read-RepoFile 'source\common\rendering\nri\shaders\TraceOpaque.cs.hlsl'
+$cacheTrace = Read-RepoFile 'source\common\rendering\nri\shaders\Include\IndirectRadianceCacheTrace.hlsli'
 $pipelines = Read-RepoFile 'source\common\rendering\nri\renderer\nri_pipeline_state.cpp'
 $renderer = Read-RepoFile 'source\common\rendering\nri\renderer\nri_renderer.h'
 $dispatch = Read-RepoFile 'source\common\rendering\nri\renderer\nri_pass_dispatch.cpp'
@@ -24,6 +25,8 @@ $cmake = Read-RepoFile 'source\CMakeLists.txt'
 
 Require ($cvars -match 'CVAR\(Bool,\s*nri_ptindirectradiancecache,\s*false,\s*0\)') `
 	'Indirect-radiance cache must remain default-disabled and session-only.'
+Require ($cvars -match 'CVAR\(Bool,\s*nri_ptindirectradiancecacheaccept,\s*false,\s*0\)') `
+	'Historical-radiance acceptance must remain default-disabled and session-only.'
 Require ($owner -match 'if\s*\(!enabled\)[\s\S]{0,320}mActive\s*=\s*false;[\s\S]{0,80}return result;[\s\S]*EnsureResources') `
 	'The disabled Prepare path must return before EnsureResources can allocate.'
 Require ($ownerHeader -match 'mapIdentity[\s\S]*staticSceneIdentity[\s\S]*portalRouteIdentity[\s\S]*materialIdentity[\s\S]*mutationIdentity[\s\S]*voxelOccurrenceIdentity[\s\S]*lightingIdentity') `
@@ -74,11 +77,26 @@ Require ($renderer -match 'TraceOpaque,\s*TraceOpaqueCache,\s*Composition') `
 Require ($dispatch -match 'indirectRadianceCacheActive\s*\?\s*NRIRenderer::PipelineSlot::TraceOpaqueCache\s*:\s*NRIRenderer::PipelineSlot::TraceOpaque') `
 	'Only an active cache request may select the cache permutation; ordinary dispatch must retain TraceOpaque.'
 Require ($trace -match 'defined\(NRI_INDIRECT_RADIANCE_CACHE\)[\s\S]*TryReadIndirectRadianceCache[\s\S]*TELEMETRY_EXACT_FALLBACK') `
-	'Slice 4.1 must query the cache permutation and record exact fallback.'
-Require ($trace -notmatch 'WriteIndirectRadianceCache') `
-	'Slice 4.1 exact-miss mode must not publish a provisional radiance payload.'
-Require ($dispatch -notmatch 'NRI_FLAG_INDIRECT_RADIANCE_CACHE_ACCEPT') `
-	'Slice 4.1 must never authorize a historical cache hit.'
+	'The cache permutation must query the cache and record every exact fallback.'
+Require ($dispatch -match 'indirectRadianceCacheAccept\s*=[\s\S]{0,360}indirectRadianceCacheActive[\s\S]*nri_ptindirectradiancecacheaccept[\s\S]*invalidationMask\s*==\s*NRI_INDIRECT_RADIANCE_CACHE_INVALID_NONE[\s\S]*!indirectRadianceCache\.clearRequired[\s\S]*!context\.mFrame\.resetHistory') `
+	'Historical acceptance must require an active, compatible, uncleared, non-reset cache frame.'
+Require ($dispatch -match 'indirectRadianceCacheAccept\s*\?\s*NRI_FLAG_INDIRECT_RADIANCE_CACHE_ACCEPT\s*:\s*0u') `
+	'Only the guarded acceptance state may authorize a historical cache hit.'
+$diffuseTrace = [regex]::Match(
+	$trace,
+	'float3 TraceIndirectDiffuse[\s\S]*?(?=float3 TraceIndirectSpecular)').Value
+Require ($diffuseTrace -match 'EvaluateSectorLighting[\s\S]*EvaluateSampledEmissiveLighting[\s\S]*UseDirectionalPlaceholderLight[\s\S]*throughput \*= bounceDiffuseColor[\s\S]*TryReadIndirectRadianceCache') `
+	'The first secondary hit and its current lighting must remain exact before cache lookup.'
+Require ($diffuseTrace -match 'TryReadIndirectRadianceCache[\s\S]*indirectRadiance \+= throughput \* cachedIncidentRadiance;[\s\S]*break;') `
+	'An accepted entry may replace only the diffuse continuation after the exact first hit.'
+Require ($diffuseTrace -match 'TELEMETRY_EXACT_FALLBACK[\s\S]*cacheContinuationBaseline = indirectRadiance[\s\S]*continuationRadiance = indirectRadiance - cacheContinuationBaseline[\s\S]*demodulatedContinuation[\s\S]*WriteIndirectRadianceCache') `
+	'A miss must trace exactly, isolate bounces two and later, demodulate them, and publish that continuation.'
+Require ($trace -match 'if\s*\(cacheWritePending\s*&&\s*\(gTraceConstants\.Flags\s*&\s*NRI_FLAG_INDIRECT_RADIANCE_CACHE_ACCEPT\)\s*!=\s*0u\)[\s\S]{0,520}WriteIndirectRadianceCache') `
+	'Forced-miss reference mode must remain read-only; only guarded acceptance mode may publish cache entries.'
+Require ($cacheTrace -match 'IndirectRadianceCacheFrameMetadata\(gTraceConstants\.FrameIndex - 1u\)') `
+	'Historical reuse must accept records from exactly one renderer frame ago.'
+Require ($cacheTrace -match 'InterlockedCompareExchange[\s\S]*\.StableKey = record\.StableKey[\s\S]*\.IncidentRadiance = record\.IncidentRadiance[\s\S]*DeviceMemoryBarrier\(\)[\s\S]*InterlockedExchange\(gIndirectRadianceCacheCurrent\[tableIndex\]\.Metadata, record\.Metadata') `
+	'Writers must atomically claim a slot and publish metadata only after the payload is visible.'
 Require ($shared -match 'defined\(NRI_INDIRECT_RADIANCE_CACHE\)[\s\S]*IndirectRadianceCache\.hlsli') `
 	'Cache resources must enter only the cache shader permutation.'
 

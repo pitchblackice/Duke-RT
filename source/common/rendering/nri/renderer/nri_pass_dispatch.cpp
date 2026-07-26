@@ -419,9 +419,12 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	if (ShouldTracePtPerf())
 	{
 		const NRIIndirectRadianceCacheTelemetrySnapshot& cache = context.mIndirectRadianceCacheService.GetTelemetry();
-		Printf("PERF pt indirect radiance cache NRI: frame=%u requested=%u mode=exact-miss valid=%u telemetry_frame=%llu lookups=%llu accepted=%llu forced_miss=%llu collision=%llu stale=%llu unsupported=%llu exact_fallback=%llu occupancy=%llu updates=%llu clears=%llu table_bytes=%llu total_bytes=%llu invalidation=0x%x pending_readbacks=%u\n",
+		const bool cacheAcceptRequested = (bool)nri_ptindirectradiancecache && (bool)nri_ptindirectradiancecacheaccept;
+		Printf("PERF pt indirect radiance cache NRI: frame=%u requested=%u accept_requested=%u mode=%s valid=%u telemetry_frame=%llu lookups=%llu accepted=%llu forced_miss=%llu collision=%llu stale=%llu unsupported=%llu exact_fallback=%llu occupancy=%llu updates=%llu clears=%llu table_bytes=%llu total_bytes=%llu invalidation=0x%x pending_readbacks=%u\n",
 			context.mFrame.frameIndex,
 			(bool)nri_ptindirectradiancecache ? 1u : 0u,
+			cacheAcceptRequested ? 1u : 0u,
+			cacheAcceptRequested ? "age-one" : "exact-miss",
 			cache.valid ? 1u : 0u,
 			(unsigned long long)cache.frameNumber,
 			(unsigned long long)cache.lookupCount,
@@ -472,6 +475,12 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	{
 		indirectRadianceCacheActive = false;
 	}
+	const bool indirectRadianceCacheAccept =
+		indirectRadianceCacheActive &&
+		(bool)nri_ptindirectradiancecacheaccept &&
+		indirectRadianceCache.invalidationMask == NRI_INDIRECT_RADIANCE_CACHE_INVALID_NONE &&
+		!indirectRadianceCache.clearRequired &&
+		!context.mFrame.resetHistory;
 	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars(context.mEffectiveIndirectSamplingMode);
 	const bool useTemporalJitter =
 		!nri_ptbootstrap &&
@@ -509,6 +518,7 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		(ShouldCollectTraceShaderStats() ? NRI_FLAG_TRACE_SHADER_STATS : 0u) |
 		(context.mActiveIndirectSamplingMode != 0u ? NRI_FLAG_PROBABILISTIC_INDIRECT : 0u) |
 		(indirectRadianceCacheActive ? NRI_FLAG_INDIRECT_RADIANCE_CACHE : 0u) |
+		(indirectRadianceCacheAccept ? NRI_FLAG_INDIRECT_RADIANCE_CACHE_ACCEPT : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u) |
 		NRIPackTemporalJitterPhaseCount(jitterPhaseCount) |
 		PackVoxelNormalBlend8(nri_ptvoxelnormalblend);
