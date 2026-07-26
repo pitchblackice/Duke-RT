@@ -277,14 +277,16 @@ namespace
 	void FlushLoopRecord(const Record& record)
 	{
 		const auto& f = record.outer;
-		Printf("PERF loop trace: frame=%llu presentation_gen=%llu simulation_gen=%llu engine_gen=%llu state=level gametic=%d startframe_ms=%.3f try_ms=%.3f try_traced_ms=%.3f display_ms=%.3f display_begin_ms=%.3f display_render_ms=%.3f display_overlay_ms=%.3f display_update_ms=%.3f starttic_ms=%.3f music_ms=%.3f frame_ms=%.3f do_wait=%d realtics=%d avail=%d counts=%d ticks=%d wait_loops=%d zero_return=%d wait_return=%d paused_return=%d display_skip=%d level_rendered=1 compact=1 epoch=%llu sample=%u\n",
+		Printf("PERF loop trace: frame=%llu presentation_gen=%llu simulation_gen=%llu engine_gen=%llu state=level gametic=%d startframe_ms=%.3f try_ms=%.3f try_traced_ms=%.3f display_ms=%.3f display_begin_ms=%.3f display_render_ms=%.3f display_overlay_ms=%.3f display_update_ms=%.3f starttic_ms=%.3f music_ms=%.3f frame_ms=%.3f do_wait=%d realtics=%d avail=%d counts=%d ticks=%d wait_loops=%d zero_return=%d wait_return=%d paused_return=%d fixed_return=%d fixed_tail_suppressed=%u display_skip=%d level_rendered=1 compact=1 epoch=%llu sample=%u\n",
 			(unsigned long long)f.traceFrame, (unsigned long long)f.presentationGeneration,
 			(unsigned long long)f.simulationGeneration, (unsigned long long)f.engineGeneration,
 			f.gametic, f.startFrameMs, f.tryMs, f.tryTracedMs, f.displayMs,
 			f.displayBeginMs, f.displayRenderMs, f.displayOverlayMs, f.displayUpdateMs,
 			f.startTicMs, f.musicMs, f.frameMs, f.doWait ? 1 : 0, f.realtics,
 			f.availabletics, f.counts, f.ticks, f.waitLoops, f.zeroReturn ? 1 : 0,
-			f.waitReturn ? 1 : 0, f.pausedReturn ? 1 : 0, f.displaySkipped ? 1 : 0,
+			f.waitReturn ? 1 : 0, f.pausedReturn ? 1 : 0,
+			f.fixedSimulationReturn ? 1 : 0, f.fixedSimulationSuppressedTailTicks,
+			f.displaySkipped ? 1 : 0,
 			(unsigned long long)gCapture.epoch, record.eligibleIndex);
 	}
 }

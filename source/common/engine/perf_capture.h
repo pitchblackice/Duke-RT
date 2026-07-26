@@ -94,6 +94,8 @@ struct PerfCompactOuterFrame
 	double nriDenoiseMs = 0.0, nriComposeMs = 0.0, nriUpscaleMs = 0.0, nriFinalMs = 0.0;
 	int realtics = 0, availabletics = 0, counts = 0, ticks = 0, waitLoops = 0;
 	bool doWait = false, zeroReturn = false, waitReturn = false, pausedReturn = false;
+	bool fixedSimulationReturn = false;
+	uint32_t fixedSimulationSuppressedTailTicks = 0;
 	bool displaySkipped = false, levelRendered = false, stateIsLevel = false, nriActive = false;
 };
 

@@ -2070,6 +2070,7 @@ void NRIRenderer::OnLevelFirstFrameRelease()
 		mFrameIndex,
 		BuildNRIPersistentVoxelSettingsFromCVars(),
 		(int)nri_ptloadingtrace);
+	NRIPreloadCoordinator::QueueStrictPreloadFirstFrameReleaseCommand(*this);
 }
 
 NRIRenderer::LevelTransitionSnapshot NRIRenderer::BuildLevelTransitionSnapshot() const

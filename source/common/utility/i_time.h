@@ -25,6 +25,7 @@ int I_WaitForTic(int prevtic, double const ticrate = GameTicRate);
 // You must also not call I_WaitForTic() while freezing time, since the
 // tic will never arrive (unless it's the current one).
 void I_FreezeTime(bool frozen);
+bool I_IsTimeFrozen();
 
 // [RH] Returns millisecond-accurate time
 uint64_t I_msTime();

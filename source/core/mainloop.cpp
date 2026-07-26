@@ -127,6 +127,23 @@ void MarkPlayers()
 
 bool r_NoInterpolate;
 extern bool demoplayback;
+CUSTOM_CVAR(Int, perf_fixedsimulationframes, 0, 0)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 4096)
+	{
+		self = 4096;
+	}
+}
+
+// The fixed-presentation performance control owns this freeze only when it
+// started it. Wipes, movie playback, and other engine clients retain ownership
+// of any freeze that was already active.
+static bool perfFixedSimulationOwnsTimeFreeze = false;
+
 int entertic;
 int oldentertics;
 int gametic;
@@ -152,6 +169,8 @@ namespace
 	{
 		bool doWait = false;
 		bool pausedReturn = false;
+		bool fixedSimulationReturn = false;
+		uint32_t fixedSimulationSuppressedTailTicks = 0;
 		bool zeroCountReturn = false;
 		bool waitLoopReturn = false;
 		int realtics = 0;
@@ -1361,6 +1380,34 @@ void TryRunTics (void)
 	perfTryRunTicsTraceStats = {};
 	gGameUpdateTicksThisPresentation = 0;
 
+	// Keep presentation, renderer publication, fence retirement, and GPU work
+	// running while a bounded performance capture holds authoritative gameplay
+	// state fixed. This diagnostic control is deliberately session-only and is
+	// never permitted in network games, demos, or outside an active level.
+	// Fixed presentations must bypass I_WaitForTic: frozen time cannot advance.
+	if ((int)perf_fixedsimulationframes > 0 &&
+		gamestate == GS_LEVEL && !netgame && !demoplayback)
+	{
+		if (!perfFixedSimulationOwnsTimeFreeze && !I_IsTimeFrozen())
+		{
+			I_FreezeTime(true);
+			perfFixedSimulationOwnsTimeFreeze = true;
+		}
+		perf_fixedsimulationframes = (int)perf_fixedsimulationframes - 1;
+		perfTryRunTicsTraceStats.fixedSimulationReturn = true;
+		perfTryRunTicsTraceStats.durationMs = I_msTimeF() - traceStartMs;
+		return;
+	}
+	if (perfFixedSimulationOwnsTimeFreeze)
+	{
+		I_FreezeTime(false);
+		perfFixedSimulationOwnsTimeFreeze = false;
+	}
+	if ((int)perf_fixedsimulationframes > 0)
+	{
+		perf_fixedsimulationframes = 0;
+	}
+
 	// If paused, do not eat more CPU time than we need, because it
 	// will all be wasted anyway.
 	bool doWait = (cl_capfps || pauseext || (r_NoInterpolate && !M_IsAnimated() && gamestate != GS_CUTSCENE && gamestate != GS_INTRO));
@@ -1562,6 +1609,16 @@ void TryRunTics (void)
 
 			NetUpdate ();	// check for new console commands
 			TicStabilityEnd();
+			if ((int)perf_fixedsimulationframes > 0 &&
+				gamestate == GS_LEVEL && !netgame && !demoplayback && counts > 0)
+			{
+				// A delayed console command can arm fixed simulation from inside
+				// GameTicker after this catch-up batch was calculated. Preserve the
+				// state reached by the arming tick instead of consuming the stale
+				// remainder before the first fixed presentation.
+				perfTryRunTicsTraceStats.fixedSimulationSuppressedTailTicks = (uint32_t)counts;
+				counts = 0;
+			}
 			if (UsePathTracingLevelLoadClockPolicy() && counts > 0)
 			{
 				// The named loading boundary may begin inside a batch that was
@@ -1713,6 +1770,8 @@ void MainLoop ()
 				compact.zeroReturn = perfTryRunTicsTraceStats.zeroCountReturn;
 				compact.waitReturn = perfTryRunTicsTraceStats.waitLoopReturn;
 				compact.pausedReturn = perfTryRunTicsTraceStats.pausedReturn;
+				compact.fixedSimulationReturn = perfTryRunTicsTraceStats.fixedSimulationReturn;
+				compact.fixedSimulationSuppressedTailTicks = perfTryRunTicsTraceStats.fixedSimulationSuppressedTailTicks;
 				compact.displaySkipped = perfDisplayTraceStats.skippedInactive;
 				compact.levelRendered = perfDisplayTraceStats.levelRendered;
 				compact.stateIsLevel = gamestate == GS_LEVEL;
@@ -1727,7 +1786,7 @@ void MainLoop ()
 				const auto renderTrace = GetPerfRenderTraceStats();
 				const double frameMs = I_msTimeF() - frameStartMs;
 				Printf(
-					"PERF loop trace: frame=%llu presentation_gen=%llu simulation_gen=%llu engine_gen=%llu state=%s gametic=%d startframe_ms=%.3f try_ms=%.3f try_traced_ms=%.3f display_ms=%.3f display_begin_ms=%.3f display_render_ms=%.3f display_overlay_ms=%.3f display_update_ms=%.3f starttic_ms=%.3f music_ms=%.3f frame_ms=%.3f do_wait=%d realtics=%d avail=%d counts=%d ticks=%d wait_loops=%d zero_return=%d wait_return=%d paused_return=%d display_skip=%d level_rendered=%d\n",
+					"PERF loop trace: frame=%llu presentation_gen=%llu simulation_gen=%llu engine_gen=%llu state=%s gametic=%d startframe_ms=%.3f try_ms=%.3f try_traced_ms=%.3f display_ms=%.3f display_begin_ms=%.3f display_render_ms=%.3f display_overlay_ms=%.3f display_update_ms=%.3f starttic_ms=%.3f music_ms=%.3f frame_ms=%.3f do_wait=%d realtics=%d avail=%d counts=%d ticks=%d wait_loops=%d zero_return=%d wait_return=%d paused_return=%d fixed_return=%d fixed_tail_suppressed=%u display_skip=%d level_rendered=%d\n",
 					(unsigned long long)traceFrame,
 					(unsigned long long)gPresentationGeneration,
 					(unsigned long long)gGameUpdateGeneration,
@@ -1754,6 +1813,8 @@ void MainLoop ()
 					perfTryRunTicsTraceStats.zeroCountReturn ? 1 : 0,
 					perfTryRunTicsTraceStats.waitLoopReturn ? 1 : 0,
 					perfTryRunTicsTraceStats.pausedReturn ? 1 : 0,
+					perfTryRunTicsTraceStats.fixedSimulationReturn ? 1 : 0,
+					perfTryRunTicsTraceStats.fixedSimulationSuppressedTailTicks,
 					perfDisplayTraceStats.skippedInactive ? 1 : 0,
 					perfDisplayTraceStats.levelRendered ? 1 : 0);
 				Printf(

@@ -376,6 +376,8 @@ CVAR(Bool, nri_ptvoxelcomputepreloadstrict, false, 0)
 
 CVAR(String, nri_ptvoxelcomputepreloadterminalcommand, "", 0)
 
+CVAR(String, nri_ptvoxelcomputepreloadreleasecommand, "", 0)
+
 CVAR(Bool, nri_ptvoxelcomputepreloadbalancedoptional, false, 0)
 
 CVAR(Int, nri_ptvoxelcomputepreloadbalancedmaxpriority, 1, 0)
