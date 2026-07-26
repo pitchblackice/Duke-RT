@@ -151,7 +151,9 @@ function Read-Entry([object]$Entry) {
 $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
 $runs = @($manifest.entries | ForEach-Object { Read-Entry $_ })
 $identity = @($runs | ForEach-Object { "$($_.manifestHash)/$($_.selectedBindings)/$($_.activeInstances)/$($_.populationKey)" } | Sort-Object -Unique)
-if ($identity.Count -ne 1) { throw 'Matrix legs did not retain one strict scene/voxel/light population identity.' }
+if ($identity.Count -ne 1) {
+    throw "Matrix legs did not retain one strict scene/voxel/light population identity: $($identity -join ' | ')"
+}
 
 $legs = @($runs.leg | Sort-Object -Unique | ForEach-Object {
     $name = $_

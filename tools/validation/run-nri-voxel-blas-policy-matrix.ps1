@@ -31,6 +31,7 @@ function New-MatrixScenario([object]$Base, [int]$Policy, [bool]$Compact, [string
     $loopFrames = $Samples + $WarmupSamples + 3
     $leg = "policy-$Policy-compact-$([int]$Compact)"
     $settings = [ordered]@{
+        cl_interpolate = 'false'
         nri_ptlightbounces = '2'
         nri_ptmirrorbounces = '2'
         nri_ptportaldepth = '3'
