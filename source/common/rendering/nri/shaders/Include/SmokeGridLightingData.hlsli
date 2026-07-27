@@ -106,6 +106,19 @@ struct SmokeGridLightControl
 	uint ExplicitZeroProbes;
 	uint SplitBlockedProbes;
 	uint2 SelfShadowPadding;
+	uint RadiancePartitionCount;
+	uint RadianceNewInvalidQuantity;
+	uint RadianceMaintenanceQuantity;
+	uint RadianceMaximumAge;
+	uint RadianceNewInvalidRequested;
+	uint RadianceNewInvalidScheduled;
+	uint RadianceNewInvalidDeferred;
+	uint RadianceMaintenanceRequested;
+	uint RadianceMaintenanceScheduled;
+	uint RadianceMaintenanceDeferred;
+	uint RadianceHistoryRetained;
+	uint RadianceHistoryMissing;
+	uint RadianceAgeOverflows;
 };
 
 struct SmokeGridLightProposal

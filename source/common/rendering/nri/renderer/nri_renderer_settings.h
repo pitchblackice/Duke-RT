@@ -139,6 +139,10 @@ struct NRISmokeSettings
 	bool emissiveWorldFilter = false;
 	bool emissiveLocalProposals = true;
 	uint32_t emissiveWorldDebug = 0;
+	uint32_t worldRadiancePartitions = 1;
+	uint32_t worldRadianceNewCells = 8192;
+	uint32_t worldRadianceMaintenanceCells = 32768;
+	uint32_t worldRadianceMaximumAge = 16;
 	bool emissiveLegacyGatherDisabled = false;
 	bool emissiveQuarterKey = false;
 	float emissiveSourceClamp = 32.0f;

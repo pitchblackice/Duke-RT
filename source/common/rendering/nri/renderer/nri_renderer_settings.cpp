@@ -241,6 +241,11 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.emissiveWorldFilter = (bool)nri_ptsmokeemissiveworldfilter;
 	settings.emissiveLocalProposals = (bool)nri_ptsmokeemissivelocal;
 	settings.emissiveWorldDebug = (uint32_t)std::clamp((int)nri_ptsmokeemissiveworlddebug, 0, 7);
+	const uint32_t requestedWorldPartitions = (uint32_t)std::clamp((int)nri_ptsmokeworldpartitions, 1, 4);
+	settings.worldRadiancePartitions = requestedWorldPartitions >= 4u ? 4u : (requestedWorldPartitions >= 2u ? 2u : 1u);
+	settings.worldRadianceNewCells = (uint32_t)std::clamp((int)nri_ptsmokeworldnewcells, 1, 262144);
+	settings.worldRadianceMaintenanceCells = (uint32_t)std::clamp((int)nri_ptsmokeworldmaintenancecells, 1, 262144);
+	settings.worldRadianceMaximumAge = (uint32_t)std::clamp((int)nri_ptsmokeworldradiancemaxage, 1, 65535);
 	settings.emissiveLegacyGatherDisabled = (bool)nri_ptsmokeemissivelegacygatherdisable;
 	settings.emissiveQuarterKey = (bool)nri_ptsmokeemissivequarterkey;
 	settings.emissiveSourceClamp = std::clamp((float)nri_ptsmokeemissiveclamp, 1.0f, 256.0f);

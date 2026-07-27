@@ -122,6 +122,19 @@ struct NRISmokeGridLightControlGpu
 	uint32_t explicitZeroProbes = 0;
 	uint32_t splitBlockedProbes = 0;
 	uint32_t selfShadowPadding[2] = {};
+	uint32_t radiancePartitionCount = 1;
+	uint32_t radianceNewInvalidQuantity = 0;
+	uint32_t radianceMaintenanceQuantity = 0;
+	uint32_t radianceMaximumAge = 0;
+	uint32_t radianceNewInvalidRequested = 0;
+	uint32_t radianceNewInvalidScheduled = 0;
+	uint32_t radianceNewInvalidDeferred = 0;
+	uint32_t radianceMaintenanceRequested = 0;
+	uint32_t radianceMaintenanceScheduled = 0;
+	uint32_t radianceMaintenanceDeferred = 0;
+	uint32_t radianceHistoryRetained = 0;
+	uint32_t radianceHistoryMissing = 0;
+	uint32_t radianceAgeOverflows = 0;
 };
 
 struct NRISmokeGridLightProposalGpu
@@ -177,6 +190,10 @@ struct NRISmokeGridLightingStatusSnapshot
 	uint32_t emissivePointCandidatesRequested = 1;
 	uint32_t emissivePointCandidatesEffective = 1;
 	int32_t emissiveCandidateTarget = -1;
+	uint32_t radiancePartitionCount = 1;
+	uint32_t radianceNewInvalidQuantity = 0;
+	uint32_t radianceMaintenanceQuantity = 0;
+	uint32_t radianceMaximumAge = 0;
 	uint32_t lastUpdatedFrame = UINT32_MAX;
 	uint64_t fieldBytes = 0;
 	uint64_t workBytes = 0;
@@ -201,7 +218,7 @@ struct NRISmokeGridLightingStatusSnapshot
 };
 
 static_assert(sizeof(NRISmokeGridLightRecordGpu) == 96);
-static_assert(sizeof(NRISmokeGridLightControlGpu) == 332);
+static_assert(sizeof(NRISmokeGridLightControlGpu) == 384);
 static_assert(sizeof(NRISmokeGridLightProposalGpu) == 80);
 static_assert(sizeof(NRISmokeGridLightSupportStampGpu) == 8);
 static_assert(sizeof(NRISmokeGridScatterMetadataGpu) == 32);

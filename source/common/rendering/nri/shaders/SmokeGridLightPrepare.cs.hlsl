@@ -8,6 +8,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	control.FrameStamp = gSmokeConstants.FrameIndex;
 	control.SimulationEpoch = gSmokeConstants.SimulationEpoch;
 	control.FieldPing = (gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_FIELD_PING) != 0u ? 1u : 0u;
+	control.RadiancePartitionCount = max(gSmokeConstants.ParticleCapacity, 1u);
+	control.RadianceNewInvalidQuantity = max(gSmokeConstants.StyleCount, 1u);
+	control.RadianceMaintenanceQuantity = max(gSmokeConstants.FroxelWidth, 1u);
+	control.RadianceMaximumAge = max(gSmokeConstants.FroxelHeight, 1u);
 	gSmokeGridLightControl[0] = control;
 	uint smokeControlCount, ignoredStride;
 	gSmokeControl.GetDimensions(smokeControlCount, ignoredStride);
