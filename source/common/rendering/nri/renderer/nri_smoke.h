@@ -8,6 +8,7 @@
 #include "nri_smoke_emitters.h"
 #include "nri_smoke_grid.h"
 #include "nri_smoke_grid_lighting.h"
+#include "nri_smoke_view_work.h"
 #include "v_video.h"
 
 #include <array>
@@ -322,6 +323,7 @@ private:
 	NRISmokeAuthority mAuthority;
 	NRISmokeGrid mGrid;
 	NRISmokeGridLighting mGridLighting;
+	NRISmokeViewWork mViewWork;
 	std::vector<NRISmokeStyleGpu> mStyles;
 	std::vector<NRISmokeInjectionCommandGpu> mPendingCommands;
 	std::vector<NRISmokeInjectionCommandGpu> mSelectedGridCommands;

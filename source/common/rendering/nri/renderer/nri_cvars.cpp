@@ -848,6 +848,7 @@ CVAR(Bool, nri_ptsmokefilteredvisibility, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG
 CVAR(Int, nri_ptsmokedebug, 0, 0)
 CVAR(Int, nri_ptsmoketrace, 0, 0)
 CVAR(Bool, nri_ptsmokereadback, false, 0)
+CVAR(Bool, nri_ptsmokeviewcompare, false, 0)
 CVAR(Float, nri_ptsmokeindirectscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsmokerepresentation, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsmokegridbricks, 512, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

@@ -1843,15 +1843,19 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		nri::BarrierDesc barrier = {}; barrier.buffers = barriers.data(); barrier.bufferNum = (uint32_t)barriers.size();
 		renderer.mFrameBuffer->mCore.CmdBarrier(*renderer.mFrameBuffer->mCommandBuffer, barrier);
 	};
-	renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 0, slot.inputSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 1, slot.bufferSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 2, slot.textureSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 3, slot.outputSet, nri::BindPoint::COMPUTE });
-	if (lightBuffersReady)
-		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 4, slot.lightSet, nri::BindPoint::COMPUTE });
-	if (filteredResourcesReady || shadowReady || sectorLightResourcesReady || skyResourceReady || reprojectionResourcesReady)
-		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 5, slot.filteredSceneSet, nri::BindPoint::COMPUTE });
+	auto bindSmokePipeline = [&]()
+	{
+		renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
+		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 0, slot.inputSet, nri::BindPoint::COMPUTE });
+		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 1, slot.bufferSet, nri::BindPoint::COMPUTE });
+		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 2, slot.textureSet, nri::BindPoint::COMPUTE });
+		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 3, slot.outputSet, nri::BindPoint::COMPUTE });
+		if (lightBuffersReady)
+			renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 4, slot.lightSet, nri::BindPoint::COMPUTE });
+		if (filteredResourcesReady || shadowReady || sectorLightResourcesReady || skyResourceReady || reprojectionResourcesReady)
+			renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 5, slot.filteredSceneSet, nri::BindPoint::COMPUTE });
+	};
+	bindSmokePipeline();
 	const bool multipleScatterReady = gridRepresentationActive && mSettings.multipleScatter &&
 		mGridLighting.GetStatusSnapshot().multipleScatterEffective;
 	if ((worldEmissiveReady || multipleScatterReady) &&
@@ -1887,6 +1891,41 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		dispatch(NRISmokePass::Clear, Groups(std::max({ froxelCount, wideCellCount, (uint64_t)mResourceFroxelDepth })), 1, 1);
 		storageBarrier();
 	}
+	bool viewComparatorPrepared = false;
+	if (renderGrid && mSettings.viewCompare)
+	{
+		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeViewPrepare);
+		std::array<const nri::Descriptor*, NRISmokeGrid::EvaluationDescriptorCount> grid = {};
+		if (mGrid.GetEvaluationStorageDescriptors(grid) && mViewWork.Initialize(BuildGridServices(renderer)))
+		{
+			NRISmokeViewWorkFrame frame = {};
+			frame.constants.frameIndex = renderer.mFrameIndex;
+			frame.constants.simulationEpoch = mStatus.simulationEpoch;
+			frame.constants.brickCapacity = mGrid.GetStatusSnapshot().brickCapacity;
+			frame.constants.froxelWidth = mResourceFroxelWidth;
+			frame.constants.froxelHeight = mResourceFroxelHeight;
+			frame.constants.froxelDepth = mResourceFroxelDepth;
+			const NRISmokeViewWorkLayout layout = NRISmokeViewWork::Describe(
+				mResourceFroxelWidth, mResourceFroxelHeight, mResourceFroxelDepth,
+				frame.constants.brickCapacity);
+			frame.constants.tileCountX = layout.tileCountX;
+			frame.constants.tileCountY = layout.tileCountY;
+			frame.constants.fieldPing = mGrid.GetFieldPing();
+			frame.constants.cellSize = mSettings.gridCellSize;
+			frame.constants.opticalThreshold = mSettings.gridActiveThreshold;
+			frame.constants.froxelMaxDistance = mSettings.froxelMaxDistance;
+			frame.constants.depthExponent = constants.depthExponent;
+			frame.constants.tanHalfFovX = constants.tanHalfFovX;
+			frame.constants.tanHalfFovY = constants.tanHalfFovY;
+			std::copy(constants.cameraPosition, constants.cameraPosition + 3, frame.constants.cameraPosition);
+			std::copy(constants.cameraForward, constants.cameraForward + 3, frame.constants.cameraForward);
+			std::copy(constants.cameraRight, constants.cameraRight + 3, frame.constants.cameraRight);
+			std::copy(constants.cameraUp, constants.cameraUp + 3, frame.constants.cameraUp);
+			frame.gridDescriptors = { grid[0], grid[2], grid[7], grid[8] };
+			viewComparatorPrepared = mViewWork.Prepare(BuildGridServices(renderer), frame);
+			bindSmokePipeline();
+		}
+	}
 	if (renderParticles)
 	{
 		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeCarrier);
@@ -1912,6 +1951,12 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 			(mResourceFroxelHeight + 3) / 4, (mResourceFroxelDepth + 3) / 4);
 		mStatus.gridOpticalDispatches++;
 		storageBarrier();
+	}
+	if (viewComparatorPrepared)
+	{
+		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeViewPrepare);
+		mViewWork.CompareDense(BuildGridServices(renderer), mFroxelMedium.storageView, mFroxelSource.storageView);
+		bindSmokePipeline();
 	}
 	{
 		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeViewPoint);
@@ -2346,6 +2391,7 @@ void NRISmokeSystem::DestroyResources(NRIRenderer& renderer)
 
 void NRISmokeSystem::Shutdown(NRIRenderer& renderer)
 {
+	mViewWork.Shutdown(BuildGridServices(renderer));
 	mGridLighting.Shutdown(BuildGridServices(renderer));
 	mGrid.Shutdown(BuildGridServices(renderer));
 	DestroyResources(renderer);
@@ -2377,6 +2423,7 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.gridSimulationDispatches, mStatus.particleOpticalDispatches, mStatus.gridOpticalDispatches,
 		mStatus.particleCommandsRouted, mStatus.gridCommandsRouted);
 	mGrid.PrintStatus();
+	mViewWork.PrintStatus(mSettings.viewCompare);
 	Printf("NRI PT smoke admission: gathered=%u uploaded=%u deferred=%u coalesced=%u expired=%u rejected=%u sources=%u interactive=%u/%u estimated_bricks=%llu/%llu closure=%s policy=cost-aware-source-round terminal_rejection=yes\n",
 		mStatus.admission.gathered, mStatus.admission.uploaded, mStatus.admission.boundedDeferred,
 		mStatus.admission.coalesced, mStatus.admission.expired, mStatus.admission.rejected,
