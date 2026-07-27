@@ -9,7 +9,8 @@ void main(uint dispatchThreadId : SV_DispatchThreadID)
 	if (index < SmokeViewColumnCount())
 	{
 		gViewColumnMasks[index].Words = 0u;
-		gViewColumnOffsets[index] = 0u;
+		if (gViewConstants.ExecutionRoute == 2u)
+			gViewColumnOffsets[index] = 0u;
 	}
 	if (index == 0u)
 	{
@@ -19,7 +20,10 @@ void main(uint dispatchThreadId : SV_DispatchThreadID)
 		control.BrickTileTests = SmokeViewTileCount() * gViewConstants.BrickCapacity;
 		control.CompactCapacity = gViewConstants.FroxelCapacity;
 		gViewWorkControl[0] = control;
-		gViewIndirectArgs[0] = uint3(0u, 1u, 1u);
-		gViewIndirectArgs[1] = uint3(0u, 1u, 1u);
+		if (gViewConstants.ExecutionRoute == 2u)
+		{
+			gViewIndirectArgs[0] = uint3(0u, 1u, 1u);
+			gViewIndirectArgs[1] = uint3(0u, 1u, 1u);
+		}
 	}
 }

@@ -5,13 +5,16 @@ void main()
 {
 	const uint froxelCount = SmokeViewColumnCount() * gViewConstants.FroxelDepth;
 	gViewWorkControl[0].EvaluationRoute = gViewConstants.ExecutionRoute;
-	const bool compactFailed = gViewWorkControl[0].Overflow != 0u ||
-		gViewWorkControl[0].CompactCount > gViewConstants.FroxelCapacity;
-	if (compactFailed)
+	if (gViewConstants.ExecutionRoute == 2u)
 	{
-		gViewWorkControl[0].CompactCount = 0u;
-		gViewIndirectArgs[0] = uint3(0u, 1u, 1u);
-		gViewIndirectArgs[1] = uint3(0u, 1u, 1u);
+		const bool compactFailed = gViewWorkControl[0].Overflow != 0u ||
+			gViewWorkControl[0].CompactCount > gViewConstants.FroxelCapacity;
+		if (compactFailed)
+		{
+			gViewWorkControl[0].CompactCount = 0u;
+			gViewIndirectArgs[0] = uint3(0u, 1u, 1u);
+			gViewIndirectArgs[1] = uint3(0u, 1u, 1u);
+		}
 	}
 	gViewWorkControl[0].EvaluationDispatched = gViewConstants.ExecutionRoute == 2u ?
 		gViewWorkControl[0].CompactCount : froxelCount;

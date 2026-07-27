@@ -136,6 +136,8 @@ void NRISmokeViewWork::DestroyResources(const NRISmokeGridServices& services)
 	DestroyBuffer(services, mColumnOffsets);
 	mResourceFroxelDepth = 0u;
 	mResourcesInitialized = false;
+	mCompactResourcesInitialized = false;
+	mIndirectInitialized = false;
 	mIndirectIsArgument = false;
 	mStatus.layout = {};
 	mStatus.residentBytes = 0u;
@@ -259,38 +261,80 @@ bool NRISmokeViewWork::EnsureResources(const NRISmokeGridServices& services,
 	return true;
 }
 
-void NRISmokeViewWork::TransitionOutputsToStorage(const NRISmokeGridServices& services)
+void NRISmokeViewWork::TransitionOutputsToStorage(const NRISmokeGridServices& services, bool compactRoute)
 {
-	if (mResourcesInitialized)
-		return;
-	NRIBufferResource* resources[] = { &mTileMasks, &mColumnMasks, &mControl, &mCompactIndices, &mIndirectArgs, &mColumnOffsets };
-	nri::BufferBarrierDesc barriers[std::size(resources)] = {};
-	for (uint32_t i = 0u; i < std::size(resources); ++i)
+	std::array<nri::BufferBarrierDesc, 6> barriers = {};
+	uint32_t count = 0u;
+	if (!mResourcesInitialized)
 	{
-		barriers[i].buffer = resources[i]->buffer;
-		barriers[i].before = {};
-		barriers[i].after = StorageAccess();
+		NRIBufferResource* resources[] = { &mTileMasks, &mColumnMasks, &mControl };
+		for (NRIBufferResource* resource : resources)
+		{
+			barriers[count].buffer = resource->buffer;
+			barriers[count].before = {};
+			barriers[count].after = StorageAccess();
+			count++;
+		}
+		mResourcesInitialized = true;
 	}
+	if (compactRoute && !mCompactResourcesInitialized)
+	{
+		NRIBufferResource* resources[] = { &mCompactIndices, &mColumnOffsets };
+		for (NRIBufferResource* resource : resources)
+		{
+			barriers[count].buffer = resource->buffer;
+			barriers[count].before = {};
+			barriers[count].after = StorageAccess();
+			count++;
+		}
+		mCompactResourcesInitialized = true;
+	}
+	if (compactRoute && !mIndirectInitialized)
+	{
+		barriers[count].buffer = mIndirectArgs.buffer;
+		barriers[count].before = {};
+		barriers[count].after = StorageAccess();
+		count++;
+		mIndirectInitialized = true;
+	}
+	if (count == 0u)
+		return;
 	nri::BarrierDesc desc = {};
-	desc.buffers = barriers;
-	desc.bufferNum = (uint32_t)std::size(barriers);
+	desc.buffers = barriers.data();
+	desc.bufferNum = count;
 	services.core->CmdBarrier(*services.commandBuffer, desc);
-	mResourcesInitialized = true;
 }
 
-void NRISmokeViewWork::StorageBarrier(const NRISmokeGridServices& services)
+void NRISmokeViewWork::StorageBarrier(const NRISmokeGridServices& services, bool compactRoute)
 {
-	NRIBufferResource* resources[] = { &mTileMasks, &mColumnMasks, &mControl, &mCompactIndices, &mIndirectArgs, &mColumnOffsets };
-	nri::BufferBarrierDesc barriers[std::size(resources)] = {};
-	for (uint32_t i = 0u; i < std::size(resources); ++i)
+	NRIBufferResource* resources[] = { &mTileMasks, &mColumnMasks, &mControl };
+	std::array<nri::BufferBarrierDesc, 6> barriers = {};
+	uint32_t count = 0u;
+	for (NRIBufferResource* resource : resources)
 	{
-		barriers[i].buffer = resources[i]->buffer;
-		barriers[i].before = StorageAccess();
-		barriers[i].after = StorageAccess();
+		barriers[count].buffer = resource->buffer;
+		barriers[count].before = StorageAccess();
+		barriers[count].after = StorageAccess();
+		count++;
+	}
+	if (compactRoute)
+	{
+		NRIBufferResource* compactResources[] = { &mCompactIndices, &mColumnOffsets };
+		for (NRIBufferResource* resource : compactResources)
+		{
+			barriers[count].buffer = resource->buffer;
+			barriers[count].before = StorageAccess();
+			barriers[count].after = StorageAccess();
+			count++;
+		}
+		barriers[count].buffer = mIndirectArgs.buffer;
+		barriers[count].before = StorageAccess();
+		barriers[count].after = StorageAccess();
+		count++;
 	}
 	nri::BarrierDesc desc = {};
-	desc.buffers = barriers;
-	desc.bufferNum = (uint32_t)std::size(barriers);
+	desc.buffers = barriers.data();
+	desc.bufferNum = count;
 	services.core->CmdBarrier(*services.commandBuffer, desc);
 }
 
@@ -313,6 +357,7 @@ void NRISmokeViewWork::Dispatch(const NRISmokeGridServices& services, NRISmokeVi
 bool NRISmokeViewWork::Prepare(const NRISmokeGridServices& services, const NRISmokeViewWorkFrame& frame)
 {
 	const auto& c = frame.constants;
+	const bool compactRoute = c.executionRoute == 2u;
 	ConsumeReadback(services, c.simulationEpoch);
 	if (!services.IsRecordingValid() || mPipelineLayout == nullptr || mStorageSet == nullptr ||
 		c.froxelWidth == 0u || c.froxelHeight == 0u || c.froxelDepth == 0u ||
@@ -331,7 +376,7 @@ bool NRISmokeViewWork::Prepare(const NRISmokeGridServices& services, const NRISm
 			"tile-layout-mismatch" : mStatus.failureReason);
 		return false;
 	}
-	if (mIndirectIsArgument)
+	if (compactRoute && mIndirectIsArgument)
 	{
 		nri::BufferBarrierDesc buffer = {};
 		buffer.buffer = mIndirectArgs.buffer;
@@ -357,21 +402,24 @@ bool NRISmokeViewWork::Prepare(const NRISmokeGridServices& services, const NRISm
 	services.core->UpdateDescriptorRanges(&update, 1u);
 	services.core->CmdSetPipelineLayout(*services.commandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 	services.core->CmdSetDescriptorSet(*services.commandBuffer, { 0, mStorageSet, nri::BindPoint::COMPUTE });
-	TransitionOutputsToStorage(services);
+	TransitionOutputsToStorage(services, compactRoute);
 	Dispatch(services, NRISmokeViewWorkPass::Clear, c, Groups(std::max(layout.tileCount, layout.columnCount)));
-	StorageBarrier(services);
+	StorageBarrier(services, compactRoute);
 	Dispatch(services, NRISmokeViewWorkPass::ProjectTiles, c, layout.tileCount);
-	StorageBarrier(services);
+	StorageBarrier(services, compactRoute);
 	Dispatch(services, NRISmokeViewWorkPass::ExpandColumns, c, Groups(layout.columnCount));
-	StorageBarrier(services);
-	Dispatch(services, NRISmokeViewWorkPass::CountColumns, c, Groups(layout.columnCount));
-	StorageBarrier(services);
-	Dispatch(services, NRISmokeViewWorkPass::PrefixColumns, c, 1u);
-	StorageBarrier(services);
-	Dispatch(services, NRISmokeViewWorkPass::ScatterFroxels, c, Groups(layout.columnCount));
-	StorageBarrier(services);
+	StorageBarrier(services, compactRoute);
+	if (compactRoute)
+	{
+		Dispatch(services, NRISmokeViewWorkPass::CountColumns, c, Groups(layout.columnCount));
+		StorageBarrier(services, true);
+		Dispatch(services, NRISmokeViewWorkPass::PrefixColumns, c, 1u);
+		StorageBarrier(services, true);
+		Dispatch(services, NRISmokeViewWorkPass::ScatterFroxels, c, Groups(layout.columnCount));
+		StorageBarrier(services, true);
+	}
 	Dispatch(services, NRISmokeViewWorkPass::Finalize, c, 1u);
-	StorageBarrier(services);
+	StorageBarrier(services, compactRoute);
 	mLastConstants = c;
 	return true;
 }
@@ -385,7 +433,7 @@ bool NRISmokeViewWork::CompareDense(const NRISmokeGridServices& services,
 		SetFailure("compare-prerequisite");
 		return false;
 	}
-	if (mIndirectIsArgument)
+	if (mLastConstants.executionRoute == 2u && mIndirectIsArgument)
 	{
 		nri::BufferBarrierDesc buffer = {};
 		buffer.buffer = mIndirectArgs.buffer;
@@ -410,7 +458,7 @@ bool NRISmokeViewWork::CompareDense(const NRISmokeGridServices& services,
 	const uint64_t froxelCount = (uint64_t)mLastConstants.froxelWidth *
 		mLastConstants.froxelHeight * mLastConstants.froxelDepth;
 	Dispatch(services, NRISmokeViewWorkPass::CompareDense, mLastConstants, Groups(froxelCount));
-	StorageBarrier(services);
+	StorageBarrier(services, mLastConstants.executionRoute == 2u);
 	RecordReadback(services);
 	return true;
 }

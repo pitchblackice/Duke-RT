@@ -50,6 +50,8 @@ $owner = Get-Content (Join-Path $root 'source/common/rendering/nri/renderer/nri_
 $prefix = Get-Content (Join-Path $root 'source/common/rendering/nri/shaders/SmokeViewWorkPrefixColumns.cs.hlsl') -Raw
 $scatter = Get-Content (Join-Path $root 'source/common/rendering/nri/shaders/SmokeViewWorkScatterFroxels.cs.hlsl') -Raw
 $compact = Get-Content (Join-Path $root 'source/common/rendering/nri/shaders/SmokeEvaluateGridCompact.cs.hlsl') -Raw
+$clear = Get-Content (Join-Path $root 'source/common/rendering/nri/shaders/SmokeViewWorkClear.cs.hlsl') -Raw
+$finalize = Get-Content (Join-Path $root 'source/common/rendering/nri/shaders/SmokeViewWorkFinalize.cs.hlsl') -Raw
 
 $a = Compact-Masks @([UInt64]0x5, [UInt64]0x2, [UInt64]0x9, [UInt64]0) 2 2 4 16
 $b = Compact-Masks @([UInt64]0x5, [UInt64]0x2, [UInt64]0x9, [UInt64]0) 2 2 4 16
@@ -64,6 +66,13 @@ $serial = Prefix-Chunked $counts $counts.Count
 Assert-True (($chunked.Offsets -join ',') -eq ($serial.Offsets -join ',')) 'Chunk carry must exactly match serial exclusive offsets across full and partial chunks.'
 Assert-True ($chunked.Total -eq $serial.Total) 'Chunk carry must publish the exact compact count.'
 Assert-True ($owner -match 'CountColumns[\s\S]*PrefixColumns[\s\S]*ScatterFroxels[\s\S]*Finalize') 'GPU pass order must be Count, Prefix, Scatter, Finalize.'
+Assert-True ($owner -match 'const bool compactRoute = c\.executionRoute == 2u' -and
+    $owner -match 'ExpandColumns[\s\S]*if \(compactRoute\)[\s\S]*CountColumns[\s\S]*PrefixColumns[\s\S]*ScatterFroxels[\s\S]*Finalize') 'Only route 2 may execute exact compaction between mask expansion and finalization.'
+Assert-True ($owner -match 'if \(compactRoute && mIndirectIsArgument\)' -and
+    $owner -match 'TransitionOutputsToStorage\(services, compactRoute\)' -and
+    $owner -match 'StorageBarrier\(services, compactRoute\)') 'Route 1 may not transition or barrier the indirect argument buffer.'
+Assert-True ($clear -match 'ExecutionRoute == 2u[\s\S]*gViewIndirectArgs\[0\]' -and
+    $finalize -match 'ExecutionRoute == 2u[\s\S]*gViewIndirectArgs\[0\]') 'Route 1 shaders may not write indirect arguments.'
 Assert-True ($prefix -match '#define\s+NRI_SMOKE_VIEW_PREFIX_THREADS\s+256u' -and $prefix -match '\[numthreads\(NRI_SMOKE_VIEW_PREFIX_THREADS,\s*1,\s*1\)\]') 'Prefix must use one fixed 256-lane group.'
 Assert-True ($prefix -match 'groupshared uint gPrefixValues' -and $prefix -match 'gPrefixCarry \+=' -and $prefix -match 'compactCount > gViewConstants.FroxelCapacity') 'Prefix must use deterministic chunk carry and retain exact capacity checking.'
 Assert-True ($prefix -notmatch 'Interlocked|SV_GroupID') 'Prefix ordering may not depend on atomics or cross-group scheduling.'

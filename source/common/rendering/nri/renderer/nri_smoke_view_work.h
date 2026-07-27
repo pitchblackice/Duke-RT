@@ -66,8 +66,8 @@ private:
 		uint32_t stride, nri::BufferUsageBits usage);
 	void DestroyBuffer(const NRISmokeGridServices& services, NRIBufferResource& resource);
 	void DestroyResources(const NRISmokeGridServices& services);
-	void TransitionOutputsToStorage(const NRISmokeGridServices& services);
-	void StorageBarrier(const NRISmokeGridServices& services);
+	void TransitionOutputsToStorage(const NRISmokeGridServices& services, bool compactRoute);
+	void StorageBarrier(const NRISmokeGridServices& services, bool compactRoute);
 	void Dispatch(const NRISmokeGridServices& services, NRISmokeViewWorkPass pass,
 		const NRISmokeViewWorkConstants& constants, uint32_t groups);
 	bool CreateReadback(const NRISmokeGridServices& services, NRIBufferResource& out);
@@ -97,5 +97,7 @@ private:
 	NRISmokeViewWorkConstants mLastConstants = {};
 	uint32_t mResourceFroxelDepth = 0;
 	bool mResourcesInitialized = false;
+	bool mCompactResourcesInitialized = false;
+	bool mIndirectInitialized = false;
 	bool mIndirectIsArgument = false;
 };
