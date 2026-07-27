@@ -7,6 +7,7 @@
 #include "SmokeSourceShaping.hlsli"
 #include "SmokeGridData.hlsli"
 #include "SmokeGridLightingData.hlsli"
+#include "SmokeViewWorkData.hlsli"
 
 #define NRI_SMOKE_SET_INPUTS 0
 #define NRI_SMOKE_SET_BUFFERS 1
@@ -311,6 +312,8 @@ RWStructuredBuffer<uint> gSmokeGridScatterActive : register(u41, space1);
 RWStructuredBuffer<SmokeGridLightRecord> gSmokeGridLightSelfShadowCurrent : register(u42, space1);
 RWStructuredBuffer<SmokeGridLightRecord> gSmokeGridLightSelfShadowHistory : register(u43, space1);
 RWStructuredBuffer<uint2> gSmokeViewColumnMasks : register(u44, space1);
+RWStructuredBuffer<uint> gSmokeViewCompactIndices : register(u45, space1);
+RWStructuredBuffer<SmokeViewWorkControl> gSmokeViewWorkControl : register(u46, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);
