@@ -1057,6 +1057,8 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 	{
 		const NRISmokeGridStatusSnapshot& gridWork = mGrid.GetStatusSnapshot();
 		const NRISmokeGridLightingStatusSnapshot& worldWork = mGridLighting.GetStatusSnapshot();
+		const NRISmokePulseSnapshot& pulseWork = mPulseOwner.GetSnapshot();
+		const NRISmokePromptFallbackSnapshot& promptWork = mPromptFallback.GetSnapshot();
 		const bool joined = gridWork.gpuStatsValid && worldWork.gpuStatsValid && mStatus.gpuStatsValid &&
 			gridWork.gpuRendererFrame == worldWork.gpuRendererFrame &&
 			gridWork.gpuRendererFrame == mStatus.gpuStatsFrame &&
@@ -1092,6 +1094,34 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 			mStatus.directionalSamples, mStatus.directionalShadowRays, mStatus.directReceiverSamples,
 			mStatus.directTemporalAccepted, mStatus.directTemporalRejected,
 			mStatus.directSpatialAccepted, mStatus.directSpatialRejected);
+		Printf("PERF pt smoke radiance schedule NRI: observe_renderer_frame=%llu observe_frame=%u valid=%u renderer_frame=%llu frame=%u epoch=%u partitions=%u new_quantity=%u maintenance_quantity=%u maximum_age=%u new_requested=%u new_scheduled=%u new_deferred=%u new_tickets=%u maintenance_requested=%u maintenance_scheduled=%u maintenance_deferred=%u maintenance_tickets=%u history_retained=%u history_missing=%u age_overflows=%u compact=1\n",
+			(unsigned long long)renderer.mFrameBuffer->mFrameIndex, renderer.mFrameIndex,
+			worldWork.gpuStatsValid ? 1u : 0u, (unsigned long long)worldWork.gpuRendererFrame,
+			worldWork.gpu.frameStamp, worldWork.gpu.simulationEpoch, worldWork.gpu.radiancePartitionCount,
+			worldWork.gpu.radianceNewInvalidQuantity, worldWork.gpu.radianceMaintenanceQuantity,
+			worldWork.gpu.radianceMaximumAge, worldWork.gpu.radianceNewInvalidRequested,
+			worldWork.gpu.radianceNewInvalidScheduled, worldWork.gpu.radianceNewInvalidDeferred,
+			worldWork.gpu.radianceNewInvalidTickets, worldWork.gpu.radianceMaintenanceRequested,
+			worldWork.gpu.radianceMaintenanceScheduled, worldWork.gpu.radianceMaintenanceDeferred,
+			worldWork.gpu.radianceMaintenanceTickets, worldWork.gpu.radianceHistoryRetained,
+			worldWork.gpu.radianceHistoryMissing, worldWork.gpu.radianceAgeOverflows);
+		Printf("PERF pt smoke transactions NRI: observe_renderer_frame=%llu observe_frame=%u pulse_enqueued_ranges=%llu pulse_enqueued_mass=%llu pulse_planned_ranges=%llu pulse_planned_mass=%llu pulse_committed_ranges=%llu pulse_committed_mass=%llu pulse_pending_ranges=%u pulse_pending_mass=%llu pulse_rollbacks=%llu pulse_resets=%llu prompt_scheduled_current=%u prompt_scheduled_total=%llu prompt_fallback_executed=%llu prompt_grid_handoffs=%llu prompt_pending_mass=%llu prompt_grid_mass=%llu prompt_fallback_mass=%llu prompt_deferred_ranges=%llu prompt_deferred_mass=%llu prompt_deferred_brick_work=%llu prompt_rollbacks=%llu prompt_internal_errors=%llu prompt_authored_renderer_frame=%llu compact=1\n",
+			(unsigned long long)renderer.mFrameBuffer->mFrameIndex, renderer.mFrameIndex,
+			(unsigned long long)pulseWork.enqueuedPulses, (unsigned long long)pulseWork.enqueuedMass,
+			(unsigned long long)pulseWork.plannedRanges, (unsigned long long)pulseWork.plannedMass,
+			(unsigned long long)pulseWork.committedRanges, (unsigned long long)pulseWork.committedMass,
+			pulseWork.pendingRanges, (unsigned long long)pulseWork.pendingMass,
+			(unsigned long long)pulseWork.rollbackCount, (unsigned long long)pulseWork.resetPulses,
+			promptWork.scheduledFallbackQuantity, (unsigned long long)promptWork.scheduledFallbackRanges,
+			(unsigned long long)promptWork.executedFallbackRanges, (unsigned long long)promptWork.gridHandoffs,
+			(unsigned long long)promptWork.authoredPendingMass,
+			(unsigned long long)promptWork.committedDepositedMass,
+			(unsigned long long)promptWork.fallbackCarrierMass,
+			(unsigned long long)promptWork.promptDeferredRanges,
+			(unsigned long long)promptWork.promptDeferredMass,
+			(unsigned long long)promptWork.promptDeferredBrickWork,
+			(unsigned long long)promptWork.rollbackCount, (unsigned long long)promptWork.internalErrors,
+			(unsigned long long)promptWork.authoredRendererFrame);
 		Printf("PERF pt smoke hash health NRI: observe_renderer_frame=%llu observe_frame=%u joined=%u grid_valid=%u renderer_frame=%llu frame=%u epoch=%u delta_valid=%u hash_capacity=%u hash_empty=%u hash_claimed=%u hash_resident=%u hash_new=%u hash_tombstone=%u hash_invalid_state=%u hash_invalid_mapping=%u control_probe_total=%u control_probe_delta=%u control_probe_max=%u probe_bin_1_total=%u probe_bin_1_delta=%u probe_bin_2_4_total=%u probe_bin_2_4_delta=%u probe_bin_5_8_total=%u probe_bin_5_8_delta=%u probe_bin_9_16_total=%u probe_bin_9_16_delta=%u probe_bin_17_24_total=%u probe_bin_17_24_delta=%u lookup_probe_total=%u lookup_probe_delta=%u insertion_probe_total=%u insertion_probe_delta=%u lookup_probe_limit_failures_total=%u lookup_probe_limit_failures_delta=%u insertion_probe_limit_failures_total=%u insertion_probe_limit_failures_delta=%u insertion_capacity_failures_total=%u insertion_capacity_failures_delta=%u insertion_active_failures_total=%u insertion_active_failures_delta=%u reclaim_invalid_mapping_failures_total=%u reclaim_invalid_mapping_failures_delta=%u hash_rebuild_attempts_total=%u hash_rebuild_attempts_delta=%u hash_rebuild_successes_total=%u hash_rebuild_successes_delta=%u hash_rebuild_failures_total=%u hash_rebuild_failures_delta=%u compact=1\n",
 			(unsigned long long)renderer.mFrameBuffer->mFrameIndex, renderer.mFrameIndex, joined ? 1u : 0u,
 			gridWork.gpuStatsValid ? 1u : 0u, (unsigned long long)gridWork.gpuRendererFrame,
