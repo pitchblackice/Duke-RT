@@ -62,7 +62,7 @@ bool SmokeGridLightScheduleRadiance(uint cellIndex, int3 cell, SmokeGridBrick br
 	if (!historyValid)
 	{
 		InterlockedAdd(gSmokeGridLightControl[0].RadianceNewInvalidRequested, 1u);
-		scheduled = partitionDue && SmokeGridLightClaimNewInvalid();
+		scheduled = SmokeGridLightClaimNewInvalid();
 		if (!scheduled)
 			InterlockedAdd(gSmokeGridLightControl[0].RadianceNewInvalidDeferred, 1u);
 	}

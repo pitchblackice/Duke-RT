@@ -26,6 +26,10 @@ Assert-Match $prepare 'RadiancePartitionCount\s*=\s*max\(gSmokeConstants\.Partic
 Assert-Match $seed 'SmokeGridLightStableWorldKey[\s\S]*FrameIndex\s*%\s*partitionCount' 'Maintenance selection must rotate by stable world key.'
 Assert-Match $seed 'RadianceNewInvalidRequested[\s\S]*SmokeGridLightClaimNewInvalid[\s\S]*RadianceNewInvalidDeferred' 'New and invalid radiance must own a bounded reserved lane.'
 Assert-Match $seed 'RadianceMaintenanceRequested[\s\S]*SmokeGridLightClaimMaintenance[\s\S]*RadianceMaintenanceDeferred' 'Maintenance radiance must own an independently bounded lane.'
+Assert-Match $seed 'if\s*\(!historyValid\)[\s\S]*RadianceNewInvalidRequested[\s\S]*scheduled\s*=\s*SmokeGridLightClaimNewInvalid\(\)' 'New and invalid work must claim its reserved lane independently of the maintenance partition.'
+if ($seed -match 'scheduled\s*=\s*partitionDue\s*&&\s*SmokeGridLightClaimNewInvalid\(\)') {
+	throw 'Stable maintenance partitioning must not filter new and invalid work.'
+}
 Assert-Match $seed 'InterlockedAdd\(gSmokeGridLightControl\[0\]\.RadianceNewInvalidTickets,\s*1u,\s*ticket\)[\s\S]*ticket\s*>=\s*gSmokeGridLightControl\[0\]\.RadianceNewInvalidQuantity[\s\S]*InterlockedAdd\(gSmokeGridLightControl\[0\]\.RadianceNewInvalidScheduled,\s*1u\)' 'New work must use one ticket atomic and count only accepted execution.'
 Assert-Match $seed 'InterlockedAdd\(gSmokeGridLightControl\[0\]\.RadianceMaintenanceTickets,\s*1u,\s*ticket\)[\s\S]*ticket\s*>=\s*gSmokeGridLightControl\[0\]\.RadianceMaintenanceQuantity[\s\S]*InterlockedAdd\(gSmokeGridLightControl\[0\]\.RadianceMaintenanceScheduled,\s*1u\)' 'Maintenance must use one ticket atomic and count only accepted execution.'
 if ($seed -match 'InterlockedCompareExchange\(gSmokeGridLightControl\[0\]\.Radiance(?:NewInvalid|Maintenance)Scheduled') {
@@ -34,27 +38,37 @@ if ($seed -match 'InterlockedCompareExchange\(gSmokeGridLightControl\[0\]\.Radia
 Assert-Match $seed 'SmokeGridLightSetMetadata\(retained[\s\S]*SmokeGridLightLastUpdate\(prior\)[\s\S]*retainedAge[\s\S]*RadianceHistoryRetained' 'Unscheduled compatible work must retain explicit aged history.'
 Assert-Match $temporal 'SmokeGridLightAge\(current\)\s*>\s*0u\)[\s\S]*return;' 'Temporal accumulation must not reinterpret retained history as a new sample.'
 
-# CPU mirror: fixed claims cannot exceed either immutable quantity, and every
-# stable key is due exactly once per partition cycle before age escalation.
-$partitionCount = 4
+# CPU mirror: fixed claims cannot exceed either immutable quantity, new/invalid
+# claims are independent of partitioning, and every maintenance key is due
+# exactly once per partition cycle before age escalation.
 $newQuantity = 7
 $maintenanceQuantity = 11
 $keys = 0..63
-$seen = [bool[]]::new($keys.Count)
-for ($frame = 0; $frame -lt $partitionCount; $frame++) {
-	$newScheduled = 0
-	$maintenanceScheduled = 0
-	foreach ($key in $keys) {
-		$due = ($key % $partitionCount) -eq ($frame % $partitionCount)
-		if ($due) { $seen[$key] = $true }
-		if ($due -and $newScheduled -lt $newQuantity) { $newScheduled++ }
-		if ($due -and $maintenanceScheduled -lt $maintenanceQuantity) { $maintenanceScheduled++ }
+
+foreach ($partitionCount in @(2, 4)) {
+	$seen = [bool[]]::new($keys.Count)
+	for ($frame = 0; $frame -lt $partitionCount; $frame++) {
+		$newRequested = [Math]::Min($newQuantity, 3 + $frame)
+		$newScheduled = 0
+		$newDeferred = 0
+		$maintenanceScheduled = 0
+		for ($request = 0; $request -lt $newRequested; $request++) {
+			if ($newScheduled -lt $newQuantity) { $newScheduled++ } else { $newDeferred++ }
+		}
+		foreach ($key in $keys) {
+			$due = ($key % $partitionCount) -eq ($frame % $partitionCount)
+			if ($due) { $seen[$key] = $true }
+			if ($due -and $maintenanceScheduled -lt $maintenanceQuantity) { $maintenanceScheduled++ }
+		}
+		if ($newScheduled -ne $newRequested -or $newDeferred -ne 0) {
+			throw "New/invalid reserved work was partition-filtered: partitions=$partitionCount requested=$newRequested scheduled=$newScheduled deferred=$newDeferred"
+		}
+		if ($newScheduled -gt $newQuantity -or $maintenanceScheduled -gt $maintenanceQuantity) {
+			throw 'A fixed radiance lane exceeded its immutable quantity.'
+		}
 	}
-	if ($newScheduled -gt $newQuantity -or $maintenanceScheduled -gt $maintenanceQuantity) {
-		throw 'A fixed radiance lane exceeded its immutable quantity.'
-	}
+	if (($seen | Where-Object { -not $_ }).Count -ne 0) { throw "Stable $partitionCount-way rotation failed to visit every world key." }
 }
-if (($seen | Where-Object { -not $_ }).Count -ne 0) { throw 'Stable partition rotation failed to visit every world key.' }
 
 $age = 0
 for ($frame = 0; $frame -lt 5; $frame++) { $age = [Math]::Min($age + 1, 65535) }
