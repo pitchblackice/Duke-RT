@@ -11,6 +11,14 @@
 #define NRI_SMOKE_GRID_TOMBSTONE 4u
 #define NRI_SMOKE_GRID_BRICK_CONTENT 1u
 #define NRI_SMOKE_GRID_BRICK_HALO 2u
+#define NRI_SMOKE_GRID_BRICK_BORROWED_FIRST_USE 4u
+#define NRI_SMOKE_GRID_FIRST_USE_CORE_MINIMUM 8u
+#define NRI_SMOKE_GRID_FIRST_USE_CORE_DIVISOR 16u
+#define NRI_SMOKE_GRID_FIRST_USE_BLOCKED_NONE 0u
+#define NRI_SMOKE_GRID_FIRST_USE_BLOCKED_NO_BORROWED 1u
+#define NRI_SMOKE_GRID_FIRST_USE_BLOCKED_VISIBLE 2u
+#define NRI_SMOKE_GRID_FIRST_USE_BLOCKED_PROBE 3u
+#define NRI_SMOKE_GRID_FIRST_USE_BLOCKED_INVALID 4u
 
 struct SmokeGridHashEntry
 {
@@ -97,6 +105,18 @@ struct SmokeGridControl
 	uint HashRebuildAttempts;
 	uint HashRebuildSuccesses;
 	uint HashRebuildFailures;
+	uint FirstUseCoreCapacity;
+	uint BorrowedResident;
+	uint BorrowedAllocations;
+	uint BorrowedReturns;
+	uint BorrowedPromotions;
+	uint BorrowedReclaims;
+	uint FirstUseReplacementAdmissions;
+	uint FirstUseBlockedNoBorrowed;
+	uint FirstUseBlockedVisible;
+	uint FirstUseBlockedProbe;
+	uint FirstUseBlockedInvalid;
+	uint FirstUseCapacityFailures;
 };
 
 struct SmokeGridSourceStats

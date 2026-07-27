@@ -79,10 +79,11 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 		InterlockedXor(gSmokeGridControl[0].FieldHashHi, gSmokeGridHashHi[0]);
 		gSmokeGridReclaimDecision = 0u;
 		SmokeGridBrick updated = brick;
+		const uint retainedPolicyFlags = updated.Flags & NRI_SMOKE_GRID_BRICK_BORROWED_FIRST_USE;
 		if (gSmokeGridOccupied[0] != 0u)
 		{
 			updated.IdleFrames = 0u;
-			updated.Flags = NRI_SMOKE_GRID_BRICK_CONTENT;
+			updated.Flags = retainedPolicyFlags | NRI_SMOKE_GRID_BRICK_CONTENT;
 			gSmokeGridBricks[brickIndex] = updated;
 			if (!SmokeGridAppendNextActive(brickIndex))
 				InterlockedAdd(gSmokeGridControl[0].AllocationFailures, 1u);
@@ -91,7 +92,7 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 		else
 		{
 			updated.IdleFrames = min(updated.IdleFrames + 1u, 0xfffffffeu);
-			updated.Flags = NRI_SMOKE_GRID_BRICK_HALO;
+			updated.Flags = retainedPolicyFlags | NRI_SMOKE_GRID_BRICK_HALO;
 			InterlockedAdd(gSmokeGridControl[0].EmptyBricks, 1u);
 			const bool graceExpired = updated.IdleFrames >= gSmokeGridConstants.ReclaimGrace;
 			// Empty topology is a cache, not source data. Under pressure, release it
@@ -149,6 +150,11 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 			uint ignoredResidentCount;
 			InterlockedAdd(gSmokeGridControl[0].ResidentCount, 0xffffffffu, ignoredResidentCount);
 			InterlockedAdd(gSmokeGridControl[0].Reclaimed, 1u);
+			if ((brick.Flags & NRI_SMOKE_GRID_BRICK_BORROWED_FIRST_USE) != 0u)
+			{
+				InterlockedAdd(gSmokeGridControl[0].BorrowedReturns, 1u);
+				InterlockedAdd(gSmokeGridControl[0].BorrowedReclaims, 1u);
+			}
 		}
 		else
 		{

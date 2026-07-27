@@ -40,7 +40,7 @@ for ($index = 0; $index -lt $cpuFields.Count; $index++) {
     Assert-Match $contracts ("uint32_t\s+{0}\s*=" -f $cpuFields[$index]) ("Missing CPU hash-health field {0}." -f $cpuFields[$index])
     Assert-Match $data ("uint\s+{0}\s*;" -f $gpuFields[$index]) ("Missing HLSL hash-health field {0}." -f $gpuFields[$index])
 }
-Assert-Match $contracts 'sizeof\(NRISmokeGridControlGpu\)\s*==\s*256' 'The mirrored grid control ABI size must be pinned.'
+Assert-Match $contracts 'sizeof\(NRISmokeGridControlGpu\)\s*==\s*304' 'The mirrored grid control ABI size must be pinned.'
 Assert-Match $hashHealth 'for\s*\(uint slot = 0u; slot < gSmokeGridConstants.HashCapacity; \+\+slot\)' 'Hash gauges must scan every physical hash slot.'
 Assert-Match $hashHealth 'gSmokeGridConstants\.Flags\s*&\s*1u' 'Exact hash scanning must run only for the final diagnostic dispatch.'
 Assert-Match $hashHealth 'HashEmpty\+\+[\s\S]*HashClaimed\+\+[\s\S]*HashResident\+\+[\s\S]*HashNew\+\+[\s\S]*HashTombstone\+\+' 'All valid hash states must have exact gauges.'

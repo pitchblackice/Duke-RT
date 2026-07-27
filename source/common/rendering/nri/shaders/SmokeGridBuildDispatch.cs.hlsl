@@ -12,6 +12,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gSmokeGridControl[0].HashTombstone = 0u;
 		gSmokeGridControl[0].HashInvalidState = 0u;
 		gSmokeGridControl[0].HashInvalidMapping = 0u;
+		gSmokeGridControl[0].BorrowedResident = 0u;
+		gSmokeGridControl[0].FirstUseCoreCapacity = SmokeGridFirstUseCoreCapacity();
 		[loop]
 		for (uint slot = 0u; slot < gSmokeGridConstants.HashCapacity; ++slot)
 		{
@@ -22,7 +24,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			else if (entry.State == NRI_SMOKE_GRID_NEW) gSmokeGridControl[0].HashNew++;
 			else if (entry.State == NRI_SMOKE_GRID_TOMBSTONE) gSmokeGridControl[0].HashTombstone++;
 			else gSmokeGridControl[0].HashInvalidState++;
-
 			if (entry.State == NRI_SMOKE_GRID_RESIDENT || entry.State == NRI_SMOKE_GRID_NEW)
 			{
 				bool valid = entry.BrickIndex < gSmokeGridConstants.BrickCapacity;
@@ -32,7 +33,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					valid = brick.HashSlot == slot && brick.Generation == entry.Generation &&
 						brick.State == entry.State && all(brick.Coordinate == entry.Coordinate);
 				}
-				if (!valid) gSmokeGridControl[0].HashInvalidMapping++;
+				if (!valid)
+					gSmokeGridControl[0].HashInvalidMapping++;
+				else if ((gSmokeGridBricks[entry.BrickIndex].Flags &
+					NRI_SMOKE_GRID_BRICK_BORROWED_FIRST_USE) != 0u)
+					gSmokeGridControl[0].BorrowedResident++;
 			}
 		}
 	}

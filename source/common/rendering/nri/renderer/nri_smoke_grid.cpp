@@ -1,4 +1,5 @@
 #include "nri_smoke_grid.h"
+#include "nri_smoke_grid_reserve_policy.h"
 
 #include "../system/nri_gpu_timing.h"
 #include "printf.h"
@@ -424,6 +425,16 @@ void NRISmokeGrid::ConsumeReadback(const NRISmokeGridServices& services, uint32_
 				delta.hashRebuildAttempts = next.hashRebuildAttempts - previous.hashRebuildAttempts;
 				delta.hashRebuildSuccesses = next.hashRebuildSuccesses - previous.hashRebuildSuccesses;
 				delta.hashRebuildFailures = next.hashRebuildFailures - previous.hashRebuildFailures;
+				delta.borrowedAllocations = next.borrowedAllocations - previous.borrowedAllocations;
+				delta.borrowedReturns = next.borrowedReturns - previous.borrowedReturns;
+				delta.borrowedPromotions = next.borrowedPromotions - previous.borrowedPromotions;
+				delta.borrowedReclaims = next.borrowedReclaims - previous.borrowedReclaims;
+				delta.firstUseReplacementAdmissions = next.firstUseReplacementAdmissions - previous.firstUseReplacementAdmissions;
+				delta.firstUseBlockedNoBorrowed = next.firstUseBlockedNoBorrowed - previous.firstUseBlockedNoBorrowed;
+				delta.firstUseBlockedVisible = next.firstUseBlockedVisible - previous.firstUseBlockedVisible;
+				delta.firstUseBlockedProbe = next.firstUseBlockedProbe - previous.firstUseBlockedProbe;
+				delta.firstUseBlockedInvalid = next.firstUseBlockedInvalid - previous.firstUseBlockedInvalid;
+				delta.firstUseCapacityFailures = next.firstUseCapacityFailures - previous.firstUseCapacityFailures;
 				mStatus.gpuFrameDeltaValid = true;
 			}
 			mStatus.controlReadbackBytes += sizeof(NRISmokeGridControlGpu);
@@ -840,6 +851,9 @@ void NRISmokeGrid::PrintStatus() const
 		"control_probe_total=%u control_probe_max=%u control_probe_bins=%u/%u/%u/%u/%u lookup_probe_total=%u insertion_probe_total=%u "
 		"lookup_probe_limit_failures=%u insertion_probe_limit_failures=%u insertion_capacity_failures=%u insertion_active_failures=%u reclaim_invalid_mapping_failures=%u "
 		"hash_rebuild_attempts=%u hash_rebuild_successes=%u hash_rebuild_failures=%u "
+		"first_use_core=%u first_use_core_expected=%u borrowed_resident=%u borrowed_allocations=%u borrowed_returns=%u "
+		"borrowed_promotions=%u borrowed_reclaims=%u first_use_replacement_admissions=%u "
+		"first_use_blocked_no_borrowed=%u first_use_blocked_visible=%u first_use_blocked_probe=%u first_use_blocked_invalid=%u first_use_capacity_failures=%u "
 		"field_readback=0 control_readback=%llu source_readback=%llu fallback=%s reset=%s\n",
 		mStatus.requested ? "yes" : "no", mStatus.representation,
 		mStatus.initialized ? "yes" : "no", mStatus.resourcesReady ? "ready" : "unavailable",
@@ -872,6 +886,13 @@ void NRISmokeGrid::PrintStatus() const
 		mStatus.gpu.insertionActiveFailures, mStatus.gpu.reclaimInvalidMappingFailures,
 		mStatus.gpu.hashRebuildAttempts, mStatus.gpu.hashRebuildSuccesses,
 		mStatus.gpu.hashRebuildFailures,
+		mStatus.gpu.firstUseCoreCapacity, NRISmokeGridFirstUseCoreCapacity(mStatus.brickCapacity),
+		mStatus.gpu.borrowedResident, mStatus.gpu.borrowedAllocations,
+		mStatus.gpu.borrowedReturns, mStatus.gpu.borrowedPromotions,
+		mStatus.gpu.borrowedReclaims, mStatus.gpu.firstUseReplacementAdmissions,
+		mStatus.gpu.firstUseBlockedNoBorrowed, mStatus.gpu.firstUseBlockedVisible,
+		mStatus.gpu.firstUseBlockedProbe, mStatus.gpu.firstUseBlockedInvalid,
+		mStatus.gpu.firstUseCapacityFailures,
 		(unsigned long long)mStatus.controlReadbackBytes,
 		(unsigned long long)mStatus.sourceReadbackBytes,
 		mStatus.failureReason.c_str(), mStatus.resetReason.c_str());

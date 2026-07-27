@@ -57,6 +57,18 @@ uint SmokeGridEmissionReserve()
 	return min(gSmokeGridConstants.BrickCapacity, max(8u, gSmokeGridConstants.BrickCapacity / 4u));
 }
 
+uint SmokeGridFirstUseCoreCapacity()
+{
+	return min(gSmokeGridConstants.BrickCapacity,
+		max(NRI_SMOKE_GRID_FIRST_USE_CORE_MINIMUM,
+			gSmokeGridConstants.BrickCapacity / NRI_SMOKE_GRID_FIRST_USE_CORE_DIVISOR));
+}
+
+bool SmokeGridIsFirstUseClass(uint sourceClass)
+{
+	return sourceClass != NRI_SMOKE_SOURCE_CLASS_AMBIENT;
+}
+
 bool SmokeGridTryAppendActive(uint ping, uint brickIndex)
 {
 	uint destination = 0u;
@@ -196,6 +208,127 @@ bool SmokeGridLookupBrickControlSerial(int3 coordinate, out uint brickIndex)
 	SmokeGridRecordControlProbe(probeLimit, false);
 	gSmokeGridControl[0].LookupProbeLimitFailures++;
 	return false;
+}
+
+void SmokeGridPromoteBorrowedBrickSerial(uint brickIndex)
+{
+	if (brickIndex >= gSmokeGridConstants.BrickCapacity ||
+		(gSmokeGridBricks[brickIndex].Flags & NRI_SMOKE_GRID_BRICK_BORROWED_FIRST_USE) == 0u)
+		return;
+	gSmokeGridBricks[brickIndex].Flags &= ~NRI_SMOKE_GRID_BRICK_BORROWED_FIRST_USE;
+	gSmokeGridControl[0].BorrowedReturns++;
+	gSmokeGridControl[0].BorrowedPromotions++;
+}
+
+bool SmokeGridTryReplaceBorrowedDormantSerial(int3 coordinate, uint flags,
+	out uint brickIndex, out uint blockedReason)
+{
+	brickIndex = 0xffffffffu;
+	blockedReason = NRI_SMOKE_GRID_FIRST_USE_BLOCKED_NONE;
+	const uint brickCapacity = gSmokeGridConstants.BrickCapacity;
+	if (brickCapacity == 0u || gSmokeGridConstants.HashCapacity == 0u)
+	{
+		blockedReason = NRI_SMOKE_GRID_FIRST_USE_BLOCKED_NO_BORROWED;
+		return false;
+	}
+
+	uint candidateIndex = 0xffffffffu;
+	uint borrowedSeen = 0u;
+	uint visibleSeen = 0u;
+	const uint candidateStart = SmokeGridHashCoordinate(coordinate) % brickCapacity;
+	[loop]
+	for (uint ordinal = 0u; ordinal < brickCapacity; ++ordinal)
+	{
+		const uint index = (candidateStart + ordinal) % brickCapacity;
+		const SmokeGridBrick candidate = gSmokeGridBricks[index];
+		if ((candidate.Flags & NRI_SMOKE_GRID_BRICK_BORROWED_FIRST_USE) == 0u)
+			continue;
+		borrowedSeen++;
+		const bool opticallyDormant = candidate.State == NRI_SMOKE_GRID_RESIDENT &&
+			(candidate.Flags & NRI_SMOKE_GRID_BRICK_HALO) != 0u &&
+			(candidate.Flags & NRI_SMOKE_GRID_BRICK_CONTENT) == 0u && candidate.IdleFrames > 0u;
+		if (!opticallyDormant)
+		{
+			visibleSeen++;
+			continue;
+		}
+		bool mappingValid = candidate.HashSlot < gSmokeGridConstants.HashCapacity;
+		if (mappingValid)
+		{
+			const SmokeGridHashEntry entry = gSmokeGridHash[candidate.HashSlot];
+			mappingValid = entry.State == NRI_SMOKE_GRID_RESIDENT && entry.BrickIndex == index &&
+				entry.Generation == candidate.Generation && all(entry.Coordinate == candidate.Coordinate);
+		}
+		if (mappingValid)
+		{
+			candidateIndex = index;
+			break;
+		}
+	}
+	if (candidateIndex == 0xffffffffu)
+	{
+		blockedReason = borrowedSeen == 0u ? NRI_SMOKE_GRID_FIRST_USE_BLOCKED_NO_BORROWED :
+			(visibleSeen != 0u ? NRI_SMOKE_GRID_FIRST_USE_BLOCKED_VISIBLE :
+				NRI_SMOKE_GRID_FIRST_USE_BLOCKED_INVALID);
+		return false;
+	}
+
+	const SmokeGridBrick candidate = gSmokeGridBricks[candidateIndex];
+	const uint mask = gSmokeGridConstants.HashCapacity - 1u;
+	const uint base = SmokeGridHashCoordinate(coordinate) & mask;
+	const uint probeLimit = min(NRI_SMOKE_GRID_HASH_PROBES, gSmokeGridConstants.HashCapacity);
+	uint destination = 0xffffffffu;
+	uint probesVisited = probeLimit;
+	[loop]
+	for (uint probe = 0u; probe < probeLimit; ++probe)
+	{
+		const uint slot = (base + probe) & mask;
+		const SmokeGridHashEntry entry = gSmokeGridHash[slot];
+		if (slot == candidate.HashSlot || entry.State == NRI_SMOKE_GRID_TOMBSTONE)
+		{
+			if (destination == 0xffffffffu)
+				destination = slot;
+		}
+		if (entry.State == NRI_SMOKE_GRID_EMPTY)
+		{
+			if (destination == 0xffffffffu)
+				destination = slot;
+			probesVisited = probe + 1u;
+			break;
+		}
+	}
+	SmokeGridRecordControlProbe(probesVisited, true);
+	if (destination == 0xffffffffu)
+	{
+		blockedReason = NRI_SMOKE_GRID_FIRST_USE_BLOCKED_PROBE;
+		return false;
+	}
+
+	if (candidate.HashSlot != destination)
+		gSmokeGridHash[candidate.HashSlot].State = NRI_SMOKE_GRID_TOMBSTONE;
+	uint generation = candidate.Generation + 1u;
+	if (generation == 0u)
+		generation = 1u;
+	gSmokeGridHash[destination].State = NRI_SMOKE_GRID_CLAIMED;
+	SmokeGridBrick replacement = (SmokeGridBrick)0;
+	replacement.Coordinate = coordinate;
+	replacement.HashSlot = destination;
+	replacement.Generation = generation;
+	replacement.State = NRI_SMOKE_GRID_NEW;
+	replacement.Flags = flags & ~NRI_SMOKE_GRID_BRICK_BORROWED_FIRST_USE;
+	gSmokeGridBricks[candidateIndex] = replacement;
+	gSmokeGridHash[destination].Coordinate = coordinate;
+	gSmokeGridHash[destination].BrickIndex = candidateIndex;
+	gSmokeGridHash[destination].Generation = generation;
+	DeviceMemoryBarrier();
+	gSmokeGridHash[destination].State = NRI_SMOKE_GRID_NEW;
+	gSmokeGridControl[0].Allocated++;
+	gSmokeGridControl[0].Reclaimed++;
+	gSmokeGridControl[0].BorrowedReturns++;
+	gSmokeGridControl[0].BorrowedReclaims++;
+	gSmokeGridControl[0].FirstUseReplacementAdmissions++;
+	brickIndex = candidateIndex;
+	return true;
 }
 
 bool SmokeGridAllocateAtSlotSerial(int3 coordinate, uint flags, uint slot, uint probe, out uint brickIndex)

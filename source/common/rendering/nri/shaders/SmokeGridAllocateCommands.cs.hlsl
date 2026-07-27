@@ -167,6 +167,19 @@ void SmokeGridRecordRejection(uint sourceSlot, uint sourceCapacity, uint reason)
 	else gSmokeGridControl[0].AdmissionInvalidRejected++;
 }
 
+void SmokeGridRecordFirstUseBlocked(uint reason)
+{
+	gSmokeGridControl[0].FirstUseCapacityFailures++;
+	if (reason == NRI_SMOKE_GRID_FIRST_USE_BLOCKED_VISIBLE)
+		gSmokeGridControl[0].FirstUseBlockedVisible++;
+	else if (reason == NRI_SMOKE_GRID_FIRST_USE_BLOCKED_PROBE)
+		gSmokeGridControl[0].FirstUseBlockedProbe++;
+	else if (reason == NRI_SMOKE_GRID_FIRST_USE_BLOCKED_INVALID)
+		gSmokeGridControl[0].FirstUseBlockedInvalid++;
+	else
+		gSmokeGridControl[0].FirstUseBlockedNoBorrowed++;
+}
+
 [numthreads(1, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -196,6 +209,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	gSmokeGridControl[0].AdmissionProbeRejected = 0u;
 	gSmokeGridControl[0].AdmissionInvalidRejected = 0u;
 	gSmokeGridControl[0].AdmissionFootprintCulled = 0u;
+	gSmokeGridControl[0].FirstUseCoreCapacity = SmokeGridFirstUseCoreCapacity();
 	gSmokeGridControl[0].Generation = gSmokeGridConstants.SimulationEpoch;
 	gSmokeGridControl[0].FrameStamp = gSmokeGridConstants.FrameIndex;
 
@@ -296,6 +310,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				uint brickIndex;
 				if (SmokeGridFindBrickSerial(coordinate, brickIndex))
 				{
+					const uint sourceClass = SmokeInjectionSourceClass(command);
+					if (SmokeGridIsFirstUseClass(sourceClass))
+						SmokeGridPromoteBorrowedBrickSerial(brickIndex);
 					gSmokeGridSourceStats[sourceSlot].ExistingHits++;
 					gSmokeGridControl[0].AdmissionExisting++;
 					gSmokeGridBricks[brickIndex].Flags |= NRI_SMOKE_GRID_BRICK_CONTENT;
@@ -305,14 +322,39 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 				if (gSmokeGridControl[0].FreeCount == 0u)
 				{
-					SmokeGridRecordRejection(sourceSlot, validSourceCapacity, 0u);
+					const uint sourceClass = SmokeInjectionSourceClass(command);
+					uint blockedReason = NRI_SMOKE_GRID_FIRST_USE_BLOCKED_NONE;
+					if (SmokeGridIsFirstUseClass(sourceClass) &&
+						SmokeGridTryReplaceBorrowedDormantSerial(coordinate,
+							NRI_SMOKE_GRID_BRICK_CONTENT, brickIndex, blockedReason))
+					{
+						gSmokeGridSourceStats[sourceSlot].AdmittedNew++;
+						gSmokeGridSourceStats[sourceSlot].AdmittedKeyHash ^=
+							SmokeGridHashCoordinate(coordinate);
+						gSmokeGridControl[0].AdmissionAdmitted++;
+					}
+					else
+					{
+						if (SmokeGridIsFirstUseClass(sourceClass))
+							SmokeGridRecordFirstUseBlocked(blockedReason);
+						SmokeGridRecordRejection(sourceSlot, validSourceCapacity,
+							blockedReason == NRI_SMOKE_GRID_FIRST_USE_BLOCKED_PROBE ? 1u :
+								(blockedReason == NRI_SMOKE_GRID_FIRST_USE_BLOCKED_INVALID ? 2u : 0u));
+					}
 					completedTurn = true;
 					continue;
 				}
+				const uint freeBeforeAllocation = gSmokeGridControl[0].FreeCount;
 				bool newlyAllocated = false;
 				if (SmokeGridFindOrAllocateBrickSerial(coordinate, NRI_SMOKE_GRID_BRICK_CONTENT,
 					brickIndex, newlyAllocated) && newlyAllocated)
 				{
+					if (!SmokeGridIsFirstUseClass(SmokeInjectionSourceClass(command)) &&
+						freeBeforeAllocation <= SmokeGridFirstUseCoreCapacity())
+					{
+						gSmokeGridBricks[brickIndex].Flags |= NRI_SMOKE_GRID_BRICK_BORROWED_FIRST_USE;
+						gSmokeGridControl[0].BorrowedAllocations++;
+					}
 					gSmokeGridSourceStats[sourceSlot].AdmittedNew++;
 					gSmokeGridSourceStats[sourceSlot].AdmittedKeyHash ^=
 						SmokeGridHashCoordinate(coordinate);

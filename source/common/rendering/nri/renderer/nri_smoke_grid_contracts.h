@@ -106,6 +106,18 @@ struct NRISmokeGridControlGpu
 	uint32_t hashRebuildAttempts = 0;
 	uint32_t hashRebuildSuccesses = 0;
 	uint32_t hashRebuildFailures = 0;
+	uint32_t firstUseCoreCapacity = 0;
+	uint32_t borrowedResident = 0;
+	uint32_t borrowedAllocations = 0;
+	uint32_t borrowedReturns = 0;
+	uint32_t borrowedPromotions = 0;
+	uint32_t borrowedReclaims = 0;
+	uint32_t firstUseReplacementAdmissions = 0;
+	uint32_t firstUseBlockedNoBorrowed = 0;
+	uint32_t firstUseBlockedVisible = 0;
+	uint32_t firstUseBlockedProbe = 0;
+	uint32_t firstUseBlockedInvalid = 0;
+	uint32_t firstUseCapacityFailures = 0;
 };
 
 struct NRISmokeGridSourceStatsGpu
@@ -176,7 +188,7 @@ struct NRISmokeGridConstants
 
 static_assert(sizeof(NRISmokeGridHashEntryGpu) == 32);
 static_assert(sizeof(NRISmokeGridBrickGpu) == 32);
-static_assert(sizeof(NRISmokeGridControlGpu) == 256);
+static_assert(sizeof(NRISmokeGridControlGpu) == 304);
 static_assert(sizeof(NRISmokeGridSourceStatsGpu) == 64);
 static_assert(sizeof(NRISmokeGridDispatchGpu) == 12);
 static_assert(sizeof(NRISmokeGridConstants) == 128);
