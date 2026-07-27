@@ -62,6 +62,7 @@ struct NRISmokeGridFrameDesc
 	uint32_t commandCount = 0;
 	uint32_t styleCount = 0;
 	uint32_t simulationSubsteps = 0;
+	bool hashHealthDiagnostic = false;
 	float simulationStep = 1.0f / 60.0f;
 	const nri::Descriptor* styleView = nullptr;
 	const nri::Descriptor* commandView = nullptr;

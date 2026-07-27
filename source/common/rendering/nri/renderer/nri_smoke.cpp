@@ -1400,6 +1400,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		gridFrame.commandCount = commandCount;
 		gridFrame.styleCount = (uint32_t)mStyles.size();
 		gridFrame.simulationSubsteps = substeps;
+		gridFrame.hashHealthDiagnostic = mSettings.readback;
 		gridFrame.simulationStep = step;
 		gridFrame.styleView = mStyleBuffer.shaderView;
 		gridFrame.commandView = slot.device.shaderView;

@@ -51,7 +51,8 @@ Assert-Match $resources 'InsertionProbeLimitFailures\+\+' 'Insertion probe-limit
 Assert-Match $halo 'SmokeGridLookupBrickControlSerial' 'Halo allocation lookups must contribute to control-plane probe telemetry.'
 Assert-NotMatch $evaluate 'ControlProbe|ProbeBin|ProbeTotal' 'Render sampling must not add per-sample telemetry atomics.'
 Assert-Match $owner 'delta\.controlProbeTotal[\s\S]*delta\.hashRebuildFailures' 'Cumulative hash-health counters must publish frame deltas.'
-Assert-Match $owner 'constants\.flags\s*=\s*1u;[\s\S]*NRISmokeGridPass::BuildDispatch' 'The owner must request one final exact hash scan per frame.'
+Assert-Match $owner 'frame\.simulationSubsteps\s*>\s*0u\s*\|\|\s*frame\.hashHealthDiagnostic' 'The final dispatch must run only for simulation publication or explicit hash diagnostics.'
+Assert-Match $owner 'constants\.flags\s*=\s*frame\.hashHealthDiagnostic\s*\?\s*1u\s*:\s*0u' 'The owner must request exact scanning only for explicit diagnostics.'
 Assert-Match $runtime 'PERF pt smoke hash health NRI:' 'Compact capture must include the hash-health row.'
 Assert-Match $runtime 'hash_empty=%u[\s\S]*hash_tombstone=%u[\s\S]*control_probe_delta=%u[\s\S]*hash_rebuild_failures_delta=%u' 'Compact hash-health output must include gauges, probe bins, reasons, and rebuild events.'
 

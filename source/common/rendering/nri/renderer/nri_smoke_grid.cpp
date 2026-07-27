@@ -738,11 +738,12 @@ bool NRISmokeGrid::RecordFrame(const NRISmokeGridServices& services, const NRISm
 	}
 
 	TransitionDispatchToStorage(services);
+	if (frame.simulationSubsteps > 0u || frame.hashHealthDiagnostic)
 	{
 		NRIScopedGpuTiming timing(services.gpuTimingDevice, NRIGpuTimingScope::SmokeGridRebuild);
-		// Publish final ping/count and exact hash gauges after NEW publication,
-		// allocation, and reclamation have all completed for this frame.
-		constants.flags = 1u;
+		// Publish final ping/count after simulation. Exact full-table gauges are
+		// diagnostic-only so ordinary rendering does not inherit their serial scan.
+		constants.flags = frame.hashHealthDiagnostic ? 1u : 0u;
 		Dispatch(services, constants, NRISmokeGridPass::BuildDispatch, 1u);
 		StorageBarrier(services);
 	}
