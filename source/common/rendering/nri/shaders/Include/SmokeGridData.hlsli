@@ -74,6 +74,29 @@ struct SmokeGridControl
 	uint AdmissionProbeRejected;
 	uint AdmissionInvalidRejected;
 	uint AdmissionFootprintCulled;
+	uint HashEmpty;
+	uint HashClaimed;
+	uint HashResident;
+	uint HashNew;
+	uint HashTombstone;
+	uint HashInvalidState;
+	uint HashInvalidMapping;
+	uint ControlProbeTotal;
+	uint ControlProbeBin1;
+	uint ControlProbeBin2To4;
+	uint ControlProbeBin5To8;
+	uint ControlProbeBin9To16;
+	uint ControlProbeBin17To24;
+	uint LookupProbeTotal;
+	uint InsertionProbeTotal;
+	uint LookupProbeLimitFailures;
+	uint InsertionProbeLimitFailures;
+	uint InsertionCapacityFailures;
+	uint InsertionActiveFailures;
+	uint ReclaimInvalidMappingFailures;
+	uint HashRebuildAttempts;
+	uint HashRebuildSuccesses;
+	uint HashRebuildFailures;
 };
 
 struct SmokeGridSourceStats

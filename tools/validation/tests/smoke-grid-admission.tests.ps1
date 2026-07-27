@@ -16,7 +16,7 @@ $resources = Read-Source 'source/common/rendering/nri/shaders/Include/SmokeGridR
 $allocate = Read-Source 'source/common/rendering/nri/shaders/SmokeGridAllocateCommands.cs.hlsl'
 $deposit = Read-Source 'source/common/rendering/nri/shaders/SmokeGridDeposit.cs.hlsl'
 
-Assert-Match $contracts 'sizeof\(NRISmokeGridControlGpu\)\s*==\s*164' 'Grid admission control ABI must include the footprint-cull counter.'
+Assert-Match $contracts 'sizeof\(NRISmokeGridControlGpu\)\s*==\s*256' 'Grid control ABI must include admission and hash-health telemetry.'
 Assert-Match $contracts 'sizeof\(NRISmokeGridSourceStatsGpu\)\s*==\s*64' 'Per-source admission rows must remain 64 bytes.'
 Assert-Match $data 'struct SmokeGridSourceStats[\s\S]*SourceId[\s\S]*RejectedCapacity[\s\S]*RejectedProbe[\s\S]*RejectedInvalid[\s\S]*AdmittedKeyHash' 'HLSL source rejection contract is incomplete.'
 Assert-Match $resources 'SmokeGridFindBrickSerial[\s\S]*NRI_SMOKE_GRID_RESIDENT[\s\S]*NRI_SMOKE_GRID_NEW' 'Existing and current-pass NEW hits must be found before capacity decisions.'

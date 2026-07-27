@@ -114,7 +114,10 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 			{
 				gSmokeGridBricks[brickIndex] = updated;
 				if (reclaimable)
+				{
 					InterlockedAdd(gSmokeGridControl[0].ProbeFailures, 1u);
+					InterlockedAdd(gSmokeGridControl[0].ReclaimInvalidMappingFailures, 1u);
+				}
 				if (!SmokeGridAppendNextActive(brickIndex))
 					InterlockedAdd(gSmokeGridControl[0].AllocationFailures, 1u);
 			}

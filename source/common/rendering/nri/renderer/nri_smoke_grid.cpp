@@ -408,6 +408,22 @@ void NRISmokeGrid::ConsumeReadback(const NRISmokeGridServices& services, uint32_
 				delta.nanRejects = next.nanRejects - previous.nanRejects;
 				delta.depositionCells = next.depositionCells - previous.depositionCells;
 				delta.depositionRejected = next.depositionRejected - previous.depositionRejected;
+				delta.controlProbeTotal = next.controlProbeTotal - previous.controlProbeTotal;
+				delta.controlProbeBin1 = next.controlProbeBin1 - previous.controlProbeBin1;
+				delta.controlProbeBin2To4 = next.controlProbeBin2To4 - previous.controlProbeBin2To4;
+				delta.controlProbeBin5To8 = next.controlProbeBin5To8 - previous.controlProbeBin5To8;
+				delta.controlProbeBin9To16 = next.controlProbeBin9To16 - previous.controlProbeBin9To16;
+				delta.controlProbeBin17To24 = next.controlProbeBin17To24 - previous.controlProbeBin17To24;
+				delta.lookupProbeTotal = next.lookupProbeTotal - previous.lookupProbeTotal;
+				delta.insertionProbeTotal = next.insertionProbeTotal - previous.insertionProbeTotal;
+				delta.lookupProbeLimitFailures = next.lookupProbeLimitFailures - previous.lookupProbeLimitFailures;
+				delta.insertionProbeLimitFailures = next.insertionProbeLimitFailures - previous.insertionProbeLimitFailures;
+				delta.insertionCapacityFailures = next.insertionCapacityFailures - previous.insertionCapacityFailures;
+				delta.insertionActiveFailures = next.insertionActiveFailures - previous.insertionActiveFailures;
+				delta.reclaimInvalidMappingFailures = next.reclaimInvalidMappingFailures - previous.reclaimInvalidMappingFailures;
+				delta.hashRebuildAttempts = next.hashRebuildAttempts - previous.hashRebuildAttempts;
+				delta.hashRebuildSuccesses = next.hashRebuildSuccesses - previous.hashRebuildSuccesses;
+				delta.hashRebuildFailures = next.hashRebuildFailures - previous.hashRebuildFailures;
 				mStatus.gpuFrameDeltaValid = true;
 			}
 			mStatus.controlReadbackBytes += sizeof(NRISmokeGridControlGpu);
@@ -711,11 +727,11 @@ bool NRISmokeGrid::RecordFrame(const NRISmokeGridServices& services, const NRISm
 	}
 
 	TransitionDispatchToStorage(services);
-	if (frame.simulationSubsteps > 0u)
 	{
 		NRIScopedGpuTiming timing(services.gpuTimingDevice, NRIGpuTimingScope::SmokeGridRebuild);
-		// Publish the final ping/count for render evaluation. Without this last
-		// control update, the camera pass would sample the previous field.
+		// Publish final ping/count and exact hash gauges after NEW publication,
+		// allocation, and reclamation have all completed for this frame.
+		constants.flags = 1u;
 		Dispatch(services, constants, NRISmokeGridPass::BuildDispatch, 1u);
 		StorageBarrier(services);
 	}
@@ -820,6 +836,10 @@ void NRISmokeGrid::PrintStatus() const
 		"admission_sources=%u admission_requested=%u admission_existing=%u admission_admitted=%u "
 		"admission_rejected=%u admission_capacity_rejected=%u admission_probe_rejected=%u admission_invalid_rejected=%u "
 		"admission_footprint_culled=%u "
+		"hash_empty=%u hash_claimed=%u hash_resident=%u hash_new=%u hash_tombstone=%u hash_invalid_state=%u hash_invalid_mapping=%u "
+		"control_probe_total=%u control_probe_max=%u control_probe_bins=%u/%u/%u/%u/%u lookup_probe_total=%u insertion_probe_total=%u "
+		"lookup_probe_limit_failures=%u insertion_probe_limit_failures=%u insertion_capacity_failures=%u insertion_active_failures=%u reclaim_invalid_mapping_failures=%u "
+		"hash_rebuild_attempts=%u hash_rebuild_successes=%u hash_rebuild_failures=%u "
 		"field_readback=0 control_readback=%llu source_readback=%llu fallback=%s reset=%s\n",
 		mStatus.requested ? "yes" : "no", mStatus.representation,
 		mStatus.initialized ? "yes" : "no", mStatus.resourcesReady ? "ready" : "unavailable",
@@ -841,6 +861,17 @@ void NRISmokeGrid::PrintStatus() const
 		mStatus.gpu.admissionRejected, mStatus.gpu.admissionCapacityRejected,
 		mStatus.gpu.admissionProbeRejected, mStatus.gpu.admissionInvalidRejected,
 		mStatus.gpu.admissionFootprintCulled,
+		mStatus.gpu.hashEmpty, mStatus.gpu.hashClaimed, mStatus.gpu.hashResident,
+		mStatus.gpu.hashNew, mStatus.gpu.hashTombstone, mStatus.gpu.hashInvalidState,
+		mStatus.gpu.hashInvalidMapping, mStatus.gpu.controlProbeTotal, mStatus.gpu.maximumProbe,
+		mStatus.gpu.controlProbeBin1, mStatus.gpu.controlProbeBin2To4,
+		mStatus.gpu.controlProbeBin5To8, mStatus.gpu.controlProbeBin9To16,
+		mStatus.gpu.controlProbeBin17To24, mStatus.gpu.lookupProbeTotal,
+		mStatus.gpu.insertionProbeTotal, mStatus.gpu.lookupProbeLimitFailures,
+		mStatus.gpu.insertionProbeLimitFailures, mStatus.gpu.insertionCapacityFailures,
+		mStatus.gpu.insertionActiveFailures, mStatus.gpu.reclaimInvalidMappingFailures,
+		mStatus.gpu.hashRebuildAttempts, mStatus.gpu.hashRebuildSuccesses,
+		mStatus.gpu.hashRebuildFailures,
 		(unsigned long long)mStatus.controlReadbackBytes,
 		(unsigned long long)mStatus.sourceReadbackBytes,
 		mStatus.failureReason.c_str(), mStatus.resetReason.c_str());
