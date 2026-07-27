@@ -981,6 +981,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_smoke_authority.cpp
 	common/rendering/nri/renderer/nri_smoke_grid.cpp
 	common/rendering/nri/renderer/nri_smoke_grid_lighting.cpp
+	common/rendering/nri/renderer/nri_smoke_grid_lighting_identity.cpp
 	common/rendering/nri/renderer/nri_smoke_view_work.cpp
 	common/rendering/nri/renderer/nri_smoke_emitters.cpp
 	common/rendering/nri/renderer/nri_weapon_event_batch.cpp
