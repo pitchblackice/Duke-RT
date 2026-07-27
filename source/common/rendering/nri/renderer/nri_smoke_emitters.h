@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nri_smoke_contracts.h"
+#include "nri_smoke_interest.h"
 #include "v_video.h"
 
 #include <cstdint>
@@ -15,7 +16,8 @@ public:
 	void Gather(uint32_t epoch, double gameplayTimeSeconds, const TArray<PathTracingWeaponLightEvent>& weaponEvents,
 		const SceneLightSystem& sceneLights,
 		std::vector<NRISmokeStyleGpu>& styles, std::vector<NRISmokeInjectionCommandGpu>& commands,
-		uint32_t& nextSerial, uint32_t traceMode);
+		uint32_t& nextSerial, uint32_t traceMode, const NRISmokeInterestSnapshot& interest,
+		float gridCellSize, uint32_t gridBrickCapacity);
 	void Reset();
 	uint32_t GetGeneration() const { return mGeneration; }
 
@@ -47,7 +49,12 @@ private:
 	struct MapEmitterState
 	{
 		double previousTimeSeconds = 0.0;
+		double logicalElapsedSeconds = 0.0;
 		double intervalRemainder = 0.0;
+		uint64_t nextCadenceOrdinal = 0;
+		uint32_t coalescedDebt = 0;
+		NRISmokeInterestTier previousTier = NRISmokeInterestTier::Dormant;
+		bool initialized = false;
 		bool emitted = false;
 	};
 

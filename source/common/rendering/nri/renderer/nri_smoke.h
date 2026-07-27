@@ -8,6 +8,7 @@
 #include "nri_smoke_emitters.h"
 #include "nri_smoke_grid.h"
 #include "nri_smoke_grid_lighting.h"
+#include "nri_smoke_interest.h"
 #include "nri_smoke_pulses.h"
 #include "nri_smoke_prompt_fallback.h"
 #include "nri_smoke_view_work.h"
@@ -325,6 +326,7 @@ private:
 	NRISmokeAuthority mAuthority;
 	NRISmokeGrid mGrid;
 	NRISmokeGridLighting mGridLighting;
+	NRISmokeInterestTracker mInterest;
 	NRISmokeViewWork mViewWork;
 	NRISmokePulseOwner mPulseOwner;
 	NRISmokePromptFallback mPromptFallback;

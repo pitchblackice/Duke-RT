@@ -51,6 +51,34 @@ namespace
 		const DVector2 forward = actor->spr.Angles.Yaw.ToVector();
 		return DVector3(forward.X * actor->vel.X, forward.Y * actor->vel.X, actor->vel.Z);
 	}
+
+	int32_t SmokeGridFloorDiv8(int32_t value)
+	{
+		const int32_t quotient = value / 8;
+		const int32_t remainder = value - quotient * 8;
+		return quotient - (remainder < 0 ? 1 : 0);
+	}
+
+	uint32_t ConservativeMapEmitterBrickFootprint(const NRISmokeInjectionCommandGpu& command,
+		const NRISmokeStyleGpu& style, float gridCellSize)
+	{
+		const float cellSize = std::max(gridCellSize, 0.0001f);
+		const float radius = std::min(std::max(std::max(command.spawnRadius,
+			style.radius * command.radiusScale), cellSize), cellSize * 16.0f);
+		float extent[3];
+		for (uint32_t axis = 0; axis < 3u; ++axis)
+			extent[axis] = std::abs(command.halfAxisU[axis]) + std::abs(command.halfAxisV[axis]) + radius;
+		uint64_t bricks = 1u;
+		for (uint32_t axis = 0; axis < 3u; ++axis)
+		{
+			const int32_t minimumCell = (int32_t)std::floor((command.position[axis] - extent[axis]) / cellSize);
+			const int32_t maximumCell = (int32_t)std::floor((command.position[axis] + extent[axis]) / cellSize);
+			const int32_t minimumBrick = SmokeGridFloorDiv8(minimumCell);
+			const int32_t maximumBrick = SmokeGridFloorDiv8(maximumCell);
+			bricks *= (uint64_t)std::max(maximumBrick - minimumBrick + 1, 1);
+		}
+		return (uint32_t)std::min<uint64_t>(bricks, UINT32_MAX);
+	}
 }
 
 size_t NRISmokeEmitterSystem::IdentityHash::operator()(const Identity& value) const
@@ -75,7 +103,8 @@ void NRISmokeEmitterSystem::Reset()
 void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, const TArray<PathTracingWeaponLightEvent>& weaponEvents,
 	const SceneLightSystem& sceneLights,
 	std::vector<NRISmokeStyleGpu>& styles, std::vector<NRISmokeInjectionCommandGpu>& commands,
-	uint32_t& nextSerial, uint32_t traceMode)
+	uint32_t& nextSerial, uint32_t traceMode, const NRISmokeInterestSnapshot& interest,
+	float gridCellSize, uint32_t gridBrickCapacity)
 {
 	const ResolvedLightOverlaySet& resolved = GetResolvedLightOverlaySet();
 	if (mGeneration != resolved.resolvedGeneration || mActiveMapName.CompareNoCase(resolved.activeMapName) != 0)
@@ -350,13 +379,19 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 		uint32_t emitted = 0u;
 		uint32_t particles = 0u;
 		uint32_t skipped = 0u;
+		uint32_t dormant = 0u;
+		uint32_t coalesced = 0u;
+		uint32_t debt = 0u;
+		uint32_t footprintBricks = 0u;
+		NRISmokeInterestTier tier = NRISmokeInterestTier::Hot;
 	};
 	auto emitMapRule = [&](const ResolvedLightOverlayMapSmokeEmitterRule& rule,
 		MapEmitterState& state, const char* eventName,
-		NRISmokeInjectionSourceClass sourceClass) -> MapEmissionStats
+		NRISmokeInjectionSourceClass sourceClass, NRISmokeInterestTier tier) -> MapEmissionStats
 	{
 		MapEmissionStats stats = {};
 		stats.active = 1u;
+		stats.tier = tier;
 		LightOverlayMapSmokeEmitterRectangle rectangle = {};
 		if (!BuildLightOverlayMapSmokeEmitterRectangle(rule, rectangle))
 		{
@@ -368,35 +403,83 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			}
 			return stats;
 		}
-
-		uint32_t emitCount = 0u;
-		if (!state.emitted)
-		{
-			state.emitted = true;
-			state.previousTimeSeconds = gameplayTimeSeconds;
-			state.intervalRemainder = 0.0;
-			emitCount = 1u;
-		}
-		else
-		{
-			const double elapsedSeconds = std::max(0.0, gameplayTimeSeconds - state.previousTimeSeconds);
-			state.previousTimeSeconds = gameplayTimeSeconds;
-			const double intervalSeconds = std::max(0.001, (double)rule.intervalSeconds);
-			const double total = state.intervalRemainder + elapsedSeconds;
-			const uint32_t candidateCount = (uint32_t)std::floor(total / intervalSeconds);
-			state.intervalRemainder = std::fmod(total, intervalSeconds);
-			emitCount = std::min(candidateCount, rule.maxSegmentsPerFrame);
-			stats.skipped = candidateCount - emitCount;
-		}
 		const DVector3 center(rectangle.center[0], rectangle.center[1], rectangle.center[2]);
 		const DVector3 normal(rectangle.normal[0], rectangle.normal[1], rectangle.normal[2]);
 		const DVector3 axisU(rectangle.halfAxisU[0], rectangle.halfAxisU[1], rectangle.halfAxisU[2]);
 		const DVector3 axisV(rectangle.halfAxisV[0], rectangle.halfAxisV[1], rectangle.halfAxisV[2]);
 		const DVector3 velocity = normal * rule.velocityScale;
+		if (rule.styleIndex < styles.size())
+		{
+			NRISmokeInjectionCommandGpu footprint = {};
+			WorldToPathTracingPosition(center, footprint.position);
+			WorldToPathTracingDirection(axisU, footprint.halfAxisU);
+			WorldToPathTracingDirection(axisV, footprint.halfAxisV);
+			footprint.spawnRadius = rule.spawnRadius;
+			footprint.radiusScale = rule.radiusScale;
+			stats.footprintBricks = ConservativeMapEmitterBrickFootprint(
+				footprint, styles[rule.styleIndex], gridCellSize);
+		}
+
+		const double intervalSeconds = std::max(0.001, (double)rule.intervalSeconds);
+		uint32_t candidateCount = 0u;
+		uint64_t firstCadenceOrdinal = 0u;
+		if (!state.initialized)
+		{
+			state.initialized = true;
+			state.previousTimeSeconds = gameplayTimeSeconds;
+			state.logicalElapsedSeconds = gameplayTimeSeconds;
+			const double nonNegativeTime = std::max(gameplayTimeSeconds, 0.0);
+			firstCadenceOrdinal = (uint64_t)std::floor(nonNegativeTime / intervalSeconds);
+			state.nextCadenceOrdinal = firstCadenceOrdinal + 1u;
+			state.intervalRemainder = std::fmod(nonNegativeTime, intervalSeconds);
+			candidateCount = 1u;
+		}
+		else
+		{
+			const double elapsedSeconds = std::max(0.0, gameplayTimeSeconds - state.previousTimeSeconds);
+			state.previousTimeSeconds = gameplayTimeSeconds;
+			state.logicalElapsedSeconds += elapsedSeconds;
+			const double total = state.intervalRemainder + elapsedSeconds;
+			candidateCount = (uint32_t)std::min<double>(std::floor(total / intervalSeconds), UINT32_MAX);
+			state.intervalRemainder = std::fmod(total, intervalSeconds);
+			firstCadenceOrdinal = state.nextCadenceOrdinal;
+			state.nextCadenceOrdinal += candidateCount;
+		}
+		constexpr uint32_t MaximumCoalescedDebt = 4096u;
+		const bool dormant = tier == NRISmokeInterestTier::Dormant;
+		const bool promoting = state.previousTier == NRISmokeInterestTier::Dormant && !dormant && state.coalescedDebt != 0u;
+		state.previousTier = tier;
+		if (dormant)
+		{
+			state.coalescedDebt = std::min<uint32_t>(MaximumCoalescedDebt,
+				state.coalescedDebt + std::min(candidateCount, MaximumCoalescedDebt - state.coalescedDebt));
+			stats.skipped = candidateCount;
+			stats.dormant = candidateCount;
+			stats.debt = state.coalescedDebt;
+			return stats;
+		}
+
+		uint32_t emitCount = std::min(candidateCount, rule.maxSegmentsPerFrame);
+		stats.skipped = candidateCount - emitCount;
+		if (promoting)
+		{
+			stats.coalesced = state.coalescedDebt;
+			state.coalescedDebt = 0u;
+			// If no cadence crossing occurred this frame, one ordinary current-time
+			// pulse starts prewarming. Missed history is never replayed wholesale.
+			if (emitCount == 0u && rule.maxSegmentsPerFrame != 0u)
+			{
+				emitCount = 1u;
+				candidateCount = 1u;
+				firstCadenceOrdinal = state.nextCadenceOrdinal > 0u ? state.nextCadenceOrdinal - 1u : 0u;
+			}
+		}
+		stats.debt = state.coalescedDebt;
 		const uint32_t sourceId = NRIMakeSmokeSourceId(eventName,
 			resolved.activeMapName.GetChars(), rule.id.GetChars());
 		for (uint32_t emissionIndex = 0; emissionIndex < emitCount; ++emissionIndex)
 		{
+			const uint64_t cadenceOrdinal = firstCadenceOrdinal + (uint64_t)(candidateCount - emitCount + emissionIndex);
 			NRISmokeInjectionCommandGpu command = {};
 			WorldToPathTracingPosition(center, command.position);
 			WorldToPathTracingDirection(velocity, command.velocity);
@@ -405,7 +488,8 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			command.spawnRadius = rule.spawnRadius;
 			command.styleIndex = rule.styleIndex;
 			command.count = rule.count;
-			command.serial = nextSerial++;
+			command.serial = NRIMakeSmokeSourceId("map-pulse", resolved.activeMapName.GetChars(),
+				rule.id.GetChars(), (uint32_t)cadenceOrdinal);
 			command.densityScale = rule.densityScale;
 			command.radiusScale = rule.radiusScale;
 			command.velocityCone = rule.velocityCone;
@@ -414,12 +498,14 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			command.sourceId = sourceId;
 			command.sourceMetadata = NRIPackSmokeSourceMetadata(sourceClass);
 			commands.push_back(command);
+			state.emitted = true;
 			stats.emitted++;
 			stats.particles += command.count;
 			if (traceMode >= 2 && verbosePrinted < 32u)
 			{
-				Printf("NRI PT smoke emitter: event=%s map=%s rule=%s command_serial=%u source_id=%08x source_class=%u style=%u particles=%u render=(%.3f,%.3f,%.3f) velocity=(%.3f,%.3f,%.3f) axis_u=(%.3f,%.3f,%.3f) axis_v=(%.3f,%.3f,%.3f) shape=rectangle\n",
+				Printf("NRI PT smoke emitter: event=%s map=%s rule=%s command_serial=%u cadence_ordinal=%llu source_id=%08x source_class=%u style=%u particles=%u render=(%.3f,%.3f,%.3f) velocity=(%.3f,%.3f,%.3f) axis_u=(%.3f,%.3f,%.3f) axis_v=(%.3f,%.3f,%.3f) shape=rectangle\n",
 					eventName, resolved.activeMapName.GetChars(), rule.id.GetChars(), command.serial,
+					(unsigned long long)cadenceOrdinal,
 					command.sourceId, static_cast<uint32_t>(NRIGetSmokeSourceClass(command.sourceMetadata)),
 					command.styleIndex, command.count,
 					command.position[0], command.position[1], command.position[2],
@@ -450,13 +536,17 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 		{
 			continue;
 		}
-		const MapEmissionStats stats = emitMapRule(rule, mMapEmitterStates[ruleIndex], "map",
-			NRISmokeInjectionSourceClass::AmbientMap);
+		const uint32_t sourceId = NRIMakeSmokeSourceId("map", resolved.activeMapName.GetChars(), rule.id.GetChars());
+		const NRISmokeInterestTier tier = interest.Resolve(sourceId);
+		const MapEmissionStats stats = emitMapRule(rule, mMapEmitterStates[sourceId], "map",
+			NRISmokeInjectionSourceClass::AmbientMap, tier);
 		if (traceMode != 0)
 		{
-			Printf("NRI PT smoke emitter: event=map-frame-summary map=%s rule=%s active=%u emitted=%u particles=%u skipped=%u interval=%.3f shape=rectangle\n",
-				resolved.activeMapName.GetChars(), rule.id.GetChars(), stats.active, stats.emitted,
-				stats.particles, stats.skipped, rule.intervalSeconds);
+			Printf("NRI PT smoke emitter: event=map-frame-summary map=%s rule=%s active=%u tier=%u emitted=%u particles=%u skipped=%u dormant=%u coalesced=%u debt=%u interval=%.3f footprint_bricks=%u grid_capacity=%u impossible=%u shape=rectangle\n",
+				resolved.activeMapName.GetChars(), rule.id.GetChars(), stats.active, (uint32_t)stats.tier,
+				stats.emitted, stats.particles, stats.skipped, stats.dormant, stats.coalesced,
+				stats.debt, rule.intervalSeconds, stats.footprintBricks, gridBrickCapacity,
+				stats.footprintBricks > gridBrickCapacity ? 1u : 0u);
 		}
 	}
 
@@ -486,7 +576,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			previewRule.styleIndex = previewStyle->styleIndex;
 			previewRule.styleResolved = true;
 			const MapEmissionStats stats = emitMapRule(previewRule, mEditorPreviewState, "map-preview",
-				NRISmokeInjectionSourceClass::Diagnostic);
+				NRISmokeInjectionSourceClass::Diagnostic, NRISmokeInterestTier::Hot);
 			if (traceMode != 0)
 			{
 				Printf("NRI PT smoke emitter: event=map-preview-frame-summary map=%s rule=%s active=%u emitted=%u particles=%u skipped=%u interval=%.3f revision=%u shape=rectangle\n",

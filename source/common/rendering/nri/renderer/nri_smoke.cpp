@@ -5,6 +5,7 @@
 #include "../system/nri_gpu_timing.h"
 #include "../system/nri_renderdevice.h"
 #include "gamecontrol.h"
+#include "lightoverlay.h"
 #include "printf.h"
 
 #include <algorithm>
@@ -910,10 +911,20 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 		}
 	};
 	prepareGridOwners();
+	NRISmokeInterestFrameInput interestInput = {};
+	interestInput.rendererFrame = renderer.mFrameIndex;
+	interestInput.cameraPosition = renderer.mCurrentCameraPos;
+	interestInput.previousCameraPosition = renderer.mPreviousCameraPos;
+	interestInput.hasPreviousCamera = renderer.mHasPreviousCameraState;
+	interestInput.mapWorld = &renderer.mMapWorld;
+	interestInput.visibleChunkWords = &renderer.mCurrentVisibleChunkWords;
+	interestInput.overlays = &GetResolvedLightOverlaySet();
+	mInterest.Update(interestInput);
 	const uint32_t previousGeneration = mEmitters.GetGeneration();
 	const double gameplayTimeSeconds = PlayClock > 0 ? (double)PlayClock * (1.0 / 120.0) : 0.0;
 	mEmitters.Gather(mStatus.simulationEpoch, gameplayTimeSeconds, weaponEvents, renderer.mSceneLights,
-		mStyles, mPendingCommands, mNextCommandSerial, mSettings.traceMode);
+		mStyles, mPendingCommands, mNextCommandSerial, mSettings.traceMode, mInterest.GetSnapshot(),
+		mSettings.gridCellSize, mSettings.gridBrickCapacity);
 	const bool styleLayoutInvalidated = previousGeneration != 0 && previousGeneration != mEmitters.GetGeneration();
 	if (styleLayoutInvalidated)
 	{
@@ -2495,7 +2506,10 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.volumeHistoryAge = 0;
 	mStatus.volumeHistoryResetReason = mStatus.resetReason;
 	if (std::strcmp(mStatus.resetReason, "authority-transition") != 0)
+	{
 		mEmitters.Reset();
+		mInterest.Reset();
+	}
 	mGrid.Reset(mStatus.simulationEpoch, mStatus.resetReason);
 	mGridLighting.Reset(mStatus.simulationEpoch, mStatus.resetReason);
 }
@@ -2595,6 +2609,11 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		(unsigned long long)mStatus.admission.estimatedBrickWorkUploaded,
 		(unsigned long long)mStatus.admission.estimatedBrickWorkGathered,
 		mStatus.admission.Closes() ? "yes" : "no");
+	const NRISmokeInterestSnapshot& interest = mInterest.GetSnapshot();
+	Printf("NRI PT smoke interest: frame=%u hot=%u warm=%u dormant=%u positive=%u portal_promoted=%u runtime_portal_uncertain=%u camera_jump=%u policy=positive-only-hysteretic\n",
+		interest.rendererFrame, interest.hotCount, interest.warmCount, interest.dormantCount,
+		interest.positiveCount, interest.portalPromotedChunks,
+		interest.runtimePortalUncertain ? 1u : 0u, interest.cameraJump ? 1u : 0u);
 	const NRISmokeGridLightingStatusSnapshot& world = mGridLighting.GetStatusSnapshot();
 	Printf("NRI PT smoke grid emissive: requested_backend=%u effective_backend=%u authority=%s ready=%s cells=%u ping=%u inner_ris_points=%u/%u target=%d field_mib=%.2f work_mib=%.2f links_mib=%.2f proposal_mib=%.3f filter=%s filter_mib=%.2f total_mib=%.2f proposal=%s field_readback=0\n",
 		world.requestedBackend, world.effectiveBackend, world.authority, world.resourcesReady ? "yes" : "no",
