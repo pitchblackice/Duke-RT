@@ -5,6 +5,8 @@
 
 constexpr uint32_t NRI_SMOKE_GRID_BRICK_AXIS = 8u;
 constexpr uint32_t NRI_SMOKE_GRID_CELLS_PER_BRICK = 512u;
+constexpr uint32_t NRI_SMOKE_GRID_FLAG_HASH_HEALTH = 1u;
+constexpr uint32_t NRI_SMOKE_GRID_FLAG_COMPACT_DRAINED_HASH = 2u;
 
 enum class NRISmokeGridPass : uint32_t
 {

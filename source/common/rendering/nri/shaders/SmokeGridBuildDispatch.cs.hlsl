@@ -1,9 +1,50 @@
 #include "Include/SmokeGridResources.hlsli"
 
+void SmokeGridCompactDrainedHash()
+{
+	if ((gSmokeGridConstants.Flags & NRI_SMOKE_GRID_FLAG_COMPACT_DRAINED_HASH) == 0u ||
+		gSmokeGridControl[0].ResidentCount != 0u)
+		return;
+
+	const uint activeCount = min(SmokeGridActiveCount(), gSmokeGridConstants.BrickCapacity);
+	bool hasNonEmptySlot = false;
+	bool safeToReset = activeCount == 0u &&
+		gSmokeGridControl[0].FreeCount == gSmokeGridConstants.BrickCapacity;
+	[loop]
+	for (uint slot = 0u; slot < gSmokeGridConstants.HashCapacity; ++slot)
+	{
+		const uint state = gSmokeGridHash[slot].State;
+		hasNonEmptySlot = hasNonEmptySlot || state != NRI_SMOKE_GRID_EMPTY;
+		safeToReset = safeToReset &&
+			(state == NRI_SMOKE_GRID_EMPTY || state == NRI_SMOKE_GRID_TOMBSTONE);
+	}
+
+	if (!hasNonEmptySlot)
+		return;
+
+	gSmokeGridControl[0].HashRebuildAttempts++;
+	if (!safeToReset)
+	{
+		gSmokeGridControl[0].HashRebuildFailures++;
+		return;
+	}
+
+	[loop]
+	for (uint slot = 0u; slot < gSmokeGridConstants.HashCapacity; ++slot)
+	{
+		SmokeGridHashEntry entry = (SmokeGridHashEntry)0;
+		entry.BrickIndex = 0xffffffffu;
+		gSmokeGridHash[slot] = entry;
+	}
+	DeviceMemoryBarrier();
+	gSmokeGridControl[0].HashRebuildSuccesses++;
+}
+
 [numthreads(1, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-	if ((gSmokeGridConstants.Flags & 1u) != 0u)
+	SmokeGridCompactDrainedHash();
+	if ((gSmokeGridConstants.Flags & NRI_SMOKE_GRID_FLAG_HASH_HEALTH) != 0u)
 	{
 		gSmokeGridControl[0].HashEmpty = 0u;
 		gSmokeGridControl[0].HashClaimed = 0u;

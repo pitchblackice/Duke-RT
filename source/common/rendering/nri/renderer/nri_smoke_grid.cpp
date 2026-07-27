@@ -741,9 +741,13 @@ bool NRISmokeGrid::RecordFrame(const NRISmokeGridServices& services, const NRISm
 	if (frame.simulationSubsteps > 0u || frame.hashHealthDiagnostic)
 	{
 		NRIScopedGpuTiming timing(services.gpuTimingDevice, NRIGpuTimingScope::SmokeGridRebuild);
-		// Publish final ping/count after simulation. Exact full-table gauges are
-		// diagnostic-only so ordinary rendering does not inherit their serial scan.
-		constants.flags = frame.hashHealthDiagnostic ? 1u : 0u;
+		// Publish final ping/count after simulation. This is the only dispatch
+		// authorized to reset a fully drained hash; earlier dispatches can contain
+		// NEW mappings that have not reached preparation yet. Exact gauges remain
+		// diagnostic-only outside that zero-resident cleanup case.
+		constants.flags = frame.hashHealthDiagnostic ? NRI_SMOKE_GRID_FLAG_HASH_HEALTH : 0u;
+		if (frame.simulationSubsteps > 0u)
+			constants.flags |= NRI_SMOKE_GRID_FLAG_COMPACT_DRAINED_HASH;
 		Dispatch(services, constants, NRISmokeGridPass::BuildDispatch, 1u);
 		StorageBarrier(services);
 	}
