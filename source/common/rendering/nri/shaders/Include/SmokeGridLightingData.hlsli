@@ -29,6 +29,9 @@ struct SmokeGridLightControl
 	uint ActiveCount;
 	uint SupportCount;
 	uint SourceCount;
+	uint SupportOnlyCount;
+	uint DuplicateCount;
+	uint SupportOverflowCount;
 	uint ScheduledCount;
 	uint Samples;
 	uint Visible;
@@ -111,6 +114,12 @@ struct SmokeGridLightProposal
 	uint Count;
 	uint BrickGeneration;
 	uint SimulationEpoch;
+	uint FrameStamp;
+};
+
+struct SmokeGridLightSupportStamp
+{
+	uint BrickGeneration;
 	uint FrameStamp;
 };
 

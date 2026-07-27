@@ -31,7 +31,7 @@ struct NRISmokeGridLightingDirectSeedSnapshot
 class NRISmokeGridLighting
 {
 public:
-	static constexpr uint32_t StorageDescriptorCount = 14u;
+	static constexpr uint32_t StorageDescriptorCount = 15u;
 
 	bool Initialize(const NRISmokeGridServices& services, nri::PipelineLayout* sharedLayout);
 	bool PrepareFrame(const NRISmokeGridServices& services, const NRISmokeSettings& settings,
@@ -89,6 +89,7 @@ private:
 	NRIBufferResource mScatterActive;
 	NRIBufferResource mSelfShadowCurrent;
 	NRIBufferResource mSelfShadowHistory;
+	NRIBufferResource mSupportStamps;
 	std::vector<FrameSlot> mFrameSlots;
 	uint32_t mResourceCellCapacity = 0;
 	uint32_t mResourceBrickCapacity = 0;
