@@ -36,7 +36,7 @@ NRISmokeWorkTable NRISmokeWorkScheduler::BuildTable(NRISmokeWorkProfile profile,
 		table.maximumLightCandidates = 8u;
 		table.radianceNewInvalidCells = 16384u;
 		table.radianceMaintenanceCells = 65536u;
-		table.simulationSubsteps = 2u;
+		table.simulationSubsteps = 1u;
 		break;
 	case NRISmokeWorkProfile::Medium:
 		table.emissionCommands = 32u;

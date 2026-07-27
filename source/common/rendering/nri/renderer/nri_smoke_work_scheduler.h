@@ -24,7 +24,7 @@ struct NRISmokeWorkTable
 {
 	static constexpr uint32_t Unrestricted = std::numeric_limits<uint32_t>::max();
 
-	uint32_t revision = 3u;
+	uint32_t revision = 4u;
 	uint32_t emissionCommands = 256u;
 	uint32_t firstUseSources = 8u;
 	uint32_t froxelPixelSize = Unrestricted;

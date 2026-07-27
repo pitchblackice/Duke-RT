@@ -33,7 +33,7 @@ int main()
 		high.table.emissiveLights == 1u && high.table.emissiveBackend == 2u &&
 		high.table.lightSamples == 4u && high.table.maximumLightCandidates == 8u &&
 		high.table.radianceNewInvalidCells == 16384u &&
-		high.table.radianceMaintenanceCells == 65536u && high.table.simulationSubsteps == 2u,
+		high.table.radianceMaintenanceCells == 65536u && high.table.simulationSubsteps == 1u,
 		"high table must remain immutable");
 	const uint32_t highSerial = high.profileChangeSerial;
 	Require(scheduler.Resolve(1u, 1u).profileChangeSerial == highSerial,
