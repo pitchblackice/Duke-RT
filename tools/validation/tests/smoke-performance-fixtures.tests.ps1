@@ -129,6 +129,9 @@ Assert-Match $runner "PERF pt smoke gpu timing NRI/detail_total" "fixture runner
 Assert-Match $runner "Smoke GPU characterization:" "fixture runner must report timing without enforcing a rejected quality budget"
 Assert-Match $runner "expected four emitting map rules" "fixture runner must verify all four E1L1 emitters are active"
 Assert-Match $runner "rule=duke_rpg_trail_continuous .* emitted=\[1-9\]" "fixture runner must verify nonzero RPG trail emission in every run log"
+Assert-Match $runner '\[string\[\]\]\$AdditionalArgs\s*=\s*@\(\)' "fixture runner must accept profile/calibration overrides"
+Assert-Match $runner '\$arguments\.AdditionalArgs\s*=\s*\$AdditionalArgs' "fixture runner must forward profile/calibration overrides"
+Assert-Match $runner 'timingFrames\.Count\s+-lt\s+\$ExpectedSamples' "fixture runner must derive its join sample floor from the scenario"
 Assert-True ($runner -notmatch "grid_admission_|Assert-SourceServed|queue_cap|SmokeGpuBudgetMs") "fixture runner must not claim future fairness/scheduler telemetry"
 
 Write-Host "Smoke performance fixture contract tests passed."

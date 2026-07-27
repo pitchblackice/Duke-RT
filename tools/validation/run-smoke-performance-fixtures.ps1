@@ -10,6 +10,8 @@ param(
 
     [int]$TimeoutSeconds = 0,
 
+    [string[]]$AdditionalArgs = @(),
+
     [string]$OutputDirectory = "tools/logs/perf/smoke-fixtures",
 
     [switch]$ValidateOnly
@@ -82,7 +84,7 @@ function Get-SmokeGridStatusRows {
 }
 
 function Assert-SmokeTimingWorkJoin {
-    param([string]$LogPath, [string]$CaseId)
+    param([string]$LogPath, [string]$CaseId, [int]$ExpectedSamples)
 
     $timingFrames = @(
         Select-String -LiteralPath $LogPath -Pattern '^PERF pt smoke gpu timing NRI: ' |
@@ -93,7 +95,7 @@ function Assert-SmokeTimingWorkJoin {
         Select-String -LiteralPath $LogPath -Pattern '^PERF pt smoke work NRI: ' |
             ForEach-Object { ConvertFrom-StatusLine -Line $_.Line }
     )
-    if ($timingFrames.Count -lt 192 -or $workRows.Count -lt $timingFrames.Count) {
+    if ($timingFrames.Count -lt $ExpectedSamples -or $workRows.Count -lt $timingFrames.Count) {
         throw "smoke fixture '$CaseId' has incomplete timing/work rows: timing=$($timingFrames.Count) work=$($workRows.Count)"
     }
 
@@ -278,6 +280,7 @@ foreach ($item in $selected) {
     }
     if ($Runs -gt 0) { $arguments.Runs = $Runs }
     if ($TimeoutSeconds -gt 0) { $arguments.TimeoutSeconds = $TimeoutSeconds }
+    if ($AdditionalArgs.Count -gt 0) { $arguments.AdditionalArgs = $AdditionalArgs }
     & $perfRunner @arguments
 
     $summaryPath = Join-Path $caseOutput "summary.json"
@@ -317,8 +320,9 @@ foreach ($item in $selected) {
     }
     $pressureExpected = $item.id -in @("saturation", "rpg-overload")
     $expectedBricks = if ($pressureExpected) { [uint64]64 } else { [uint64]512 }
+    $expectedSamples = [int](Get-RequiredProperty $item.scenario.capture "loopTraceFrames" "fixture case '$($item.id)' capture")
     foreach ($runLog in $runLogs) {
-        Assert-SmokeTimingWorkJoin -LogPath $runLog.FullName -CaseId $item.id
+        Assert-SmokeTimingWorkJoin -LogPath $runLog.FullName -CaseId $item.id -ExpectedSamples $expectedSamples
         Assert-SmokeGridStatus -LogPath $runLog.FullName -CaseId $item.id `
             -ExpectedBricks $expectedBricks -PressureExpected $pressureExpected
         if ($item.id -eq "saturation") {
