@@ -78,6 +78,50 @@ float SmokeRepresentativeDepth(SmokeBilinearFootprint footprint, uint terminalSl
 	return clamp((nearDepth + farDepth) * 0.5, 0.0, terminalDepth);
 }
 
+uint SmokeResolveCarrierMetadata(SmokeBilinearFootprint footprint, uint depthSlice)
+{
+	const uint4 metadata = uint4(
+		SmokeFroxelMetadata(gSmokeFroxelSource[SmokeFroxelIndex(footprint.p00.x, footprint.p00.y, depthSlice)].w),
+		SmokeFroxelMetadata(gSmokeFroxelSource[SmokeFroxelIndex(footprint.p10.x, footprint.p10.y, depthSlice)].w),
+		SmokeFroxelMetadata(gSmokeFroxelSource[SmokeFroxelIndex(footprint.p01.x, footprint.p01.y, depthSlice)].w),
+		SmokeFroxelMetadata(gSmokeFroxelSource[SmokeFroxelIndex(footprint.p11.x, footprint.p11.y, depthSlice)].w));
+	uint resolved = metadata.x;
+	[unroll] for (uint i = 1u; i < 4u; ++i)
+	{
+		if (!SmokeFroxelCarrierValid(resolved) && SmokeFroxelCarrierValid(metadata[i]))
+			resolved = metadata[i];
+		else if (SmokeFroxelRadianceAge(metadata[i]) > SmokeFroxelRadianceAge(resolved))
+			resolved = metadata[i];
+		if (SmokeFroxelRadianceUnresolved(metadata[i]))
+			resolved |= NRI_SMOKE_RADIANCE_UNRESOLVED;
+	}
+	return resolved;
+}
+
+float3 SmokeCarrierDebugColor(uint metadata, uint debugMode)
+{
+	if (debugMode == 8u)
+	{
+		const float age = (float)SmokeFroxelCarrierAge(metadata) / 15.0;
+		return SmokeFroxelCarrierValid(metadata) ? lerp(float3(0.0, 1.0, 0.0), float3(1.0, 0.0, 0.0), age) : 0.0;
+	}
+	if (debugMode == 9u)
+	{
+		const float confidence = SmokeFroxelRadianceValid(metadata) ?
+			1.0 - (float)SmokeFroxelRadianceAge(metadata) / 63.0 : 0.0;
+		return float3(1.0 - confidence, confidence, 0.0);
+	}
+	if (debugMode == 10u)
+	{
+		const uint fallback = SmokeFroxelFallbackType(metadata);
+		const float3 palette[6] = {
+			float3(0.0, 0.0, 0.0), float3(0.2, 0.5, 1.0), float3(1.0, 0.8, 0.1),
+			float3(1.0, 0.2, 0.8), float3(0.2, 1.0, 1.0), float3(0.4, 1.0, 0.2) };
+		return palette[min(fallback, 5u)];
+	}
+	return SmokeFroxelRadianceUnresolved(metadata) ? float3(1.0, 0.0, 0.0) : float3(0.0, 1.0, 0.0);
+}
+
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -107,6 +151,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	volume.a = clamp(volume.a, 0.0, 16.0);
 	if (!all(isfinite(volume)) || volume.a <= 1e-6)
 		volume = 0.0;
+	const uint debugMode = SmokeDebugMode(gSmokeConstants.DebugMode);
+	if (volume.a > 0.0 && debugMode >= 8u && debugMode <= 11u)
+	{
+		const uint carrierMetadata = SmokeResolveCarrierMetadata(footprint, depthSlice);
+		volume.rgb = SmokeCarrierDebugColor(carrierMetadata, debugMode) * (1.0 - exp(-volume.a));
+	}
 	const float reactive = 1.0 - exp(-volume.a);
 	const float representativeDepth = SmokeRepresentativeDepth(footprint, depthSlice, viewDepth, volume.a);
 	gSmokeVolumeCurrentOutput[pixel] = volume;

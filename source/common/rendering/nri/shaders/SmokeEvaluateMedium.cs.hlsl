@@ -231,7 +231,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float anisotropy = anisotropyWeight > 1e-6 ? weightedAnisotropy / anisotropyWeight : 0.0;
 	gSmokeFroxelMedium[froxelIndex] = float4(scatteringCoefficient, extinction);
 	gSmokeFroxelPhase[froxelIndex] = float4(anisotropy, anisotropyWeight, (float)contributingCandidates, occupied ? 1.0 : 0.0);
-	gSmokeFroxelSource[froxelIndex] = 0.0;
+	gSmokeFroxelSource[froxelIndex] = float4(0.0, 0.0, 0.0,
+		SmokeFroxelMetadataValue(SmokeFroxelCarrierMetadata(gSmokeConstants.SimulationEpoch)));
 	if (froxelIndex < scratchCount)
 	{
 		SmokeIndirectCacheRecord currentRecord = (SmokeIndirectCacheRecord)0;

@@ -265,7 +265,7 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.lightSamples = (uint32_t)std::clamp((int)nri_ptsmokelightsamples, 1, 4);
 	settings.maxLightCandidates = (uint32_t)std::clamp((int)nri_ptsmokemaxlightcandidates, 1, 32);
 	settings.filteredVisibility = (bool)nri_ptsmokefilteredvisibility;
-	settings.debugMode = (uint32_t)std::clamp((int)nri_ptsmokedebug, 0, 7);
+	settings.debugMode = (uint32_t)std::clamp((int)nri_ptsmokedebug, 0, 11);
 	settings.traceMode = (uint32_t)std::clamp((int)nri_ptsmoketrace, 0, 2);
 	settings.viewCompare = (bool)nri_ptsmokeviewcompare;
 	settings.viewRoute = (uint32_t)std::clamp((int)nri_ptsmokeviewroute, 0, 2);

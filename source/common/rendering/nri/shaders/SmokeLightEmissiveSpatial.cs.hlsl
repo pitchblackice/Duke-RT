@@ -48,7 +48,11 @@ void SmokeAccumulateReference(
 	}
 	estimate /= (float)sampleCount;
 	const float3 sourceContribution = medium.rgb * estimate * gSmokeConstants.RadianceScale;
-	gSmokeFroxelSource[froxelIndex] = float4(gSmokeFroxelSource[froxelIndex].rgb + sourceContribution, 0.0);
+	uint sourceMetadata = SmokeFroxelMetadata(gSmokeFroxelSource[froxelIndex].w);
+	sourceMetadata = SmokeFroxelResolveRadiance(sourceMetadata, gSmokeConstants.SimulationEpoch,
+		NRI_SMOKE_FALLBACK_EMISSIVE, 0u);
+	gSmokeFroxelSource[froxelIndex] = float4(gSmokeFroxelSource[froxelIndex].rgb + sourceContribution,
+		SmokeFroxelMetadataValue(sourceMetadata));
 }
 
 void SmokeResolveLegacyEmissive(
@@ -144,7 +148,11 @@ void SmokeResolveLegacyEmissive(
 				(uint)min((unclampedLuminance - gSmokeConstants.DeltaTime) * 1024.0, 4294967295.0));
 		}
 	}
-	gSmokeFroxelSource[froxelIndex] = float4(gSmokeFroxelSource[froxelIndex].rgb + medium.rgb * incidentContribution, 0.0);
+	uint spatialMetadata = SmokeFroxelMetadata(gSmokeFroxelSource[froxelIndex].w);
+	spatialMetadata = SmokeFroxelResolveRadiance(spatialMetadata, gSmokeConstants.SimulationEpoch,
+		NRI_SMOKE_FALLBACK_EMISSIVE, 0u);
+	gSmokeFroxelSource[froxelIndex] = float4(gSmokeFroxelSource[froxelIndex].rgb + medium.rgb * incidentContribution,
+		SmokeFroxelMetadataValue(spatialMetadata));
 	reservoir.Metadata = SmokePackEmissiveMetadata(SmokeEmissiveRecordM(reservoir),
 		SmokeEmissiveMediumHash(medium, anisotropy), SmokeEmissiveRecordAge(reservoir));
 	reservoir.ReceiverPosition = receiverPosition;
@@ -288,7 +296,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				(uint)min((unclampedLuminance - gSmokeConstants.DeltaTime) * 1024.0, 4294967295.0));
 		}
 	}
-	gSmokeFroxelSource[froxelIndex] = float4(gSmokeFroxelSource[froxelIndex].rgb + medium.rgb * incidentContribution, 0.0);
+	uint resolvedMetadata = SmokeFroxelMetadata(gSmokeFroxelSource[froxelIndex].w);
+	resolvedMetadata = SmokeFroxelResolveRadiance(resolvedMetadata, gSmokeConstants.SimulationEpoch,
+		NRI_SMOKE_FALLBACK_EMISSIVE, 0u);
+	gSmokeFroxelSource[froxelIndex] = float4(gSmokeFroxelSource[froxelIndex].rgb + medium.rgb * incidentContribution,
+		SmokeFroxelMetadataValue(resolvedMetadata));
 
 	SmokeEmissiveMomentRecord resolved = center;
 	resolved.MeanRadiance = reconstructedMean;

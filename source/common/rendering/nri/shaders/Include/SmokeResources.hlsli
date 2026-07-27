@@ -264,6 +264,53 @@ struct SmokeControl
 	uint DirectNanRejects;
 };
 
+// Froxel carrier state is authored by materialization and remains independent
+// from progressively completed lighting in gSmokeFroxelSource.w. Beauty paths
+// consume rgb only; this word is an explicit diagnostic/validity contract.
+#define NRI_SMOKE_CARRIER_VALID 0x1u
+#define NRI_SMOKE_RADIANCE_VALID 0x2u
+#define NRI_SMOKE_CARRIER_GENERATION_SHIFT 2u
+#define NRI_SMOKE_RADIANCE_GENERATION_SHIFT 10u
+#define NRI_SMOKE_CARRIER_AGE_SHIFT 18u
+#define NRI_SMOKE_RADIANCE_AGE_SHIFT 22u
+#define NRI_SMOKE_FALLBACK_SHIFT 28u
+#define NRI_SMOKE_RADIANCE_UNRESOLVED 0x80000000u
+#define NRI_SMOKE_FALLBACK_NONE 0u
+#define NRI_SMOKE_FALLBACK_ENVIRONMENT 1u
+#define NRI_SMOKE_FALLBACK_ANALYTIC 2u
+#define NRI_SMOKE_FALLBACK_EMISSIVE 3u
+#define NRI_SMOKE_FALLBACK_CACHED 4u
+#define NRI_SMOKE_FALLBACK_WORLD 5u
+
+uint SmokeFroxelCarrierMetadata(uint simulationEpoch)
+{
+	return NRI_SMOKE_CARRIER_VALID |
+		((simulationEpoch & 0xffu) << NRI_SMOKE_CARRIER_GENERATION_SHIFT) |
+		NRI_SMOKE_RADIANCE_UNRESOLVED;
+}
+
+uint SmokeFroxelResolveRadiance(uint metadata, uint simulationEpoch, uint fallbackType, uint age)
+{
+	metadata |= NRI_SMOKE_RADIANCE_VALID;
+	metadata &= ~(0xffu << NRI_SMOKE_RADIANCE_GENERATION_SHIFT);
+	metadata |= (simulationEpoch & 0xffu) << NRI_SMOKE_RADIANCE_GENERATION_SHIFT;
+	metadata &= ~(0x3fu << NRI_SMOKE_RADIANCE_AGE_SHIFT);
+	metadata |= (min(age, 63u) & 0x3fu) << NRI_SMOKE_RADIANCE_AGE_SHIFT;
+	metadata &= ~(0x7u << NRI_SMOKE_FALLBACK_SHIFT);
+	metadata |= (fallbackType & 0x7u) << NRI_SMOKE_FALLBACK_SHIFT;
+	metadata &= ~NRI_SMOKE_RADIANCE_UNRESOLVED;
+	return metadata;
+}
+
+uint SmokeFroxelMetadata(float encoded) { return asuint(encoded); }
+float SmokeFroxelMetadataValue(uint metadata) { return asfloat(metadata); }
+bool SmokeFroxelCarrierValid(uint metadata) { return (metadata & NRI_SMOKE_CARRIER_VALID) != 0u; }
+bool SmokeFroxelRadianceValid(uint metadata) { return (metadata & NRI_SMOKE_RADIANCE_VALID) != 0u; }
+uint SmokeFroxelCarrierAge(uint metadata) { return (metadata >> NRI_SMOKE_CARRIER_AGE_SHIFT) & 0xfu; }
+uint SmokeFroxelRadianceAge(uint metadata) { return (metadata >> NRI_SMOKE_RADIANCE_AGE_SHIFT) & 0x3fu; }
+uint SmokeFroxelFallbackType(uint metadata) { return (metadata >> NRI_SMOKE_FALLBACK_SHIFT) & 0x7u; }
+bool SmokeFroxelRadianceUnresolved(uint metadata) { return (metadata & NRI_SMOKE_RADIANCE_UNRESOLVED) != 0u; }
+
 StructuredBuffer<SmokeStyle> gSmokeStyles : register(t0, space0);
 StructuredBuffer<SmokeInjectionCommand> gSmokeCommands : register(t1, space0);
 

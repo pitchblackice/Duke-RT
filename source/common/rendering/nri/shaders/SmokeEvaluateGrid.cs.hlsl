@@ -269,7 +269,11 @@ void SmokeEvaluateGridFroxel(uint3 dispatchThreadId)
 	// The fourth phase lane identifies grid materialization to the shared direct
 	// light passes. Particle evaluation retains the value 1.
 	gSmokeFroxelPhase[froxelIndex] = float4(anisotropy, optical.w, 1.0, 2.0);
-	gSmokeFroxelSource[froxelIndex] = float4(source, 0.0);
+	uint carrierMetadata = SmokeFroxelCarrierMetadata(gSmokeConstants.SimulationEpoch);
+	if (any(source > 0.0))
+		carrierMetadata = SmokeFroxelResolveRadiance(carrierMetadata, gSmokeConstants.SimulationEpoch,
+			NRI_SMOKE_FALLBACK_WORLD, 0u);
+	gSmokeFroxelSource[froxelIndex] = float4(source, SmokeFroxelMetadataValue(carrierMetadata));
 	uint occupiedCapacity;
 	gSmokeOccupiedFroxelIndices.GetDimensions(occupiedCapacity, ignoredStride);
 	uint occupiedSlot = 0u;
