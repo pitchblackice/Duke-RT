@@ -12,6 +12,9 @@ enum class NRISmokeViewWorkPass : uint32_t
 	Clear = 0,
 	ProjectTiles,
 	ExpandColumns,
+	CountColumns,
+	PrefixColumns,
+	ScatterFroxels,
 	Finalize,
 	CompareDense,
 	Count,
@@ -58,6 +61,10 @@ struct NRISmokeViewWorkControlGpu
 	uint32_t behindCameraRejects = 0;
 	uint32_t offscreenRejects = 0;
 	uint32_t emptyBrickTilePairs = 0;
+	uint32_t compactCount = 0;
+	uint32_t prefixColumns = 0;
+	uint32_t scatterWrites = 0;
+	uint32_t compactCapacity = 0;
 };
 
 struct NRISmokeViewIndirectArgsGpu
@@ -93,7 +100,7 @@ struct NRISmokeViewWorkConstants
 	uint32_t executionRoute = 0;
 
 	float cameraForward[3] = {};
-	float padding1 = 0.0f;
+	uint32_t froxelCapacity = 0;
 
 	float cameraRight[3] = {};
 	float padding2 = 0.0f;
@@ -114,6 +121,6 @@ struct NRISmokeViewWorkLayout
 };
 
 static_assert(sizeof(NRISmokeViewMaskGpu) == 8);
-static_assert(sizeof(NRISmokeViewWorkControlGpu) == 124);
+static_assert(sizeof(NRISmokeViewWorkControlGpu) == 140);
 static_assert(sizeof(NRISmokeViewIndirectArgsGpu) == 12);
 static_assert(sizeof(NRISmokeViewWorkConstants) == 128);

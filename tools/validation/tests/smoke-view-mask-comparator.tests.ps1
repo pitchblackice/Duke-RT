@@ -41,6 +41,7 @@ foreach ($field in @('false_negatives', 'false_positives', 'tau_error_max', 'opa
 }
 Assert-Match $owner 'authority=smoke-evaluate-grid\s+comparator_output_mutation=no' 'Status must state production output authority and diagnostic non-mutation.'
 Assert-Match $control 'uint32_t\s+overflow' 'Comparator contract must retain an explicit overflow counter.'
-Assert-NotMatch $smoke 'CmdDispatchIndirect|opaque.*depth|available.*headroom|gpu.*budget' 'Slice 3A must not add indirect execution, opaque-depth culling, or adaptive budgeting.'
+Assert-Match $smoke 'mSettings\.viewRoute\s*==\s*2u[\s\S]*dispatchIndirect\(NRISmokePass::EvaluateGridCompact' 'Later compact execution must remain isolated to explicit route 2.'
+Assert-NotMatch $smoke 'opaque.*depth|available.*headroom|gpu.*budget' 'View work must not add opaque-depth culling or adaptive budgeting.'
 
 Write-Host 'Smoke view conservative-mask comparator contract passed.'

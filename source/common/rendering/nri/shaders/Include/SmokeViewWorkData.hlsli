@@ -43,6 +43,10 @@ struct SmokeViewWorkControl
 	uint BehindCameraRejects;
 	uint OffscreenRejects;
 	uint EmptyBrickTilePairs;
+	uint CompactCount;
+	uint PrefixColumns;
+	uint ScatterWrites;
+	uint CompactCapacity;
 };
 
 struct SmokeViewWorkConstants
@@ -71,7 +75,7 @@ struct SmokeViewWorkConstants
 	uint ExecutionRoute;
 
 	float3 CameraForward;
-	float Padding1;
+	uint FroxelCapacity;
 
 	float3 CameraRight;
 	float Padding2;

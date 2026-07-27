@@ -294,7 +294,7 @@ private:
 	NRISmokeSettings mSettings = {};
 	NRISmokeStatusSnapshot mStatus = {};
 	nri::PipelineLayout* mPipelineLayout = nullptr;
-	std::array<nri::Pipeline*, 21> mPipelines = {};
+	std::array<nri::Pipeline*, 22> mPipelines = {};
 	std::vector<CommandSlot> mCommandSlots;
 	NRIBufferResource mStyleBuffer;
 	NRIBufferResource mCompatibilityStorage;

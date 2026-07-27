@@ -24,7 +24,7 @@ namespace
 	constexpr uint32_t kSmokeCoreStorageBufferCount = 17u;
 	constexpr uint32_t kSmokeDirectStorageBufferCount = 2u;
 	constexpr uint32_t kSmokeGridLightingStorageBufferCount = NRISmokeGridLighting::StorageDescriptorCount;
-	constexpr uint32_t kSmokeViewStorageBufferCount = 1u;
+	constexpr uint32_t kSmokeViewStorageBufferCount = 3u;
 	constexpr uint32_t kSmokeStorageDescriptorCount = kSmokeCoreStorageBufferCount + NRISmokeGrid::EvaluationDescriptorCount +
 		kSmokeDirectStorageBufferCount + kSmokeGridLightingStorageBufferCount + kSmokeViewStorageBufferCount;
 	constexpr uint32_t kSmokeFilteredSceneBufferCount = 8u;
@@ -44,8 +44,8 @@ namespace
 	constexpr uint32_t kSmokeFlagGridLightingDebugShift = 27u;
 	constexpr uint32_t kSmokeFlagViewMask = 0x40000000u;
 	constexpr uint32_t kSmokeFlagGridLightingLocalProposals = 0x80000000u;
-	const char* const kSmokePipelineNames[] = { "SmokeClear", "SmokeSimulate", "SmokeSpawn", "SmokeBin", "SmokeLightDirectionalCarriers", "SmokeEvaluateMedium", "SmokeEvaluateGrid", "SmokeLightPoint", "SmokeLightDirectional", "SmokeLightDirectTemporal", "SmokeLightDirectSpatial", "SmokeLightEmissive", "SmokeLightEmissiveTemporal", "SmokeLightEmissiveSpatial", "SmokeLightIndirectReference", "SmokeLightIndirectTemporal", "SmokeLightIndirectSpatial", "SmokeIntegrate", "SmokeResolveVolume", "SmokeTemporalVolume", "SmokeComposite" };
-	static_assert(std::size(kSmokePipelineNames) == 21u);
+	const char* const kSmokePipelineNames[] = { "SmokeClear", "SmokeSimulate", "SmokeSpawn", "SmokeBin", "SmokeLightDirectionalCarriers", "SmokeEvaluateMedium", "SmokeEvaluateGrid", "SmokeLightPoint", "SmokeLightDirectional", "SmokeLightDirectTemporal", "SmokeLightDirectSpatial", "SmokeLightEmissive", "SmokeLightEmissiveTemporal", "SmokeLightEmissiveSpatial", "SmokeLightIndirectReference", "SmokeLightIndirectTemporal", "SmokeLightIndirectSpatial", "SmokeIntegrate", "SmokeResolveVolume", "SmokeTemporalVolume", "SmokeComposite", "SmokeEvaluateGridCompact" };
+	static_assert(std::size(kSmokePipelineNames) == 22u);
 
 	uint32_t PackDirectionalLightColor24(const float color[3])
 	{
@@ -1330,6 +1330,8 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		gridLightingDescriptors.fill(mControl.storageView);
 	std::copy(gridLightingDescriptors.begin(), gridLightingDescriptors.end(),
 		outputs.begin() + kSmokeCoreStorageBufferCount + NRISmokeGrid::EvaluationDescriptorCount + kSmokeDirectStorageBufferCount);
+	outputs[kSmokeStorageDescriptorCount - 3u] = mControl.storageView;
+	outputs[kSmokeStorageDescriptorCount - 2u] = mControl.storageView;
 	outputs[kSmokeStorageDescriptorCount - 1u] = mControl.storageView;
 	nri::UpdateDescriptorRangeDesc updates[2] = {};
 	updates[0].descriptorSet = slot.inputSet; updates[0].rangeIndex = 0; updates[0].descriptors = inputs; updates[0].descriptorNum = 2;
@@ -1824,6 +1826,19 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		renderer.mFrameBuffer->mCore.CmdDispatch(*renderer.mFrameBuffer->mCommandBuffer, { x, y, z });
 		renderer.mFrameBuffer->mCore.CmdEndAnnotation(*renderer.mFrameBuffer->mCommandBuffer);
 	};
+	auto dispatchIndirect = [&](NRISmokePass pass, const nri::Buffer& arguments, uint64_t byteOffset)
+	{
+		renderer.mFrameBuffer->mCore.CmdBeginAnnotation(*renderer.mFrameBuffer->mCommandBuffer,
+			kSmokePipelineNames[(uint32_t)pass], nri::BGRA_UNUSED);
+		constants.pass = (uint32_t)pass;
+		renderer.mFrameBuffer->mCore.CmdSetRootConstants(*renderer.mFrameBuffer->mCommandBuffer,
+			{ 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+		renderer.mFrameBuffer->mCore.CmdSetPipeline(*renderer.mFrameBuffer->mCommandBuffer,
+			*mPipelines[(uint32_t)pass]);
+		renderer.mFrameBuffer->mCore.CmdDispatchIndirect(*renderer.mFrameBuffer->mCommandBuffer,
+			arguments, byteOffset);
+		renderer.mFrameBuffer->mCore.CmdEndAnnotation(*renderer.mFrameBuffer->mCommandBuffer);
+	};
 	auto storageBarrier = [&]()
 	{
 		NRIBufferResource* resources[] = { &mParticles, &mControl, &mFineCells, &mReferenceNext,
@@ -1895,6 +1910,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		storageBarrier();
 	}
 	bool viewComparatorPrepared = false;
+	NRISmokeViewWorkOutputs viewOutputs = {};
 	if (renderGrid && (mSettings.viewCompare || mSettings.viewRoute != 0u))
 	{
 		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeViewPrepare);
@@ -1919,6 +1935,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 			// threshold. Any represented optical coefficient must remain eligible.
 			frame.constants.opticalThreshold = 0.0f;
 			frame.constants.executionRoute = mSettings.viewRoute;
+			frame.constants.froxelCapacity = (uint32_t)froxelCount;
 			frame.constants.froxelMaxDistance = mSettings.froxelMaxDistance;
 			frame.constants.depthExponent = constants.depthExponent;
 			frame.constants.tanHalfFovX = constants.tanHalfFovX;
@@ -1929,18 +1946,19 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 			std::copy(constants.cameraUp, constants.cameraUp + 3, frame.constants.cameraUp);
 			frame.gridDescriptors = { grid[0], grid[2], grid[7], grid[8] };
 			viewComparatorPrepared = mViewWork.Prepare(BuildGridServices(renderer), frame);
-			NRISmokeViewWorkOutputs viewOutputs = {};
-			if (viewComparatorPrepared && mViewWork.GetOutputs(viewOutputs) && viewOutputs.columnMasks != nullptr)
+			if (viewComparatorPrepared && mViewWork.GetOutputs(viewOutputs) && viewOutputs.columnMasks != nullptr &&
+				viewOutputs.compactIndices != nullptr && viewOutputs.control != nullptr)
 			{
-				const nri::Descriptor* viewMask[] = { viewOutputs.columnMasks };
+				const nri::Descriptor* viewResources[] = {
+					viewOutputs.columnMasks, viewOutputs.compactIndices, viewOutputs.control };
 				nri::UpdateDescriptorRangeDesc update = {};
 				update.descriptorSet = slot.bufferSet;
 				update.rangeIndex = 0u;
-				update.baseDescriptor = kSmokeStorageDescriptorCount - 1u;
-				update.descriptors = viewMask;
-				update.descriptorNum = 1u;
+				update.baseDescriptor = kSmokeStorageDescriptorCount - 3u;
+				update.descriptors = viewResources;
+				update.descriptorNum = (uint32_t)std::size(viewResources);
 				renderer.mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1u);
-				if (mSettings.viewRoute != 0u)
+				if (mSettings.viewRoute == 1u)
 					constants.flags |= kSmokeFlagViewMask;
 			}
 			bindSmokePipeline();
@@ -1967,9 +1985,23 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	if (renderGrid)
 	{
 		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeMaterialize);
-		dispatch(NRISmokePass::EvaluateGrid, (mResourceFroxelWidth + 3) / 4,
-			(mResourceFroxelHeight + 3) / 4, (mResourceFroxelDepth + 3) / 4);
-		mStatus.gridOpticalDispatches++;
+		if (mSettings.viewRoute == 2u)
+		{
+			// Compact is an explicit static route. Missing preparation and overflow
+			// both fail closed: the latter publishes zero indirect arguments.
+			if (viewComparatorPrepared && viewOutputs.indirectBuffer != nullptr)
+			{
+				mViewWork.TransitionIndirectToArgument(BuildGridServices(renderer));
+				dispatchIndirect(NRISmokePass::EvaluateGridCompact, *viewOutputs.indirectBuffer, 0u);
+				mStatus.gridOpticalDispatches++;
+			}
+		}
+		else
+		{
+			dispatch(NRISmokePass::EvaluateGrid, (mResourceFroxelWidth + 3) / 4,
+				(mResourceFroxelHeight + 3) / 4, (mResourceFroxelDepth + 3) / 4);
+			mStatus.gridOpticalDispatches++;
+		}
 		storageBarrier();
 	}
 	if (viewComparatorPrepared && mSettings.viewCompare)

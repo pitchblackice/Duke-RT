@@ -26,6 +26,7 @@ enum class NRISmokePass : uint32_t
 	ResolveVolume,
 	TemporalVolume,
 	Composite,
+	EvaluateGridCompact,
 };
 
 struct NRISmokeParticleGpu

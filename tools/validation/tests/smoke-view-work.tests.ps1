@@ -14,6 +14,7 @@ $owner = Read-Source 'source/common/rendering/nri/renderer/nri_smoke_view_work.c
 $project = Read-Source 'source/common/rendering/nri/shaders/SmokeViewWorkProjectTiles.cs.hlsl'
 $expand = Read-Source 'source/common/rendering/nri/shaders/SmokeViewWorkExpandColumns.cs.hlsl'
 $finalize = Read-Source 'source/common/rendering/nri/shaders/SmokeViewWorkFinalize.cs.hlsl'
+$prefix = Read-Source 'source/common/rendering/nri/shaders/SmokeViewWorkPrefixColumns.cs.hlsl'
 $smoke = Read-Source 'source/common/rendering/nri/renderer/nri_smoke.cpp'
 
 Assert-Match $contracts 'NRI_SMOKE_VIEW_TILE_AXIS\s*=\s*8u' 'View work must retain the measured 8x8 column tile.'
@@ -28,11 +29,11 @@ Assert-Match $project 'FieldPing != 0u[\s\S]*gViewGridOpticalB[\s\S]*gViewGridOp
 Assert-Match $project 'NRI_SMOKE_GRID_BRICK_AXIS \* 0.5 \+ 1.0' 'Projected brick support must include a trilinear-support expansion.'
 Assert-Match $project 'cameraInside[\s\S]*crossesNear[\s\S]*minimumUv = 0.0[\s\S]*maximumUv = 1.0' 'Camera-inside and near-plane projection must remain conservative.'
 Assert-Match $expand 'gViewColumnMasks\[columnIndex\]\.Words = mask' 'Merged tile masks must publish one mask per froxel column.'
-Assert-Match $finalize 'uint3\(0u, 1u, 1u\)' 'Indirect dispatch must remain disabled until exact compaction is integrated.'
+Assert-Match ($prefix + $finalize) 'CompactCount[\s\S]*IndirectArgs[\s\S]*Overflow' 'Exact compaction must publish indirect work or fail closed on overflow.'
 Assert-NotMatch $project 'AppendStructuredBuffer|InterlockedAdd\([^\r\n]*candidate|MAX_CANDIDATE|CandidateCapacity' 'View discovery must not hide truncation behind a candidate append cap.'
 Assert-NotMatch $project 'opaque|Opaque|depth texture|DepthTexture' 'The conservative mask must not cull against opaque depth.'
 Assert-Match $smoke 'SmokeMaterialize[\s\S]*EvaluateGrid' 'Dense evaluation must remain an explicit production stage.'
-Assert-NotMatch $smoke 'CmdDispatchIndirect' 'View-work integration must not replace dense authority with indirect execution.'
+Assert-Match $smoke 'mSettings\.viewRoute\s*==\s*2u[\s\S]*dispatchIndirect\(NRISmokePass::EvaluateGridCompact[\s\S]*else[\s\S]*NRISmokePass::EvaluateGrid' 'Indirect materialization must remain an explicit route-2 alternative to dense authority.'
 
 $tileX = [math]::Ceiling(120 / 8)
 $tileY = [math]::Ceiling(68 / 8)

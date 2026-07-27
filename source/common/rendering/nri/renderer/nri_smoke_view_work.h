@@ -19,6 +19,7 @@ struct NRISmokeViewWorkOutputs
 	const nri::Descriptor* compactIndices = nullptr;
 	const nri::Descriptor* control = nullptr;
 	const nri::Descriptor* indirectArgs = nullptr;
+	const nri::Buffer* indirectBuffer = nullptr;
 	uint32_t columnCount = 0;
 	uint32_t froxelCapacity = 0;
 };
@@ -41,7 +42,7 @@ struct NRISmokeViewWorkStatusSnapshot
 class NRISmokeViewWork
 {
 public:
-	static constexpr uint32_t StorageDescriptorCount = 11u;
+	static constexpr uint32_t StorageDescriptorCount = 12u;
 
 	static NRISmokeViewWorkLayout Describe(uint32_t froxelWidth, uint32_t froxelHeight,
 		uint32_t froxelDepth, uint32_t brickCapacity);
@@ -51,6 +52,7 @@ public:
 	bool CompareDense(const NRISmokeGridServices& services,
 		const nri::Descriptor* denseMedium, const nri::Descriptor* denseSource);
 	void Finish(const NRISmokeGridServices& services);
+	void TransitionIndirectToArgument(const NRISmokeGridServices& services);
 	void PrintStatus(bool compareRequested, uint32_t routeRequested) const;
 	void Shutdown(const NRISmokeGridServices& services);
 
@@ -90,8 +92,10 @@ private:
 	NRIBufferResource mControl;
 	NRIBufferResource mCompactIndices;
 	NRIBufferResource mIndirectArgs;
+	NRIBufferResource mColumnOffsets;
 	std::vector<FrameSlot> mFrameSlots;
 	NRISmokeViewWorkConstants mLastConstants = {};
 	uint32_t mResourceFroxelDepth = 0;
 	bool mResourcesInitialized = false;
+	bool mIndirectIsArgument = false;
 };

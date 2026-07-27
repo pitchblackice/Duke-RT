@@ -243,23 +243,8 @@ void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 sca
 		(worldDebugMode == 0u ? integratedSource : integratedWorldDebug)) * sampleWeight;
 }
 
-[numthreads(4, 4, 4)]
-void main(uint3 dispatchThreadId : SV_DispatchThreadID)
+void SmokeEvaluateGridFroxel(uint3 dispatchThreadId)
 {
-	if (dispatchThreadId.x >= gSmokeConstants.FroxelWidth ||
-		dispatchThreadId.y >= gSmokeConstants.FroxelHeight ||
-		dispatchThreadId.z >= gSmokeConstants.FroxelDepth)
-		return;
-	if ((gSmokeConstants.Flags & NRI_SMOKE_FLAG_COMPARE_REPRESENTATION) != 0u &&
-		dispatchThreadId.x < gSmokeConstants.FroxelWidth / 2u)
-		return;
-	if ((gSmokeConstants.Flags & NRI_SMOKE_FLAG_VIEW_MASK) != 0u)
-	{
-		const uint columnIndex = dispatchThreadId.y * gSmokeConstants.FroxelWidth + dispatchThreadId.x;
-		const uint2 mask = gSmokeViewColumnMasks[columnIndex];
-		if ((mask[dispatchThreadId.z >> 5u] & (1u << (dispatchThreadId.z & 31u))) == 0u)
-			return;
-	}
 	uint controlCount, ignoredStride;
 	gSmokeRenderGridControl.GetDimensions(controlCount, ignoredStride);
 	if (controlCount == 0u || gSmokeRenderGridControl[0].ResidentCount == 0u)
@@ -294,3 +279,25 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	else
 		InterlockedAdd(gSmokeControl[0].OccupiedOverflow, 1u);
 }
+
+#ifndef NRI_SMOKE_EVALUATE_GRID_LIBRARY
+[numthreads(4, 4, 4)]
+void main(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+	if (dispatchThreadId.x >= gSmokeConstants.FroxelWidth ||
+		dispatchThreadId.y >= gSmokeConstants.FroxelHeight ||
+		dispatchThreadId.z >= gSmokeConstants.FroxelDepth)
+		return;
+	if ((gSmokeConstants.Flags & NRI_SMOKE_FLAG_COMPARE_REPRESENTATION) != 0u &&
+		dispatchThreadId.x < gSmokeConstants.FroxelWidth / 2u)
+		return;
+	if ((gSmokeConstants.Flags & NRI_SMOKE_FLAG_VIEW_MASK) != 0u)
+	{
+		const uint columnIndex = dispatchThreadId.y * gSmokeConstants.FroxelWidth + dispatchThreadId.x;
+		const uint2 mask = gSmokeViewColumnMasks[columnIndex];
+		if ((mask[dispatchThreadId.z >> 5u] & (1u << (dispatchThreadId.z & 31u))) == 0u)
+			return;
+	}
+	SmokeEvaluateGridFroxel(dispatchThreadId);
+}
+#endif

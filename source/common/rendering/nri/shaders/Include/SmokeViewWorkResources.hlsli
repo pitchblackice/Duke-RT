@@ -16,6 +16,7 @@ NRI_RESOURCE(RWStructuredBuffer<uint>, gViewCompactIndices, u, 7, 0);
 NRI_RESOURCE(RWStructuredBuffer<uint3>, gViewIndirectArgs, u, 8, 0);
 NRI_RESOURCE(RWStructuredBuffer<float4>, gViewDenseMedium, u, 9, 0);
 NRI_RESOURCE(RWStructuredBuffer<float4>, gViewDenseSource, u, 10, 0);
+NRI_RESOURCE(RWStructuredBuffer<uint>, gViewColumnOffsets, u, 11, 0);
 
 NRI_ROOT_CONSTANTS(SmokeViewWorkConstants, gViewConstants, 0, 1);
 
