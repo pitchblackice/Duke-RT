@@ -24,8 +24,9 @@ namespace
 	constexpr uint32_t kSmokeCoreStorageBufferCount = 17u;
 	constexpr uint32_t kSmokeDirectStorageBufferCount = 2u;
 	constexpr uint32_t kSmokeGridLightingStorageBufferCount = NRISmokeGridLighting::StorageDescriptorCount;
+	constexpr uint32_t kSmokeViewStorageBufferCount = 1u;
 	constexpr uint32_t kSmokeStorageDescriptorCount = kSmokeCoreStorageBufferCount + NRISmokeGrid::EvaluationDescriptorCount +
-		kSmokeDirectStorageBufferCount + kSmokeGridLightingStorageBufferCount;
+		kSmokeDirectStorageBufferCount + kSmokeGridLightingStorageBufferCount + kSmokeViewStorageBufferCount;
 	constexpr uint32_t kSmokeFilteredSceneBufferCount = 8u;
 	constexpr uint32_t kSmokeEmissiveSceneBufferCount = 7u;
 	constexpr uint32_t kSmokeExtendedSceneBufferCount = 10u;
@@ -41,6 +42,7 @@ namespace
 	constexpr uint32_t kSmokeFlagEmissiveQuarterKey = 0x2000000u;
 	constexpr uint32_t kSmokeFlagGridLightingFieldPing = 0x4000000u;
 	constexpr uint32_t kSmokeFlagGridLightingDebugShift = 27u;
+	constexpr uint32_t kSmokeFlagViewMask = 0x40000000u;
 	constexpr uint32_t kSmokeFlagGridLightingLocalProposals = 0x80000000u;
 	const char* const kSmokePipelineNames[] = { "SmokeClear", "SmokeSimulate", "SmokeSpawn", "SmokeBin", "SmokeLightDirectionalCarriers", "SmokeEvaluateMedium", "SmokeEvaluateGrid", "SmokeLightPoint", "SmokeLightDirectional", "SmokeLightDirectTemporal", "SmokeLightDirectSpatial", "SmokeLightEmissive", "SmokeLightEmissiveTemporal", "SmokeLightEmissiveSpatial", "SmokeLightIndirectReference", "SmokeLightIndirectTemporal", "SmokeLightIndirectSpatial", "SmokeIntegrate", "SmokeResolveVolume", "SmokeTemporalVolume", "SmokeComposite" };
 	static_assert(std::size(kSmokePipelineNames) == 21u);
@@ -1328,6 +1330,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		gridLightingDescriptors.fill(mControl.storageView);
 	std::copy(gridLightingDescriptors.begin(), gridLightingDescriptors.end(),
 		outputs.begin() + kSmokeCoreStorageBufferCount + NRISmokeGrid::EvaluationDescriptorCount + kSmokeDirectStorageBufferCount);
+	outputs[kSmokeStorageDescriptorCount - 1u] = mControl.storageView;
 	nri::UpdateDescriptorRangeDesc updates[2] = {};
 	updates[0].descriptorSet = slot.inputSet; updates[0].rangeIndex = 0; updates[0].descriptors = inputs; updates[0].descriptorNum = 2;
 	updates[1].descriptorSet = slot.bufferSet; updates[1].rangeIndex = 0; updates[1].descriptors = outputs.data(); updates[1].descriptorNum = kSmokeStorageDescriptorCount;
@@ -1892,7 +1895,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		storageBarrier();
 	}
 	bool viewComparatorPrepared = false;
-	if (renderGrid && mSettings.viewCompare)
+	if (renderGrid && (mSettings.viewCompare || mSettings.viewRoute != 0u))
 	{
 		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeViewPrepare);
 		std::array<const nri::Descriptor*, NRISmokeGrid::EvaluationDescriptorCount> grid = {};
@@ -1912,7 +1915,10 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 			frame.constants.tileCountY = layout.tileCountY;
 			frame.constants.fieldPing = mGrid.GetFieldPing();
 			frame.constants.cellSize = mSettings.gridCellSize;
-			frame.constants.opticalThreshold = mSettings.gridActiveThreshold;
+			// Discovery is an exact output-safety gate, not a lifecycle/quality
+			// threshold. Any represented optical coefficient must remain eligible.
+			frame.constants.opticalThreshold = 0.0f;
+			frame.constants.executionRoute = mSettings.viewRoute;
 			frame.constants.froxelMaxDistance = mSettings.froxelMaxDistance;
 			frame.constants.depthExponent = constants.depthExponent;
 			frame.constants.tanHalfFovX = constants.tanHalfFovX;
@@ -1923,6 +1929,20 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 			std::copy(constants.cameraUp, constants.cameraUp + 3, frame.constants.cameraUp);
 			frame.gridDescriptors = { grid[0], grid[2], grid[7], grid[8] };
 			viewComparatorPrepared = mViewWork.Prepare(BuildGridServices(renderer), frame);
+			NRISmokeViewWorkOutputs viewOutputs = {};
+			if (viewComparatorPrepared && mViewWork.GetOutputs(viewOutputs) && viewOutputs.columnMasks != nullptr)
+			{
+				const nri::Descriptor* viewMask[] = { viewOutputs.columnMasks };
+				nri::UpdateDescriptorRangeDesc update = {};
+				update.descriptorSet = slot.bufferSet;
+				update.rangeIndex = 0u;
+				update.baseDescriptor = kSmokeStorageDescriptorCount - 1u;
+				update.descriptors = viewMask;
+				update.descriptorNum = 1u;
+				renderer.mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1u);
+				if (mSettings.viewRoute != 0u)
+					constants.flags |= kSmokeFlagViewMask;
+			}
 			bindSmokePipeline();
 		}
 	}
@@ -1952,11 +1972,15 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		mStatus.gridOpticalDispatches++;
 		storageBarrier();
 	}
-	if (viewComparatorPrepared)
+	if (viewComparatorPrepared && mSettings.viewCompare)
 	{
 		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeViewPrepare);
 		mViewWork.CompareDense(BuildGridServices(renderer), mFroxelMedium.storageView, mFroxelSource.storageView);
 		bindSmokePipeline();
+	}
+	else if (viewComparatorPrepared)
+	{
+		mViewWork.Finish(BuildGridServices(renderer));
 	}
 	{
 		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeViewPoint);
@@ -2423,7 +2447,7 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.gridSimulationDispatches, mStatus.particleOpticalDispatches, mStatus.gridOpticalDispatches,
 		mStatus.particleCommandsRouted, mStatus.gridCommandsRouted);
 	mGrid.PrintStatus();
-	mViewWork.PrintStatus(mSettings.viewCompare);
+	mViewWork.PrintStatus(mSettings.viewCompare, mSettings.viewRoute);
 	Printf("NRI PT smoke admission: gathered=%u uploaded=%u deferred=%u coalesced=%u expired=%u rejected=%u sources=%u interactive=%u/%u estimated_bricks=%llu/%llu closure=%s policy=cost-aware-source-round terminal_rejection=yes\n",
 		mStatus.admission.gathered, mStatus.admission.uploaded, mStatus.admission.boundedDeferred,
 		mStatus.admission.coalesced, mStatus.admission.expired, mStatus.admission.rejected,

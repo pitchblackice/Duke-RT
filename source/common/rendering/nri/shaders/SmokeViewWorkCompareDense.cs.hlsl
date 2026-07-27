@@ -1,5 +1,14 @@
 #include "Include/SmokeViewWorkResources.hlsli"
 
+uint SmokeViewOutputHash(uint value)
+{
+	value ^= value >> 16u;
+	value *= 0x7feb352du;
+	value ^= value >> 15u;
+	value *= 0x846ca68bu;
+	return value ^ (value >> 16u);
+}
+
 float SmokeViewCompareSliceDepth(uint boundary)
 {
 	const float normalized = (float)boundary / max((float)gViewConstants.FroxelDepth, 1.0);
@@ -20,6 +29,16 @@ void main(uint dispatchThreadId : SV_DispatchThreadID)
 	const float4 medium = gViewDenseMedium[dispatchThreadId];
 	const float3 source = gViewDenseSource[dispatchThreadId].rgb;
 	const bool dense = medium.w > 1e-6 && any(medium.rgb > 0.0);
+	if (dense)
+	{
+		InterlockedAdd(gViewWorkControl[0].DenseContributing, 1u);
+		const uint hashLo = SmokeViewOutputHash(dispatchThreadId ^ asuint(medium.x) ^
+			SmokeViewOutputHash(asuint(medium.y)) ^ SmokeViewOutputHash(asuint(medium.z)) ^ SmokeViewOutputHash(asuint(medium.w)));
+		const uint hashHi = SmokeViewOutputHash((dispatchThreadId * 0x9e3779b9u) ^ asuint(source.x) ^
+			SmokeViewOutputHash(asuint(source.y)) ^ SmokeViewOutputHash(asuint(source.z)));
+		InterlockedXor(gViewWorkControl[0].OutputHashLo, hashLo);
+		InterlockedXor(gViewWorkControl[0].OutputHashHi, hashHi);
+	}
 	if (dense == selected)
 		return;
 	if (!dense)

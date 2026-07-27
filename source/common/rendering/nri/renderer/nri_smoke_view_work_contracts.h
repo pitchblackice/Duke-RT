@@ -46,12 +46,18 @@ struct NRISmokeViewWorkControlGpu
 	uint32_t opacityErrorBits = 0;
 	uint32_t radianceErrorBits = 0;
 	uint32_t boundaryFalseNegatives = 0;
+	uint32_t denseContributing = 0;
+	uint32_t outputHashLo = 0;
+	uint32_t outputHashHi = 0;
+	uint32_t evaluationRoute = 0;
+	uint32_t evaluationDispatched = 0;
+	uint32_t evaluationSelected = 0;
+	uint32_t evaluationSkipped = 0;
 	uint32_t nearPlaneSpans = 0;
 	uint32_t cameraInsideSpans = 0;
 	uint32_t behindCameraRejects = 0;
 	uint32_t offscreenRejects = 0;
 	uint32_t emptyBrickTilePairs = 0;
-	uint32_t padding[1] = {};
 };
 
 struct NRISmokeViewIndirectArgsGpu
@@ -84,7 +90,7 @@ struct NRISmokeViewWorkConstants
 	float tanHalfFovY = 1.0f;
 
 	float cameraPosition[3] = {};
-	float padding0 = 0.0f;
+	uint32_t executionRoute = 0;
 
 	float cameraForward[3] = {};
 	float padding1 = 0.0f;
@@ -108,6 +114,6 @@ struct NRISmokeViewWorkLayout
 };
 
 static_assert(sizeof(NRISmokeViewMaskGpu) == 8);
-static_assert(sizeof(NRISmokeViewWorkControlGpu) == 100);
+static_assert(sizeof(NRISmokeViewWorkControlGpu) == 124);
 static_assert(sizeof(NRISmokeViewIndirectArgsGpu) == 12);
 static_assert(sizeof(NRISmokeViewWorkConstants) == 128);

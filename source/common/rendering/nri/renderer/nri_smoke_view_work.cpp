@@ -373,6 +373,12 @@ bool NRISmokeViewWork::CompareDense(const NRISmokeGridServices& services,
 	return true;
 }
 
+void NRISmokeViewWork::Finish(const NRISmokeGridServices& services)
+{
+	if (services.IsRecordingValid() && mStatus.resourcesReady)
+		RecordReadback(services);
+}
+
 void NRISmokeViewWork::ConsumeReadback(const NRISmokeGridServices& services, uint32_t simulationEpoch)
 {
 	if (mFrameSlots.empty())
@@ -393,6 +399,12 @@ void NRISmokeViewWork::ConsumeReadback(const NRISmokeGridServices& services, uin
 			mStatus.gpu = next;
 			mStatus.gpuRendererFrame = slot.rendererFrame;
 			mStatus.gpuStatsValid = true;
+			Printf("PERF pt smoke view work NRI: renderer_frame=%llu frame=%u epoch=%u route=%u dispatched=%u selected=%u skipped=%u dense_contributing=%u unique_froxels=%u unique_columns=%u false_negatives=%u false_positives=%u output_hash=%08x%08x boundary_false_negatives=%u overflow=%u compact=1\n",
+				(unsigned long long)mStatus.gpuRendererFrame, next.frameStamp, next.simulationEpoch,
+				next.evaluationRoute, next.evaluationDispatched, next.evaluationSelected,
+				next.evaluationSkipped, next.denseContributing, next.uniqueFroxels,
+				next.uniqueColumns, next.falseNegatives, next.falsePositives,
+				next.outputHashHi, next.outputHashLo, next.boundaryFalseNegatives, next.overflow);
 		}
 	}
 	slot.pending = false;
@@ -430,17 +442,20 @@ void NRISmokeViewWork::RecordReadback(const NRISmokeGridServices& services)
 	slot.simulationEpoch = mLastConstants.simulationEpoch;
 }
 
-void NRISmokeViewWork::PrintStatus(bool requested) const
+void NRISmokeViewWork::PrintStatus(bool compareRequested, uint32_t routeRequested) const
 {
 	const auto& g = mStatus.gpu;
-	Printf("NRI PT smoke view work: requested=%s authority=dense-reference output_mutation=no initialized=%s resources=%s gpu_stats=%s renderer_frame=%llu frame=%u epoch=%u tiles=%u columns=%u brick_tile_bound=%llu optical_cell_bound=%llu unique_froxels=%u unique_columns=%u false_negatives=%u false_positives=%u tau_error_max=%.9g opacity_error_max=%.9g radiance_error_max=%.9g boundary_false_negatives=%u near_plane_spans=%u camera_inside_spans=%u overflow=%u reason=%s\n",
-		requested ? "yes" : "no", mStatus.initialized ? "yes" : "no",
+	Printf("NRI PT smoke view work: requested=%s compare=%s route_requested=%u route_effective=%u authority=smoke-evaluate-grid comparator_output_mutation=no initialized=%s resources=%s gpu_stats=%s renderer_frame=%llu frame=%u epoch=%u tiles=%u columns=%u brick_tile_bound=%llu optical_cell_bound=%llu dispatched=%u selected=%u skipped=%u dense_contributing=%u unique_froxels=%u unique_columns=%u false_negatives=%u false_positives=%u output_hash=%08x%08x tau_error_max=%.9g opacity_error_max=%.9g radiance_error_max=%.9g boundary_false_negatives=%u near_plane_spans=%u camera_inside_spans=%u overflow=%u reason=%s\n",
+		(compareRequested || routeRequested != 0u) ? "yes" : "no", compareRequested ? "yes" : "no",
+		routeRequested, g.evaluationRoute, mStatus.initialized ? "yes" : "no",
 		mStatus.resourcesReady ? "ready" : "unavailable", mStatus.gpuStatsValid ? "valid" : "disabled",
 		(unsigned long long)mStatus.gpuRendererFrame, g.frameStamp, g.simulationEpoch,
 		mStatus.layout.tileCount, mStatus.layout.columnCount,
 		(unsigned long long)mStatus.layout.brickTilePairBound,
 		(unsigned long long)mStatus.layout.opticalCellTestBound,
+		g.evaluationDispatched, g.evaluationSelected, g.evaluationSkipped, g.denseContributing,
 		g.uniqueFroxels, g.uniqueColumns, g.falseNegatives, g.falsePositives,
+		g.outputHashHi, g.outputHashLo,
 		(double)FloatFromBits(g.tauErrorBits), (double)FloatFromBits(g.opacityErrorBits),
 		(double)FloatFromBits(g.radianceErrorBits), g.boundaryFalseNegatives,
 		g.nearPlaneSpans, g.cameraInsideSpans, g.overflow, mStatus.failureReason);

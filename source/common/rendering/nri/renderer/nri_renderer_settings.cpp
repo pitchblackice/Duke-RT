@@ -263,6 +263,7 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.debugMode = (uint32_t)std::clamp((int)nri_ptsmokedebug, 0, 7);
 	settings.traceMode = (uint32_t)std::clamp((int)nri_ptsmoketrace, 0, 2);
 	settings.viewCompare = (bool)nri_ptsmokeviewcompare;
+	settings.viewRoute = (uint32_t)std::clamp((int)nri_ptsmokeviewroute, 0, 1);
 	settings.froxelMaxDistance = std::clamp((float)nri_ptsmokefroxelmaxdistance, 64.0f, 32768.0f);
 	settings.timeScale = std::clamp((float)nri_ptsmoketimescale, 0.0f, 4.0f);
 	settings.wind[0] = std::clamp((float)nri_ptsmokewindx, -256.0f, 256.0f);

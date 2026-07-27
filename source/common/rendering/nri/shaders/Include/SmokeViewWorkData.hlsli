@@ -31,12 +31,18 @@ struct SmokeViewWorkControl
 	uint OpacityErrorBits;
 	uint RadianceErrorBits;
 	uint BoundaryFalseNegatives;
+	uint DenseContributing;
+	uint OutputHashLo;
+	uint OutputHashHi;
+	uint EvaluationRoute;
+	uint EvaluationDispatched;
+	uint EvaluationSelected;
+	uint EvaluationSkipped;
 	uint NearPlaneSpans;
 	uint CameraInsideSpans;
 	uint BehindCameraRejects;
 	uint OffscreenRejects;
 	uint EmptyBrickTilePairs;
-	uint Padding;
 };
 
 struct SmokeViewWorkConstants
@@ -62,7 +68,7 @@ struct SmokeViewWorkConstants
 	float TanHalfFovY;
 
 	float3 CameraPosition;
-	float Padding0;
+	uint ExecutionRoute;
 
 	float3 CameraForward;
 	float Padding1;

@@ -50,7 +50,8 @@ public:
 	bool Prepare(const NRISmokeGridServices& services, const NRISmokeViewWorkFrame& frame);
 	bool CompareDense(const NRISmokeGridServices& services,
 		const nri::Descriptor* denseMedium, const nri::Descriptor* denseSource);
-	void PrintStatus(bool requested) const;
+	void Finish(const NRISmokeGridServices& services);
+	void PrintStatus(bool compareRequested, uint32_t routeRequested) const;
 	void Shutdown(const NRISmokeGridServices& services);
 
 	bool GetOutputs(NRISmokeViewWorkOutputs& outputs) const;

@@ -253,6 +253,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if ((gSmokeConstants.Flags & NRI_SMOKE_FLAG_COMPARE_REPRESENTATION) != 0u &&
 		dispatchThreadId.x < gSmokeConstants.FroxelWidth / 2u)
 		return;
+	if ((gSmokeConstants.Flags & NRI_SMOKE_FLAG_VIEW_MASK) != 0u)
+	{
+		const uint columnIndex = dispatchThreadId.y * gSmokeConstants.FroxelWidth + dispatchThreadId.x;
+		const uint2 mask = gSmokeViewColumnMasks[columnIndex];
+		if ((mask[dispatchThreadId.z >> 5u] & (1u << (dispatchThreadId.z & 31u))) == 0u)
+			return;
+	}
 	uint controlCount, ignoredStride;
 	gSmokeRenderGridControl.GetDimensions(controlCount, ignoredStride);
 	if (controlCount == 0u || gSmokeRenderGridControl[0].ResidentCount == 0u)

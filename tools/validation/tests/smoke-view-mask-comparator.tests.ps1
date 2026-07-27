@@ -20,11 +20,11 @@ $timing = Read-Repo 'source/common/rendering/nri/system/nri_gpu_timing.cpp'
 
 Assert-Match $cvars 'CVAR\(Bool,\s*nri_ptsmokeviewcompare,\s*false,\s*0\)' 'View-mask comparison must be opt-in, default-off, and session-only.'
 Assert-Match $settings 'settings\.viewCompare\s*=\s*\(bool\)nri_ptsmokeviewcompare' 'The immutable frame settings must capture the diagnostic CVar.'
-Assert-Match $smoke 'renderGrid\s*&&\s*mSettings\.viewCompare' 'Mask preparation must run only for grid rendering under the diagnostic toggle.'
+Assert-Match $smoke 'renderGrid\s*&&\s*\(mSettings\.viewCompare\s*\|\|\s*mSettings\.viewRoute\s*!=\s*0u\)' 'Mask preparation must run only for grid rendering under an explicit diagnostic/static route.'
 Assert-Match $smoke 'SmokeMaterialize[\s\S]*EvaluateGrid[\s\S]*CompareDense' 'Dense evaluation must remain the authority and execute before comparison.'
 Assert-Match $smoke 'SmokeViewPrepare[\s\S]*mViewWork\.Prepare' 'View preparation must have an explicit timing scope separate from dense evaluation.'
 Assert-Match $timing 'view_prepare=%\.6f[\s\S]*evaluate_grid=%\.6f' 'Telemetry must expose view preparation separately from dense grid evaluation.'
-Assert-NotMatch $dense 'SmokeViewWork|ColumnMasks|CompactIndices|DispatchIndirect' 'The production dense shader must not depend on diagnostic masks or indirect work.'
+Assert-NotMatch $dense 'CompactIndices|DispatchIndirect' 'The production evaluation shader must not depend on compaction or indirect work.'
 
 Assert-Match $compare 'gViewDenseMedium\[dispatchThreadId\]' 'Comparator must read the dense reference medium.'
 Assert-Match $compare 'gViewDenseSource\[dispatchThreadId\]' 'Comparator must read the dense reference radiance source.'
@@ -39,7 +39,7 @@ Assert-NotMatch $compare 'gSmokeFroxelMedium\s*\[[^]]+\]\s*=|gSmokeFroxelSource\
 foreach ($field in @('false_negatives', 'false_positives', 'tau_error_max', 'opacity_error_max', 'radiance_error_max', 'boundary_false_negatives', 'overflow')) {
     Assert-Match $owner ([regex]::Escape($field + '=')) "Status output must report $field."
 }
-Assert-Match $owner 'authority=dense-reference\s+output_mutation=no' 'Status must state dense reference authority and diagnostic non-mutation.'
+Assert-Match $owner 'authority=smoke-evaluate-grid\s+comparator_output_mutation=no' 'Status must state production output authority and diagnostic non-mutation.'
 Assert-Match $control 'uint32_t\s+overflow' 'Comparator contract must retain an explicit overflow counter.'
 Assert-NotMatch $smoke 'CmdDispatchIndirect|opaque.*depth|available.*headroom|gpu.*budget' 'Slice 3A must not add indirect execution, opaque-depth culling, or adaptive budgeting.'
 
