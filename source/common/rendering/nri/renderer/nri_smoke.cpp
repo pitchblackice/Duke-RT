@@ -693,6 +693,10 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 	mSettings = BuildNRISmokeSettingsFromCVars();
 	const NRISmokeWorkSchedulerSnapshot& workSchedule =
 		mWorkScheduler.Resolve(mSettings.workProfile, mSettings.maxSubsteps);
+	if (workSchedule.table.froxelPixelSize != NRISmokeWorkTable::Unrestricted)
+		mSettings.froxelPixelSize = workSchedule.table.froxelPixelSize;
+	if (workSchedule.table.froxelDepth != NRISmokeWorkTable::Unrestricted)
+		mSettings.froxelDepth = workSchedule.table.froxelDepth;
 	mStatus.enabled = mSettings.enabled;
 	mStatus.dlrrModeRequested = mSettings.dlrrMode;
 	mStatus.mainViewEligible = mainViewEligible;
@@ -1560,11 +1564,12 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	if (mSettings.traceMode >= 2u)
 	{
 		const NRISmokeWorkSchedulerSnapshot& work = mWorkScheduler.GetSnapshot();
-		Printf("PERF pt smoke schedule NRI: renderer_frame=%llu frame=%u epoch=%u profile_requested=%u profile_effective=%u profile_name=%s revision=%u supported=%08x enforced=%08x emission_limit=%u emission_requested=%u emission_scheduled=%u emission_deferred=%u first_use_limit=%u first_use_requested=%u first_use_scheduled=%u first_use_deferred=%u radiance_new_limit=%u radiance_maintenance_limit=%u simulation_limit=%u simulation_due=%u simulation_scheduled=%u simulation_deferred=%u simulation_debt=%u simulation_debt_max=%u simulation_capped_consecutive=%u simulation_capped_total=%llu unsupported_unrestricted=%u compact=1\n",
+		Printf("PERF pt smoke schedule NRI: renderer_frame=%llu frame=%u epoch=%u profile_requested=%u profile_effective=%u profile_name=%s revision=%u supported=%08x enforced=%08x froxel_pixels=%u froxel_depth=%u emission_limit=%u emission_requested=%u emission_scheduled=%u emission_deferred=%u first_use_limit=%u first_use_requested=%u first_use_scheduled=%u first_use_deferred=%u radiance_new_limit=%u radiance_maintenance_limit=%u simulation_limit=%u simulation_due=%u simulation_scheduled=%u simulation_deferred=%u simulation_debt=%u simulation_debt_max=%u simulation_capped_consecutive=%u simulation_capped_total=%llu unsupported_unrestricted=%u compact=1\n",
 			(unsigned long long)renderer.mFrameBuffer->mFrameIndex, renderer.mFrameIndex, mStatus.simulationEpoch,
 			work.requestedProfile, (uint32_t)work.effectiveProfile,
 			NRISmokeWorkScheduler::ProfileName(work.effectiveProfile), work.table.revision,
 			work.table.supportedCapabilities, work.table.enforcedCapabilities,
+			mSettings.froxelPixelSize, mSettings.froxelDepth,
 			work.table.emissionCommands, work.emissionRequested, work.emissionScheduled, work.emissionDeferred,
 			work.table.firstUseSources, work.promptRequested, work.promptScheduled, work.promptDeferred,
 			work.table.radianceNewInvalidCells, work.table.radianceMaintenanceCells,
@@ -2622,11 +2627,12 @@ void NRISmokeSystem::Shutdown(NRIRenderer& renderer)
 void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 {
 	const NRISmokeWorkSchedulerSnapshot& work = mWorkScheduler.GetSnapshot();
-	Printf("NRI PT smoke work profile: requested=%u effective=%u name=%s revision=%u change_serial=%u supported=%08x enforced=%08x unrestricted=%u emission_commands=%u first_use_sources=%u admission_brick_requests=%u deposition_cell_visits=%u projection_work_units=%u materialized_froxels=%u radiance_new_invalid=%u radiance_maintenance=%u world_link_rays=%u direct_receiver_samples=%u dormant_promotions=%u simulation_substeps=%u emission=%u/%u/%u first_use=%u/%u/%u simulation=%u/%u/%u debt=%u debt_max=%u capped_consecutive=%u capped_total=%llu policy=static-no-timing-input\n",
+	Printf("NRI PT smoke work profile: requested=%u effective=%u name=%s revision=%u change_serial=%u supported=%08x enforced=%08x unrestricted=%u froxel_pixels=%u froxel_depth=%u emission_commands=%u first_use_sources=%u admission_brick_requests=%u deposition_cell_visits=%u projection_work_units=%u materialized_froxels=%u radiance_new_invalid=%u radiance_maintenance=%u world_link_rays=%u direct_receiver_samples=%u dormant_promotions=%u simulation_substeps=%u emission=%u/%u/%u first_use=%u/%u/%u simulation=%u/%u/%u debt=%u debt_max=%u capped_consecutive=%u capped_total=%llu policy=static-no-timing-input\n",
 		work.requestedProfile, (uint32_t)work.effectiveProfile,
 		NRISmokeWorkScheduler::ProfileName(work.effectiveProfile), work.table.revision,
 		work.profileChangeSerial, work.table.supportedCapabilities, work.table.enforcedCapabilities,
-		NRISmokeWorkTable::Unrestricted, work.table.emissionCommands, work.table.firstUseSources,
+		NRISmokeWorkTable::Unrestricted, mSettings.froxelPixelSize, mSettings.froxelDepth,
+		work.table.emissionCommands, work.table.firstUseSources,
 		work.table.admissionBrickRequests, work.table.depositionCellVisits, work.table.projectionWorkUnits,
 		work.table.materializedFroxels, work.table.radianceNewInvalidCells,
 		work.table.radianceMaintenanceCells, work.table.worldLinkRays,
