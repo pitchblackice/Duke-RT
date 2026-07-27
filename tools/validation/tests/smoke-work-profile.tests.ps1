@@ -22,11 +22,13 @@ Assert-Match $scheduler 'NRISmokeWorkProfile::High[\s\S]*emissionCommands = 128u
 Assert-Match $scheduler 'NRISmokeWorkProfile::High[\s\S]*froxelPixelSize = 16u[\s\S]*froxelDepth = 48u' 'High static froxel table is missing.'
 Assert-Match $scheduler 'NRISmokeWorkProfile::Medium[\s\S]*froxelPixelSize = 24u[\s\S]*froxelDepth = 32u' 'Medium static froxel table is missing.'
 Assert-Match $scheduler 'NRISmokeWorkProfile::Low[\s\S]*froxelPixelSize = 32u[\s\S]*froxelDepth = 24u' 'Low static froxel table is missing.'
+Assert-Match $scheduler 'NRISmokeWorkProfile::Low[\s\S]*emissiveLights = 0u[\s\S]*emissiveBackend = 0u[\s\S]*lightSamples = 1u[\s\S]*maximumLightCandidates = 4u' 'Low static lighting table is missing.'
 Assert-Match $schedulerHeader 'admissionBrickRequests = Unrestricted[\s\S]*depositionCellVisits = Unrestricted[\s\S]*projectionWorkUnits = Unrestricted[\s\S]*materializedFroxels = Unrestricted[\s\S]*worldLinkRays = Unrestricted[\s\S]*directReceiverSamples = Unrestricted[\s\S]*dormantPromotions = Unrestricted' 'Unsupported GPU families must not advertise fake caps.'
 Assert-Match $runtime 'maximumCommands\s*=\s*std::min\(kMaxCommands, workTable\.emissionCommands\)' 'Emission transport must apply the fixed profile quantity.'
 Assert-Match $runtime 'mPromptFallback\.Prepare\([\s\S]*workTable\.firstUseSources' 'Prompt first-use must apply the fixed profile quantity.'
 Assert-Match $runtime 'std::min\(dueSubsteps, workTable\.simulationSubsteps\)[\s\S]*RecordSimulation\(dueSubsteps, substeps, debtSubsteps\)' 'Simulation must cap work while retaining explicit debt.'
 Assert-Match $runtime 'workSchedule\.table\.froxelPixelSize[\s\S]*mSettings\.froxelPixelSize[\s\S]*workSchedule\.table\.froxelDepth[\s\S]*mSettings\.froxelDepth' 'Profiles must resolve static froxel dimensions before resource preparation.'
+Assert-Match $runtime 'workSchedule\.table\.emissiveLights[\s\S]*mSettings\.emissiveLights[\s\S]*workSchedule\.table\.lightSamples[\s\S]*mSettings\.lightSamples' 'Profiles must resolve static lighting quantities before resource preparation.'
 Assert-Match $seed 'NRI_SMOKE_GRID_LIGHT_WORK_LIMITED[\s\S]*SmokeGridLightClaimNewInvalid[\s\S]*SmokeGridLightClaimMaintenance' 'Static profiles must activate both existing radiance ticket lanes.'
 Assert-Match $runtime 'PERF pt smoke schedule NRI:[\s\S]*unsupported_unrestricted=%u' 'Compact telemetry must publish the fixed table and unsupported sentinel.'
 

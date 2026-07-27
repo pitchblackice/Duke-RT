@@ -30,6 +30,10 @@ NRISmokeWorkTable NRISmokeWorkScheduler::BuildTable(NRISmokeWorkProfile profile,
 		table.firstUseSources = 8u;
 		table.froxelPixelSize = 16u;
 		table.froxelDepth = 48u;
+		table.emissiveLights = 1u;
+		table.emissiveBackend = 2u;
+		table.lightSamples = 4u;
+		table.maximumLightCandidates = 8u;
 		table.radianceNewInvalidCells = 16384u;
 		table.radianceMaintenanceCells = 65536u;
 		table.simulationSubsteps = 2u;
@@ -39,6 +43,10 @@ NRISmokeWorkTable NRISmokeWorkScheduler::BuildTable(NRISmokeWorkProfile profile,
 		table.firstUseSources = 4u;
 		table.froxelPixelSize = 24u;
 		table.froxelDepth = 32u;
+		table.emissiveLights = 1u;
+		table.emissiveBackend = 2u;
+		table.lightSamples = 4u;
+		table.maximumLightCandidates = 8u;
 		table.radianceNewInvalidCells = 8192u;
 		table.radianceMaintenanceCells = 32768u;
 		table.simulationSubsteps = 1u;
@@ -48,6 +56,10 @@ NRISmokeWorkTable NRISmokeWorkScheduler::BuildTable(NRISmokeWorkProfile profile,
 		table.firstUseSources = 2u;
 		table.froxelPixelSize = 32u;
 		table.froxelDepth = 24u;
+		table.emissiveLights = 0u;
+		table.emissiveBackend = 0u;
+		table.lightSamples = 1u;
+		table.maximumLightCandidates = 4u;
 		table.radianceNewInvalidCells = 4096u;
 		table.radianceMaintenanceCells = 8192u;
 		table.simulationSubsteps = 1u;

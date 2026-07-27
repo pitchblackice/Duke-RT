@@ -30,6 +30,8 @@ int main()
 	const auto& high = scheduler.Resolve(1u, 8u);
 	Require(high.table.emissionCommands == 128u && high.table.firstUseSources == 8u &&
 		high.table.froxelPixelSize == 16u && high.table.froxelDepth == 48u &&
+		high.table.emissiveLights == 1u && high.table.emissiveBackend == 2u &&
+		high.table.lightSamples == 4u && high.table.maximumLightCandidates == 8u &&
 		high.table.radianceNewInvalidCells == 16384u &&
 		high.table.radianceMaintenanceCells == 65536u && high.table.simulationSubsteps == 2u,
 		"high table must remain immutable");
@@ -40,12 +42,16 @@ int main()
 	const auto& medium = scheduler.Resolve(2u, 8u);
 	Require(medium.table.emissionCommands == 32u && medium.table.firstUseSources == 4u &&
 		medium.table.froxelPixelSize == 24u && medium.table.froxelDepth == 32u &&
+		medium.table.emissiveLights == 1u && medium.table.emissiveBackend == 2u &&
+		medium.table.lightSamples == 4u && medium.table.maximumLightCandidates == 8u &&
 		medium.table.radianceNewInvalidCells == 8192u &&
 		medium.table.radianceMaintenanceCells == 32768u && medium.table.simulationSubsteps == 1u,
 		"medium table must remain immutable");
 	const auto& low = scheduler.Resolve(3u, 8u);
 	Require(low.table.emissionCommands == 16u && low.table.firstUseSources == 2u &&
 		low.table.froxelPixelSize == 32u && low.table.froxelDepth == 24u &&
+		low.table.emissiveLights == 0u && low.table.emissiveBackend == 0u &&
+		low.table.lightSamples == 1u && low.table.maximumLightCandidates == 4u &&
 		low.table.radianceNewInvalidCells == 4096u &&
 		low.table.radianceMaintenanceCells == 8192u && low.table.simulationSubsteps == 1u,
 		"low table must remain immutable");
