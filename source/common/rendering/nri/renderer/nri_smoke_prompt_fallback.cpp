@@ -3,59 +3,99 @@
 #include "nri_smoke_admission.h"
 #include "nri_smoke_pulses.h"
 
+#include <algorithm>
+
 NRISmokePromptPrepareResult NRISmokePromptFallback::Prepare(
 	std::vector<NRISmokeInjectionCommandGpu>& commands, uint64_t rendererFrame,
-	float gridCellSize, std::vector<NRISmokePromptRangeIdentity>& retained)
+	float gridCellSize, std::vector<NRISmokePromptRangeIdentity>& retained,
+	uint32_t maximumFallbackCarrierQuantity)
 {
 	NRISmokePromptPrepareResult result = {};
+	const uint32_t fallbackQuantity = std::min(maximumFallbackCarrierQuantity,
+		FixedFallbackCarrierQuantity);
 	mPlan.clear();
 	mNewlyClaimedSlots.clear();
 	retained.clear();
 	std::vector<NRISmokeInjectionCommandGpu> scheduled;
 	scheduled.reserve(commands.size());
-	for (auto command : commands)
+	std::vector<bool> handled(commands.size(), false);
+	auto identityOf = [](const NRISmokeInjectionCommandGpu& command)
 	{
-		if (!NRIIsInteractiveSmokeSource(command.sourceMetadata))
-		{
-			scheduled.push_back(command);
-			continue;
-		}
-		NRISmokePromptRangeIdentity identity = { command.pulseIdLow, command.pulseIdHigh,
+		return NRISmokePromptRangeIdentity { command.pulseIdLow, command.pulseIdHigh,
 			command.rangeBegin, command.rangeCount };
-		auto matches = [&](const NRISmokePromptRangeIdentity& candidate)
-		{
-			return candidate.rangeCount != 0u && candidate.pulseIdLow == identity.pulseIdLow &&
-				candidate.pulseIdHigh == identity.pulseIdHigh && candidate.rangeBegin == identity.rangeBegin &&
-				candidate.rangeCount == identity.rangeCount;
-		};
-		uint32_t slot = FixedFallbackCarrierQuantity;
-		for (uint32_t i = 0u; i < FixedFallbackCarrierQuantity; ++i)
-			if (matches(mActiveSlots[i])) { slot = i; break; }
-		if (slot == FixedFallbackCarrierQuantity)
-			for (uint32_t i = 0u; i < FixedFallbackCarrierQuantity; ++i)
-				if (mActiveSlots[i].rangeCount == 0u)
-				{
-					slot = i;
-					mActiveSlots[i] = identity;
-					mNewlyClaimedSlots.push_back(i);
-					break;
-				}
-		if (slot == FixedFallbackCarrierQuantity)
-		{
-			result.deferredRanges++;
-			result.deferredMass += command.rangeCount;
-			result.deferredBrickWork += NRIEstimateSmokeCommandBrickWork(command, gridCellSize);
-			continue;
-		}
+	};
+	auto matches = [](const NRISmokePromptRangeIdentity& left,
+		const NRISmokePromptRangeIdentity& right)
+	{
+		return left.rangeCount != 0u && left.pulseIdLow == right.pulseIdLow &&
+			left.pulseIdHigh == right.pulseIdHigh && left.rangeBegin == right.rangeBegin &&
+			left.rangeCount == right.rangeCount;
+	};
+	auto defer = [&](const NRISmokeInjectionCommandGpu& command)
+	{
+		result.deferredRanges++;
+		result.deferredMass += command.rangeCount;
+		result.deferredBrickWork += NRIEstimateSmokeCommandBrickWork(command, gridCellSize);
+	};
+	auto schedule = [&](NRISmokeInjectionCommandGpu command, uint32_t slot)
+	{
 		command.sourceMetadata |= NRI_SMOKE_SOURCE_METADATA_PROMPT_ELIGIBLE;
 		command.sourceMetadata &= ~NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_MASK;
 		command.sourceMetadata |= slot << NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_SHIFT;
-		mPlan.push_back(identity);
+		mPlan.push_back(identityOf(command));
 		scheduled.push_back(command);
+	};
+
+	for (uint32_t index = 0u; index < commands.size(); ++index)
+	{
+		if (!NRIIsInteractiveSmokeSource(commands[index].sourceMetadata))
+		{
+			scheduled.push_back(commands[index]);
+			handled[index] = true;
+		}
+	}
+	// Preserve already-published sticky identities before claiming capacity for
+	// newcomers. A profile reduction limits scheduled quantity, not valid slot
+	// identity; an existing range may live in any of the eight ABI slots.
+	for (uint32_t index = 0u; index < commands.size(); ++index)
+	{
+		if (handled[index]) continue;
+		const NRISmokePromptRangeIdentity identity = identityOf(commands[index]);
+		uint32_t slot = FixedFallbackCarrierQuantity;
+		for (uint32_t i = 0u; i < FixedFallbackCarrierQuantity; ++i)
+			if (matches(mActiveSlots[i], identity)) { slot = i; break; }
+		if (slot == FixedFallbackCarrierQuantity) continue;
+		if (mPlan.size() < fallbackQuantity)
+			schedule(commands[index], slot);
+		else
+			defer(commands[index]);
+		handled[index] = true;
+	}
+	for (uint32_t index = 0u; index < commands.size(); ++index)
+	{
+		if (handled[index]) continue;
+		auto command = commands[index];
+		if (mPlan.size() >= fallbackQuantity)
+		{
+			defer(command);
+			continue;
+		}
+		uint32_t slot = FixedFallbackCarrierQuantity;
+		for (uint32_t i = 0u; i < FixedFallbackCarrierQuantity; ++i)
+			if (mActiveSlots[i].rangeCount == 0u) { slot = i; break; }
+		if (slot == FixedFallbackCarrierQuantity)
+		{
+			defer(command);
+			continue;
+		}
+		mActiveSlots[slot] = identityOf(command);
+		mNewlyClaimedSlots.push_back(slot);
+		schedule(command, slot);
 	}
 	commands.swap(scheduled);
 	retained = mPlan;
 	mSnapshot.scheduledFallbackQuantity = (uint32_t)mPlan.size();
+	mSnapshot.maximumFallbackCarrierQuantity = fallbackQuantity;
 	mSnapshot.scheduledFallbackRanges += mPlan.size();
 	mSnapshot.authoredRendererFrame = rendererFrame;
 	mSnapshot.authoredPendingMass = 0;

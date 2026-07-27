@@ -85,6 +85,33 @@ int main()
 	rollbackOwner.Prepare(newcomers, 203u, 8.0f, retained);
 	Require(newcomers.size() == 8u, "epoch/resource reset must release every sticky prompt slot");
 
+	NRISmokePromptFallback profiledOwner;
+	std::vector<NRISmokeInjectionCommandGpu> profiled = { Interactive(300u), Interactive(301u),
+		Interactive(302u), Interactive(303u), Interactive(304u) };
+	const auto profiledResult = profiledOwner.Prepare(profiled, 300u, 8.0f, retained, 2u);
+	Require(profiled.size() == 2u && retained.size() == 2u && profiledResult.deferredRanges == 3u,
+		"a static first-use profile must cap scheduled sticky slots without dropping overflow");
+	Require(profiledOwner.GetSnapshot().maximumFallbackCarrierQuantity == 2u,
+		"prompt status must publish the effective profile quantity");
+
+	NRISmokePromptFallback switchedOwner;
+	std::vector<NRISmokeInjectionCommandGpu> initialSlots = { Interactive(400u), Interactive(401u),
+		Interactive(402u), Interactive(403u), Interactive(404u), Interactive(405u),
+		Interactive(406u), Interactive(407u) };
+	switchedOwner.Prepare(initialSlots, 400u, 8.0f, retained, 8u);
+	const NRISmokeInjectionCommandGpu stickySlotSeven = initialSlots[7];
+	switchedOwner.Commit(400u);
+	std::vector<NRISmokeInjectionCommandGpu> afterReduction = { Interactive(408u), stickySlotSeven,
+		Interactive(409u) };
+	const auto reducedResult = switchedOwner.Prepare(afterReduction, 401u, 8.0f, retained, 2u);
+	Require(afterReduction.size() == 1u && retained.size() == 1u && reducedResult.deferredRanges == 2u,
+		"a reduced profile must schedule an existing high-slot identity without duplicating a full ledger");
+	Require(afterReduction[0].pulseIdLow == stickySlotSeven.pulseIdLow,
+		"profile reduction must preserve the exact sticky identity before admitting newcomers");
+	Require(((stickySlotSeven.sourceMetadata & NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_MASK) >>
+		NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_SHIFT) == 7u,
+		"the profile-switch fixture must exercise a sticky identity outside the reduced slot prefix");
+
 	std::cout << "Smoke prompt sticky-slot transaction tests passed.\n";
 	return 0;
 }

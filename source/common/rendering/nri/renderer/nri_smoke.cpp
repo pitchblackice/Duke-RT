@@ -691,6 +691,8 @@ void NRISmokeSystem::AppendSyntheticCommand(NRIRenderer& renderer)
 bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, const TArray<PathTracingWeaponLightEvent>& weaponEvents)
 {
 	mSettings = BuildNRISmokeSettingsFromCVars();
+	const NRISmokeWorkSchedulerSnapshot& workSchedule =
+		mWorkScheduler.Resolve(mSettings.workProfile, mSettings.maxSubsteps);
 	mStatus.enabled = mSettings.enabled;
 	mStatus.dlrrModeRequested = mSettings.dlrrMode;
 	mStatus.mainViewEligible = mainViewEligible;
@@ -901,6 +903,7 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 		{
 			const NRISmokeGridStatusSnapshot& gridStatus = mGrid.GetStatusSnapshot();
 			worldLightingReady = mGridLighting.PrepareFrame(BuildGridServices(renderer), mSettings,
+				workSchedule.table,
 				gridStatus.cellCapacity, renderer.mFrameIndex, mStatus.simulationEpoch) && mGridLighting.IsWorldReady();
 			if (worldLightingReady)
 			{
@@ -1225,8 +1228,14 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	mLastGameplaySeconds = now;
 	mAccumulator += elapsed * mSettings.timeScale;
 	const float step = 1.0f / (float)mSettings.simulationRate;
-	uint32_t substeps = std::min((uint32_t)std::floor(mAccumulator / step), mSettings.maxSubsteps);
+	const uint32_t dueSubsteps = (uint32_t)std::min<double>(
+		std::floor(mAccumulator / step), (double)UINT32_MAX);
+	const NRISmokeWorkTable& workTable = mWorkScheduler.GetSnapshot().table;
+	const uint32_t substeps = std::min(dueSubsteps, workTable.simulationSubsteps);
 	mAccumulator -= (float)substeps * step;
+	const uint32_t debtSubsteps = (uint32_t)std::min<double>(
+		std::floor(mAccumulator / step), (double)UINT32_MAX);
+	mWorkScheduler.RecordSimulation(dueSubsteps, substeps, debtSubsteps);
 	mStatus.simulationSubsteps = substeps;
 	if (particleAuthority)
 		mParticleSimulationSeconds += (double)substeps * (double)step * (double)mSettings.timeScale;
@@ -1239,9 +1248,10 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		mPromptFallback.CommitGridHandoffs(mPulseOwner, mGrid.ConsumePromptOutcomes());
 	}
 	const auto& availableCommands = mPulseOwner.PendingCommands();
+	const uint32_t maximumCommands = std::min(kMaxCommands, workTable.emissionCommands);
 	if (gridAuthority && !particleAuthority)
 	{
-		mStatus.admission = mAdmissionScheduler.SelectGridCommands(availableCommands, kMaxCommands,
+		mStatus.admission = mAdmissionScheduler.SelectGridCommands(availableCommands, maximumCommands,
 			renderer.mFrameIndex, mSettings.gridCellSize, mSelectedGridCommands);
 		mStatus.admission.boundedDeferred = mStatus.admission.rejected;
 		mStatus.admission.rejected = 0u;
@@ -1250,7 +1260,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	{
 		mStatus.admission = {};
 		mStatus.admission.gathered = (uint32_t)availableCommands.size();
-		mStatus.admission.uploaded = std::min(mStatus.admission.gathered, kMaxCommands);
+		mStatus.admission.uploaded = std::min(mStatus.admission.gathered, maximumCommands);
 		mStatus.admission.boundedDeferred = mStatus.admission.gathered - mStatus.admission.uploaded;
 		mSelectedGridCommands.assign(availableCommands.begin(),
 			availableCommands.begin() + mStatus.admission.uploaded);
@@ -1269,10 +1279,14 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		}
 	}
 	std::vector<NRISmokePromptRangeIdentity> retainedPromptIdentities;
+	uint32_t promptRequested = 0u;
+	for (const auto& command : mSelectedGridCommands)
+		if (NRIIsInteractiveSmokeSource(command.sourceMetadata)) promptRequested++;
 	if (gridAuthority && !particleAuthority)
 	{
 		const NRISmokePromptPrepareResult promptResult = mPromptFallback.Prepare(mSelectedGridCommands,
-			renderer.mFrameBuffer->mFrameIndex, mSettings.gridCellSize, retainedPromptIdentities);
+			renderer.mFrameBuffer->mFrameIndex, mSettings.gridCellSize, retainedPromptIdentities,
+			workTable.firstUseSources);
 		mStatus.admission.uploaded -= std::min(mStatus.admission.uploaded, promptResult.deferredRanges);
 		mStatus.admission.boundedDeferred += promptResult.deferredRanges;
 		mStatus.admission.interactiveUploaded -= std::min(mStatus.admission.interactiveUploaded,
@@ -1280,6 +1294,11 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		mStatus.admission.estimatedBrickWorkUploaded -=
 			std::min(mStatus.admission.estimatedBrickWorkUploaded, promptResult.deferredBrickWork);
 	}
+	uint32_t promptScheduled = 0u;
+	for (const auto& command : mSelectedGridCommands)
+		if (NRIIsInteractiveSmokeSource(command.sourceMetadata)) promptScheduled++;
+	mWorkScheduler.RecordPrompt(promptRequested, promptScheduled);
+	mWorkScheduler.RecordEmission((uint32_t)availableCommands.size(), (uint32_t)mSelectedGridCommands.size());
 	if (!mPulseOwner.Plan(mSelectedGridCommands, mPendingCommands, mPulsePlanToken))
 		return false;
 	std::vector<NRISmokeInjectionCommandGpu> retainedPromptCommands;
@@ -1298,7 +1317,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	mStatus.admissionFrame = renderer.mFrameIndex;
 	mStatus.admissionRendererFrame = renderer.mFrameBuffer->mFrameIndex;
 	CommandSlot& slot = mCommandSlots[std::min(renderer.mFrameBuffer->mCurrentQueuedFrameIndex, (uint32_t)mCommandSlots.size() - 1)];
-	const uint32_t commandCount = std::min((uint32_t)frameCommands->size(), kMaxCommands);
+	const uint32_t commandCount = std::min((uint32_t)frameCommands->size(), maximumCommands);
 	mStatus.commandsUploaded = commandCount;
 	mStatus.commandsUploadedTotal += commandCount;
 	mStatus.styleCount = (uint32_t)mStyles.size();
@@ -1538,6 +1557,22 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	}
 	mPulsePlanToken = 0u;
 	mPromptFallback.Commit(renderer.mFrameBuffer->mFrameIndex);
+	if (mSettings.traceMode >= 2u)
+	{
+		const NRISmokeWorkSchedulerSnapshot& work = mWorkScheduler.GetSnapshot();
+		Printf("PERF pt smoke schedule NRI: renderer_frame=%llu frame=%u epoch=%u profile_requested=%u profile_effective=%u profile_name=%s revision=%u supported=%08x enforced=%08x emission_limit=%u emission_requested=%u emission_scheduled=%u emission_deferred=%u first_use_limit=%u first_use_requested=%u first_use_scheduled=%u first_use_deferred=%u radiance_new_limit=%u radiance_maintenance_limit=%u simulation_limit=%u simulation_due=%u simulation_scheduled=%u simulation_deferred=%u simulation_debt=%u simulation_debt_max=%u simulation_capped_consecutive=%u simulation_capped_total=%llu unsupported_unrestricted=%u compact=1\n",
+			(unsigned long long)renderer.mFrameBuffer->mFrameIndex, renderer.mFrameIndex, mStatus.simulationEpoch,
+			work.requestedProfile, (uint32_t)work.effectiveProfile,
+			NRISmokeWorkScheduler::ProfileName(work.effectiveProfile), work.table.revision,
+			work.table.supportedCapabilities, work.table.enforcedCapabilities,
+			work.table.emissionCommands, work.emissionRequested, work.emissionScheduled, work.emissionDeferred,
+			work.table.firstUseSources, work.promptRequested, work.promptScheduled, work.promptDeferred,
+			work.table.radianceNewInvalidCells, work.table.radianceMaintenanceCells,
+			work.table.simulationSubsteps, work.simulationDueSubsteps, work.simulationScheduledSubsteps,
+			work.simulationDeferredSubsteps, work.simulationDebtSubsteps,
+			work.simulationMaximumDebtSubsteps, work.simulationConsecutiveCappedFrames,
+			(unsigned long long)work.simulationCappedFrames, NRISmokeWorkTable::Unrestricted);
+	}
 	mPendingCommands.clear();
 	mSelectedGridCommands.clear();
 	return true;
@@ -1982,7 +2017,8 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	const bool multipleScatterReady = gridRepresentationActive && mSettings.multipleScatter &&
 		mGridLighting.GetStatusSnapshot().multipleScatterEffective;
 	if ((worldEmissiveReady || multipleScatterReady) &&
-		!mGridLighting.Record(BuildGridServices(renderer), mSettings, constants, emissiveResourcesReady))
+		!mGridLighting.Record(BuildGridServices(renderer), mSettings,
+			mWorkScheduler.GetSnapshot().table, constants, emissiveResourcesReady))
 	{
 		mStatus.representationFallback = "grid-lighting-record-retry";
 		mStatus.authorityReason = "grid-lighting-record-retry";
@@ -2469,6 +2505,7 @@ void NRISmokeSystem::Reset(const char* reason)
 	mPendingCommands.clear();
 	mSelectedGridCommands.clear();
 	mAdmissionScheduler.Reset();
+	mWorkScheduler.ResetTelemetry();
 	mPulsePlanToken = 0u;
 	mPromptFallback.Reset();
 	if (std::strcmp(mStatus.resetReason, "authority-transition") == 0)
@@ -2584,6 +2621,22 @@ void NRISmokeSystem::Shutdown(NRIRenderer& renderer)
 
 void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 {
+	const NRISmokeWorkSchedulerSnapshot& work = mWorkScheduler.GetSnapshot();
+	Printf("NRI PT smoke work profile: requested=%u effective=%u name=%s revision=%u change_serial=%u supported=%08x enforced=%08x unrestricted=%u emission_commands=%u first_use_sources=%u admission_brick_requests=%u deposition_cell_visits=%u projection_work_units=%u materialized_froxels=%u radiance_new_invalid=%u radiance_maintenance=%u world_link_rays=%u direct_receiver_samples=%u dormant_promotions=%u simulation_substeps=%u emission=%u/%u/%u first_use=%u/%u/%u simulation=%u/%u/%u debt=%u debt_max=%u capped_consecutive=%u capped_total=%llu policy=static-no-timing-input\n",
+		work.requestedProfile, (uint32_t)work.effectiveProfile,
+		NRISmokeWorkScheduler::ProfileName(work.effectiveProfile), work.table.revision,
+		work.profileChangeSerial, work.table.supportedCapabilities, work.table.enforcedCapabilities,
+		NRISmokeWorkTable::Unrestricted, work.table.emissionCommands, work.table.firstUseSources,
+		work.table.admissionBrickRequests, work.table.depositionCellVisits, work.table.projectionWorkUnits,
+		work.table.materializedFroxels, work.table.radianceNewInvalidCells,
+		work.table.radianceMaintenanceCells, work.table.worldLinkRays,
+		work.table.directReceiverSamples, work.table.dormantPromotions, work.table.simulationSubsteps,
+		work.emissionRequested, work.emissionScheduled, work.emissionDeferred,
+		work.promptRequested, work.promptScheduled, work.promptDeferred,
+		work.simulationDueSubsteps, work.simulationScheduledSubsteps,
+		work.simulationDeferredSubsteps, work.simulationDebtSubsteps,
+		work.simulationMaximumDebtSubsteps, work.simulationConsecutiveCappedFrames,
+		(unsigned long long)work.simulationCappedFrames);
 	Printf("NRI PT smoke representation: requested=%u effective=%u authority=%s operational=%s reason=%s "
 		"preparation=%s transition=%u@%u grid=%s fallback=%s particle_payload_bytes=%llu descriptor_sentinel_bytes=%llu "
 		"particle_payload_mib=%.3f descriptor_sentinel_mib=%.3f particle_lifetime_active=%s "
@@ -2615,10 +2668,12 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		interest.positiveCount, interest.portalPromotedChunks,
 		interest.runtimePortalUncertain ? 1u : 0u, interest.cameraJump ? 1u : 0u);
 	const NRISmokeGridLightingStatusSnapshot& world = mGridLighting.GetStatusSnapshot();
-	Printf("NRI PT smoke grid emissive: requested_backend=%u effective_backend=%u authority=%s ready=%s cells=%u ping=%u inner_ris_points=%u/%u target=%d field_mib=%.2f work_mib=%.2f links_mib=%.2f proposal_mib=%.3f filter=%s filter_mib=%.2f total_mib=%.2f proposal=%s field_readback=0\n",
+	Printf("NRI PT smoke grid emissive: requested_backend=%u effective_backend=%u authority=%s ready=%s cells=%u ping=%u inner_ris_points=%u/%u target=%d radiance_work_limited=%s radiance_new=%u radiance_maintenance=%u field_mib=%.2f work_mib=%.2f links_mib=%.2f proposal_mib=%.3f filter=%s filter_mib=%.2f total_mib=%.2f proposal=%s field_readback=0\n",
 		world.requestedBackend, world.effectiveBackend, world.authority, world.resourcesReady ? "yes" : "no",
 		world.cellCapacity, world.fieldPing, world.emissivePointCandidatesRequested, world.emissivePointCandidatesEffective,
 		world.emissiveCandidateTarget,
+		world.radianceWorkLimited ? "yes" : "no", world.radianceNewInvalidQuantity,
+		world.radianceMaintenanceQuantity,
 		(double)world.fieldBytes / (1024.0 * 1024.0),
 		(double)world.workBytes / (1024.0 * 1024.0), (double)world.linkBytes / (1024.0 * 1024.0),
 		(double)world.proposalBytes / (1024.0 * 1024.0),

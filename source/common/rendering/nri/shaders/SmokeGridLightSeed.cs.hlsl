@@ -46,7 +46,8 @@ bool SmokeGridLightClaimMaintenance()
 bool SmokeGridLightScheduleRadiance(uint cellIndex, int3 cell, SmokeGridBrick brick)
 {
 	const uint partitionCount = max(gSmokeGridLightControl[0].RadiancePartitionCount, 1u);
-	if (partitionCount <= 1u)
+	const bool workLimited = (gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_WORK_LIMITED) != 0u;
+	if (partitionCount <= 1u && !workLimited)
 		return true;
 
 	const bool targetHistory = (gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_FIELD_PING) != 0u;
@@ -57,7 +58,8 @@ bool SmokeGridLightScheduleRadiance(uint cellIndex, int3 cell, SmokeGridBrick br
 		prior = gSmokeGridLightHistory[cellIndex];
 	const bool historyValid = SmokeGridLightRecordValid(prior, brick.Generation, gSmokeConstants.SimulationEpoch);
 	const uint partition = SmokeGridLightStableWorldKey(cell) % partitionCount;
-	const bool partitionDue = partition == (gSmokeConstants.FrameIndex % partitionCount);
+	const bool partitionDue = partitionCount <= 1u ||
+		partition == (gSmokeConstants.FrameIndex % partitionCount);
 	bool scheduled = false;
 	if (!historyValid)
 	{

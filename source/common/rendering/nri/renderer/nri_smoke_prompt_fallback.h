@@ -52,7 +52,8 @@ public:
 	static constexpr uint32_t FixedFallbackCarrierQuantity = 8u;
 
 	NRISmokePromptPrepareResult Prepare(std::vector<NRISmokeInjectionCommandGpu>& commands,
-		uint64_t rendererFrame, float gridCellSize, std::vector<NRISmokePromptRangeIdentity>& retained);
+		uint64_t rendererFrame, float gridCellSize, std::vector<NRISmokePromptRangeIdentity>& retained,
+		uint32_t maximumFallbackCarrierQuantity = FixedFallbackCarrierQuantity);
 	void CommitGridHandoffs(NRISmokePulseOwner& pulses,
 		const std::vector<NRISmokePromptOutcomeGpu>& outcomes);
 	void Commit(uint64_t rendererFrame);

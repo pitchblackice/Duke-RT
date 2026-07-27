@@ -12,6 +12,7 @@
 #include "nri_smoke_pulses.h"
 #include "nri_smoke_prompt_fallback.h"
 #include "nri_smoke_view_work.h"
+#include "nri_smoke_work_scheduler.h"
 #include "v_video.h"
 
 #include <array>
@@ -330,6 +331,7 @@ private:
 	NRISmokeViewWork mViewWork;
 	NRISmokePulseOwner mPulseOwner;
 	NRISmokePromptFallback mPromptFallback;
+	NRISmokeWorkScheduler mWorkScheduler;
 	std::vector<NRISmokeStyleGpu> mStyles;
 	std::vector<NRISmokeInjectionCommandGpu> mPendingCommands;
 	std::vector<NRISmokeInjectionCommandGpu> mSelectedGridCommands;

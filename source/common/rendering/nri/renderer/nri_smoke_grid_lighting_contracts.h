@@ -196,6 +196,7 @@ struct NRISmokeGridLightingStatusSnapshot
 	uint32_t radianceNewInvalidQuantity = 0;
 	uint32_t radianceMaintenanceQuantity = 0;
 	uint32_t radianceMaximumAge = 0;
+	bool radianceWorkLimited = false;
 	uint32_t lastUpdatedFrame = UINT32_MAX;
 	uint64_t fieldBytes = 0;
 	uint64_t workBytes = 0;

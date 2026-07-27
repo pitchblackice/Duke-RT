@@ -223,6 +223,7 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	NRISmokeSettings settings = {};
 	settings.enabled = (bool)nri_ptsmoke;
 	settings.readback = (bool)nri_ptsmokereadback;
+	settings.workProfile = (uint32_t)std::max((int)nri_ptsmokeworkprofile, 0);
 	settings.quality = (uint32_t)std::clamp((int)nri_ptsmokequality, 0, 2);
 	settings.particleCapacity = (uint32_t)std::clamp((int)nri_ptsmokeparticles, 256, 65536);
 	settings.froxelPixelSize = (uint32_t)std::clamp((int)nri_ptsmokefroxelpixels, 4, 64);

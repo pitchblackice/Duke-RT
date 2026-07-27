@@ -3,6 +3,7 @@
 #include "nri_smoke_grid.h"
 #include "nri_smoke_grid_lighting_contracts.h"
 #include "nri_smoke_contracts.h"
+#include "nri_smoke_work_scheduler.h"
 
 #include <array>
 #include <vector>
@@ -35,9 +36,9 @@ public:
 
 	bool Initialize(const NRISmokeGridServices& services, nri::PipelineLayout* sharedLayout);
 	bool PrepareFrame(const NRISmokeGridServices& services, const NRISmokeSettings& settings,
-		uint32_t cellCapacity, uint32_t frameIndex, uint32_t simulationEpoch);
+		const NRISmokeWorkTable& workTable, uint32_t cellCapacity, uint32_t frameIndex, uint32_t simulationEpoch);
 	bool Record(const NRISmokeGridServices& services, const NRISmokeSettings& settings,
-		NRISmokeConstants constants, bool emissiveResourcesReady);
+		const NRISmokeWorkTable& workTable, NRISmokeConstants constants, bool emissiveResourcesReady);
 	void PublishGridSnapshot(const std::array<const nri::Descriptor*, NRISmokeGrid::EvaluationDescriptorCount>& descriptors,
 		uint32_t fieldPing, float cellSize);
 	void Reset(uint32_t simulationEpoch, const char* reason);

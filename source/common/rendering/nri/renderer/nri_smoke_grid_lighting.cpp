@@ -304,7 +304,7 @@ bool NRISmokeGridLighting::RecordControlReadback(const NRISmokeGridServices& ser
 }
 
 bool NRISmokeGridLighting::PrepareFrame(const NRISmokeGridServices& services, const NRISmokeSettings& settings,
-	uint32_t cellCapacity, uint32_t frameIndex, uint32_t simulationEpoch)
+	const NRISmokeWorkTable& workTable, uint32_t cellCapacity, uint32_t frameIndex, uint32_t simulationEpoch)
 {
 	ConsumeReadback(services, simulationEpoch);
 	if (!settings.readback)
@@ -326,8 +326,13 @@ bool NRISmokeGridLighting::PrepareFrame(const NRISmokeGridServices& services, co
 	mStatus.emissivePointCandidatesEffective = effectivePointCandidates;
 	mStatus.emissiveCandidateTarget = settings.emissiveCandidateTarget;
 	mStatus.radiancePartitionCount = settings.worldRadiancePartitions;
-	mStatus.radianceNewInvalidQuantity = settings.worldRadianceNewCells;
-	mStatus.radianceMaintenanceQuantity = settings.worldRadianceMaintenanceCells;
+	mStatus.radianceWorkLimited = NRISmokeWorkScheduler::Enforces(workTable,
+		NRISmokeWorkCapability_RadianceNewInvalid) && NRISmokeWorkScheduler::Enforces(workTable,
+		NRISmokeWorkCapability_RadianceMaintenance);
+	mStatus.radianceNewInvalidQuantity = mStatus.radianceWorkLimited ?
+		workTable.radianceNewInvalidCells : settings.worldRadianceNewCells;
+	mStatus.radianceMaintenanceQuantity = mStatus.radianceWorkLimited ?
+		workTable.radianceMaintenanceCells : settings.worldRadianceMaintenanceCells;
 	mStatus.radianceMaximumAge = settings.worldRadianceMaximumAge;
 	mStatus.multipleScatterRequested = settings.multipleScatter;
 	mStatus.scatterDecision = !settings.multipleScatter ? "disabled" : "gpu-probe4x4x4/boundary-aware";
@@ -408,7 +413,7 @@ void NRISmokeGridLighting::Dispatch(const NRISmokeGridServices& services, NRISmo
 }
 
 bool NRISmokeGridLighting::Record(const NRISmokeGridServices& services, const NRISmokeSettings& settings,
-	NRISmokeConstants constants, bool emissiveResourcesReady)
+	const NRISmokeWorkTable& workTable, NRISmokeConstants constants, bool emissiveResourcesReady)
 {
 	if (!mStatus.initialized || !mStatus.resourcesReady || !services.IsRecordingValid())
 		return false;
@@ -442,9 +447,14 @@ bool NRISmokeGridLighting::Record(const NRISmokeGridServices& services, const NR
 	// These root lanes are unused by world-lighting passes. Keep the diagnostic
 	// work table local to this focused owner instead of widening the shared ABI.
 	constants.particleCapacity = settings.worldRadiancePartitions;
-	constants.styleCount = settings.worldRadianceNewCells;
-	constants.froxelWidth = settings.worldRadianceMaintenanceCells;
+	const bool radianceWorkLimited = NRISmokeWorkScheduler::Enforces(workTable,
+		NRISmokeWorkCapability_RadianceNewInvalid) && NRISmokeWorkScheduler::Enforces(workTable,
+		NRISmokeWorkCapability_RadianceMaintenance);
+	constants.styleCount = radianceWorkLimited ? workTable.radianceNewInvalidCells : settings.worldRadianceNewCells;
+	constants.froxelWidth = radianceWorkLimited ? workTable.radianceMaintenanceCells : settings.worldRadianceMaintenanceCells;
 	constants.froxelHeight = settings.worldRadianceMaximumAge;
+	if (radianceWorkLimited)
+		constants.flags |= 0x40000000u;
 	{
 		NRIScopedGpuTiming timing(services.gpuTimingDevice, NRIGpuTimingScope::SmokeWorldActive);
 		Dispatch(services, NRISmokeGridLightingPass::Prepare, constants, 1u);

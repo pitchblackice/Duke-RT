@@ -802,6 +802,7 @@ CUSTOM_CVAR(Bool, nri_ptsmoke, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		: "";
 }
 CVAR(Int, nri_ptsmokequality, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptsmokeworkprofile, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsmokeparticles, 8192, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsmokefroxelpixels, 16, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsmokefroxelz, 48, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
