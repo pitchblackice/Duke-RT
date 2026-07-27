@@ -1186,22 +1186,29 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	if (particleAuthority)
 		mParticleSimulationSeconds += (double)substeps * (double)step * (double)mSettings.timeScale;
 
-	const std::vector<NRISmokeInjectionCommandGpu>* frameCommands = &mPendingCommands;
+	// Authored pulses become persistent before selection. The immutable plan is
+	// committed only after every authoritative consumer has recorded it.
+	mPulseOwner.Enqueue(mPendingCommands);
+	mPendingCommands.clear();
+	const auto& availableCommands = mPulseOwner.PendingCommands();
 	if (gridAuthority && !particleAuthority)
 	{
-		mStatus.admission = mAdmissionScheduler.SelectGridCommands(mPendingCommands, kMaxCommands,
+		mStatus.admission = mAdmissionScheduler.SelectGridCommands(availableCommands, kMaxCommands,
 			renderer.mFrameIndex, mSettings.gridCellSize, mSelectedGridCommands);
-		frameCommands = &mSelectedGridCommands;
+		mStatus.admission.boundedDeferred = mStatus.admission.rejected;
+		mStatus.admission.rejected = 0u;
 	}
 	else
 	{
 		mStatus.admission = {};
-		mStatus.admission.gathered = (uint32_t)mPendingCommands.size();
+		mStatus.admission.gathered = (uint32_t)availableCommands.size();
 		mStatus.admission.uploaded = std::min(mStatus.admission.gathered, kMaxCommands);
-		mStatus.admission.rejected = mStatus.admission.gathered - mStatus.admission.uploaded;
+		mStatus.admission.boundedDeferred = mStatus.admission.gathered - mStatus.admission.uploaded;
+		mSelectedGridCommands.assign(availableCommands.begin(),
+			availableCommands.begin() + mStatus.admission.uploaded);
 		for (uint32_t i = 0; i < mStatus.admission.gathered; ++i)
 		{
-			const auto& command = mPendingCommands[i];
+			const auto& command = availableCommands[i];
 			const uint32_t cost = NRIEstimateSmokeCommandBrickWork(command, mSettings.gridCellSize);
 			mStatus.admission.estimatedBrickWorkGathered += cost;
 			if (i < mStatus.admission.uploaded)
@@ -1213,6 +1220,16 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 			}
 		}
 	}
+	if (!mPulseOwner.Plan(mSelectedGridCommands, mPendingCommands, mPulsePlanToken))
+		return false;
+	const std::vector<NRISmokeInjectionCommandGpu>* frameCommands = &mPendingCommands;
+	auto rollbackPulsePlan = [&]()
+	{
+		if (mPulsePlanToken != 0u) mPulseOwner.Rollback(mPulsePlanToken);
+		mPulsePlanToken = 0u;
+		mPendingCommands.clear();
+		mSelectedGridCommands.clear();
+	};
 	mStatus.admissionFrame = renderer.mFrameIndex;
 	mStatus.admissionRendererFrame = renderer.mFrameBuffer->mFrameIndex;
 	CommandSlot& slot = mCommandSlots[std::min(renderer.mFrameBuffer->mCurrentQueuedFrameIndex, (uint32_t)mCommandSlots.size() - 1)];
@@ -1244,9 +1261,15 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	mStatus.particleCommandsRouted = particleAuthority ? commandCount : 0u;
 	mStatus.gridCommandsRouted = gridAuthority ? commandCount : 0u;
 	if (commandCount > 0 && !UploadBytes(renderer, slot.upload, frameCommands->data(), (uint64_t)commandCount * sizeof(NRISmokeInjectionCommandGpu)))
+	{
+		rollbackPulsePlan();
 		return false;
+	}
 	if (!UploadBytes(renderer, slot.styleUpload, mStyles.data(), mStyles.size() * sizeof(NRISmokeStyleGpu)))
+	{
+		rollbackPulsePlan();
 		return false;
+	}
 
 	const bool firstWorldUse = !mResourcesInitialized;
 	const bool firstParticleResourceUse = !mParticleResourcesInitialized;
@@ -1412,6 +1435,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		gridFrame.commandView = slot.device.shaderView;
 		if (!mGrid.RecordFrame(BuildGridServices(renderer), mSettings, gridFrame))
 		{
+			rollbackPulsePlan();
 			mStatus.gridReady = false;
 			mStatus.representationFallback = "grid-record-retry";
 			mStatus.authorityReason = "grid-record-retry";
@@ -1434,6 +1458,15 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		mStatus.particleSimulationDispatches++;
 		storageBarrier();
 	}
+	if (mPulsePlanToken != 0u && !mPulseOwner.Commit(mPulsePlanToken))
+	{
+		mPulseOwner.Reset();
+		mPulsePlanToken = 0u;
+		mPendingCommands.clear();
+		mSelectedGridCommands.clear();
+		return false;
+	}
+	mPulsePlanToken = 0u;
 	mPendingCommands.clear();
 	mSelectedGridCommands.clear();
 	return true;
@@ -2358,6 +2391,11 @@ void NRISmokeSystem::Reset(const char* reason)
 	mPendingCommands.clear();
 	mSelectedGridCommands.clear();
 	mAdmissionScheduler.Reset();
+	mPulsePlanToken = 0u;
+	if (std::strcmp(mStatus.resetReason, "authority-transition") == 0)
+		mPulseOwner.RebaseEpoch(mStatus.simulationEpoch);
+	else
+		mPulseOwner.Reset();
 	mStatus.admission = {};
 	mStatus.admissionFrame = UINT32_MAX;
 	mStatus.admissionRendererFrame = UINT64_MAX;

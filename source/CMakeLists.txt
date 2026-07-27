@@ -979,6 +979,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_renderer_settings.cpp
 	common/rendering/nri/renderer/nri_smoke.cpp
 	common/rendering/nri/renderer/nri_smoke_authority.cpp
+	common/rendering/nri/renderer/nri_smoke_pulses.cpp
 	common/rendering/nri/renderer/nri_smoke_grid.cpp
 	common/rendering/nri/renderer/nri_smoke_grid_lighting.cpp
 	common/rendering/nri/renderer/nri_smoke_grid_lighting_identity.cpp

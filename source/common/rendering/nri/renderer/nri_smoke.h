@@ -8,6 +8,7 @@
 #include "nri_smoke_emitters.h"
 #include "nri_smoke_grid.h"
 #include "nri_smoke_grid_lighting.h"
+#include "nri_smoke_pulses.h"
 #include "nri_smoke_view_work.h"
 #include "v_video.h"
 
@@ -324,10 +325,12 @@ private:
 	NRISmokeGrid mGrid;
 	NRISmokeGridLighting mGridLighting;
 	NRISmokeViewWork mViewWork;
+	NRISmokePulseOwner mPulseOwner;
 	std::vector<NRISmokeStyleGpu> mStyles;
 	std::vector<NRISmokeInjectionCommandGpu> mPendingCommands;
 	std::vector<NRISmokeInjectionCommandGpu> mSelectedGridCommands;
 	NRISmokeAdmissionScheduler mAdmissionScheduler;
+	uint64_t mPulsePlanToken = 0;
 	uint32_t mResourceParticleCapacity = 0;
 	uint32_t mResourceFroxelWidth = 0;
 	uint32_t mResourceFroxelHeight = 0;

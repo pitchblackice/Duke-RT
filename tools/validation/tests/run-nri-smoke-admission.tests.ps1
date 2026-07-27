@@ -17,9 +17,13 @@ if ($LASTEXITCODE -ne 0) { throw "Smoke admission test compilation failed with e
 if ($LASTEXITCODE -ne 0) { throw "Smoke admission tests failed with exit code $LASTEXITCODE." }
 
 $smokeOwner = Get-Content -Raw (Join-Path $sourceDir 'nri_smoke.cpp')
-if ($smokeOwner -notmatch 'gridAuthority\s*&&\s*!particleAuthority[\s\S]{0,180}SelectGridCommands\(mPendingCommands')
+if ($smokeOwner -notmatch 'gridAuthority\s*&&\s*!particleAuthority[\s\S]{0,220}SelectGridCommands\(availableCommands')
 {
-	throw 'Grid selection must happen before the fixed upload cap without changing particle/reference order.'
+	throw 'Grid selection must consume the persistent pulse queue before the fixed upload cap.'
+}
+if ($smokeOwner -notmatch 'boundedDeferred\s*=\s*mStatus\.admission\.rejected;[\s\S]{0,80}mStatus\.admission\.rejected\s*=\s*0u')
+{
+	throw 'Unselected pulse ranges must remain bounded-deferred rather than becoming terminal rejection.'
 }
 
 Write-Host 'Smoke admission structural and pure tests passed.'

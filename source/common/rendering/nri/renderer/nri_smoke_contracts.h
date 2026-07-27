@@ -99,6 +99,10 @@ struct NRISmokeInjectionCommandGpu
 	uint32_t sourceId = 0;
 	uint32_t sourceSlot = UINT32_MAX;
 	uint32_t sourceMetadata = 0;
+	uint32_t rangeBegin = 0;
+	uint32_t rangeCount = 0;
+	uint32_t pulseIdLow = 0;
+	uint32_t pulseIdHigh = 0;
 };
 
 struct NRISmokeControlGpu
@@ -274,13 +278,17 @@ struct NRISmokeEmissiveStorageGpu
 
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
 static_assert(sizeof(NRISmokeStyleGpu) == 80);
-static_assert(sizeof(NRISmokeInjectionCommandGpu) == 96);
+static_assert(sizeof(NRISmokeInjectionCommandGpu) == 112);
 static_assert(offsetof(NRISmokeInjectionCommandGpu, halfAxisU) == 56);
 static_assert(offsetof(NRISmokeInjectionCommandGpu, shape) == 68);
 static_assert(offsetof(NRISmokeInjectionCommandGpu, halfAxisV) == 72);
 static_assert(offsetof(NRISmokeInjectionCommandGpu, sourceId) == 84);
 static_assert(offsetof(NRISmokeInjectionCommandGpu, sourceSlot) == 88);
 static_assert(offsetof(NRISmokeInjectionCommandGpu, sourceMetadata) == 92);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, rangeBegin) == 96);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, rangeCount) == 100);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, pulseIdLow) == 104);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, pulseIdHigh) == 108);
 static_assert(sizeof(NRISmokeControlGpu) == 568);
 static_assert(sizeof(NRISmokeIndirectCacheGpu) == 32);
 static_assert(sizeof(NRISmokeDirectCacheGpu) == 40);

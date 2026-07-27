@@ -19,7 +19,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const SmokeStyle style = gSmokeStyles[command.StyleIndex];
 	uint baseCursor = 0u;
-	const uint spawnCount = min(command.Count, min(particleCapacity, NRI_SMOKE_MAX_PARTICLES_PER_COMMAND));
+	const uint spawnCount = min(command.RangeCount, min(particleCapacity, NRI_SMOKE_MAX_PARTICLES_PER_COMMAND));
 	InterlockedAdd(gSmokeControl[0].WriteCursor, spawnCount, baseCursor);
 	for (uint i = 0u; i < spawnCount; ++i)
 	{
@@ -30,7 +30,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		else
 			InterlockedAdd(gSmokeControl[0].ActiveApprox, 1u);
 
-		uint randomState = SmokeHash(command.Serial ^ (i * 0x9e3779b9u));
+		const uint pulseOrdinal = command.RangeBegin + i;
+		uint randomState = SmokeHash(command.Serial ^ (pulseOrdinal * 0x9e3779b9u));
 		float3 sourcePosition = command.Position;
 		float3 halfAxisU, halfAxisV;
 		SmokeInjectionRectangleHalfAxes(command, halfAxisU, halfAxisV);
@@ -57,7 +58,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		particle.Epoch = gSmokeConstants.SimulationEpoch;
 		particle.InitialDensity = particle.Density;
 		particle.InitialRadius = particle.Radius;
-		particle.Serial = SmokeHash(command.Serial + i);
+		particle.Serial = SmokeHash(command.Serial + pulseOrdinal);
 		particle.Active = 1u;
 		gSmokeParticles[particleIndex] = particle;
 		InterlockedAdd(gSmokeControl[0].Spawned, 1u);

@@ -48,6 +48,10 @@ struct SmokeInjectionCommand
 	uint SourceId;
 	uint SourceSlot;
 	uint SourceMetadata;
+	uint RangeBegin;
+	uint RangeCount;
+	uint PulseIdLow;
+	uint PulseIdHigh;
 };
 
 uint SmokeInjectionSourceClass(SmokeInjectionCommand command)

@@ -36,7 +36,7 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 	if (!SmokeInjectionTraversalFits(extent, 262144u))
 		return;
 	const uint cellCount = extent.x * extent.y * extent.z;
-	const float commandMass = max(style.Density * command.DensityScale, 0.0) * (float)min(command.Count, 256u);
+	const float commandMass = max(style.Density * command.DensityScale, 0.0) * (float)min(command.RangeCount, 256u);
 	const float inverseCellSize = rcp(max(gSmokeGridConstants.CellSize, 0.0001));
 	const float radiusCells = radius * inverseCellSize;
 	const float halfUCells = length(halfAxisU) * inverseCellSize;

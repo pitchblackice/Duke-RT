@@ -31,10 +31,12 @@ NRISmokeInjectionCommandGpu Command(NRISmokeInjectionSourceClass sourceClass,
 
 int main()
 {
-	static_assert(sizeof(NRISmokeInjectionCommandGpu) == 96u);
+	static_assert(sizeof(NRISmokeInjectionCommandGpu) == 112u);
 	static_assert(offsetof(NRISmokeInjectionCommandGpu, sourceId) == 84u);
 	static_assert(offsetof(NRISmokeInjectionCommandGpu, sourceSlot) == 88u);
 	static_assert(offsetof(NRISmokeInjectionCommandGpu, sourceMetadata) == 92u);
+	static_assert(offsetof(NRISmokeInjectionCommandGpu, rangeBegin) == 96u);
+	static_assert(offsetof(NRISmokeInjectionCommandGpu, rangeCount) == 100u);
 	Require(NRIGetSmokeSourceClass(NRIPackSmokeSourceMetadata(
 		NRISmokeInjectionSourceClass::InteractiveEvent, 17u)) ==
 		NRISmokeInjectionSourceClass::InteractiveEvent,

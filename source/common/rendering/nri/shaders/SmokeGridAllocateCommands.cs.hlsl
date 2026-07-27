@@ -236,7 +236,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		stats.Commands++;
 		const SmokeStyle style = gSmokeGridStyles[command.StyleIndex];
 		const float requestedMass = max(style.Density * command.DensityScale, 0.0) *
-			(float)min(command.Count, 256u);
+			(float)min(command.RangeCount, 256u);
 		const uint requestedMassQ = (uint)min(requestedMass *
 			gSmokeGridConstants.MassQuantization, 4294967295.0);
 		stats.RequestedMassQ += requestedMassQ;
