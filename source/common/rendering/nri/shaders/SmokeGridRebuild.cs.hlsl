@@ -56,7 +56,7 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 	const float4 dynamics = SmokeGridLoadDynamics(outputPing, cellIndex);
 	const float threshold = max(gSmokeGridConstants.ActiveThreshold, 0.0);
 	gSmokeGridOccupied[localIndex] =
-		(max(max(scalar.x, scalar.z), max(optical.x, max(optical.y, optical.z))) > threshold) ? 1u : 0u;
+		(max(scalar.z, max(optical.x, max(optical.y, optical.z))) > threshold) ? 1u : 0u;
 	SmokeGridCellFieldHash(SmokeGridCellCoordinate(brick.Coordinate, groupThreadId), scalar,
 		velocity, optical, dynamics, gSmokeGridHashLo[localIndex], gSmokeGridHashHi[localIndex]);
 	GroupMemoryBarrierWithGroupSync();

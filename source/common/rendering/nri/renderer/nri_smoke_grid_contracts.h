@@ -82,6 +82,7 @@ struct NRISmokeGridControlGpu
 	uint32_t admissionCapacityRejected = 0;
 	uint32_t admissionProbeRejected = 0;
 	uint32_t admissionInvalidRejected = 0;
+	uint32_t admissionFootprintCulled = 0;
 };
 
 struct NRISmokeGridSourceStatsGpu
@@ -97,7 +98,7 @@ struct NRISmokeGridSourceStatsGpu
 	uint32_t rejectedProbe = 0;
 	uint32_t rejectedInvalid = 0;
 	uint32_t depositionCells = 0;
-	uint32_t padding = 0;
+	uint32_t footprintCulled = 0;
 	uint32_t requestedMassQ = 0;
 	uint32_t depositedMassQ = 0;
 	uint32_t rejectedMassQ = 0;
@@ -152,7 +153,7 @@ struct NRISmokeGridConstants
 
 static_assert(sizeof(NRISmokeGridHashEntryGpu) == 32);
 static_assert(sizeof(NRISmokeGridBrickGpu) == 32);
-static_assert(sizeof(NRISmokeGridControlGpu) == 160);
+static_assert(sizeof(NRISmokeGridControlGpu) == 164);
 static_assert(sizeof(NRISmokeGridSourceStatsGpu) == 64);
 static_assert(sizeof(NRISmokeGridDispatchGpu) == 12);
 static_assert(sizeof(NRISmokeGridConstants) == 128);

@@ -79,6 +79,7 @@ struct NRISmokeGridSourceStatusSnapshot
 	uint32_t rejectedCapacity = 0;
 	uint32_t rejectedProbe = 0;
 	uint32_t rejectedInvalid = 0;
+	uint32_t footprintCulled = 0;
 	uint32_t depositionCells = 0;
 	uint32_t requestedMassQ = 0;
 	uint32_t depositedMassQ = 0;

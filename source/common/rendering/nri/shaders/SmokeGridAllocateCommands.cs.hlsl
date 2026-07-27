@@ -40,12 +40,12 @@ uint SmokeGridStableFootprintOrdinal(uint ordinal, uint count, uint sourceId)
 }
 
 bool SmokeGridCommandFootprint(SmokeInjectionCommand command, SmokeStyle style,
-	out int3 minimumBrick, out uint3 brickExtent, out uint brickCount)
+	out int3 minimumBrick, out uint3 brickExtent, out uint brickCount,
+	out float radius, out float3 halfAxisU, out float3 halfAxisV)
 {
 	const float cellSize = max(gSmokeGridConstants.CellSize, 0.0001);
-	const float radius = min(max(max(command.SpawnRadius, style.Radius * command.RadiusScale), cellSize),
+	radius = min(max(max(command.SpawnRadius, style.Radius * command.RadiusScale), cellSize),
 		cellSize * 16.0);
-	float3 halfAxisU, halfAxisV;
 	SmokeInjectionRectangleHalfAxes(command, halfAxisU, halfAxisV);
 	const float3 sourceExtent = abs(halfAxisU) + abs(halfAxisV) + radius;
 	const int3 minimumCell = (int3)floor((command.Position - sourceExtent) / cellSize);
@@ -60,6 +60,86 @@ bool SmokeGridCommandFootprint(SmokeInjectionCommand command, SmokeStyle style,
 	}
 	brickCount = brickExtent.x * brickExtent.y * brickExtent.z;
 	return true;
+}
+
+bool SmokeGridSupportAxisSeparates(float3 sourceCenter, float3 halfAxisU, float3 halfAxisV,
+	float radius, float3 brickCenter, float3 brickHalfExtent, float3 axis)
+{
+	const float axisLengthSquared = dot(axis, axis);
+	if (axisLengthSquared <= 1e-10)
+		return false;
+	const float sourceRadius = abs(dot(halfAxisU, axis)) + abs(dot(halfAxisV, axis)) +
+		radius * sqrt(axisLengthSquared);
+	const float brickRadius = dot(brickHalfExtent, abs(axis));
+	return abs(dot(brickCenter - sourceCenter, axis)) > sourceRadius + brickRadius;
+}
+
+// Reject only when a separating axis proves that the brick cannot intersect
+// the authored sphere or thick rectangle. This is conservative for skewed and
+// degenerate rectangle bases: an uncertain brick remains admitted.
+bool SmokeGridCommandMayIntersectBrick(SmokeInjectionCommand command, int3 brickCoordinate,
+	float radius, float3 halfAxisU, float3 halfAxisV)
+{
+	const float cellSize = max(gSmokeGridConstants.CellSize, 0.0001);
+	const float brickWidth = cellSize * (float)NRI_SMOKE_GRID_BRICK_AXIS;
+	const float3 brickHalfExtent = 0.5 * brickWidth;
+	const float3 brickCenter = ((float3)brickCoordinate + 0.5) * brickWidth;
+	const float3 closest = clamp(command.Position,
+		brickCenter - brickHalfExtent, brickCenter + brickHalfExtent);
+	const float3 closestOffset = command.Position - closest;
+	if (command.Shape != NRI_SMOKE_INJECTION_SHAPE_RECTANGLE &&
+		dot(closestOffset, closestOffset) > radius * radius)
+		return false;
+
+	if (command.Shape == NRI_SMOKE_INJECTION_SHAPE_RECTANGLE)
+	{
+		const float supportRadius = length(halfAxisU) + length(halfAxisV) + radius;
+		if (dot(closestOffset, closestOffset) > supportRadius * supportRadius)
+			return false;
+		const float3 worldX = float3(1.0, 0.0, 0.0);
+		const float3 worldY = float3(0.0, 1.0, 0.0);
+		const float3 worldZ = float3(0.0, 0.0, 1.0);
+		const float3 normal = cross(halfAxisU, halfAxisV);
+		if (SmokeGridSupportAxisSeparates(command.Position, halfAxisU, halfAxisV, radius,
+				brickCenter, brickHalfExtent, normal) ||
+			SmokeGridSupportAxisSeparates(command.Position, halfAxisU, halfAxisV, radius,
+				brickCenter, brickHalfExtent, cross(halfAxisU, worldX)) ||
+			SmokeGridSupportAxisSeparates(command.Position, halfAxisU, halfAxisV, radius,
+				brickCenter, brickHalfExtent, cross(halfAxisU, worldY)) ||
+			SmokeGridSupportAxisSeparates(command.Position, halfAxisU, halfAxisV, radius,
+				brickCenter, brickHalfExtent, cross(halfAxisU, worldZ)) ||
+			SmokeGridSupportAxisSeparates(command.Position, halfAxisU, halfAxisV, radius,
+				brickCenter, brickHalfExtent, cross(halfAxisV, worldX)) ||
+			SmokeGridSupportAxisSeparates(command.Position, halfAxisU, halfAxisV, radius,
+				brickCenter, brickHalfExtent, cross(halfAxisV, worldY)) ||
+			SmokeGridSupportAxisSeparates(command.Position, halfAxisU, halfAxisV, radius,
+				brickCenter, brickHalfExtent, cross(halfAxisV, worldZ)))
+			return false;
+	}
+
+	// Allocation authority is the same cell-center kernel used by deposition.
+	// The separating tests above cheaply discard distant bricks; this bounded
+	// 8^3 reference closes the remaining boundary exactly without approximating
+	// skewed authored rectangles.
+	[loop]
+	for (uint z = 0u; z < NRI_SMOKE_GRID_BRICK_AXIS; ++z)
+	{
+		[loop]
+		for (uint y = 0u; y < NRI_SMOKE_GRID_BRICK_AXIS; ++y)
+		{
+			[loop]
+			for (uint x = 0u; x < NRI_SMOKE_GRID_BRICK_AXIS; ++x)
+			{
+				const float3 cellPosition = SmokeGridCellCenter(brickCoordinate, uint3(x, y, z), cellSize);
+				const float3 closestSource = SmokeInjectionClosestRectanglePoint(
+					cellPosition, command.Position, halfAxisU, halfAxisV);
+				const float3 offset = cellPosition - closestSource;
+				if (dot(offset, offset) < radius * radius)
+					return true;
+			}
+		}
+	}
+	return false;
 }
 
 int3 SmokeGridFootprintCoordinate(int3 minimumBrick, uint3 brickExtent,
@@ -115,6 +195,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	gSmokeGridControl[0].AdmissionCapacityRejected = 0u;
 	gSmokeGridControl[0].AdmissionProbeRejected = 0u;
 	gSmokeGridControl[0].AdmissionInvalidRejected = 0u;
+	gSmokeGridControl[0].AdmissionFootprintCulled = 0u;
 	gSmokeGridControl[0].Generation = gSmokeGridConstants.SimulationEpoch;
 	gSmokeGridControl[0].FrameStamp = gSmokeGridConstants.FrameIndex;
 
@@ -182,8 +263,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				int3 minimumBrick;
 				uint3 brickExtent;
 				uint brickCount;
+				float radius;
+				float3 halfAxisU, halfAxisV;
 				if (!SmokeGridCommandFootprint(command, gSmokeGridStyles[command.StyleIndex],
-					minimumBrick, brickExtent, brickCount))
+					minimumBrick, brickExtent, brickCount, radius, halfAxisU, halfAxisV))
 				{
 					SmokeGridRecordRejection(sourceSlot, validSourceCapacity, 2u);
 					gSmokeGridSourceCommandCursor[sourceSlot]++;
@@ -200,6 +283,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const uint footprintOrdinal = gSmokeGridSourceBrickCursor[sourceSlot]++;
 				const int3 coordinate = SmokeGridFootprintCoordinate(minimumBrick, brickExtent,
 					footprintOrdinal, command.SourceId);
+				if (!SmokeGridCommandMayIntersectBrick(command, coordinate, radius, halfAxisU, halfAxisV))
+				{
+					gSmokeGridSourceStats[sourceSlot].FootprintCulled++;
+					gSmokeGridControl[0].AdmissionFootprintCulled++;
+					madeProgress = true;
+					continue;
+				}
 				gSmokeGridSourceStats[sourceSlot].RequestedBricks++;
 				gSmokeGridControl[0].AdmissionRequested++;
 				madeProgress = true;

@@ -73,6 +73,7 @@ struct SmokeGridControl
 	uint AdmissionCapacityRejected;
 	uint AdmissionProbeRejected;
 	uint AdmissionInvalidRejected;
+	uint AdmissionFootprintCulled;
 };
 
 struct SmokeGridSourceStats
@@ -88,7 +89,7 @@ struct SmokeGridSourceStats
 	uint RejectedProbe;
 	uint RejectedInvalid;
 	uint DepositionCells;
-	uint Padding;
+	uint FootprintCulled;
 	uint RequestedMassQ;
 	uint DepositedMassQ;
 	uint RejectedMassQ;

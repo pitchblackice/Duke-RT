@@ -378,7 +378,7 @@ void NRISmokeGrid::ConsumeReadback(const NRISmokeGridServices& services, uint32_
 				if (row.sourceId == 0u || row.commands == 0u) continue;
 				mStatus.sources.push_back({ row.sourceId, row.sourceClass, row.priority, row.commands,
 					row.requestedBricks, row.existingHits, row.admittedNew, row.rejectedCapacity,
-					row.rejectedProbe, row.rejectedInvalid, row.depositionCells, row.requestedMassQ,
+					row.rejectedProbe, row.rejectedInvalid, row.footprintCulled, row.depositionCells, row.requestedMassQ,
 					row.depositedMassQ, row.rejectedMassQ, row.admittedKeyHash });
 			}
 			services.core->UnmapBuffer(*slot.sourceReadback.buffer);
@@ -819,6 +819,7 @@ void NRISmokeGrid::PrintStatus() const
 		"backtrace_clamps=%u nan=%u field_hash=%08x%08x resident_mib=%.2f "
 		"admission_sources=%u admission_requested=%u admission_existing=%u admission_admitted=%u "
 		"admission_rejected=%u admission_capacity_rejected=%u admission_probe_rejected=%u admission_invalid_rejected=%u "
+		"admission_footprint_culled=%u "
 		"field_readback=0 control_readback=%llu source_readback=%llu fallback=%s reset=%s\n",
 		mStatus.requested ? "yes" : "no", mStatus.representation,
 		mStatus.initialized ? "yes" : "no", mStatus.resourcesReady ? "ready" : "unavailable",
@@ -839,15 +840,16 @@ void NRISmokeGrid::PrintStatus() const
 		mStatus.gpu.admissionExisting, mStatus.gpu.admissionAdmitted,
 		mStatus.gpu.admissionRejected, mStatus.gpu.admissionCapacityRejected,
 		mStatus.gpu.admissionProbeRejected, mStatus.gpu.admissionInvalidRejected,
+		mStatus.gpu.admissionFootprintCulled,
 		(unsigned long long)mStatus.controlReadbackBytes,
 		(unsigned long long)mStatus.sourceReadbackBytes,
 		mStatus.failureReason.c_str(), mStatus.resetReason.c_str());
 	for (const NRISmokeGridSourceStatusSnapshot& source : mStatus.sources)
 	{
-		Printf("NRI PT smoke grid source: source_id=%08x source_class=%u class=%s priority=%u commands=%u requested_bricks=%u existing_hits=%u admitted_new=%u rejected_capacity=%u rejected_probe=%u rejected_invalid=%u deposition_cells=%u requested_mass_q=%u deposited_mass_q=%u rejected_mass_q=%u admitted_key_hash=%08x frame=%u epoch=%u\n",
+		Printf("NRI PT smoke grid source: source_id=%08x source_class=%u class=%s priority=%u commands=%u requested_bricks=%u existing_hits=%u admitted_new=%u rejected_capacity=%u rejected_probe=%u rejected_invalid=%u footprint_culled=%u deposition_cells=%u requested_mass_q=%u deposited_mass_q=%u rejected_mass_q=%u admitted_key_hash=%08x frame=%u epoch=%u\n",
 			source.sourceId, source.sourceClass, SmokeSourceClassName(source.sourceClass), source.priority,
 			source.commands, source.requestedBricks, source.existingHits, source.admittedNew,
-			source.rejectedCapacity, source.rejectedProbe, source.rejectedInvalid,
+			source.rejectedCapacity, source.rejectedProbe, source.rejectedInvalid, source.footprintCulled,
 			source.depositionCells, source.requestedMassQ, source.depositedMassQ,
 			source.rejectedMassQ, source.admittedKeyHash, mStatus.gpu.frameStamp, mStatus.gpu.generation);
 	}
