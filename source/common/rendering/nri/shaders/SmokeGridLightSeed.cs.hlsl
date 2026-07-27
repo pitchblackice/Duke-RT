@@ -25,34 +25,22 @@ uint SmokeGridLightStableWorldKey(int3 cell)
 
 bool SmokeGridLightClaimNewInvalid()
 {
-	[loop]
-	for (;;)
-	{
-		const uint current = gSmokeGridLightControl[0].RadianceNewInvalidScheduled;
-		if (current >= gSmokeGridLightControl[0].RadianceNewInvalidQuantity)
-			return false;
-		uint observed;
-		InterlockedCompareExchange(gSmokeGridLightControl[0].RadianceNewInvalidScheduled,
-			current, current + 1u, observed);
-		if (observed == current)
-			return true;
-	}
+	uint ticket;
+	InterlockedAdd(gSmokeGridLightControl[0].RadianceNewInvalidTickets, 1u, ticket);
+	if (ticket >= gSmokeGridLightControl[0].RadianceNewInvalidQuantity)
+		return false;
+	InterlockedAdd(gSmokeGridLightControl[0].RadianceNewInvalidScheduled, 1u);
+	return true;
 }
 
 bool SmokeGridLightClaimMaintenance()
 {
-	[loop]
-	for (;;)
-	{
-		const uint current = gSmokeGridLightControl[0].RadianceMaintenanceScheduled;
-		if (current >= gSmokeGridLightControl[0].RadianceMaintenanceQuantity)
-			return false;
-		uint observed;
-		InterlockedCompareExchange(gSmokeGridLightControl[0].RadianceMaintenanceScheduled,
-			current, current + 1u, observed);
-		if (observed == current)
-			return true;
-	}
+	uint ticket;
+	InterlockedAdd(gSmokeGridLightControl[0].RadianceMaintenanceTickets, 1u, ticket);
+	if (ticket >= gSmokeGridLightControl[0].RadianceMaintenanceQuantity)
+		return false;
+	InterlockedAdd(gSmokeGridLightControl[0].RadianceMaintenanceScheduled, 1u);
+	return true;
 }
 
 bool SmokeGridLightScheduleRadiance(uint cellIndex, int3 cell, SmokeGridBrick brick)

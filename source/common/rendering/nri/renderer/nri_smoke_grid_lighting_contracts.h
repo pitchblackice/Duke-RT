@@ -135,6 +135,8 @@ struct NRISmokeGridLightControlGpu
 	uint32_t radianceHistoryRetained = 0;
 	uint32_t radianceHistoryMissing = 0;
 	uint32_t radianceAgeOverflows = 0;
+	uint32_t radianceNewInvalidTickets = 0;
+	uint32_t radianceMaintenanceTickets = 0;
 };
 
 struct NRISmokeGridLightProposalGpu
@@ -218,7 +220,7 @@ struct NRISmokeGridLightingStatusSnapshot
 };
 
 static_assert(sizeof(NRISmokeGridLightRecordGpu) == 96);
-static_assert(sizeof(NRISmokeGridLightControlGpu) == 384);
+static_assert(sizeof(NRISmokeGridLightControlGpu) == 392);
 static_assert(sizeof(NRISmokeGridLightProposalGpu) == 80);
 static_assert(sizeof(NRISmokeGridLightSupportStampGpu) == 8);
 static_assert(sizeof(NRISmokeGridScatterMetadataGpu) == 32);

@@ -119,6 +119,8 @@ struct SmokeGridLightControl
 	uint RadianceHistoryRetained;
 	uint RadianceHistoryMissing;
 	uint RadianceAgeOverflows;
+	uint RadianceNewInvalidTickets;
+	uint RadianceMaintenanceTickets;
 };
 
 struct SmokeGridLightProposal
