@@ -27,6 +27,7 @@ enum class NRISmokePass : uint32_t
 	TemporalVolume,
 	Composite,
 	EvaluateGridCompact,
+	PromptFallback,
 };
 
 struct NRISmokeParticleGpu
@@ -80,6 +81,10 @@ enum class NRISmokeInjectionSourceClass : uint32_t
 	InteractiveEvent = 2,
 	Diagnostic = 3,
 };
+
+constexpr uint32_t NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_SHIFT = 16u;
+constexpr uint32_t NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_MASK = 0x000f0000u;
+constexpr uint32_t NRI_SMOKE_SOURCE_METADATA_PROMPT_ELIGIBLE = 0x00100000u;
 
 struct NRISmokeInjectionCommandGpu
 {

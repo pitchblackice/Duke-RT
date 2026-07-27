@@ -18,6 +18,14 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 	if (commandIndex >= min(gSmokeGridConstants.CommandCount, commandCapacity))
 		return;
 	const SmokeInjectionCommand command = gSmokeGridCommands[commandIndex];
+	if (SmokeInjectionPromptEligible(command))
+	{
+		const uint promptSlot = SmokeInjectionPromptSlot(command);
+		if (promptSlot >= NRI_SMOKE_PROMPT_FALLBACK_QUANTITY ||
+			gSmokePromptOutcomes[promptSlot].CommandIndex != commandIndex ||
+			gSmokePromptOutcomes[promptSlot].Outcome != NRI_SMOKE_PROMPT_OUTCOME_GRID_NEW)
+			return;
+	}
 	if (command.Epoch != gSmokeGridConstants.SimulationEpoch || command.StyleIndex >= min(gSmokeGridConstants.StyleCount, styleCapacity))
 		return;
 	const SmokeStyle style = gSmokeGridStyles[command.StyleIndex];
@@ -62,6 +70,8 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 		const float kernel = normalized * normalized * (3.0 - 2.0 * normalized);
 		if (kernel <= 0.0)
 			continue;
+		if (SmokeInjectionPromptEligible(command))
+			InterlockedAdd(gSmokePromptOutcomes[SmokeInjectionPromptSlot(command)].RequestedBricks, 1u);
 		const float mass = commandMass * kernel / kernelNormalization;
 		const uint massQ = (uint)max(SmokeGridQuantize(mass,
 			gSmokeGridConstants.MassQuantization), 0);
@@ -140,5 +150,7 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 			InterlockedAdd(gSmokeGridSourceStats[command.SourceSlot].DepositedMassQ, massQ);
 			InterlockedAdd(gSmokeGridSourceStats[command.SourceSlot].DepositionCells, 1u);
 		}
+		if (SmokeInjectionPromptEligible(command))
+			InterlockedAdd(gSmokePromptOutcomes[SmokeInjectionPromptSlot(command)].AdmittedBricks, 1u);
 	}
 }

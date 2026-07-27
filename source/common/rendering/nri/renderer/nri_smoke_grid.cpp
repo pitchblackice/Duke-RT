@@ -53,9 +53,12 @@ namespace
 		"SmokeGridAdvectVelocity",
 		"SmokeGridAdvectFields",
 		"SmokeGridRebuild",
+		"SmokeGridValidatePrompt",
+		"SmokeGridAuthorizePrompt",
+		"SmokeGridFinalizePrompt",
 	};
 
-	static_assert(std::size(kPipelineNames) == 11u);
+	static_assert(std::size(kPipelineNames) == 14u);
 
 	const char* SmokeSourceClassName(uint32_t sourceClass)
 	{
@@ -75,7 +78,7 @@ std::array<NRIBufferResource*, NRISmokeGrid::StorageDescriptorCount> NRISmokeGri
 	return { &mControl, &mHash, &mBricks, &mFreeList, &mActiveA, &mActiveB, &mDispatchArgs,
 		&mScalarA, &mScalarB, &mVelocityA, &mVelocityB, &mOpticalA, &mOpticalB,
 		&mDynamicsA, &mDynamicsB, &mDeposit0, &mDeposit1, &mDeposit2, &mDeposit3,
-		&mSourceStats };
+		&mSourceStats, &mPromptOutcomes, &mPromptLedger };
 }
 
 std::array<const NRIBufferResource*, NRISmokeGrid::StorageDescriptorCount> NRISmokeGrid::StorageResources() const
@@ -83,7 +86,7 @@ std::array<const NRIBufferResource*, NRISmokeGrid::StorageDescriptorCount> NRISm
 	return { &mControl, &mHash, &mBricks, &mFreeList, &mActiveA, &mActiveB, &mDispatchArgs,
 		&mScalarA, &mScalarB, &mVelocityA, &mVelocityB, &mOpticalA, &mOpticalB,
 		&mDynamicsA, &mDynamicsB, &mDeposit0, &mDeposit1, &mDeposit2, &mDeposit3,
-		&mSourceStats };
+		&mSourceStats, &mPromptOutcomes, &mPromptLedger };
 }
 
 void NRISmokeGrid::SetFailure(const char* reason)
@@ -294,7 +297,11 @@ bool NRISmokeGrid::EnsureResources(const NRISmokeGridServices& services, const N
 		CreateBuffer(services, mDeposit2, cells * 16u, 16u, storage, nri::MemoryLocation::DEVICE, true) &&
 		CreateBuffer(services, mDeposit3, cells * 16u, 16u, storage, nri::MemoryLocation::DEVICE, true) &&
 		CreateBuffer(services, mSourceStats, (uint64_t)SourceCapacity * sizeof(NRISmokeGridSourceStatsGpu),
-			sizeof(NRISmokeGridSourceStatsGpu), storage, nri::MemoryLocation::DEVICE, true);
+			sizeof(NRISmokeGridSourceStatsGpu), storage, nri::MemoryLocation::DEVICE, true) &&
+		CreateBuffer(services, mPromptOutcomes, NRI_SMOKE_PROMPT_FALLBACK_QUANTITY * sizeof(NRISmokePromptOutcomeGpu),
+			sizeof(NRISmokePromptOutcomeGpu), storage, nri::MemoryLocation::DEVICE, true) &&
+		CreateBuffer(services, mPromptLedger, NRI_SMOKE_PROMPT_LEDGER_CAPACITY * sizeof(NRISmokePromptLedgerGpu),
+			sizeof(NRISmokePromptLedgerGpu), storage, nri::MemoryLocation::DEVICE, true);
 
 	for (FrameSlot& slot : mFrameSlots)
 	{
@@ -303,8 +310,13 @@ bool NRISmokeGrid::EnsureResources(const NRISmokeGridServices& services, const N
 		created = created && CreateBuffer(services, slot.sourceReadback,
 			(uint64_t)SourceCapacity * sizeof(NRISmokeGridSourceStatsGpu), sizeof(NRISmokeGridSourceStatsGpu),
 			nri::BufferUsageBits::NONE, nri::MemoryLocation::HOST_READBACK, false);
+		created = created && CreateBuffer(services, slot.promptReadback,
+			NRI_SMOKE_PROMPT_FALLBACK_QUANTITY * sizeof(NRISmokePromptOutcomeGpu), sizeof(NRISmokePromptOutcomeGpu),
+			nri::BufferUsageBits::NONE, nri::MemoryLocation::HOST_READBACK, false);
 		slot.readbackPending = false;
-		slot.readbackInitialized = false;
+		slot.diagnosticReadbackPending = false;
+		slot.promptReadbackInitialized = false;
+		slot.diagnosticReadbackInitialized = false;
 	}
 	if (!created)
 	{
@@ -341,7 +353,7 @@ bool NRISmokeGrid::EnsureResources(const NRISmokeGridServices& services, const N
 	for (const NRIBufferResource* resource : StorageResources())
 		mStatus.residentBytes += resource->memorySize;
 	for (const FrameSlot& slot : mFrameSlots)
-		mStatus.residentBytes += slot.controlReadback.memorySize + slot.sourceReadback.memorySize;
+		mStatus.residentBytes += slot.controlReadback.memorySize + slot.sourceReadback.memorySize + slot.promptReadback.memorySize;
 	mStatus.resourcesReady = true;
 	mStatus.failureReason = "none";
 	return true;
@@ -352,7 +364,21 @@ void NRISmokeGrid::ConsumeReadback(const NRISmokeGridServices& services, uint32_
 	if (mFrameSlots.empty() || services.core == nullptr)
 		return;
 	FrameSlot& slot = mFrameSlots[std::min(services.queuedFrameIndex, (uint32_t)mFrameSlots.size() - 1u)];
-	if (!slot.readbackPending || slot.controlReadback.buffer == nullptr || slot.sourceReadback.buffer == nullptr)
+	if (slot.readbackPending && slot.promptReadback.buffer != nullptr && slot.readbackEpoch == simulationEpoch)
+	{
+		const uint64_t promptBytes = NRI_SMOKE_PROMPT_FALLBACK_QUANTITY * sizeof(NRISmokePromptOutcomeGpu);
+		const void* promptMapped = services.core->MapBuffer(*slot.promptReadback.buffer, 0, promptBytes);
+		if (promptMapped != nullptr)
+		{
+			const auto* outcomes = static_cast<const NRISmokePromptOutcomeGpu*>(promptMapped);
+			for (uint32_t i = 0u; i < NRI_SMOKE_PROMPT_FALLBACK_QUANTITY; ++i)
+				if (outcomes[i].outcome != (uint32_t)NRISmokePromptOutcome::None && outcomes[i].rangeCount != 0u)
+					mPromptCommits.push_back(outcomes[i]);
+			services.core->UnmapBuffer(*slot.promptReadback.buffer);
+		}
+	}
+	slot.readbackPending = false;
+	if (!slot.diagnosticReadbackPending || slot.controlReadback.buffer == nullptr || slot.sourceReadback.buffer == nullptr)
 		return;
 	mStatus.gpuStatsValid = false;
 	mStatus.gpuFrameDeltaValid = false;
@@ -368,7 +394,7 @@ void NRISmokeGrid::ConsumeReadback(const NRISmokeGridServices& services, uint32_
 			const void* sourceMapped = services.core->MapBuffer(*slot.sourceReadback.buffer, 0, sourceBytes);
 			if (sourceMapped == nullptr)
 			{
-				slot.readbackPending = false;
+				slot.diagnosticReadbackPending = false;
 				return;
 			}
 			const auto* rows = static_cast<const NRISmokeGridSourceStatsGpu*>(sourceMapped);
@@ -440,7 +466,7 @@ void NRISmokeGrid::ConsumeReadback(const NRISmokeGridServices& services, uint32_
 			mStatus.controlReadbackBytes += sizeof(NRISmokeGridControlGpu);
 		}
 	}
-	slot.readbackPending = false;
+	slot.diagnosticReadbackPending = false;
 }
 
 bool NRISmokeGrid::PrepareFrame(const NRISmokeGridServices& services, const NRISmokeSettings& settings,
@@ -564,47 +590,74 @@ void NRISmokeGrid::DispatchIndirect(const NRISmokeGridServices& services, NRISmo
 
 bool NRISmokeGrid::RecordControlReadback(const NRISmokeGridServices& services, const NRISmokeSettings& settings)
 {
-	if (!settings.readback || mFrameSlots.empty())
+	if (mFrameSlots.empty())
 		return true;
 	FrameSlot& slot = mFrameSlots[std::min(services.queuedFrameIndex, (uint32_t)mFrameSlots.size() - 1u)];
-	if (slot.controlReadback.buffer == nullptr || slot.sourceReadback.buffer == nullptr)
+	if (slot.controlReadback.buffer == nullptr || slot.sourceReadback.buffer == nullptr || slot.promptReadback.buffer == nullptr)
 		return false;
 
-	nri::BufferBarrierDesc before[4] = {};
-	before[0].buffer = mControl.buffer;
+	nri::BufferBarrierDesc promptBefore[2] = {};
+	promptBefore[0].buffer = mPromptOutcomes.buffer;
+	promptBefore[0].before = StorageAccess();
+	promptBefore[0].after = NRIResourceCopySourceAccess();
+	promptBefore[1].buffer = slot.promptReadback.buffer;
+	promptBefore[1].before = slot.promptReadbackInitialized ? NRIResourceCopyDestinationAccess() : nri::AccessStage{};
+	promptBefore[1].after = NRIResourceCopyDestinationAccess();
+	nri::BarrierDesc promptBeforeCopy = {};
+	promptBeforeCopy.buffers = promptBefore;
+	promptBeforeCopy.bufferNum = 2;
+	services.core->CmdBarrier(*services.commandBuffer, promptBeforeCopy);
+	services.core->CmdCopyBuffer(*services.commandBuffer, *slot.promptReadback.buffer, 0,
+		*mPromptOutcomes.buffer, 0, NRI_SMOKE_PROMPT_FALLBACK_QUANTITY * sizeof(NRISmokePromptOutcomeGpu));
+	nri::BufferBarrierDesc promptRestore = {};
+	promptRestore.buffer = mPromptOutcomes.buffer;
+	promptRestore.before = NRIResourceCopySourceAccess();
+	promptRestore.after = StorageAccess();
+	nri::BarrierDesc promptAfterCopy = {};
+	promptAfterCopy.buffers = &promptRestore;
+	promptAfterCopy.bufferNum = 1;
+	services.core->CmdBarrier(*services.commandBuffer, promptAfterCopy);
+
+	if (settings.readback)
+	{
+		nri::BufferBarrierDesc before[4] = {};
+		before[0].buffer = mControl.buffer;
 	before[0].before = StorageAccess();
 	before[0].after = NRIResourceCopySourceAccess();
 	before[1].buffer = mSourceStats.buffer;
 	before[1].before = StorageAccess();
 	before[1].after = NRIResourceCopySourceAccess();
 	before[2].buffer = slot.controlReadback.buffer;
-	before[2].before = slot.readbackInitialized ? NRIResourceCopyDestinationAccess() : nri::AccessStage{};
+	before[2].before = slot.diagnosticReadbackInitialized ? NRIResourceCopyDestinationAccess() : nri::AccessStage{};
 	before[2].after = NRIResourceCopyDestinationAccess();
 	before[3].buffer = slot.sourceReadback.buffer;
-	before[3].before = slot.readbackInitialized ? NRIResourceCopyDestinationAccess() : nri::AccessStage{};
+	before[3].before = slot.diagnosticReadbackInitialized ? NRIResourceCopyDestinationAccess() : nri::AccessStage{};
 	before[3].after = NRIResourceCopyDestinationAccess();
-	nri::BarrierDesc beforeCopy = {};
-	beforeCopy.buffers = before;
-	beforeCopy.bufferNum = 4;
-	services.core->CmdBarrier(*services.commandBuffer, beforeCopy);
-	services.core->CmdCopyBuffer(*services.commandBuffer, *slot.controlReadback.buffer, 0,
+		nri::BarrierDesc beforeCopy = {};
+		beforeCopy.buffers = before;
+		beforeCopy.bufferNum = 4;
+		services.core->CmdBarrier(*services.commandBuffer, beforeCopy);
+		services.core->CmdCopyBuffer(*services.commandBuffer, *slot.controlReadback.buffer, 0,
 		*mControl.buffer, 0, sizeof(NRISmokeGridControlGpu));
-	services.core->CmdCopyBuffer(*services.commandBuffer, *slot.sourceReadback.buffer, 0,
+		services.core->CmdCopyBuffer(*services.commandBuffer, *slot.sourceReadback.buffer, 0,
 		*mSourceStats.buffer, 0, (uint64_t)SourceCapacity * sizeof(NRISmokeGridSourceStatsGpu));
 
-	nri::BufferBarrierDesc restore[2] = {};
+		nri::BufferBarrierDesc restore[2] = {};
 	restore[0].buffer = mControl.buffer;
 	restore[0].before = NRIResourceCopySourceAccess();
 	restore[0].after = StorageAccess();
 	restore[1].buffer = mSourceStats.buffer;
 	restore[1].before = NRIResourceCopySourceAccess();
 	restore[1].after = StorageAccess();
-	nri::BarrierDesc afterCopy = {};
-	afterCopy.buffers = restore;
-	afterCopy.bufferNum = 2;
-	services.core->CmdBarrier(*services.commandBuffer, afterCopy);
+		nri::BarrierDesc afterCopy = {};
+		afterCopy.buffers = restore;
+		afterCopy.bufferNum = 2;
+		services.core->CmdBarrier(*services.commandBuffer, afterCopy);
+		slot.diagnosticReadbackPending = true;
+		slot.diagnosticReadbackInitialized = true;
+	}
 	slot.readbackPending = true;
-	slot.readbackInitialized = true;
+	slot.promptReadbackInitialized = true;
 	slot.readbackRendererFrame = services.rendererFrame;
 	slot.readbackEpoch = mResourceEpoch;
 	return true;
@@ -696,7 +749,13 @@ bool NRISmokeGrid::RecordFrame(const NRISmokeGridServices& services, const NRISm
 	if (frame.commandCount > 0u)
 	{
 		NRIScopedGpuTiming timing(services.gpuTimingDevice, NRIGpuTimingScope::SmokeGridDeposit);
+		Dispatch(services, constants, NRISmokeGridPass::ValidatePrompt, frame.commandCount);
+		StorageBarrier(services);
+		Dispatch(services, constants, NRISmokeGridPass::AuthorizePrompt, 1u);
+		StorageBarrier(services);
 		Dispatch(services, constants, NRISmokeGridPass::Deposit, frame.commandCount);
+		StorageBarrier(services);
+		Dispatch(services, constants, NRISmokeGridPass::FinalizePrompt, 1u);
 		StorageBarrier(services);
 		DispatchIndirect(services, constants, NRISmokeGridPass::ResolveDeposit);
 		StorageBarrier(services);
@@ -789,6 +848,7 @@ void NRISmokeGrid::Reset(uint32_t simulationEpoch, const char* reason)
 	mStatus.gpuRendererFrame = UINT64_MAX;
 	mStatus.gpu = {};
 	mStatus.sources.clear();
+	mPromptCommits.clear();
 	mStatus.resetReason = reason != nullptr ? reason : "unspecified";
 }
 
@@ -800,8 +860,11 @@ void NRISmokeGrid::DestroyResources(const NRISmokeGridServices& services)
 	{
 		DestroyBuffer(services, slot.controlReadback);
 		DestroyBuffer(services, slot.sourceReadback);
+		DestroyBuffer(services, slot.promptReadback);
 		slot.readbackPending = false;
-		slot.readbackInitialized = false;
+		slot.diagnosticReadbackPending = false;
+		slot.promptReadbackInitialized = false;
+		slot.diagnosticReadbackInitialized = false;
 		slot.readbackRendererFrame = UINT64_MAX;
 		slot.readbackEpoch = 0;
 	}
@@ -815,6 +878,14 @@ void NRISmokeGrid::DestroyResources(const NRISmokeGridServices& services)
 	mStatus.resourcesReady = false;
 	mStatus.residentBytes = 0;
 	mStatus.sources.clear();
+	mPromptCommits.clear();
+}
+
+std::vector<NRISmokePromptOutcomeGpu> NRISmokeGrid::ConsumePromptOutcomes()
+{
+	std::vector<NRISmokePromptOutcomeGpu> committed;
+	committed.swap(mPromptCommits);
+	return committed;
 }
 
 void NRISmokeGrid::Shutdown(const NRISmokeGridServices& services)

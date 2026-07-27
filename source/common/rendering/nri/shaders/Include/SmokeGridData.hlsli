@@ -3,6 +3,36 @@
 
 #define NRI_SMOKE_GRID_BRICK_AXIS 8
 #define NRI_SMOKE_GRID_CELLS_PER_BRICK 512u
+#define NRI_SMOKE_PROMPT_FALLBACK_QUANTITY 8u
+#define NRI_SMOKE_PROMPT_LEDGER_CAPACITY NRI_SMOKE_PROMPT_FALLBACK_QUANTITY
+#define NRI_SMOKE_PROMPT_OUTCOME_NONE 0u
+#define NRI_SMOKE_PROMPT_OUTCOME_FALLBACK 1u
+#define NRI_SMOKE_PROMPT_OUTCOME_GRID_NEW 2u
+#define NRI_SMOKE_PROMPT_OUTCOME_GRID_COMMITTED 3u
+#define NRI_SMOKE_PROMPT_OUTCOME_INTERNAL_ERROR 4u
+
+struct SmokePromptOutcome
+{
+	uint PulseIdLow;
+	uint PulseIdHigh;
+	uint RangeBegin;
+	uint RangeCount;
+	uint CommandIndex;
+	uint Outcome;
+	uint RequestedBricks;
+	uint AdmittedBricks;
+};
+
+struct SmokePromptLedger
+{
+	uint PulseIdLow;
+	uint PulseIdHigh;
+	uint RangeBegin;
+	uint RangeCount;
+	uint Epoch;
+	uint Committed;
+	uint2 Padding;
+};
 #define NRI_SMOKE_GRID_HASH_PROBES 24u
 #define NRI_SMOKE_GRID_EMPTY 0u
 #define NRI_SMOKE_GRID_CLAIMED 1u
@@ -12,6 +42,9 @@
 #define NRI_SMOKE_GRID_BRICK_CONTENT 1u
 #define NRI_SMOKE_GRID_BRICK_HALO 2u
 #define NRI_SMOKE_GRID_BRICK_BORROWED_FIRST_USE 4u
+#define NRI_SMOKE_GRID_BRICK_PROMPT_PROVISIONAL 8u
+#define NRI_SMOKE_GRID_BRICK_PROMPT_SLOT_SHIFT 4u
+#define NRI_SMOKE_GRID_BRICK_PROMPT_SLOT_MASK 0xf0u
 #define NRI_SMOKE_GRID_FIRST_USE_CORE_MINIMUM 8u
 #define NRI_SMOKE_GRID_FIRST_USE_CORE_DIVISOR 16u
 #define NRI_SMOKE_GRID_FIRST_USE_BLOCKED_NONE 0u

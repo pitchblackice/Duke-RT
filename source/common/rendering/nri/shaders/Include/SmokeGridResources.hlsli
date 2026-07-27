@@ -29,6 +29,8 @@ RWStructuredBuffer<int4> gSmokeGridDeposit1 : register(u16, space1);
 RWStructuredBuffer<int4> gSmokeGridDeposit2 : register(u17, space1);
 RWStructuredBuffer<int4> gSmokeGridDeposit3 : register(u18, space1);
 RWStructuredBuffer<SmokeGridSourceStats> gSmokeGridSourceStats : register(u19, space1);
+RWStructuredBuffer<SmokePromptOutcome> gSmokePromptOutcomes : register(u20, space1);
+RWStructuredBuffer<SmokePromptLedger> gSmokePromptLedger : register(u21, space1);
 
 NRI_ROOT_CONSTANTS(SmokeGridConstants, gSmokeGridConstants, 0, 2);
 

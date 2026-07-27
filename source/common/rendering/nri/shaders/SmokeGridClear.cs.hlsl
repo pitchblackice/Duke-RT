@@ -35,4 +35,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gSmokeGridActiveA[index] = 0xffffffffu;
 		gSmokeGridActiveB[index] = 0xffffffffu;
 	}
+	if (index < NRI_SMOKE_PROMPT_FALLBACK_QUANTITY)
+		gSmokePromptOutcomes[index] = (SmokePromptOutcome)0;
+	if (index < NRI_SMOKE_PROMPT_LEDGER_CAPACITY)
+		gSmokePromptLedger[index] = (SmokePromptLedger)0;
 }

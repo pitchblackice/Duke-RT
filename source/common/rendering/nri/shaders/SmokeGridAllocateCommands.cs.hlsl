@@ -5,6 +5,29 @@
 groupshared uint gSmokeGridSourceCommandCursor[NRI_SMOKE_GRID_MAX_ADMISSION_SOURCES];
 groupshared uint gSmokeGridSourceBrickCursor[NRI_SMOKE_GRID_MAX_ADMISSION_SOURCES];
 
+bool SmokePromptIdentityMatches(SmokePromptLedger entry, SmokeInjectionCommand command)
+{
+	return entry.Committed != 0u && entry.Epoch == command.Epoch &&
+		entry.PulseIdLow == command.PulseIdLow && entry.PulseIdHigh == command.PulseIdHigh &&
+		entry.RangeBegin == command.RangeBegin && entry.RangeCount == command.RangeCount;
+}
+
+bool SmokePromptAlreadyCommitted(SmokeInjectionCommand command)
+{
+	const uint slot = SmokeInjectionPromptSlot(command);
+	return slot < NRI_SMOKE_PROMPT_LEDGER_CAPACITY &&
+		SmokePromptIdentityMatches(gSmokePromptLedger[slot], command);
+}
+
+void SmokePromptReject(SmokeInjectionCommand command)
+{
+	if (!SmokeInjectionPromptEligible(command))
+		return;
+	const uint slot = SmokeInjectionPromptSlot(command);
+	if (slot < NRI_SMOKE_PROMPT_FALLBACK_QUANTITY)
+		gSmokePromptOutcomes[slot].Outcome = NRI_SMOKE_PROMPT_OUTCOME_FALLBACK;
+}
+
 uint SmokeGridGreatestCommonDivisor(uint a, uint b)
 {
 	[loop]
@@ -193,6 +216,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint validCommandCount = min(gSmokeGridConstants.CommandCount, commandCapacity);
 	const uint validStyleCount = min(gSmokeGridConstants.StyleCount, styleCapacity);
 	const uint validSourceCapacity = min(sourceCapacity, NRI_SMOKE_GRID_MAX_ADMISSION_SOURCES);
+	[unroll]
+	for (uint promptSlot = 0u; promptSlot < NRI_SMOKE_PROMPT_FALLBACK_QUANTITY; ++promptSlot)
+		gSmokePromptOutcomes[promptSlot] = (SmokePromptOutcome)0;
 	[loop]
 	for (uint sourceSlot = 0u; sourceSlot < validSourceCapacity; ++sourceSlot)
 	{
@@ -218,15 +244,34 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	for (uint commandIndex = 0u; commandIndex < validCommandCount; ++commandIndex)
 	{
 		const SmokeInjectionCommand command = gSmokeGridCommands[commandIndex];
+		if (SmokeInjectionPromptEligible(command))
+		{
+			const uint promptSlot = SmokeInjectionPromptSlot(command);
+			if (promptSlot >= NRI_SMOKE_PROMPT_FALLBACK_QUANTITY)
+				continue;
+			SmokePromptOutcome outcome = (SmokePromptOutcome)0;
+			outcome.PulseIdLow = command.PulseIdLow;
+			outcome.PulseIdHigh = command.PulseIdHigh;
+			outcome.RangeBegin = command.RangeBegin;
+			outcome.RangeCount = command.RangeCount;
+			outcome.CommandIndex = commandIndex;
+			outcome.Outcome = SmokePromptAlreadyCommitted(command) ?
+				NRI_SMOKE_PROMPT_OUTCOME_GRID_COMMITTED : NRI_SMOKE_PROMPT_OUTCOME_GRID_NEW;
+			gSmokePromptOutcomes[promptSlot] = outcome;
+			if (outcome.Outcome == NRI_SMOKE_PROMPT_OUTCOME_GRID_COMMITTED)
+				continue;
+		}
 		if (command.Epoch != gSmokeGridConstants.SimulationEpoch || command.StyleIndex >= validStyleCount ||
 			command.SourceSlot >= validSourceCapacity)
 		{
+			SmokePromptReject(command);
 			SmokeGridRecordRejection(command.SourceSlot, validSourceCapacity, 2u);
 			continue;
 		}
 		SmokeGridSourceStats stats = gSmokeGridSourceStats[command.SourceSlot];
 		if (stats.Commands != 0u && stats.SourceId != command.SourceId)
 		{
+			SmokePromptReject(command);
 			SmokeGridRecordRejection(command.SourceSlot, validSourceCapacity, 2u);
 			continue;
 		}
@@ -267,9 +312,17 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			{
 				const uint commandIndex = gSmokeGridSourceCommandCursor[sourceSlot];
 				const SmokeInjectionCommand command = gSmokeGridCommands[commandIndex];
+				if (SmokeInjectionPromptEligible(command) && SmokeInjectionPromptSlot(command) < NRI_SMOKE_PROMPT_FALLBACK_QUANTITY &&
+					gSmokePromptOutcomes[SmokeInjectionPromptSlot(command)].Outcome == NRI_SMOKE_PROMPT_OUTCOME_GRID_COMMITTED)
+				{
+					gSmokeGridSourceCommandCursor[sourceSlot]++;
+					gSmokeGridSourceBrickCursor[sourceSlot] = 0u;
+					continue;
+				}
 				if (command.Epoch != gSmokeGridConstants.SimulationEpoch ||
 					command.StyleIndex >= validStyleCount || command.SourceSlot != sourceSlot)
 				{
+					SmokePromptReject(command);
 					gSmokeGridSourceCommandCursor[sourceSlot]++;
 					gSmokeGridSourceBrickCursor[sourceSlot] = 0u;
 					continue;
@@ -305,18 +358,25 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					continue;
 				}
 				gSmokeGridSourceStats[sourceSlot].RequestedBricks++;
+				if (SmokeInjectionPromptEligible(command))
+					gSmokePromptOutcomes[SmokeInjectionPromptSlot(command)].RequestedBricks++;
 				gSmokeGridControl[0].AdmissionRequested++;
 				madeProgress = true;
 				uint brickIndex;
 				if (SmokeGridFindBrickSerial(coordinate, brickIndex))
 				{
 					const uint sourceClass = SmokeInjectionSourceClass(command);
-					if (SmokeGridIsFirstUseClass(sourceClass))
+					if (SmokeGridIsFirstUseClass(sourceClass) && !SmokeInjectionPromptEligible(command))
 						SmokeGridPromoteBorrowedBrickSerial(brickIndex);
 					gSmokeGridSourceStats[sourceSlot].ExistingHits++;
 					gSmokeGridControl[0].AdmissionExisting++;
-					gSmokeGridBricks[brickIndex].Flags |= NRI_SMOKE_GRID_BRICK_CONTENT;
-					gSmokeGridBricks[brickIndex].IdleFrames = 0u;
+					if (SmokeInjectionPromptEligible(command))
+						gSmokePromptOutcomes[SmokeInjectionPromptSlot(command)].AdmittedBricks++;
+					if (!SmokeInjectionPromptEligible(command))
+					{
+						gSmokeGridBricks[brickIndex].Flags |= NRI_SMOKE_GRID_BRICK_CONTENT;
+						gSmokeGridBricks[brickIndex].IdleFrames = 0u;
+					}
 					continue;
 				}
 
@@ -324,7 +384,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				{
 					const uint sourceClass = SmokeInjectionSourceClass(command);
 					uint blockedReason = NRI_SMOKE_GRID_FIRST_USE_BLOCKED_NONE;
-					if (SmokeGridIsFirstUseClass(sourceClass) &&
+					if (!SmokeInjectionPromptEligible(command) && SmokeGridIsFirstUseClass(sourceClass) &&
 						SmokeGridTryReplaceBorrowedDormantSerial(coordinate,
 							NRI_SMOKE_GRID_BRICK_CONTENT, brickIndex, blockedReason))
 					{
@@ -332,9 +392,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 						gSmokeGridSourceStats[sourceSlot].AdmittedKeyHash ^=
 							SmokeGridHashCoordinate(coordinate);
 						gSmokeGridControl[0].AdmissionAdmitted++;
+						if (SmokeInjectionPromptEligible(command))
+							gSmokePromptOutcomes[SmokeInjectionPromptSlot(command)].AdmittedBricks++;
 					}
 					else
 					{
+						SmokePromptReject(command);
 						if (SmokeGridIsFirstUseClass(sourceClass))
 							SmokeGridRecordFirstUseBlocked(blockedReason);
 						SmokeGridRecordRejection(sourceSlot, validSourceCapacity,
@@ -346,7 +409,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				}
 				const uint freeBeforeAllocation = gSmokeGridControl[0].FreeCount;
 				bool newlyAllocated = false;
-				if (SmokeGridFindOrAllocateBrickSerial(coordinate, NRI_SMOKE_GRID_BRICK_CONTENT,
+				const uint allocationFlags = SmokeInjectionPromptEligible(command) ?
+					(NRI_SMOKE_GRID_BRICK_PROMPT_PROVISIONAL |
+						(SmokeInjectionPromptSlot(command) << NRI_SMOKE_GRID_BRICK_PROMPT_SLOT_SHIFT)) :
+					NRI_SMOKE_GRID_BRICK_CONTENT;
+				if (SmokeGridFindOrAllocateBrickSerial(coordinate, allocationFlags,
 					brickIndex, newlyAllocated) && newlyAllocated)
 				{
 					if (!SmokeGridIsFirstUseClass(SmokeInjectionSourceClass(command)) &&
@@ -359,9 +426,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					gSmokeGridSourceStats[sourceSlot].AdmittedKeyHash ^=
 						SmokeGridHashCoordinate(coordinate);
 					gSmokeGridControl[0].AdmissionAdmitted++;
+					if (SmokeInjectionPromptEligible(command))
+						gSmokePromptOutcomes[SmokeInjectionPromptSlot(command)].AdmittedBricks++;
 				}
 				else
 				{
+					SmokePromptReject(command);
 					SmokeGridRecordRejection(sourceSlot, validSourceCapacity,
 						gSmokeGridControl[0].FreeCount == 0u ? 0u : 1u);
 				}
@@ -370,5 +440,68 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		if (!madeProgress)
 			break;
+	}
+	[unroll]
+	for (uint promptSlot = 0u; promptSlot < NRI_SMOKE_PROMPT_FALLBACK_QUANTITY; ++promptSlot)
+	{
+		SmokePromptOutcome outcome = gSmokePromptOutcomes[promptSlot];
+		if (outcome.RangeCount != 0u && outcome.Outcome == NRI_SMOKE_PROMPT_OUTCOME_GRID_NEW)
+		{
+			if (outcome.RequestedBricks != outcome.AdmittedBricks)
+				outcome.Outcome = NRI_SMOKE_PROMPT_OUTCOME_FALLBACK;
+			gSmokePromptOutcomes[promptSlot] = outcome;
+		}
+		const uint provisionalTag = NRI_SMOKE_GRID_BRICK_PROMPT_PROVISIONAL |
+			(promptSlot << NRI_SMOKE_GRID_BRICK_PROMPT_SLOT_SHIFT);
+		[loop]
+		for (uint brickIndex = 0u; brickIndex < gSmokeGridConstants.BrickCapacity; ++brickIndex)
+		{
+			SmokeGridBrick brick = gSmokeGridBricks[brickIndex];
+			if ((brick.Flags & (NRI_SMOKE_GRID_BRICK_PROMPT_PROVISIONAL |
+				NRI_SMOKE_GRID_BRICK_PROMPT_SLOT_MASK)) != provisionalTag)
+				continue;
+			if (outcome.Outcome == NRI_SMOKE_PROMPT_OUTCOME_GRID_NEW)
+			{
+				brick.Flags &= ~(NRI_SMOKE_GRID_BRICK_PROMPT_PROVISIONAL |
+					NRI_SMOKE_GRID_BRICK_PROMPT_SLOT_MASK);
+				brick.Flags |= NRI_SMOKE_GRID_BRICK_CONTENT;
+				brick.IdleFrames = 0u;
+				gSmokeGridBricks[brickIndex] = brick;
+			}
+			else
+			{
+				if (brick.HashSlot < gSmokeGridConstants.HashCapacity)
+					gSmokeGridHash[brick.HashSlot].State = NRI_SMOKE_GRID_TOMBSTONE;
+				brick.State = NRI_SMOKE_GRID_EMPTY;
+				brick.Flags = 0u;
+				gSmokeGridBricks[brickIndex] = brick;
+				SmokeGridPushFree(brickIndex);
+				gSmokeGridControl[0].ResidentCount--;
+			}
+		}
+		if (outcome.Outcome == NRI_SMOKE_PROMPT_OUTCOME_GRID_NEW && outcome.CommandIndex < validCommandCount)
+		{
+			const SmokeInjectionCommand command = gSmokeGridCommands[outcome.CommandIndex];
+			int3 minimumBrick; uint3 brickExtent; uint brickCount; float radius; float3 halfAxisU, halfAxisV;
+			if (command.StyleIndex < validStyleCount && SmokeGridCommandFootprint(command,
+				gSmokeGridStyles[command.StyleIndex], minimumBrick, brickExtent, brickCount,
+				radius, halfAxisU, halfAxisV))
+			{
+				[loop]
+				for (uint ordinal = 0u; ordinal < brickCount; ++ordinal)
+				{
+					const int3 coordinate = SmokeGridFootprintCoordinate(minimumBrick, brickExtent,
+						ordinal, command.SourceId);
+					if (!SmokeGridCommandMayIntersectBrick(command, coordinate, radius, halfAxisU, halfAxisV))
+						continue;
+					uint brickIndex;
+					if (SmokeGridFindBrickSerial(coordinate, brickIndex))
+					{
+						gSmokeGridBricks[brickIndex].Flags |= NRI_SMOKE_GRID_BRICK_CONTENT;
+						gSmokeGridBricks[brickIndex].IdleFrames = 0u;
+					}
+				}
+			}
+		}
 	}
 }

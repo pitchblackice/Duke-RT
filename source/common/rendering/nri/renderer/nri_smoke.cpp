@@ -25,8 +25,12 @@ namespace
 	constexpr uint32_t kSmokeDirectStorageBufferCount = 2u;
 	constexpr uint32_t kSmokeGridLightingStorageBufferCount = NRISmokeGridLighting::StorageDescriptorCount;
 	constexpr uint32_t kSmokeViewStorageBufferCount = 3u;
+	constexpr uint32_t kSmokePromptStorageBufferCount = 1u;
 	constexpr uint32_t kSmokeStorageDescriptorCount = kSmokeCoreStorageBufferCount + NRISmokeGrid::EvaluationDescriptorCount +
-		kSmokeDirectStorageBufferCount + kSmokeGridLightingStorageBufferCount + kSmokeViewStorageBufferCount;
+		kSmokeDirectStorageBufferCount + kSmokeGridLightingStorageBufferCount + kSmokeViewStorageBufferCount +
+		kSmokePromptStorageBufferCount;
+	constexpr uint32_t kSmokeViewStorageBase = kSmokeStorageDescriptorCount -
+		kSmokePromptStorageBufferCount - kSmokeViewStorageBufferCount;
 	constexpr uint32_t kSmokeFilteredSceneBufferCount = 8u;
 	constexpr uint32_t kSmokeEmissiveSceneBufferCount = 7u;
 	constexpr uint32_t kSmokeExtendedSceneBufferCount = 10u;
@@ -44,8 +48,8 @@ namespace
 	constexpr uint32_t kSmokeFlagGridLightingDebugShift = 27u;
 	constexpr uint32_t kSmokeFlagViewMask = 0x40000000u;
 	constexpr uint32_t kSmokeFlagGridLightingLocalProposals = 0x80000000u;
-	const char* const kSmokePipelineNames[] = { "SmokeClear", "SmokeSimulate", "SmokeSpawn", "SmokeBin", "SmokeLightDirectionalCarriers", "SmokeEvaluateMedium", "SmokeEvaluateGrid", "SmokeLightPoint", "SmokeLightDirectional", "SmokeLightDirectTemporal", "SmokeLightDirectSpatial", "SmokeLightEmissive", "SmokeLightEmissiveTemporal", "SmokeLightEmissiveSpatial", "SmokeLightIndirectReference", "SmokeLightIndirectTemporal", "SmokeLightIndirectSpatial", "SmokeIntegrate", "SmokeResolveVolume", "SmokeTemporalVolume", "SmokeComposite", "SmokeEvaluateGridCompact" };
-	static_assert(std::size(kSmokePipelineNames) == 22u);
+	const char* const kSmokePipelineNames[] = { "SmokeClear", "SmokeSimulate", "SmokeSpawn", "SmokeBin", "SmokeLightDirectionalCarriers", "SmokeEvaluateMedium", "SmokeEvaluateGrid", "SmokeLightPoint", "SmokeLightDirectional", "SmokeLightDirectTemporal", "SmokeLightDirectSpatial", "SmokeLightEmissive", "SmokeLightEmissiveTemporal", "SmokeLightEmissiveSpatial", "SmokeLightIndirectReference", "SmokeLightIndirectTemporal", "SmokeLightIndirectSpatial", "SmokeIntegrate", "SmokeResolveVolume", "SmokeTemporalVolume", "SmokeComposite", "SmokeEvaluateGridCompact", "SmokePromptFallback" };
+	static_assert(std::size(kSmokePipelineNames) == 23u);
 
 	uint32_t PackDirectionalLightColor24(const float color[3])
 	{
@@ -1190,6 +1194,9 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	// committed only after every authoritative consumer has recorded it.
 	mPulseOwner.Enqueue(mPendingCommands);
 	mPendingCommands.clear();
+	{
+		mPromptFallback.CommitGridHandoffs(mPulseOwner, mGrid.ConsumePromptOutcomes());
+	}
 	const auto& availableCommands = mPulseOwner.PendingCommands();
 	if (gridAuthority && !particleAuthority)
 	{
@@ -1220,8 +1227,24 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 			}
 		}
 	}
+	std::vector<NRISmokePromptRangeIdentity> retainedPromptIdentities;
+	if (gridAuthority && !particleAuthority)
+	{
+		const NRISmokePromptPrepareResult promptResult = mPromptFallback.Prepare(mSelectedGridCommands,
+			renderer.mFrameBuffer->mFrameIndex, mSettings.gridCellSize, retainedPromptIdentities);
+		mStatus.admission.uploaded -= std::min(mStatus.admission.uploaded, promptResult.deferredRanges);
+		mStatus.admission.boundedDeferred += promptResult.deferredRanges;
+		mStatus.admission.interactiveUploaded -= std::min(mStatus.admission.interactiveUploaded,
+			promptResult.deferredRanges);
+		mStatus.admission.estimatedBrickWorkUploaded -=
+			std::min(mStatus.admission.estimatedBrickWorkUploaded, promptResult.deferredBrickWork);
+	}
 	if (!mPulseOwner.Plan(mSelectedGridCommands, mPendingCommands, mPulsePlanToken))
 		return false;
+	std::vector<NRISmokeInjectionCommandGpu> retainedPromptCommands;
+	for (const auto& command : mPendingCommands)
+		if ((command.sourceMetadata & NRI_SMOKE_SOURCE_METADATA_PROMPT_ELIGIBLE) != 0u)
+			retainedPromptCommands.push_back(command);
 	const std::vector<NRISmokeInjectionCommandGpu>* frameCommands = &mPendingCommands;
 	auto rollbackPulsePlan = [&]()
 	{
@@ -1229,6 +1252,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		mPulsePlanToken = 0u;
 		mPendingCommands.clear();
 		mSelectedGridCommands.clear();
+		mPromptFallback.Rollback();
 	};
 	mStatus.admissionFrame = renderer.mFrameIndex;
 	mStatus.admissionRendererFrame = renderer.mFrameBuffer->mFrameIndex;
@@ -1354,9 +1378,11 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		gridLightingDescriptors.fill(mControl.storageView);
 	std::copy(gridLightingDescriptors.begin(), gridLightingDescriptors.end(),
 		outputs.begin() + kSmokeCoreStorageBufferCount + NRISmokeGrid::EvaluationDescriptorCount + kSmokeDirectStorageBufferCount);
-	outputs[kSmokeStorageDescriptorCount - 3u] = mControl.storageView;
-	outputs[kSmokeStorageDescriptorCount - 2u] = mControl.storageView;
-	outputs[kSmokeStorageDescriptorCount - 1u] = mControl.storageView;
+	outputs[kSmokeViewStorageBase] = mControl.storageView;
+	outputs[kSmokeViewStorageBase + 1u] = mControl.storageView;
+	outputs[kSmokeViewStorageBase + 2u] = mControl.storageView;
+	outputs[kSmokeStorageDescriptorCount - 1u] = mGrid.GetPromptOutcomeDescriptor() != nullptr ?
+		mGrid.GetPromptOutcomeDescriptor() : mControl.storageView;
 	nri::UpdateDescriptorRangeDesc updates[2] = {};
 	updates[0].descriptorSet = slot.inputSet; updates[0].rangeIndex = 0; updates[0].descriptors = inputs; updates[0].descriptorNum = 2;
 	updates[1].descriptorSet = slot.bufferSet; updates[1].rangeIndex = 0; updates[1].descriptors = outputs.data(); updates[1].descriptorNum = kSmokeStorageDescriptorCount;
@@ -1458,7 +1484,10 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		mStatus.particleSimulationDispatches++;
 		storageBarrier();
 	}
-	if (mPulsePlanToken != 0u && !mPulseOwner.Commit(mPulsePlanToken))
+	const bool pulseCommitSucceeded = mPulsePlanToken == 0u ||
+		(retainedPromptCommands.empty() ? mPulseOwner.Commit(mPulsePlanToken) :
+			mPulseOwner.CommitRetaining(mPulsePlanToken, retainedPromptCommands));
+	if (!pulseCommitSucceeded)
 	{
 		mPulseOwner.Reset();
 		mPulsePlanToken = 0u;
@@ -1467,6 +1496,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		return false;
 	}
 	mPulsePlanToken = 0u;
+	mPromptFallback.Commit(renderer.mFrameBuffer->mFrameIndex);
 	mPendingCommands.clear();
 	mSelectedGridCommands.clear();
 	return true;
@@ -1988,7 +2018,7 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 				nri::UpdateDescriptorRangeDesc update = {};
 				update.descriptorSet = slot.bufferSet;
 				update.rangeIndex = 0u;
-				update.baseDescriptor = kSmokeStorageDescriptorCount - 3u;
+				update.baseDescriptor = kSmokeViewStorageBase;
 				update.descriptors = viewResources;
 				update.descriptorNum = (uint32_t)std::size(viewResources);
 				renderer.mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1u);
@@ -2037,6 +2067,13 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 			mStatus.gridOpticalDispatches++;
 		}
 		storageBarrier();
+		if (mPromptFallback.GetSnapshot().scheduledFallbackQuantity > 0u)
+		{
+			dispatch(NRISmokePass::PromptFallback, (mResourceFroxelWidth + 3) / 4,
+				(mResourceFroxelHeight + 3) / 4, (mResourceFroxelDepth + 3) / 4);
+			mStatus.gridOpticalDispatches++;
+			storageBarrier();
+		}
 	}
 	if (viewComparatorPrepared && mSettings.viewCompare)
 	{
@@ -2392,6 +2429,7 @@ void NRISmokeSystem::Reset(const char* reason)
 	mSelectedGridCommands.clear();
 	mAdmissionScheduler.Reset();
 	mPulsePlanToken = 0u;
+	mPromptFallback.Reset();
 	if (std::strcmp(mStatus.resetReason, "authority-transition") == 0)
 		mPulseOwner.RebaseEpoch(mStatus.simulationEpoch);
 	else

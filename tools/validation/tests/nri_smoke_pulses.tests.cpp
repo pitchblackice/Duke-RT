@@ -81,6 +81,26 @@ int main()
 	Require(!owner.GetSnapshot().planActive && owner.GetSnapshot().pendingMass == 11u,
 		"a rejected plan must not mutate queue state");
 
+	NRISmokePulseOwner promptOwner;
+	promptOwner.Enqueue({ Command(20u, 6u) });
+	auto promptRange = promptOwner.PendingCommands()[0];
+	promptRange.rangeBegin = 1u;
+	promptRange.rangeCount = 3u;
+	Require(promptOwner.Plan({ promptRange }, planned, token),
+		"a prompt range must be transactionally plannable");
+	Require(promptOwner.CommitRetaining(token, { promptRange }) &&
+		promptOwner.GetSnapshot().pendingMass == 6u,
+		"fallback authority must retain all nominal mass until GPU grid acknowledgement");
+	Require(promptOwner.Acknowledge(promptRange.pulseIdLow, promptRange.pulseIdHigh,
+		promptRange.rangeBegin, promptRange.rangeCount),
+		"the exact stable prompt identity must accept one grid handoff");
+	Require(promptOwner.GetSnapshot().pendingMass == 3u &&
+		promptOwner.GetSnapshot().committedMass == 3u,
+		"prompt handoff must close the acknowledged mass exactly");
+	Require(!promptOwner.Acknowledge(promptRange.pulseIdLow, promptRange.pulseIdHigh,
+		promptRange.rangeBegin, promptRange.rangeCount),
+		"a delayed duplicate grid acknowledgement must not consume mass twice");
+
 	owner.RebaseEpoch(12u);
 	for (const auto& command : owner.PendingCommands())
 		Require(command.epoch == 12u, "epoch rebasing must preserve ranges while updating compatibility");

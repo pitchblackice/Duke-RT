@@ -32,6 +32,8 @@ public:
 	bool Plan(const std::vector<NRISmokeInjectionCommandGpu>& selected,
 		std::vector<NRISmokeInjectionCommandGpu>& planned, uint64_t& token);
 	bool Commit(uint64_t token);
+	bool CommitRetaining(uint64_t token, const std::vector<NRISmokeInjectionCommandGpu>& retained);
+	bool Acknowledge(uint32_t pulseIdLow, uint32_t pulseIdHigh, uint32_t rangeBegin, uint32_t rangeCount);
 	bool Rollback(uint64_t token);
 	void RebaseEpoch(uint32_t epoch);
 	uint32_t Reset();

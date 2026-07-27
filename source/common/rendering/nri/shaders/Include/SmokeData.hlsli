@@ -7,6 +7,9 @@
 #define NRI_SMOKE_SOURCE_CLASS_INTERACTIVE_ACTOR 1u
 #define NRI_SMOKE_SOURCE_CLASS_INTERACTIVE_EVENT 2u
 #define NRI_SMOKE_SOURCE_CLASS_DIAGNOSTIC 3u
+#define NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_SHIFT 16u
+#define NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_MASK 0x000f0000u
+#define NRI_SMOKE_SOURCE_METADATA_PROMPT_ELIGIBLE 0x00100000u
 
 struct SmokeStyle
 {
@@ -62,6 +65,17 @@ uint SmokeInjectionSourceClass(SmokeInjectionCommand command)
 uint SmokeInjectionSourcePriority(SmokeInjectionCommand command)
 {
 	return (command.SourceMetadata >> 8u) & 0xffu;
+}
+
+bool SmokeInjectionPromptEligible(SmokeInjectionCommand command)
+{
+	return (command.SourceMetadata & NRI_SMOKE_SOURCE_METADATA_PROMPT_ELIGIBLE) != 0u;
+}
+
+uint SmokeInjectionPromptSlot(SmokeInjectionCommand command)
+{
+	return (command.SourceMetadata & NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_MASK) >>
+		NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_SHIFT;
 }
 
 void SmokeInjectionRectangleHalfAxes(SmokeInjectionCommand command,

@@ -106,10 +106,42 @@ bool NRISmokePulseOwner::Plan(const std::vector<NRISmokeInjectionCommandGpu>& se
 
 bool NRISmokePulseOwner::Commit(uint64_t token)
 {
+	return CommitRetaining(token, {});
+}
+
+bool NRISmokePulseOwner::CommitRetaining(uint64_t token,
+	const std::vector<NRISmokeInjectionCommandGpu>& retained)
+{
 	if (token == 0u || token != mActivePlanToken)
 		return false;
+	// Validate the complete mutation set first. A late stale range must never
+	// leave an earlier range committed from the same immutable plan.
 	for (const auto& committed : mPlan)
 	{
+		const bool keepPending = std::any_of(retained.begin(), retained.end(), [&](const auto& candidate)
+		{
+			return PulseId(candidate) == PulseId(committed) && candidate.rangeBegin == committed.rangeBegin &&
+				candidate.rangeCount == committed.rangeCount;
+		});
+		if (keepPending)
+			continue;
+		const uint64_t pulseId = PulseId(committed);
+		if (std::none_of(mPending.begin(), mPending.end(), [&](const auto& candidate)
+		{
+			return PulseId(candidate) == pulseId && candidate.epoch == committed.epoch &&
+				committed.rangeBegin >= candidate.rangeBegin && RangeEnd(committed) <= RangeEnd(candidate);
+		}))
+			return false;
+	}
+	for (const auto& committed : mPlan)
+	{
+		const bool keepPending = std::any_of(retained.begin(), retained.end(), [&](const auto& candidate)
+		{
+			return PulseId(candidate) == PulseId(committed) && candidate.rangeBegin == committed.rangeBegin &&
+				candidate.rangeCount == committed.rangeCount;
+		});
+		if (keepPending)
+			continue;
 		const uint64_t pulseId = PulseId(committed);
 		const auto pending = std::find_if(mPending.begin(), mPending.end(), [&](const auto& candidate)
 		{
@@ -141,6 +173,48 @@ bool NRISmokePulseOwner::Commit(uint64_t token)
 		mSnapshot.committedMass += committed.rangeCount;
 	}
 	ClearPlan();
+	return true;
+}
+
+bool NRISmokePulseOwner::Acknowledge(uint32_t pulseIdLow, uint32_t pulseIdHigh,
+	uint32_t rangeBegin, uint32_t rangeCount)
+{
+	if (mActivePlanToken != 0u || rangeCount == 0u)
+		return false;
+	NRISmokeInjectionCommandGpu acknowledged = {};
+	acknowledged.pulseIdLow = pulseIdLow;
+	acknowledged.pulseIdHigh = pulseIdHigh;
+	acknowledged.rangeBegin = rangeBegin;
+	acknowledged.rangeCount = rangeCount;
+	const uint64_t pulseId = PulseId(acknowledged);
+	const auto pending = std::find_if(mPending.begin(), mPending.end(), [&](const auto& candidate)
+	{
+		return PulseId(candidate) == pulseId && rangeBegin >= candidate.rangeBegin &&
+			RangeEnd(acknowledged) <= RangeEnd(candidate);
+	});
+	if (pending == mPending.end())
+		return false;
+	const size_t index = (size_t)std::distance(mPending.begin(), pending);
+	const auto original = *pending;
+	const uint64_t originalEnd = RangeEnd(original);
+	mPending.erase(mPending.begin() + index);
+	size_t insertion = index;
+	if (original.rangeBegin < rangeBegin)
+	{
+		auto left = original;
+		left.rangeCount = rangeBegin - original.rangeBegin;
+		mPending.insert(mPending.begin() + insertion++, left);
+	}
+	if (RangeEnd(acknowledged) < originalEnd)
+	{
+		auto right = original;
+		right.rangeBegin = (uint32_t)RangeEnd(acknowledged);
+		right.rangeCount = (uint32_t)(originalEnd - RangeEnd(acknowledged));
+		mPending.insert(mPending.begin() + insertion, right);
+	}
+	mSnapshot.committedRanges++;
+	mSnapshot.committedMass += rangeCount;
+	RefreshPendingSnapshot();
 	return true;
 }
 

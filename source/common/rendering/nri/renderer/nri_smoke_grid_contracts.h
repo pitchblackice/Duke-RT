@@ -7,6 +7,17 @@ constexpr uint32_t NRI_SMOKE_GRID_BRICK_AXIS = 8u;
 constexpr uint32_t NRI_SMOKE_GRID_CELLS_PER_BRICK = 512u;
 constexpr uint32_t NRI_SMOKE_GRID_FLAG_HASH_HEALTH = 1u;
 constexpr uint32_t NRI_SMOKE_GRID_FLAG_COMPACT_DRAINED_HASH = 2u;
+constexpr uint32_t NRI_SMOKE_PROMPT_FALLBACK_QUANTITY = 8u;
+constexpr uint32_t NRI_SMOKE_PROMPT_LEDGER_CAPACITY = NRI_SMOKE_PROMPT_FALLBACK_QUANTITY;
+
+enum class NRISmokePromptOutcome : uint32_t
+{
+	None = 0,
+	Fallback = 1,
+	GridNew = 2,
+	GridCommitted = 3,
+	InternalError = 4,
+};
 
 enum class NRISmokeGridPass : uint32_t
 {
@@ -21,6 +32,32 @@ enum class NRISmokeGridPass : uint32_t
 	AdvectVelocity,
 	AdvectFields,
 	Rebuild,
+	ValidatePrompt,
+	AuthorizePrompt,
+	FinalizePrompt,
+};
+
+struct NRISmokePromptOutcomeGpu
+{
+	uint32_t pulseIdLow = 0;
+	uint32_t pulseIdHigh = 0;
+	uint32_t rangeBegin = 0;
+	uint32_t rangeCount = 0;
+	uint32_t commandIndex = UINT32_MAX;
+	uint32_t outcome = 0;
+	uint32_t requestedBricks = 0;
+	uint32_t admittedBricks = 0;
+};
+
+struct NRISmokePromptLedgerGpu
+{
+	uint32_t pulseIdLow = 0;
+	uint32_t pulseIdHigh = 0;
+	uint32_t rangeBegin = 0;
+	uint32_t rangeCount = 0;
+	uint32_t epoch = 0;
+	uint32_t committed = 0;
+	uint32_t padding[2] = {};
 };
 
 struct NRISmokeGridHashEntryGpu
@@ -194,3 +231,5 @@ static_assert(sizeof(NRISmokeGridControlGpu) == 304);
 static_assert(sizeof(NRISmokeGridSourceStatsGpu) == 64);
 static_assert(sizeof(NRISmokeGridDispatchGpu) == 12);
 static_assert(sizeof(NRISmokeGridConstants) == 128);
+static_assert(sizeof(NRISmokePromptOutcomeGpu) == 32);
+static_assert(sizeof(NRISmokePromptLedgerGpu) == 32);

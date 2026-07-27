@@ -116,7 +116,7 @@ struct NRISmokeGridStatusSnapshot
 class NRISmokeGrid
 {
 public:
-	static constexpr uint32_t StorageDescriptorCount = 20u;
+	static constexpr uint32_t StorageDescriptorCount = 22u;
 	static constexpr uint32_t EvaluationDescriptorCount = 11u;
 	static constexpr uint32_t SourceCapacity = 256u;
 
@@ -139,6 +139,8 @@ public:
 	const NRISmokeGridStatusSnapshot& GetStatusSnapshot() const { return mStatus; }
 	uint32_t GetActivePing() const { return mActivePing; }
 	uint32_t GetFieldPing() const { return mFieldPing; }
+	const nri::Descriptor* GetPromptOutcomeDescriptor() const { return mPromptOutcomes.storageView; }
+	std::vector<NRISmokePromptOutcomeGpu> ConsumePromptOutcomes();
 
 private:
 	struct FrameSlot
@@ -146,8 +148,11 @@ private:
 		nri::DescriptorSet* inputSet = nullptr;
 		NRIBufferResource controlReadback;
 		NRIBufferResource sourceReadback;
+		NRIBufferResource promptReadback;
 		bool readbackPending = false;
-		bool readbackInitialized = false;
+		bool diagnosticReadbackPending = false;
+		bool promptReadbackInitialized = false;
+		bool diagnosticReadbackInitialized = false;
 		uint64_t readbackRendererFrame = UINT64_MAX;
 		uint32_t readbackEpoch = 0;
 	};
@@ -175,7 +180,7 @@ private:
 
 	NRISmokeGridStatusSnapshot mStatus = {};
 	nri::PipelineLayout* mPipelineLayout = nullptr;
-	std::array<nri::Pipeline*, 11> mPipelines = {};
+	std::array<nri::Pipeline*, 14> mPipelines = {};
 	nri::DescriptorSet* mStorageSet = nullptr;
 	std::vector<FrameSlot> mFrameSlots;
 
@@ -199,6 +204,9 @@ private:
 	NRIBufferResource mDeposit2;
 	NRIBufferResource mDeposit3;
 	NRIBufferResource mSourceStats;
+	NRIBufferResource mPromptOutcomes;
+	NRIBufferResource mPromptLedger;
+	std::vector<NRISmokePromptOutcomeGpu> mPromptCommits;
 
 	uint32_t mResourceBrickCapacity = 0;
 	uint32_t mResourceHashCapacity = 0;

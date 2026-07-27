@@ -9,6 +9,7 @@
 #include "nri_smoke_grid.h"
 #include "nri_smoke_grid_lighting.h"
 #include "nri_smoke_pulses.h"
+#include "nri_smoke_prompt_fallback.h"
 #include "nri_smoke_view_work.h"
 #include "v_video.h"
 
@@ -295,7 +296,7 @@ private:
 	NRISmokeSettings mSettings = {};
 	NRISmokeStatusSnapshot mStatus = {};
 	nri::PipelineLayout* mPipelineLayout = nullptr;
-	std::array<nri::Pipeline*, 22> mPipelines = {};
+	std::array<nri::Pipeline*, 23> mPipelines = {};
 	std::vector<CommandSlot> mCommandSlots;
 	NRIBufferResource mStyleBuffer;
 	NRIBufferResource mCompatibilityStorage;
@@ -326,6 +327,7 @@ private:
 	NRISmokeGridLighting mGridLighting;
 	NRISmokeViewWork mViewWork;
 	NRISmokePulseOwner mPulseOwner;
+	NRISmokePromptFallback mPromptFallback;
 	std::vector<NRISmokeStyleGpu> mStyles;
 	std::vector<NRISmokeInjectionCommandGpu> mPendingCommands;
 	std::vector<NRISmokeInjectionCommandGpu> mSelectedGridCommands;

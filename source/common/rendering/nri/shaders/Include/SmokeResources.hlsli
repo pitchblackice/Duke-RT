@@ -362,6 +362,7 @@ RWStructuredBuffer<SmokeGridLightSupportStamp> gSmokeGridLightSupportStamps : re
 RWStructuredBuffer<uint2> gSmokeViewColumnMasks : register(u45, space1);
 RWStructuredBuffer<uint> gSmokeViewCompactIndices : register(u46, space1);
 RWStructuredBuffer<SmokeViewWorkControl> gSmokeViewWorkControl : register(u47, space1);
+RWStructuredBuffer<SmokePromptOutcome> gSmokePromptOutcomes : register(u48, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);
