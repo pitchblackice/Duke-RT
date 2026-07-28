@@ -146,8 +146,10 @@ struct SmokeDormantGridConstants
 	uint InjectionCount;
 	float MaximumTransportCells;
 	uint EvolutionInjectionIndex;
+	float DensityHalfLifeScale;
+	float CoolingScale;
 	uint Padding1;
-	uint4 Padding2;
+	uint2 Padding2;
 	uint4 Padding3;
 };
 

@@ -35,6 +35,8 @@ struct NRISmokeDormantGridConfig
 	uint32_t maximumEvolutionPerFrame = 0u;
 	uint32_t maximumContinuousInjectionsPerFrame = 0u;
 	float maximumEvolutionTransportCells = 0.95f;
+	float densityHalfLifeScale = 1.0f;
+	float coolingScale = 1.0f;
 	float opticalMassRelativeTolerance = 0.25f;
 };
 

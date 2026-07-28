@@ -710,6 +710,8 @@ bool NRISmokeDormantGrid::RecordEvolution(const NRISmokeGridServices& services,
 	constants.deltaTime = std::max(frame.deltaTime, 0.0f);
 	constants.maximumTransportCells = std::clamp(
 		config.maximumEvolutionTransportCells, 0.0f, 0.95f);
+	constants.densityHalfLifeScale = std::max(config.densityHalfLifeScale, 0.001f);
+	constants.coolingScale = std::max(config.coolingScale, 0.001f);
 	StorageBarrier(services, frame.fine);
 
 	if (mNeedsClear || mResourceEpoch != frame.simulationEpoch)

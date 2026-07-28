@@ -214,7 +214,9 @@ struct NRISmokeDormantGridConstants
 	uint32_t injectionCount = 0u;
 	float maximumTransportCells = 0.95f;
 	uint32_t evolutionInjectionIndex = UINT32_MAX;
-	uint32_t padding[9] = {};
+	float densityHalfLifeScale = 1.0f;
+	float coolingScale = 1.0f;
+	uint32_t padding[7] = {};
 };
 
 static_assert(sizeof(NRISmokeDormantGridWorkGpu) == 32u);

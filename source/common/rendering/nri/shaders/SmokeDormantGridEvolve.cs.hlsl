@@ -134,8 +134,10 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 				const float4 dynamics = sDynamics[sourceIndex];
 				const float mass = max(scalar.x, 0.0);
 				const float inverseMass = mass > 1e-8 ? rcp(mass) : 0.0;
-				const float densityRate = max(dynamics.x * inverseMass, 0.0);
-				const float coolingRate = max(dynamics.y * inverseMass, 0.0);
+				const float densityRate = max(dynamics.x * inverseMass, 0.0) /
+					max(gDormantConstants.DensityHalfLifeScale, 0.001);
+				const float coolingRate = max(dynamics.y * inverseMass, 0.0) /
+					max(gDormantConstants.CoolingScale, 0.001);
 				const float densityDecay = exp(-densityRate * deltaTime);
 				const float coolingDecay = exp(-coolingRate * deltaTime);
 				const float3 displacement = clamp(velocity.xyz * deltaTime * inverseCellSize,
