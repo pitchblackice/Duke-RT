@@ -41,6 +41,8 @@ struct NRISmokeInterestSnapshot
 	uint32_t portalPromotedChunks = 0;
 	bool runtimePortalUncertain = false;
 	bool cameraJump = false;
+	bool conservativeInterestComplete = false;
+	std::vector<uint32_t> positiveChunkWords;
 	std::vector<NRISmokeSourceInterest> sources;
 
 	NRISmokeInterestTier Resolve(uint32_t sourceId) const;

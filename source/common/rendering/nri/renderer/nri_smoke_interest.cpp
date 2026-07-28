@@ -128,6 +128,9 @@ void NRISmokeInterestTracker::Update(const NRISmokeInterestFrameInput& input)
 			}
 		}
 	}
+	mSnapshot.positiveChunkWords = positiveChunks;
+	mSnapshot.conservativeInterestComplete = input.mapWorld->valid &&
+		!mSnapshot.runtimePortalUncertain;
 
 	float predictedCamera[3] = { input.cameraPosition[0], input.cameraPosition[1], input.cameraPosition[2] };
 	if (input.hasPreviousCamera && input.previousCameraPosition != nullptr)
