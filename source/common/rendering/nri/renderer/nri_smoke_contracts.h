@@ -262,6 +262,24 @@ struct NRISmokeControlGpu
 	uint32_t directHistoryResolved = 0;
 	uint32_t directHistoryClamps = 0;
 	uint32_t directNanRejects = 0;
+	uint32_t analyticLightBuildEvents = 0;
+	uint32_t analyticLightAnchorsBuilt = 0;
+	uint32_t analyticLightAnchorsValid = 0;
+	uint32_t analyticLightAnchorsInvalid = 0;
+	uint32_t analyticLightSamplesRequested = 0;
+	uint32_t analyticLightSamplesExecuted = 0;
+	uint32_t analyticLightEvaluations = 0;
+	uint32_t analyticLightBuildVisibilityRays = 0;
+	uint32_t analyticLightGridSeedHits = 0;
+	uint32_t analyticLightGridSeedMisses = 0;
+	uint32_t analyticLightApplyFroxelsTested = 0;
+	uint32_t analyticLightApplyFroxelsApplied = 0;
+	uint32_t analyticLightCarrierContributions = 0;
+	uint32_t analyticLightAnchorBlendTaps = 0;
+	uint32_t analyticLightGroupCacheHits = 0;
+	uint32_t analyticLightMissingGroupRecords = 0;
+	uint32_t analyticLightIdentityRejects = 0;
+	uint32_t analyticLightApplyVisibilityRays = 0;
 };
 
 struct NRISmokeIndirectCacheGpu
@@ -307,7 +325,7 @@ static_assert(offsetof(NRISmokeInjectionCommandGpu, rangeBegin) == 96);
 static_assert(offsetof(NRISmokeInjectionCommandGpu, rangeCount) == 100);
 static_assert(offsetof(NRISmokeInjectionCommandGpu, pulseIdLow) == 104);
 static_assert(offsetof(NRISmokeInjectionCommandGpu, pulseIdHigh) == 108);
-static_assert(sizeof(NRISmokeControlGpu) == 568);
+static_assert(sizeof(NRISmokeControlGpu) == 640);
 static_assert(sizeof(NRISmokeIndirectCacheGpu) == 32);
 static_assert(sizeof(NRISmokeDirectCacheGpu) == 40);
 static_assert(sizeof(NRISmokeEmissiveStorageGpu) == 48);

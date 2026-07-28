@@ -25,39 +25,55 @@ float SmokeAnalyticEmissiveRectangleKernel(SmokeAnalyticCarrier carrier,
 }
 
 bool SmokeLoadAnalyticLightAnchor(SmokeAnalyticCarrier carrier, uint anchorIndex,
-	out SmokeAnalyticEmissiveStorageRecord record)
+	out SmokeAnalyticEmissiveStorageRecord record, out bool missing, out bool identityRejected)
 {
 	record = (SmokeAnalyticEmissiveStorageRecord)0;
+	missing = false;
+	identityRejected = false;
 	const uint bankIndex = carrier.LightGroupSlot * NRI_SMOKE_ANALYTIC_LIGHT_ANCHORS_PER_BANK +
 		(anchorIndex % NRI_SMOKE_ANALYTIC_LIGHT_ANCHORS_PER_BANK);
 	uint capacity, stride;
 	if (anchorIndex < NRI_SMOKE_ANALYTIC_LIGHT_ANCHORS_PER_BANK)
 	{
 		gSmokeAnalyticEmissiveCurrent.GetDimensions(capacity, stride);
-		if (bankIndex >= capacity) return false;
+		if (bankIndex >= capacity) { missing = true; return false; }
 		record = gSmokeAnalyticEmissiveCurrent[bankIndex];
 	}
 	else
 	{
 		gSmokeAnalyticEmissiveHistory.GetDimensions(capacity, stride);
-		if (bankIndex >= capacity) return false;
+		if (bankIndex >= capacity) { missing = true; return false; }
 		record = gSmokeAnalyticEmissiveHistory[bankIndex];
 	}
-	return SmokeAnalyticLightIdentityMatches(record, carrier.LightGroupSlot,
+	const bool matches = SmokeAnalyticLightIdentityMatches(record, carrier.LightGroupSlot,
 		carrier.LightGroupGeneration, carrier.Epoch, anchorIndex);
+	identityRejected = !matches;
+	return matches;
 }
 
 float3 SmokeEvaluateAnalyticLightField(SmokeAnalyticCarrier carrier,
-	float3 receiverPosition, float3 viewRay, float anisotropy)
+	float3 receiverPosition, float3 viewRay, float anisotropy,
+	out uint blendTaps, out uint missingRecords, out uint identityRejects)
 {
 	float3 source = 0.0;
 	float weightSum = 0.0;
+	blendTaps = 0u;
+	missingRecords = 0u;
+	identityRejects = 0u;
 	const uint anchorCount = min(carrier.LightAnchorCount, 4u);
 	[loop]
 	for (uint anchorIndex = 0u; anchorIndex < anchorCount; ++anchorIndex)
 	{
 		SmokeAnalyticEmissiveStorageRecord record;
-		if (!SmokeLoadAnalyticLightAnchor(carrier, anchorIndex, record)) continue;
+		bool missing, identityRejected;
+		if (!SmokeLoadAnalyticLightAnchor(carrier, anchorIndex, record,
+			missing, identityRejected))
+		{
+			missingRecords += missing ? 1u : 0u;
+			identityRejects += identityRejected ? 1u : 0u;
+			continue;
+		}
+		blendTaps++;
 		const float3 offset = receiverPosition - SmokeAnalyticLightAnchorPosition(record);
 		const float weight = rcp(max(dot(offset, offset), 1.0));
 		float3 anchorSource = 0.0;
@@ -90,6 +106,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (!SmokeAnalyticCarrierReservoirOwns(phase)) return;
 	const float4 analyticMedium = gSmokeAnalyticFroxelMedium[froxelIndex];
 	if (analyticMedium.a <= 0.0 || !any(analyticMedium.rgb > 0.0)) return;
+	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;
+	if (diagnostics) InterlockedAdd(gSmokeControl[0].AnalyticLightApplyFroxelsTested, 1u);
 
 	const uint3 froxel = SmokeFroxelCoordinates(froxelIndex);
 	const float3 ray = SmokeFroxelRay(froxel.xy);
@@ -132,8 +150,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const float sigmaT = kernel * density * max(style.Extinction, 0.0) *
 			gSmokeConstants.DensityScale;
 		if (sigmaT <= 1e-6) continue;
+		uint blendTaps, missingRecords, identityRejects;
 		const float3 incident = SmokeEvaluateAnalyticLightField(carrier,
-			receiverPosition, normalize(ray), clamp(style.Anisotropy, -0.95, 0.95));
+			receiverPosition, normalize(ray), clamp(style.Anisotropy, -0.95, 0.95),
+			blendTaps, missingRecords, identityRejects);
+		if (diagnostics)
+		{
+			InterlockedAdd(gSmokeControl[0].AnalyticLightAnchorBlendTaps, blendTaps);
+			InterlockedAdd(gSmokeControl[0].AnalyticLightMissingGroupRecords, missingRecords);
+			InterlockedAdd(gSmokeControl[0].AnalyticLightIdentityRejects, identityRejects);
+			if (blendTaps > 0u) InterlockedAdd(gSmokeControl[0].AnalyticLightGroupCacheHits, 1u);
+			InterlockedAdd(gSmokeControl[0].AnalyticLightCarrierContributions, 1u);
+		}
 		analyticSource += sigmaT * saturate(style.Albedo) * incident *
 			gSmokeConstants.RadianceScale;
 	}
@@ -141,6 +169,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (luminance > gSmokeConstants.DeltaTime)
 		analyticSource *= gSmokeConstants.DeltaTime / luminance;
 	if (!any(analyticSource > 0.0)) return;
+	if (diagnostics) InterlockedAdd(gSmokeControl[0].AnalyticLightApplyFroxelsApplied, 1u);
 	uint metadata = SmokeFroxelMetadata(gSmokeFroxelSource[froxelIndex].w);
 	metadata = SmokeFroxelResolveRadiance(metadata, gSmokeConstants.SimulationEpoch,
 		NRI_SMOKE_FALLBACK_EMISSIVE, 0u);

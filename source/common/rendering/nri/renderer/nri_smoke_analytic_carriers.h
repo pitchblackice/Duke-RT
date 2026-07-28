@@ -104,6 +104,26 @@ struct NRISmokeAnalyticCarrierSnapshot
 	uint32_t highWaterQuantity = 0u;
 	uint32_t oldestActiveAgeMilliseconds = 0u;
 	uint32_t lightEventsBuiltThisFrame = 0u;
+	uint32_t lightEventsRequestedThisFrame = 0u;
+	uint32_t lightEventsAdmittedThisFrame = 0u;
+	uint32_t lightEventsRejectedThisFrame = 0u;
+	uint32_t lightEventsFirstFrameReady = 0u;
+	uint32_t lightRejectedNotPrepared = 0u;
+	uint32_t lightRejectedDisabled = 0u;
+	uint32_t lightRejectedInvalidRequest = 0u;
+	uint32_t lightRejectedStaleEpoch = 0u;
+	uint32_t lightRejectedExpiredOnArrival = 0u;
+	uint32_t lightRejectedStaleOnArrival = 0u;
+	uint32_t lightRejectedCapacity = 0u;
+	uint32_t lightRejectedLightingBudget = 0u;
+	uint32_t activeLightGroups = 0u;
+	uint32_t freeLightGroupSlots = 128u;
+	uint32_t lightGroupHighWater = 0u;
+	uint32_t sharedCarrierReferences = 0u;
+	uint32_t lightAnchorsRequested = 0u;
+	uint32_t lightAnchorsReserved = 0u;
+	uint32_t lightSamplesRequested = 0u;
+	uint32_t lightSamplesReserved = 0u;
 };
 
 // Owns immediate analytic smoke admission and gameplay-time lifetime state.
@@ -135,11 +155,15 @@ private:
 		uint32_t lightSampleCount = 0u;
 		bool lightGroupOwner = false;
 		bool lightBuildPending = false;
+		bool lightFirstBuild = false;
 		bool active = false;
 	};
 
 	void Refresh();
 	NRISmokeAnalyticCarrierAdmission Drop(NRISmokeAnalyticCarrierDropReason reason);
+	NRISmokeAnalyticCarrierAdmission DropEvent(NRISmokeAnalyticCarrierDropReason reason);
+	void BeginLightEventRequest();
+	void AdmitLightEvent();
 
 	std::array<Slot, FixedCarrierCapacity> mSlots = {};
 	std::vector<NRISmokeAnalyticCarrierGpu> mGpuCarriers;

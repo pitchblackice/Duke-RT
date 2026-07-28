@@ -263,6 +263,24 @@ struct SmokeControl
 	uint DirectHistoryResolved;
 	uint DirectHistoryClamps;
 	uint DirectNanRejects;
+	uint AnalyticLightBuildEvents;
+	uint AnalyticLightAnchorsBuilt;
+	uint AnalyticLightAnchorsValid;
+	uint AnalyticLightAnchorsInvalid;
+	uint AnalyticLightSamplesRequested;
+	uint AnalyticLightSamplesExecuted;
+	uint AnalyticLightEvaluations;
+	uint AnalyticLightBuildVisibilityRays;
+	uint AnalyticLightGridSeedHits;
+	uint AnalyticLightGridSeedMisses;
+	uint AnalyticLightApplyFroxelsTested;
+	uint AnalyticLightApplyFroxelsApplied;
+	uint AnalyticLightCarrierContributions;
+	uint AnalyticLightAnchorBlendTaps;
+	uint AnalyticLightGroupCacheHits;
+	uint AnalyticLightMissingGroupRecords;
+	uint AnalyticLightIdentityRejects;
+	uint AnalyticLightApplyVisibilityRays;
 };
 
 // Froxel carrier state is authored by materialization and remains independent

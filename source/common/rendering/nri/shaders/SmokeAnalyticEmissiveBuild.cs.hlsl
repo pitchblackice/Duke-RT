@@ -23,7 +23,7 @@ float3 SmokeAnalyticLightAnchor(uint anchorIndex, float3 lower, float3 upper)
 	return center + extent * float3(1.0, -1.0, -1.0);
 }
 
-void SmokeStoreAnalyticLightAnchor(uint groupSlot, uint groupGeneration, uint epoch,
+bool SmokeStoreAnalyticLightAnchor(uint groupSlot, uint groupGeneration, uint epoch,
 	uint anchorIndex, uint sampleCount, float3 anchorPosition, float3 lobes[6])
 {
 	SmokeAnalyticEmissiveStorageRecord record = (SmokeAnalyticEmissiveStorageRecord)0;
@@ -40,13 +40,16 @@ void SmokeStoreAnalyticLightAnchor(uint groupSlot, uint groupGeneration, uint ep
 	if (anchorIndex < NRI_SMOKE_ANALYTIC_LIGHT_ANCHORS_PER_BANK)
 	{
 		gSmokeAnalyticEmissiveCurrent.GetDimensions(capacity, stride);
-		if (bankIndex < capacity) gSmokeAnalyticEmissiveCurrent[bankIndex] = record;
+		if (bankIndex >= capacity) return false;
+		gSmokeAnalyticEmissiveCurrent[bankIndex] = record;
 	}
 	else
 	{
 		gSmokeAnalyticEmissiveHistory.GetDimensions(capacity, stride);
-		if (bankIndex < capacity) gSmokeAnalyticEmissiveHistory[bankIndex] = record;
+		if (bankIndex >= capacity) return false;
+		gSmokeAnalyticEmissiveHistory[bankIndex] = record;
 	}
+	return true;
 }
 
 [numthreads(64, 1, 1)]
@@ -87,9 +90,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint anchorCount = min(owner.LightAnchorCount, 4u);
 	const uint sampleCount = clamp(owner.LightSampleCountAndFlags & 0xffu, 1u, 4u);
 	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;
+	if (diagnostics)
+	{
+		InterlockedAdd(gSmokeControl[0].AnalyticLightBuildEvents, 1u);
+		InterlockedAdd(gSmokeControl[0].AnalyticLightSamplesRequested,
+			anchorCount * sampleCount);
+	}
 	[loop]
 	for (uint anchorIndex = 0u; anchorIndex < anchorCount; ++anchorIndex)
 	{
+		if (diagnostics) InterlockedAdd(gSmokeControl[0].AnalyticLightAnchorsBuilt, 1u);
 		const float3 anchorPosition = SmokeAnalyticLightAnchor(anchorIndex,
 			supportLower, supportUpper);
 		float3 lobes[6];
@@ -97,6 +107,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		[loop]
 		for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
 		{
+			if (diagnostics) InterlockedAdd(gSmokeControl[0].AnalyticLightSamplesExecuted, 1u);
 			uint randomState = SmokeEmissiveLaneSeed(anchorPosition, owner.LightGroupSlot,
 				anchorIndex * 4u + sampleIndex, owner.LightGroupGeneration ^ 0x6b50d76bu);
 			if (diagnostics) InterlockedAdd(gSmokeControl[0].EmissiveSamples, 1u);
@@ -114,10 +125,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			if (!SmokeEvaluateEmissiveIncident(proposal, anchorPosition, diagnostics,
 				incident, lightDirection, lightDistance))
 				continue;
+			if (diagnostics) InterlockedAdd(gSmokeControl[0].AnalyticLightEvaluations, 1u);
 			bool visible = true;
 			if (gSmokeConstants.LightMode >= 2u)
 			{
 				if (diagnostics) InterlockedAdd(gSmokeControl[0].EmissiveShadowRays, 1u);
+				if (diagnostics) InterlockedAdd(gSmokeControl[0].AnalyticLightBuildVisibilityRays, 1u);
 				visible = SmokeFilteredVisibilityEffective()
 					? SmokeEmissiveVisibleFiltered(anchorPosition, lightDirection, lightDistance, diagnostics)
 					: SmokeEmissiveVisible(anchorPosition, lightDirection, lightDistance, diagnostics);
@@ -138,7 +151,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				lobes[lobe] += estimator * (weights[lobe] /
 					max(weightSum * (float)sampleCount, 1e-6));
 		}
-		SmokeStoreAnalyticLightAnchor(owner.LightGroupSlot, owner.LightGroupGeneration,
-			owner.Epoch, anchorIndex, sampleCount, anchorPosition, lobes);
+		const bool stored = SmokeStoreAnalyticLightAnchor(owner.LightGroupSlot,
+			owner.LightGroupGeneration, owner.Epoch, anchorIndex, sampleCount,
+			anchorPosition, lobes);
+		if (diagnostics)
+		{
+			if (stored) InterlockedAdd(gSmokeControl[0].AnalyticLightAnchorsValid, 1u);
+			else InterlockedAdd(gSmokeControl[0].AnalyticLightAnchorsInvalid, 1u);
+		}
 	}
 }

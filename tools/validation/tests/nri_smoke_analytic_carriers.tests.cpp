@@ -160,6 +160,18 @@ int main()
 		owner.GetSnapshot().droppedLightingBudget == 1u,
 		"the event-build quantity must reject a complete later event without deferral");
 	owner.CommitLightBuilds();
+	const auto lightFrame = owner.GetSnapshot();
+	Require(lightFrame.lightEventsRequestedThisFrame == 2u &&
+		lightFrame.lightEventsAdmittedThisFrame == 1u &&
+		lightFrame.lightEventsRejectedThisFrame == 1u &&
+		lightFrame.lightEventsFirstFrameReady == 1u &&
+		lightFrame.lightRejectedLightingBudget == 1u,
+		"event admission telemetry must close requested as admitted plus exact rejection reasons");
+	Require(lightFrame.activeLightGroups == 1u && lightFrame.freeLightGroupSlots == 127u &&
+		lightFrame.sharedCarrierReferences == 1u && lightFrame.lightAnchorsRequested == 8u &&
+		lightFrame.lightAnchorsReserved == 4u && lightFrame.lightSamplesRequested == 32u &&
+		lightFrame.lightSamplesReserved == 16u,
+		"group, anchor, and candidate reservations must close against fixed profile quantities");
 	owner.BeginFrame(50.1, 4u, lightPolicy);
 	const auto& settled = owner.GetGpuCarriers();
 	Require((settled[0].lightSampleCountAndFlags & 0x200u) == 0u,

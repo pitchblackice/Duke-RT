@@ -19,6 +19,8 @@ $emissive = Read-Source 'source/common/rendering/nri/shaders/Include/SmokeEmissi
 $carrierEmissiveBuild = Read-Source 'source/common/rendering/nri/shaders/SmokeAnalyticEmissiveBuild.cs.hlsl'
 $carrierEmissiveResolve = Read-Source 'source/common/rendering/nri/shaders/SmokeAnalyticEmissiveResolve.cs.hlsl'
 $smoke = Read-Source 'source/common/rendering/nri/renderer/nri_smoke.cpp'
+$contracts = Read-Source 'source/common/rendering/nri/renderer/nri_smoke_contracts.h'
+$clear = Read-Source 'source/common/rendering/nri/shaders/SmokeClear.cs.hlsl'
 
 Require-Match $data 'struct\s+SmokeAnalyticCarrier' 'Analytic carrier record is missing.'
 Require-Match $data 'NRI_SMOKE_ANALYTIC_MAX_CARRIERS_PER_TILE\s+NRI_SMOKE_ANALYTIC_MAX_CARRIERS' 'Tile list must retain the complete fixed carrier pool.'
@@ -53,5 +55,9 @@ if ($carrierEmissiveBuild -match 'EmissiveTemporal|FrameIndex\s*-\s*1') {
 }
 Require-Match $smoke 'runCarrierEmissive\s*=\s*analyticCount\s*>\s*0u\s*&&\s*worldEmissiveReady' 'Carrier emissive reuse must be restricted to the world-field route.'
 Require-Match $smoke '!renderParticles\s*&&\s*!mSettings\.emissiveReference' 'Particle/compare and reference modes must retain their established lighting routes.'
+Require-Match $contracts 'analyticLightBuildEvents[\s\S]*analyticLightApplyVisibilityRays' 'Analytic build/apply counters must have a dedicated GPU readback contract.'
+Require-Match $clear 'AnalyticLightBuildEvents\s*=\s*0u[\s\S]*AnalyticLightApplyVisibilityRays\s*=\s*0u' 'Every analytic counter must reset at the frame boundary.'
+Require-Match $smoke 'PERF pt smoke analytic light NRI:[^\n]*source_frame=%llu[^\n]*apply_visibility_rays=%u[^\n]*apply_rays_zero=%s' 'Frame-keyed compact telemetry must expose the zero apply-ray invariant.'
+Require-Match $smoke 'analyticSnapshot\s*=\s*mAnalyticCarriers\.GetSnapshot' 'GPU readback metadata must retain the matching CPU admission snapshot.'
 
 Write-Host 'Smoke analytic carrier structural tests passed.'

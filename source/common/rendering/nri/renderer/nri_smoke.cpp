@@ -925,7 +925,61 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 				mStatus.filterSkipLimitExits = control.filterSkipLimitExits;
 				mStatus.filterContinuationLimitExits = control.filterContinuationLimitExits;
 				mStatus.filterResourceDowngrades = control.filterResourceDowngrades;
+				auto& analyticLight = mStatus.analyticLight;
+				analyticLight.valid = true;
+				analyticLight.sourceFrame = completedSlot.readbackFrame;
+				analyticLight.epoch = completedSlot.readbackEpoch;
+				analyticLight.profile = completedSlot.analyticProfile;
+				analyticLight.profileRevision = completedSlot.analyticProfileRevision;
+				analyticLight.buildDispatchGroups = completedSlot.analyticBuildDispatchGroups;
+				analyticLight.applyDispatchGroups = completedSlot.analyticApplyDispatchGroups;
+				analyticLight.cpu = completedSlot.analyticSnapshot;
+				analyticLight.buildEvents = control.analyticLightBuildEvents;
+				analyticLight.anchorsBuilt = control.analyticLightAnchorsBuilt;
+				analyticLight.anchorsValid = control.analyticLightAnchorsValid;
+				analyticLight.anchorsInvalid = control.analyticLightAnchorsInvalid;
+				analyticLight.samplesRequested = control.analyticLightSamplesRequested;
+				analyticLight.samplesExecuted = control.analyticLightSamplesExecuted;
+				analyticLight.evaluations = control.analyticLightEvaluations;
+				analyticLight.buildVisibilityRays = control.analyticLightBuildVisibilityRays;
+				analyticLight.gridSeedHits = control.analyticLightGridSeedHits;
+				analyticLight.gridSeedMisses = control.analyticLightGridSeedMisses;
+				analyticLight.applyFroxelsTested = control.analyticLightApplyFroxelsTested;
+				analyticLight.applyFroxelsApplied = control.analyticLightApplyFroxelsApplied;
+				analyticLight.carrierContributions = control.analyticLightCarrierContributions;
+				analyticLight.anchorBlendTaps = control.analyticLightAnchorBlendTaps;
+				analyticLight.groupCacheHits = control.analyticLightGroupCacheHits;
+				analyticLight.missingGroupRecords = control.analyticLightMissingGroupRecords;
+				analyticLight.identityRejects = control.analyticLightIdentityRejects;
+				analyticLight.applyVisibilityRays = control.analyticLightApplyVisibilityRays;
 				mStatus.controlReadbackBytes += sizeof(NRISmokeControlGpu);
+				if (mSettings.traceMode >= 2u)
+				{
+					const auto& cpu = analyticLight.cpu;
+					Printf("PERF pt smoke analytic light NRI: source_frame=%llu epoch=%u readback=valid profile=%u revision=%u implementation=%u events_requested=%u events_admitted=%u events_rejected=%u events_ready=%u reject_not_prepared=%u reject_disabled=%u reject_invalid=%u reject_stale_epoch=%u reject_expired=%u reject_stale=%u reject_capacity=%u reject_light_budget=%u groups_active=%u groups_free=%u groups_high_water=%u shared_carriers=%u anchors_requested=%u anchors_reserved=%u samples_cpu_requested=%u samples_cpu_reserved=%u build_dispatch_groups=%u apply_dispatch_groups=%u build_events=%u anchors_built=%u anchors_valid=%u anchors_invalid=%u samples_gpu_requested=%u samples_executed=%u evaluations=%u build_visibility_rays=%u grid_seed_hits=%u grid_seed_misses=%u apply_froxels_tested=%u apply_froxels_applied=%u carrier_contributions=%u anchor_blend_taps=%u group_cache_hits=%u missing_group_records=%u identity_rejects=%u apply_visibility_rays=%u apply_rays_zero=%s analytic_grid_requests=0 analytic_grid_radiance=0 analytic_grid_links=0 analytic_prompt_claims=0 analytic_dormant_work=0 compact=1\n",
+						(unsigned long long)analyticLight.sourceFrame, analyticLight.epoch,
+						analyticLight.profile, analyticLight.profileRevision, analyticLight.implementation,
+						cpu.lightEventsRequestedThisFrame, cpu.lightEventsAdmittedThisFrame,
+						cpu.lightEventsRejectedThisFrame, cpu.lightEventsFirstFrameReady,
+						cpu.lightRejectedNotPrepared, cpu.lightRejectedDisabled,
+						cpu.lightRejectedInvalidRequest, cpu.lightRejectedStaleEpoch,
+						cpu.lightRejectedExpiredOnArrival, cpu.lightRejectedStaleOnArrival,
+						cpu.lightRejectedCapacity, cpu.lightRejectedLightingBudget,
+						cpu.activeLightGroups, cpu.freeLightGroupSlots, cpu.lightGroupHighWater,
+						cpu.sharedCarrierReferences, cpu.lightAnchorsRequested,
+						cpu.lightAnchorsReserved, cpu.lightSamplesRequested, cpu.lightSamplesReserved,
+						analyticLight.buildDispatchGroups, analyticLight.applyDispatchGroups,
+						analyticLight.buildEvents, analyticLight.anchorsBuilt,
+						analyticLight.anchorsValid, analyticLight.anchorsInvalid,
+						analyticLight.samplesRequested, analyticLight.samplesExecuted,
+						analyticLight.evaluations, analyticLight.buildVisibilityRays,
+						analyticLight.gridSeedHits, analyticLight.gridSeedMisses,
+						analyticLight.applyFroxelsTested, analyticLight.applyFroxelsApplied,
+						analyticLight.carrierContributions, analyticLight.anchorBlendTaps,
+						analyticLight.groupCacheHits, analyticLight.missingGroupRecords,
+						analyticLight.identityRejects, analyticLight.applyVisibilityRays,
+						analyticLight.applyVisibilityRays == 0u ? "yes" : "no");
+				}
 			}
 			else if (mapped != nullptr)
 				renderer.mFrameBuffer->mCore.UnmapBuffer(*completedSlot.controlReadback.buffer);
@@ -933,7 +987,10 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 		}
 	}
 	if (!mSettings.readback)
+	{
 		mStatus.gpuStatsValid = false;
+		mStatus.analyticLight.valid = false;
+	}
 	const bool worldLightingRequired = mSettings.representation != 0u &&
 		(mSettings.emissiveBackend != (uint32_t)NRISmokeEmissiveBackend::Legacy ||
 		 mSettings.multipleScatter || mSettings.selfShadow);
@@ -2344,11 +2401,15 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		mDirectHistoryValid = false;
 		mLastDirectFrame = UINT32_MAX;
 	}
+	slot.analyticBuildDispatchGroups = 0u;
+	slot.analyticApplyDispatchGroups = 0u;
 	const bool runCarrierEmissive = analyticCount > 0u && worldEmissiveReady &&
 		emissiveLightsReady && !renderParticles && !mSettings.emissiveReference;
 	mStatus.analyticEmissiveCarrierOwned = runCarrierEmissive;
 	if (runCarrierEmissive)
 	{
+		slot.analyticBuildDispatchGroups = Groups(analyticCount);
+		slot.analyticApplyDispatchGroups = Groups(froxelCount);
 		const uint32_t savedParticleCapacity = constants.particleCapacity;
 		constants.particleCapacity = analyticCount;
 		{
@@ -2466,6 +2527,10 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 		slot.readbackInitialized = true;
 		slot.readbackFrame = renderer.mFrameBuffer->mFrameIndex;
 		slot.readbackEpoch = mStatus.simulationEpoch;
+		const NRISmokeWorkSchedulerSnapshot& analyticWork = mWorkScheduler.GetSnapshot();
+		slot.analyticProfile = (uint32_t)analyticWork.effectiveProfile;
+		slot.analyticProfileRevision = analyticWork.table.revision;
+		slot.analyticSnapshot = mAnalyticCarriers.GetSnapshot();
 		mControlCopyPending = true;
 	}
 	return true;
@@ -2533,6 +2598,7 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.resetReason = reason != nullptr ? reason : "unspecified";
 	mStatus.gpuStatsValid = false;
 	mStatus.gpuStatsFrame = UINT64_MAX;
+	mStatus.analyticLight = {};
 	mStatus.activeParticles = 0;
 	mStatus.spawnedParticles = 0;
 	mStatus.expiredParticles = 0;
@@ -2951,6 +3017,27 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		mStatus.emissiveInnerBlockerReceiverCell, mStatus.emissiveInnerBlockerEmitterCell,
 		mStatus.emissiveInnerBlockerInterior, mStatus.emissiveInnerSourceSelections,
 		mStatus.emissiveInnerSourceOverflow);
+	const auto& analyticLight = mStatus.analyticLight;
+	const auto& analyticCpu = analyticLight.cpu;
+	Printf("NRI PT smoke analytic light: readback=%s source_frame=%llu epoch=%u profile=%u revision=%u implementation=%u events=%u/%u/%u ready=%u groups=%u free=%u shared=%u anchors=%u/%u built=%u valid=%u invalid=%u samples=%u/%u/%u evaluations=%u build_rays=%u apply_froxels=%u/%u contributions=%u taps=%u hits=%u missing=%u identity_rejects=%u apply_visibility_rays=%u apply_rays_zero=%s dispatch=%u/%u\n",
+		analyticLight.valid ? "valid" : "invalid",
+		(unsigned long long)analyticLight.sourceFrame, analyticLight.epoch,
+		analyticLight.profile, analyticLight.profileRevision, analyticLight.implementation,
+		analyticCpu.lightEventsRequestedThisFrame, analyticCpu.lightEventsAdmittedThisFrame,
+		analyticCpu.lightEventsRejectedThisFrame, analyticCpu.lightEventsFirstFrameReady,
+		analyticCpu.activeLightGroups, analyticCpu.freeLightGroupSlots,
+		analyticCpu.sharedCarrierReferences, analyticCpu.lightAnchorsRequested,
+		analyticCpu.lightAnchorsReserved, analyticLight.anchorsBuilt,
+		analyticLight.anchorsValid, analyticLight.anchorsInvalid,
+		analyticCpu.lightSamplesRequested, analyticLight.samplesRequested,
+		analyticLight.samplesExecuted, analyticLight.evaluations,
+		analyticLight.buildVisibilityRays, analyticLight.applyFroxelsTested,
+		analyticLight.applyFroxelsApplied, analyticLight.carrierContributions,
+		analyticLight.anchorBlendTaps, analyticLight.groupCacheHits,
+		analyticLight.missingGroupRecords, analyticLight.identityRejects,
+		analyticLight.applyVisibilityRays,
+		analyticLight.applyVisibilityRays == 0u ? "yes" : "no",
+		analyticLight.buildDispatchGroups, analyticLight.applyDispatchGroups);
 	const uint64_t targetBlocked = (uint64_t)mStatus.emissiveTargetBlockerExact +
 		(uint64_t)mStatus.emissiveTargetBlockerRange + (uint64_t)mStatus.emissiveTargetBlockerOther;
 	const uint64_t targetAccounted = (uint64_t)mStatus.emissiveTargetVisibilityVisible + targetBlocked;

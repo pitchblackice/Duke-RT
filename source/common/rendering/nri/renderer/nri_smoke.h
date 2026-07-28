@@ -49,6 +49,36 @@ struct NRISmokeStatusSnapshot
 	uint32_t commandsDropped = 0;
 	NRISmokeAdmissionSnapshot admission = {};
 	NRISmokeAnalyticCarrierSnapshot analytic = {};
+	struct AnalyticLightTelemetry
+	{
+		bool valid = false;
+		uint64_t sourceFrame = UINT64_MAX;
+		uint32_t epoch = 0u;
+		uint32_t profile = 0u;
+		uint32_t profileRevision = 0u;
+		uint32_t implementation = 2u;
+		uint32_t buildDispatchGroups = 0u;
+		uint32_t applyDispatchGroups = 0u;
+		NRISmokeAnalyticCarrierSnapshot cpu = {};
+		uint32_t buildEvents = 0u;
+		uint32_t anchorsBuilt = 0u;
+		uint32_t anchorsValid = 0u;
+		uint32_t anchorsInvalid = 0u;
+		uint32_t samplesRequested = 0u;
+		uint32_t samplesExecuted = 0u;
+		uint32_t evaluations = 0u;
+		uint32_t buildVisibilityRays = 0u;
+		uint32_t gridSeedHits = 0u;
+		uint32_t gridSeedMisses = 0u;
+		uint32_t applyFroxelsTested = 0u;
+		uint32_t applyFroxelsApplied = 0u;
+		uint32_t carrierContributions = 0u;
+		uint32_t anchorBlendTaps = 0u;
+		uint32_t groupCacheHits = 0u;
+		uint32_t missingGroupRecords = 0u;
+		uint32_t identityRejects = 0u;
+		uint32_t applyVisibilityRays = 0u;
+	} analyticLight = {};
 	bool analyticEmissiveCarrierOwned = false;
 	uint32_t admissionFrame = UINT32_MAX;
 	uint64_t admissionRendererFrame = UINT64_MAX;
@@ -277,6 +307,11 @@ private:
 		bool readbackInitialized = false;
 		uint64_t readbackFrame = UINT64_MAX;
 		uint32_t readbackEpoch = 0;
+		uint32_t analyticProfile = 0u;
+		uint32_t analyticProfileRevision = 0u;
+		uint32_t analyticBuildDispatchGroups = 0u;
+		uint32_t analyticApplyDispatchGroups = 0u;
+		NRISmokeAnalyticCarrierSnapshot analyticSnapshot = {};
 	};
 
 	bool EnsureResources(NRIRenderer& renderer, uint32_t representation);
