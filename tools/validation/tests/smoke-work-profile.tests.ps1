@@ -7,6 +7,7 @@ function Assert-Match([string]$Text, [string]$Pattern, [string]$Message) {
 
 $cvars = Read-Source 'source/common/rendering/nri/renderer/nri_cvars.cpp'
 $settings = Read-Source 'source/common/rendering/nri/renderer/nri_renderer_settings.cpp'
+$settingsHeader = Read-Source 'source/common/rendering/nri/renderer/nri_renderer_settings.h'
 $scheduler = Read-Source 'source/common/rendering/nri/renderer/nri_smoke_work_scheduler.cpp'
 $schedulerHeader = Read-Source 'source/common/rendering/nri/renderer/nri_smoke_work_scheduler.h'
 $runtime = Read-Source 'source/common/rendering/nri/renderer/nri_smoke.cpp'
@@ -14,6 +15,8 @@ $menu = Read-Source 'wadsrc/static/menudef.txt'
 $seed = Read-Source 'source/common/rendering/nri/shaders/SmokeGridLightSeed.cs.hlsl'
 
 Assert-Match $cvars 'CVAR\(Int, nri_ptsmokeworkprofile, 0, CVAR_ARCHIVE \| CVAR_GLOBALCONFIG\)' 'Work profile must be archived and default to Reference.'
+Assert-Match $cvars 'CVAR\(Bool, nri_ptsmokedormantgrid, true, CVAR_ARCHIVE \| CVAR_GLOBALCONFIG\)' 'Bounded dormant smoke residency must be enabled by default.'
+Assert-Match $settingsHeader 'bool dormantGrid = true;' 'Captured smoke settings must agree with the dormant residency CVar default.'
 Assert-Match $settings 'settings\.workProfile\s*=\s*\(uint32_t\)std::max\(\(int\)nri_ptsmokeworkprofile,\s*0\)' 'Captured settings must carry the requested profile.'
 Assert-Match $menu 'Option\s+"Smoke Work Profile",\s*"nri_ptsmokeworkprofile",\s*"NRISmokeWorkProfile"' 'Video options must expose the smoke work profile.'
 Assert-Match $menu 'OptionValue NRISmokeWorkProfile[\s\S]*0, "Reference"[\s\S]*1, "High"[\s\S]*2, "Medium"[\s\S]*3, "Low"' 'Menu values must match the runtime profile ABI.'
