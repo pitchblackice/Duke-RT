@@ -49,6 +49,7 @@ struct NRISmokeStatusSnapshot
 	uint32_t commandsDropped = 0;
 	NRISmokeAdmissionSnapshot admission = {};
 	NRISmokeAnalyticCarrierSnapshot analytic = {};
+	bool analyticEmissiveCarrierOwned = false;
 	uint32_t admissionFrame = UINT32_MAX;
 	uint64_t admissionRendererFrame = UINT64_MAX;
 	uint32_t simulationSubsteps = 0;
@@ -330,6 +331,8 @@ private:
 	NRIBufferResource mAnalyticTileHeaders;
 	NRIBufferResource mAnalyticTileIndices;
 	NRIBufferResource mAnalyticFroxelMedium;
+	NRIBufferResource mAnalyticEmissiveA;
+	NRIBufferResource mAnalyticEmissiveB;
 	NRISmokeEmitterSystem mEmitters;
 	NRISmokeAuthority mAuthority;
 	NRISmokeGrid mGrid;

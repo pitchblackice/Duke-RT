@@ -93,6 +93,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		froxelIndex >= currentCount || froxelIndex >= temporalCount)
 		return;
 	const float4 phase = gSmokeFroxelPhase[froxelIndex];
+	if (SmokeAnalyticCarrierReservoirOwns(phase))
+		return;
 	if (SmokeEmissiveWorldFieldOwnsGrid(phase))
 		return;
 	const float4 medium = SmokeEmissiveReceiverMedium(froxelIndex, phase,

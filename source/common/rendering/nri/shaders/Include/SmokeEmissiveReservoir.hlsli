@@ -62,6 +62,14 @@ bool SmokeEmissiveWorldFieldOwnsGrid(float4 phase)
 	return SmokeEmissiveGridFroxel(phase) && (gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_WORLD_ENABLED) != 0u;
 }
 
+bool SmokeAnalyticCarrierReservoirOwns(float4 phase)
+{
+	return (gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_WORLD_ENABLED) != 0u &&
+		(gSmokeConstants.Flags & NRI_SMOKE_FLAG_COMPARE_REPRESENTATION) == 0u &&
+		(gSmokeConstants.Flags & NRI_SMOKE_EMISSIVE_REFERENCE) == 0u &&
+		SmokeFroxelHasAnalyticCarrier(phase) && !SmokeFroxelHasParticleCarrier(phase);
+}
+
 float4 SmokeEmissiveReceiverMedium(uint froxelIndex, float4 phase, float4 combinedMedium)
 {
 	// The world field already supplied the grid portion. A mixed froxel must
@@ -106,6 +114,34 @@ SmokeEmissiveReservoirRecord SmokeUnpackEmissiveReservoir(SmokeEmissiveStorageRe
 	record.ReceiverPosition = asfloat(storage.Data2.xyz);
 	record.SigmaT = asfloat(storage.Data2.w);
 	return record;
+}
+
+SmokeAnalyticEmissiveStorageRecord SmokePackAnalyticEmissive(
+	SmokeEmissiveReservoirRecord reservoir, uint slot, uint generation, uint epoch)
+{
+	const SmokeEmissiveStorageRecord common = SmokePackEmissiveReservoir(reservoir);
+	SmokeAnalyticEmissiveStorageRecord storage;
+	storage.Data0 = common.Data0;
+	storage.Data1 = common.Data1;
+	storage.Data2 = common.Data2;
+	storage.Data3 = uint4(slot, generation, epoch, gSmokeConstants.FrameIndex);
+	return storage;
+}
+
+SmokeEmissiveReservoirRecord SmokeUnpackAnalyticEmissive(
+	SmokeAnalyticEmissiveStorageRecord storage)
+{
+	SmokeEmissiveStorageRecord common;
+	common.Data0 = storage.Data0;
+	common.Data1 = storage.Data1;
+	common.Data2 = storage.Data2;
+	return SmokeUnpackEmissiveReservoir(common);
+}
+
+bool SmokeAnalyticEmissiveIdentityMatches(
+	SmokeAnalyticEmissiveStorageRecord storage, uint slot, uint generation, uint epoch)
+{
+	return all(storage.Data3 == uint4(slot, generation, epoch, gSmokeConstants.FrameIndex - 1u));
 }
 
 SmokeEmissiveLaneRecord SmokeEmptyEmissiveLane()

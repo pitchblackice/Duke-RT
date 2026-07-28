@@ -379,6 +379,8 @@ RWStructuredBuffer<SmokePromptOutcome> gSmokePromptOutcomes : register(u48, spac
 RWStructuredBuffer<SmokeAnalyticTileHeader> gSmokeAnalyticTileHeaders : register(u49, space1);
 RWStructuredBuffer<uint> gSmokeAnalyticTileIndices : register(u50, space1);
 RWStructuredBuffer<float4> gSmokeAnalyticFroxelMedium : register(u51, space1);
+RWStructuredBuffer<SmokeAnalyticEmissiveStorageRecord> gSmokeAnalyticEmissiveCurrent : register(u52, space1);
+RWStructuredBuffer<SmokeAnalyticEmissiveStorageRecord> gSmokeAnalyticEmissiveHistory : register(u53, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);

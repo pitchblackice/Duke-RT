@@ -45,6 +45,16 @@ struct SmokeAnalyticTileHeader
 	uint Overflow;
 };
 
+// One persistent record per physical carrier slot. Data0-2 retain the common
+// emissive reservoir payload; Data3 provides carrier-domain temporal identity.
+struct SmokeAnalyticEmissiveStorageRecord
+{
+	uint4 Data0;
+	uint4 Data1;
+	uint4 Data2;
+	uint4 Data3;
+};
+
 uint2 SmokeAnalyticTileCount(uint froxelWidth, uint froxelHeight)
 {
 	return uint2(

@@ -31,6 +31,8 @@ enum class NRISmokePass : uint32_t
 	AnalyticClear,
 	AnalyticBuildTiles,
 	AnalyticMaterialize,
+	AnalyticEmissiveBuild,
+	AnalyticEmissiveResolve,
 	Count,
 };
 
@@ -285,6 +287,11 @@ struct NRISmokeEmissiveStorageGpu
 	uint32_t data[12] = {};
 };
 
+struct NRISmokeAnalyticEmissiveStorageGpu
+{
+	uint32_t data[16] = {};
+};
+
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
 static_assert(sizeof(NRISmokeStyleGpu) == 80);
 static_assert(sizeof(NRISmokeInjectionCommandGpu) == 112);
@@ -302,6 +309,7 @@ static_assert(sizeof(NRISmokeControlGpu) == 568);
 static_assert(sizeof(NRISmokeIndirectCacheGpu) == 32);
 static_assert(sizeof(NRISmokeDirectCacheGpu) == 40);
 static_assert(sizeof(NRISmokeEmissiveStorageGpu) == 48);
+static_assert(sizeof(NRISmokeAnalyticEmissiveStorageGpu) == 64);
 
 struct NRISmokeConstants
 {
