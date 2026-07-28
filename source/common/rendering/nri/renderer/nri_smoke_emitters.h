@@ -2,6 +2,7 @@
 
 #include "nri_smoke_contracts.h"
 #include "nri_smoke_analytic_carriers.h"
+#include "nri_smoke_continuous_sources.h"
 #include "nri_smoke_interest.h"
 #include "v_video.h"
 
@@ -22,6 +23,8 @@ public:
 		float gridCellSize, uint32_t gridBrickCapacity);
 	void Reset();
 	uint32_t GetGeneration() const { return mGeneration; }
+	void SetContinuousSourceWorkQuantity(uint32_t quantity) { mContinuousSourceWorkQuantity = quantity; }
+	const NRISmokeContinuousSourceSnapshot& GetContinuousSourceSnapshot() const { return mContinuousSources.GetSnapshot(); }
 
 private:
 	struct Identity
@@ -43,6 +46,8 @@ private:
 		float spacingRemainder = 0.0f;
 		double intervalRemainder = 0.0;
 		double startDistanceTraveled = 0.0;
+		uint64_t continuousStableKey = 0;
+		uint64_t continuousCadenceOrdinal = 0;
 		bool activationLatched = false;
 		bool appearanceObserved = false;
 		bool sourceTracePublished = false;
@@ -70,6 +75,9 @@ private:
 	FString mActiveMapName;
 	std::unordered_map<Identity, ActorState, IdentityHash> mActorStates;
 	std::unordered_map<uint32_t, MapEmitterState> mMapEmitterStates;
+	NRISmokeContinuousSourceOwner mContinuousSources;
+	uint64_t mNextContinuousSourceGeneration = 0;
+	uint32_t mContinuousSourceWorkQuantity = 8u;
 	MapEmitterState mEditorPreviewState;
 	FString mEditorPreviewMapName;
 	FString mEditorPreviewRuleId;

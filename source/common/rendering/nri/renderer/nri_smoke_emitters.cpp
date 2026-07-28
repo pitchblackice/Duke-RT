@@ -155,6 +155,8 @@ void NRISmokeEmitterSystem::Reset()
 {
 	mActorStates.clear();
 	mMapEmitterStates.clear();
+	mContinuousSources.Reset();
+	mNextContinuousSourceGeneration = 0u;
 	mEditorPreviewState = {};
 	mEditorPreviewMapName = "";
 	mEditorPreviewRuleId = "";
@@ -176,6 +178,8 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 		mActiveMapName = resolved.activeMapName;
 		mActorStates.clear();
 		mMapEmitterStates.clear();
+		mContinuousSources.Reset();
+		mNextContinuousSourceGeneration = 0u;
 		mEditorPreviewState = {};
 		mEditorPreviewMapName = "";
 		mEditorPreviewRuleId = "";
@@ -257,6 +261,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 		return true;
 	};
 
+	mContinuousSources.BeginFrame(mContinuousSourceWorkQuantity);
 	for (auto& entry : mActorStates) entry.second.observed = false;
 	std::vector<uint32_t> observedPerRule;
 	std::vector<uint32_t> emittedPerRule;
@@ -302,6 +307,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 				ActorState state = {};
 				state.previousPosition = currentPosition;
 				state.previousTimeSeconds = gameplayTimeSeconds;
+				state.continuousStableKey = (uint64_t)++mNextContinuousSourceGeneration;
 				stateIt = mActorStates.emplace(identity, state).first;
 			}
 			ActorState& state = stateIt->second;
@@ -369,6 +375,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			if (traceMode != 0) activationLatchedPerRule[ruleIndex]++;
 			struct TimedEmission { DVector3 position; double gameplaySeconds = 0.0; };
 			std::vector<TimedEmission> emissions;
+			uint32_t continuousCadenceSteps = 0u;
 			DVector3 cadenceStartPosition = state.previousPosition;
 			double cadenceStartTimeSeconds = state.previousTimeSeconds;
 			if (!state.emitted)
@@ -427,6 +434,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 					cadenceStartPosition = state.previousPosition + startSegment * crossingFraction;
 					cadenceStartTimeSeconds = state.previousTimeSeconds + elapsedSeconds * crossingFraction;
 					emissions.push_back({ cadenceStartPosition, cadenceStartTimeSeconds });
+					continuousCadenceSteps = 1u;
 					state.emitted = true;
 				}
 			}
@@ -457,6 +465,8 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 				}
 
 				const uint32_t emitCount = std::min(candidateCount, rule.maxSegmentsPerFrame);
+				continuousCadenceSteps = candidateCount > UINT32_MAX - continuousCadenceSteps ?
+					UINT32_MAX : continuousCadenceSteps + candidateCount;
 				const uint32_t skipped = candidateCount - emitCount;
 				const double stride = spatialCadence ? (double)rule.spacing : (double)rule.intervalSeconds;
 				for (uint32_t emissionIndex = 0; emissionIndex < emitCount; ++emissionIndex)
@@ -517,6 +527,32 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 					state.sourceTracePublished = true;
 				}
 			}
+			const NRISmokeActorSourceLifetime sourceLifetime = NRIClassifySmokeActorSource({
+				rule.id.GetChars(), rule.trigger == LightOverlaySmokeTrigger::Interval,
+				rule.representation == LightOverlaySmokeRepresentation::Grid,
+				rule.spacing, rule.velocityScale });
+			if (sourceLifetime == NRISmokeActorSourceLifetime::PersistentContinuous)
+			{
+				state.continuousCadenceOrdinal += continuousCadenceSteps;
+				NRISmokeContinuousSourceObservation observation = {};
+				observation.stableKey = (uint64_t(actorSourceId) << 32u) | state.continuousStableKey;
+				observation.cadenceOrdinal = state.continuousCadenceOrdinal;
+				observation.gameplayTimeSeconds = gameplayTimeSeconds;
+				observation.epoch = epoch;
+				observation.sourceId = actorSourceId;
+				observation.ruleIndex = ruleIndex;
+				observation.actorIndex = identity.actorIndex;
+				observation.styleIndex = rule.styleIndex;
+				observation.particlesPerCadence = rule.count;
+				observation.cadenceSteps = continuousCadenceSteps;
+				WorldToPathTracingPosition(currentPosition + offset, observation.position);
+				WorldToPathTracingDirection(velocity, observation.velocity);
+				observation.spawnRadius = rule.spawnRadius;
+				observation.densityScale = rule.densityScale;
+				observation.radiusScale = rule.radiusScale;
+				observation.established = state.activationLatched && state.emitted;
+				mContinuousSources.Observe(observation);
+			}
 			publishActorAuthority((uint32_t)emissions.size());
 			if (traceMode != 0) cadenceActivePerRule[ruleIndex] += state.emitted ? 1u : 0u;
 		}
@@ -538,6 +574,16 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 	}
 	for (auto it = mActorStates.begin(); it != mActorStates.end(); )
 		it = !it->second.observed ? mActorStates.erase(it) : std::next(it);
+	const NRISmokeContinuousSourceSnapshot& continuousSnapshot = mContinuousSources.EndFrame();
+	if (traceMode >= 2 && (continuousSnapshot.observed != 0u ||
+		continuousSnapshot.cadenceStepsDiscarded != 0u))
+	{
+		Printf("NRI PT smoke emitter: event=continuous-source-summary observed=%u established=%u pending=%u selected=%u deferred=%u expired=%u cadence_accepted=%u cadence_coalesced=%u cadence_discarded=%u\n",
+			continuousSnapshot.observed, continuousSnapshot.established, continuousSnapshot.pending,
+			continuousSnapshot.selected, continuousSnapshot.deferred, continuousSnapshot.expired,
+			continuousSnapshot.cadenceStepsAccepted, continuousSnapshot.cadenceStepsCoalesced,
+			continuousSnapshot.cadenceStepsDiscarded);
+	}
 
 	struct MapEmissionStats
 	{
