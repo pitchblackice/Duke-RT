@@ -109,7 +109,8 @@ struct PerfCompactGpuTiming
 	double smokeWorldActiveMs = 0.0, smokeWorldLinkMs = 0.0, smokeWorldProposalMs = 0.0;
 	double smokeWorldSeedMs = 0.0, smokeWorldTemporalMs = 0.0, smokeWorldFilterMs = 0.0;
 	double smokeWorldScatterMs = 0.0, smokeCarrierMs = 0.0, smokeViewPrepareMs = 0.0;
-	double smokeMaterializeMs = 0.0, smokeViewPointMs = 0.0, smokeViewDirectionalMs = 0.0;
+	double smokeMaterializeMs = 0.0, smokeAnalyticMaterializeMs = 0.0;
+	double smokeViewPointMs = 0.0, smokeViewDirectionalMs = 0.0;
 	double smokeViewDirectReuseMs = 0.0, smokeViewEmissiveMs = 0.0, smokeViewIndirectMs = 0.0;
 	double smokeIntegrateMs = 0.0, smokeReconstructionMs = 0.0;
 	uint32_t segmentCount = 0, invalidPairs = 0, droppedScopes = 0;
@@ -120,6 +121,7 @@ struct PerfCompactGpuTiming
 			smokeGridSimulateMs + smokeGridRebuildMs + smokeWorldActiveMs + smokeWorldLinkMs +
 			smokeWorldProposalMs + smokeWorldSeedMs + smokeWorldTemporalMs + smokeWorldFilterMs +
 			smokeWorldScatterMs + smokeCarrierMs + smokeViewPrepareMs + smokeMaterializeMs +
+			smokeAnalyticMaterializeMs +
 			smokeViewPointMs + smokeViewDirectionalMs + smokeViewDirectReuseMs + smokeViewEmissiveMs +
 			smokeViewIndirectMs + smokeIntegrateMs + smokeReconstructionMs;
 	}

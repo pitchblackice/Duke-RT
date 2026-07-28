@@ -103,6 +103,7 @@ void NRISmokeEmitterSystem::Reset()
 void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, const TArray<PathTracingWeaponLightEvent>& weaponEvents,
 	const SceneLightSystem& sceneLights,
 	std::vector<NRISmokeStyleGpu>& styles, std::vector<NRISmokeInjectionCommandGpu>& commands,
+	std::vector<NRISmokeAnalyticCarrierRequest>& analyticRequests,
 	uint32_t& nextSerial, uint32_t traceMode, const NRISmokeInterestSnapshot& interest,
 	float gridCellSize, uint32_t gridBrickCapacity)
 {
@@ -142,6 +143,48 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 		target.momentumScale = source.momentumScale;
 		target.coolingHalfLife = source.coolingHalfLife;
 	}
+	analyticRequests.clear();
+	auto routeCommand = [&](const NRISmokeInjectionCommandGpu& command,
+		LightOverlaySmokeRepresentation representation, LightOverlaySmokeQueuePolicy queuePolicy,
+		bool hasMaximumLatency, float maximumLatencySeconds, double authoredGameplaySeconds,
+		uint64_t sourceEventSerial) -> bool
+	{
+		if (representation != LightOverlaySmokeRepresentation::Analytic)
+		{
+			commands.push_back(command);
+			return true;
+		}
+		// Slice 8 intentionally has no analytic backlog. Latest/retry require a
+		// different stable-source replacement contract and fail closed for now.
+		if (queuePolicy != LightOverlaySmokeQueuePolicy::Drop || command.styleIndex >= styles.size())
+			return false;
+		const NRISmokeStyleGpu& style = styles[command.styleIndex];
+		NRISmokeAnalyticCarrierRequest request = {};
+		std::copy(command.position, command.position + 3, request.position);
+		std::copy(command.velocity, command.velocity + 3, request.velocity);
+		std::copy(command.halfAxisU, command.halfAxisU + 3, request.halfAxisU);
+		std::copy(command.halfAxisV, command.halfAxisV + 3, request.halfAxisV);
+		request.velocity[1] -= style.riseVelocity;
+		request.initialRadius = std::max(std::max(command.spawnRadius,
+			style.radius * command.radiusScale), 0.001f);
+		const float radiusCells = request.initialRadius / std::max(gridCellSize, 0.0001f);
+		const float normalization = std::max(1.0f,
+			(4.0f * 3.14159265359f / 15.0f) * radiusCells * radiusCells * radiusCells);
+		request.initialDensity = std::max(command.densityScale, 0.0f) / normalization;
+		request.shape = command.shape;
+		request.rangeCount = std::min(command.count, 256u);
+		request.expansionVelocity = style.expansionVelocity;
+		request.densityHalfLife = std::max(style.densityHalfLife, 0.001f);
+		request.lifetimeSeconds = std::max(style.lifetime, 0.001f);
+		request.styleIndex = command.styleIndex;
+		request.sourceId = command.sourceId;
+		request.epoch = command.epoch;
+		request.authoredGameplaySeconds = authoredGameplaySeconds;
+		request.maximumLatencySeconds = hasMaximumLatency ? std::max(maximumLatencySeconds, 0.0f) : 0.0f;
+		request.sourceEventSerial = sourceEventSerial;
+		analyticRequests.push_back(request);
+		return true;
+	};
 
 	for (auto& entry : mActorStates) entry.second.observed = false;
 	std::vector<uint32_t> observedPerRule;
@@ -214,7 +257,8 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 					continue;
 				}
 			}
-			std::vector<DVector3> emissionPositions;
+			struct TimedEmission { DVector3 position; double gameplaySeconds = 0.0; };
+			std::vector<TimedEmission> emissions;
 			DVector3 cadenceStartPosition = state.previousPosition;
 			double cadenceStartTimeSeconds = state.previousTimeSeconds;
 			if (!state.emitted)
@@ -272,7 +316,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 					const double crossingFraction = std::max(timeCrossingFraction, distanceCrossingFraction);
 					cadenceStartPosition = state.previousPosition + startSegment * crossingFraction;
 					cadenceStartTimeSeconds = state.previousTimeSeconds + elapsedSeconds * crossingFraction;
-					emissionPositions.push_back(cadenceStartPosition);
+					emissions.push_back({ cadenceStartPosition, cadenceStartTimeSeconds });
 					state.emitted = true;
 				}
 			}
@@ -309,7 +353,9 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 				{
 					const double crossing = firstCrossing + (double)(skipped + emissionIndex) * stride;
 					const double fraction = measure > 0.0 ? std::clamp(crossing / measure, 0.0, 1.0) : 1.0;
-					emissionPositions.push_back(cadenceStartPosition + segment * fraction);
+					const double emissionTime = cadenceStartTimeSeconds +
+						std::max(0.0, gameplayTimeSeconds - cadenceStartTimeSeconds) * fraction;
+					emissions.push_back({ cadenceStartPosition + segment * fraction, emissionTime });
 				}
 			}
 
@@ -320,8 +366,9 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			const DVector3 up(0.0, 0.0, 1.0);
 			const DVector3 offset = right * rule.offset[0] + forward * rule.offset[1] + up * rule.offset[2];
 			const DVector3 velocity = ActorVelocity(actor) * rule.velocityScale;
-			for (const DVector3& emissionPosition : emissionPositions)
+			for (const TimedEmission& emission : emissions)
 			{
+				const DVector3& emissionPosition = emission.position;
 				NRISmokeInjectionCommandGpu command = {};
 				WorldToPathTracingPosition(emissionPosition + offset, command.position);
 				WorldToPathTracingDirection(velocity, command.velocity);
@@ -337,11 +384,13 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 					rule.id.GetChars(), static_cast<uint32_t>(actor->GetIndex()));
 				command.sourceMetadata = NRIPackSmokeSourceMetadata(NRISmokeInjectionSourceClass::InteractiveActor);
 				SetPointSourceShape(command);
-				commands.push_back(command);
+				const bool routed = routeCommand(command, rule.representation, rule.queuePolicy,
+					rule.hasMaxLatencySeconds, rule.maxLatencySeconds, emission.gameplaySeconds,
+					(uint64_t)(uint32_t)actor->GetIndex() << 32u | command.serial);
 				if (traceMode != 0)
 				{
-					emittedPerRule[ruleIndex]++;
-					particlesPerRule[ruleIndex] += command.count;
+					emittedPerRule[ruleIndex] += routed ? 1u : 0u;
+					particlesPerRule[ruleIndex] += routed ? command.count : 0u;
 				}
 				if (traceMode >= 2 && verbosePrinted < 32u)
 				{
@@ -659,7 +708,16 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 				rule.id.GetChars());
 			command.sourceMetadata = NRIPackSmokeSourceMetadata(NRISmokeInjectionSourceClass::InteractiveEvent);
 			SetPointSourceShape(command);
-			commands.push_back(command);
+			const bool routed = routeCommand(command, rule.representation, rule.queuePolicy,
+				rule.hasMaxLatencySeconds, rule.maxLatencySeconds, event.absoluteTimeSeconds,
+				event.serial);
+			if (!routed)
+			{
+				if (traceMode != 0)
+					Printf("NRI PT smoke emitter: event=weapon-ignored source_event=%s source_serial=%llu reason=unsupported-analytic-policy\n",
+						event.eventId.GetChars(), (unsigned long long)event.serial);
+				continue;
+			}
 			eventCommands++;
 			eventParticles += command.count;
 

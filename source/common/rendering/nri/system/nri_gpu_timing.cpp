@@ -203,6 +203,7 @@ void NRIGpuTiming::RetireSlot(nri::CoreInterface& core, uint32_t slotIndex)
 			case NRIGpuTimingScope::SmokeCarrier: timing.smokeCarrierMs += value; break;
 			case NRIGpuTimingScope::SmokeViewPrepare: timing.smokeViewPrepareMs += value; break;
 			case NRIGpuTimingScope::SmokeMaterialize: timing.smokeMaterializeMs += value; break;
+			case NRIGpuTimingScope::SmokeAnalyticMaterialize: timing.smokeAnalyticMaterializeMs += value; break;
 			case NRIGpuTimingScope::SmokeViewPoint: timing.smokeViewPointMs += value; break;
 			case NRIGpuTimingScope::SmokeViewDirectional: timing.smokeViewDirectionalMs += value; break;
 			case NRIGpuTimingScope::SmokeViewDirectReuse: timing.smokeViewDirectReuseMs += value; break;
@@ -219,7 +220,7 @@ void NRIGpuTiming::RetireSlot(nri::CoreInterface& core, uint32_t slotIndex)
 	timing.smokeVolumeMs = smokeVolumeMs;
 	const double smokeTotalMs = smokeSimulationMs + smokeVolumeMs;
 	const double smokeDetailMs = timing.SmokeDetailTotalMs();
-	Printf("PERF pt smoke gpu timing NRI: renderer_frame=%llu presentation_gen=%llu queued_slot=%u segment=%.6f simulation=%.6f volume=%.6f total=%.6f detail_total=%.6f unattributed=%.6f grid_allocate=%.6f grid_initialize=%.6f grid_deposit=%.6f grid_halo=%.6f grid_simulate=%.6f grid_rebuild=%.6f world_active=%.6f world_link=%.6f world_proposal=%.6f world_seed=%.6f world_temporal=%.6f world_filter=%.6f world_scatter=%.6f carrier=%.6f view_prepare=%.6f materialize=%.6f evaluate_grid=%.6f view_point=%.6f view_directional=%.6f view_direct_reuse=%.6f view_emissive=%.6f view_indirect=%.6f integrate=%.6f reconstruction=%.6f scopes=%u valid=%u invalid=%u dropped=%u compact=1 epoch=%llu record=%u\n",
+	Printf("PERF pt smoke gpu timing NRI: renderer_frame=%llu presentation_gen=%llu queued_slot=%u segment=%.6f simulation=%.6f volume=%.6f total=%.6f detail_total=%.6f unattributed=%.6f grid_allocate=%.6f grid_initialize=%.6f grid_deposit=%.6f grid_halo=%.6f grid_simulate=%.6f grid_rebuild=%.6f world_active=%.6f world_link=%.6f world_proposal=%.6f world_seed=%.6f world_temporal=%.6f world_filter=%.6f world_scatter=%.6f carrier=%.6f view_prepare=%.6f materialize=%.6f evaluate_grid=%.6f analytic_materialize=%.6f view_point=%.6f view_directional=%.6f view_direct_reuse=%.6f view_emissive=%.6f view_indirect=%.6f integrate=%.6f reconstruction=%.6f scopes=%u valid=%u invalid=%u dropped=%u compact=1 epoch=%llu record=%u\n",
 		(unsigned long long)slot.rendererFrame,
 		(unsigned long long)slot.token.presentationGeneration,
 		slotIndex,
@@ -246,6 +247,7 @@ void NRIGpuTiming::RetireSlot(nri::CoreInterface& core, uint32_t slotIndex)
 		timing.smokeViewPrepareMs,
 		timing.smokeMaterializeMs,
 		timing.smokeMaterializeMs,
+		timing.smokeAnalyticMaterializeMs,
 		timing.smokeViewPointMs,
 		timing.smokeViewDirectionalMs,
 		timing.smokeViewDirectReuseMs,

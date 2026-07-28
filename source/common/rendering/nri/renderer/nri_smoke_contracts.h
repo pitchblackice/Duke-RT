@@ -28,6 +28,10 @@ enum class NRISmokePass : uint32_t
 	Composite,
 	EvaluateGridCompact,
 	PromptFallback,
+	AnalyticClear,
+	AnalyticBuildTiles,
+	AnalyticMaterialize,
+	Count,
 };
 
 struct NRISmokeParticleGpu

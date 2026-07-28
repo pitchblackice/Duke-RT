@@ -9,12 +9,14 @@ namespace
 		NRISmokeWorkCapability_FirstUseSources |
 		NRISmokeWorkCapability_RadianceNewInvalid |
 		NRISmokeWorkCapability_RadianceMaintenance |
-		NRISmokeWorkCapability_SimulationSubsteps;
+		NRISmokeWorkCapability_SimulationSubsteps |
+		NRISmokeWorkCapability_AnalyticCarriers;
 
 	constexpr uint32_t kAlwaysEnforcedCapabilities =
 		NRISmokeWorkCapability_EmissionCommands |
 		NRISmokeWorkCapability_FirstUseSources |
-		NRISmokeWorkCapability_SimulationSubsteps;
+		NRISmokeWorkCapability_SimulationSubsteps |
+		NRISmokeWorkCapability_AnalyticCarriers;
 }
 
 NRISmokeWorkTable NRISmokeWorkScheduler::BuildTable(NRISmokeWorkProfile profile,
@@ -104,6 +106,13 @@ void NRISmokeWorkScheduler::RecordPrompt(uint32_t requested, uint32_t scheduled)
 	mSnapshot.promptRequested = requested;
 	mSnapshot.promptScheduled = std::min(scheduled, requested);
 	mSnapshot.promptDeferred = requested - mSnapshot.promptScheduled;
+}
+
+void NRISmokeWorkScheduler::RecordAnalytic(uint32_t requested, uint32_t scheduled)
+{
+	mSnapshot.analyticRequested = requested;
+	mSnapshot.analyticScheduled = std::min(scheduled, requested);
+	mSnapshot.analyticDropped = requested - mSnapshot.analyticScheduled;
 }
 
 void NRISmokeWorkScheduler::RecordSimulation(uint32_t due, uint32_t scheduled, uint32_t debt)

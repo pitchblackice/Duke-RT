@@ -114,10 +114,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint froxelIndex = gSmokeOccupiedFroxelIndices[dispatchThreadId.x];
 	if (froxelIndex >= SmokeFroxelCount() || froxelIndex >= mediumCount || froxelIndex >= phaseCount || froxelIndex >= reservoirCount)
 		return;
-	const float4 medium = gSmokeFroxelMedium[froxelIndex];
 	const float4 phase = gSmokeFroxelPhase[froxelIndex];
 	if (SmokeEmissiveWorldFieldOwnsGrid(phase))
 		return;
+	const float4 medium = SmokeEmissiveReceiverMedium(froxelIndex, phase,
+		gSmokeFroxelMedium[froxelIndex]);
 	if (medium.a <= 0.0 || !any(medium.rgb > 0.0))
 		return;
 	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;

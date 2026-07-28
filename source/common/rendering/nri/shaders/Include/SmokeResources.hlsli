@@ -8,6 +8,7 @@
 #include "SmokeGridData.hlsli"
 #include "SmokeGridLightingData.hlsli"
 #include "SmokeViewWorkData.hlsli"
+#include "SmokeAnalyticData.hlsli"
 
 #define NRI_SMOKE_SET_INPUTS 0
 #define NRI_SMOKE_SET_BUFFERS 1
@@ -311,8 +312,20 @@ uint SmokeFroxelRadianceAge(uint metadata) { return (metadata >> NRI_SMOKE_RADIA
 uint SmokeFroxelFallbackType(uint metadata) { return (metadata >> NRI_SMOKE_FALLBACK_SHIFT) & 0x7u; }
 bool SmokeFroxelRadianceUnresolved(uint metadata) { return (metadata & NRI_SMOKE_RADIANCE_UNRESOLVED) != 0u; }
 
+// gSmokeFroxelPhase.w is an integer-valued ownership mask. Existing particle
+// and grid writers already publish 1 and 2 respectively; analytic carriers add
+// bit 2 without pretending to own persistent grid-world radiance.
+#define NRI_SMOKE_FROXEL_CARRIER_PARTICLE 0x1u
+#define NRI_SMOKE_FROXEL_CARRIER_GRID 0x2u
+#define NRI_SMOKE_FROXEL_CARRIER_ANALYTIC 0x4u
+uint SmokeFroxelCarrierOwnership(float4 phase) { return (uint)round(max(phase.w, 0.0)); }
+bool SmokeFroxelHasParticleCarrier(float4 phase) { return (SmokeFroxelCarrierOwnership(phase) & NRI_SMOKE_FROXEL_CARRIER_PARTICLE) != 0u; }
+bool SmokeFroxelHasGridCarrier(float4 phase) { return (SmokeFroxelCarrierOwnership(phase) & NRI_SMOKE_FROXEL_CARRIER_GRID) != 0u; }
+bool SmokeFroxelHasAnalyticCarrier(float4 phase) { return (SmokeFroxelCarrierOwnership(phase) & NRI_SMOKE_FROXEL_CARRIER_ANALYTIC) != 0u; }
+
 StructuredBuffer<SmokeStyle> gSmokeStyles : register(t0, space0);
 StructuredBuffer<SmokeInjectionCommand> gSmokeCommands : register(t1, space0);
+StructuredBuffer<SmokeAnalyticCarrier> gSmokeAnalyticCarriers : register(t2, space0);
 
 RWStructuredBuffer<SmokeParticle> gSmokeParticles : register(u0, space1);
 RWStructuredBuffer<SmokeControl> gSmokeControl : register(u1, space1);
@@ -363,6 +376,9 @@ RWStructuredBuffer<uint2> gSmokeViewColumnMasks : register(u45, space1);
 RWStructuredBuffer<uint> gSmokeViewCompactIndices : register(u46, space1);
 RWStructuredBuffer<SmokeViewWorkControl> gSmokeViewWorkControl : register(u47, space1);
 RWStructuredBuffer<SmokePromptOutcome> gSmokePromptOutcomes : register(u48, space1);
+RWStructuredBuffer<SmokeAnalyticTileHeader> gSmokeAnalyticTileHeaders : register(u49, space1);
+RWStructuredBuffer<uint> gSmokeAnalyticTileIndices : register(u50, space1);
+RWStructuredBuffer<float4> gSmokeAnalyticFroxelMedium : register(u51, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);

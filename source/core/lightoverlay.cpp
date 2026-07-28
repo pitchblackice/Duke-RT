@@ -86,6 +86,25 @@ namespace
 		}
 	}
 
+	static const char* SmokeRepresentationName(LightOverlaySmokeRepresentation representation)
+	{
+		switch (representation)
+		{
+		case LightOverlaySmokeRepresentation::Analytic: return "analytic";
+		default: return "grid";
+		}
+	}
+
+	static const char* SmokeQueuePolicyName(LightOverlaySmokeQueuePolicy policy)
+	{
+		switch (policy)
+		{
+		case LightOverlaySmokeQueuePolicy::Drop: return "drop";
+		case LightOverlaySmokeQueuePolicy::Latest: return "latest";
+		default: return "retry";
+		}
+	}
+
 	static void CopyVector3(const float source[3], float destination[3])
 	{
 		destination[0] = source[0];
@@ -911,6 +930,27 @@ namespace
 					else if (!stricmp(sc.String, "immediate")) rule.activationPolicy = LightOverlayActorActivationPolicy::Immediate;
 					else sc.ScriptMessage("Invalid smoke actor activation '%s'; expected surface or immediate", sc.String);
 				}
+				else if (sc.Compare("representation"))
+				{
+					sc.MustGetString();
+					if (!stricmp(sc.String, "grid")) rule.representation = LightOverlaySmokeRepresentation::Grid;
+					else if (!stricmp(sc.String, "analytic")) rule.representation = LightOverlaySmokeRepresentation::Analytic;
+					else sc.ScriptMessage("Invalid smoke representation '%s'; expected grid or analytic", sc.String);
+				}
+				else if (sc.Compare("queuepolicy"))
+				{
+					sc.MustGetString();
+					if (!stricmp(sc.String, "retry")) rule.queuePolicy = LightOverlaySmokeQueuePolicy::Retry;
+					else if (!stricmp(sc.String, "drop")) rule.queuePolicy = LightOverlaySmokeQueuePolicy::Drop;
+					else if (!stricmp(sc.String, "latest")) rule.queuePolicy = LightOverlaySmokeQueuePolicy::Latest;
+					else sc.ScriptMessage("Invalid smoke queue policy '%s'; expected retry, drop, or latest", sc.String);
+				}
+				else if (sc.Compare("maxlatencyseconds"))
+				{
+					sc.MustGetFloat();
+					rule.hasMaxLatencySeconds = true;
+					rule.maxLatencySeconds = std::max(0.0f, (float)sc.Float);
+				}
 				else if (sc.Compare("emitterforeground"))
 				{
 					sc.MustGetString();
@@ -949,6 +989,27 @@ namespace
 			{
 				sc.MustGetString();
 				if (sc.Compare("style")) { sc.MustGetString(); rule.styleId = sc.String; }
+				else if (sc.Compare("representation"))
+				{
+					sc.MustGetString();
+					if (!stricmp(sc.String, "grid")) rule.representation = LightOverlaySmokeRepresentation::Grid;
+					else if (!stricmp(sc.String, "analytic")) rule.representation = LightOverlaySmokeRepresentation::Analytic;
+					else sc.ScriptMessage("Invalid smoke representation '%s'; expected grid or analytic", sc.String);
+				}
+				else if (sc.Compare("queuepolicy"))
+				{
+					sc.MustGetString();
+					if (!stricmp(sc.String, "retry")) rule.queuePolicy = LightOverlaySmokeQueuePolicy::Retry;
+					else if (!stricmp(sc.String, "drop")) rule.queuePolicy = LightOverlaySmokeQueuePolicy::Drop;
+					else if (!stricmp(sc.String, "latest")) rule.queuePolicy = LightOverlaySmokeQueuePolicy::Latest;
+					else sc.ScriptMessage("Invalid smoke queue policy '%s'; expected retry, drop, or latest", sc.String);
+				}
+				else if (sc.Compare("maxlatencyseconds"))
+				{
+					sc.MustGetFloat();
+					rule.hasMaxLatencySeconds = true;
+					rule.maxLatencySeconds = std::max(0.0f, (float)sc.Float);
+				}
 				else if (sc.Compare("count")) { sc.MustGetNumber(); rule.count = (uint32_t)std::clamp(sc.Number, 1, 256); }
 				else if (sc.Compare("offset")) MustParseVector3(rule.offset);
 				else if (sc.Compare("spawnradius")) { sc.MustGetFloat(); rule.spawnRadius = std::max(0.0f, (float)sc.Float); }
@@ -1889,6 +1950,9 @@ namespace
 		if (rule.excludeOwnerClassName.IsNotEmpty()) AppendLine(text, 2, FStringf("excludeownerclass %s", QuoteLightOverlayString(rule.excludeOwnerClassName).GetChars()));
 		AppendLine(text, 2, FStringf("trigger %s", SmokeTriggerName(rule.trigger)));
 		AppendLine(text, 2, FStringf("activation %s", ActorActivationPolicyName(rule.activationPolicy)));
+		AppendLine(text, 2, FStringf("representation %s", SmokeRepresentationName(rule.representation)));
+		AppendLine(text, 2, FStringf("queuepolicy %s", SmokeQueuePolicyName(rule.queuePolicy)));
+		if (rule.hasMaxLatencySeconds) AppendLine(text, 2, FStringf("maxlatencyseconds %s", FormatLightOverlayFloat(rule.maxLatencySeconds).GetChars()));
 		AppendLine(text, 2, FStringf("emitterforeground %s", rule.emitterForeground ? "on" : "off"));
 		AppendLine(text, 2, FStringf("style %s", QuoteLightOverlayString(rule.styleId).GetChars()));
 		AppendLine(text, 2, FStringf("count %u", rule.count));
@@ -1911,6 +1975,9 @@ namespace
 		AppendLine(text, 1, FStringf("smokeeventrule %s", QuoteLightOverlayString(rule.id).GetChars()));
 		AppendLine(text, 1, "{");
 		AppendLine(text, 2, FStringf("style %s", QuoteLightOverlayString(rule.styleId).GetChars()));
+		AppendLine(text, 2, FStringf("representation %s", SmokeRepresentationName(rule.representation)));
+		AppendLine(text, 2, FStringf("queuepolicy %s", SmokeQueuePolicyName(rule.queuePolicy)));
+		if (rule.hasMaxLatencySeconds) AppendLine(text, 2, FStringf("maxlatencyseconds %s", FormatLightOverlayFloat(rule.maxLatencySeconds).GetChars()));
 		AppendLine(text, 2, FStringf("count %u", rule.count));
 		AppendVector3Field(text, 2, "offset", rule.offset);
 		AppendLine(text, 2, FStringf("spawnradius %s", FormatLightOverlayFloat(rule.spawnRadius).GetChars()));
@@ -2360,22 +2427,24 @@ namespace
 		}
 		for (const auto* rule : SortRulesByOrder(database.smokeActorRules))
 		{
-			Printf("LIGHTOVR smokeactorrule %s: actorclass=%s ownerclass=%s excludeownerclass=%s trigger=%s activation=%s emitterforeground=%s style=%s "
+			Printf("LIGHTOVR smokeactorrule %s: actorclass=%s ownerclass=%s excludeownerclass=%s trigger=%s activation=%s representation=%s queuepolicy=%s maxlatency=%s emitterforeground=%s style=%s "
 				"count=%u offset=(%.3f,%.3f,%.3f) spawnradius=%.3f densityscale=%.3f radiusscale=%.3f "
 				"velocitycone=%.3f velocityscale=%.3f intervalseconds=%.3f starttime=%.3f startdistance=%.3f spacing=%.3f maxsegmentsperframe=%u source=%s\n",
 				rule->id.GetChars(), rule->actorClassName.GetChars(),
 				rule->ownerClassName.IsNotEmpty() ? rule->ownerClassName.GetChars() : "none",
 				rule->excludeOwnerClassName.IsNotEmpty() ? rule->excludeOwnerClassName.GetChars() : "none",
-				SmokeTriggerName(rule->trigger), ActorActivationPolicyName(rule->activationPolicy), rule->emitterForeground ? "on" : "off", rule->styleId.GetChars(), rule->count,
+				SmokeTriggerName(rule->trigger), ActorActivationPolicyName(rule->activationPolicy), SmokeRepresentationName(rule->representation), SmokeQueuePolicyName(rule->queuePolicy),
+				rule->hasMaxLatencySeconds ? FormatLightOverlayFloat(rule->maxLatencySeconds).GetChars() : "none", rule->emitterForeground ? "on" : "off", rule->styleId.GetChars(), rule->count,
 				rule->offset[0], rule->offset[1], rule->offset[2], rule->spawnRadius, rule->densityScale,
 				rule->radiusScale, rule->velocityCone, rule->velocityScale, rule->intervalSeconds, rule->startTime, rule->startDistance, rule->spacing,
 				rule->maxSegmentsPerFrame, SourceLocationText(rule->source).GetChars());
 		}
 		for (const auto* rule : SortRulesByOrder(database.smokeEventRules))
 		{
-			Printf("LIGHTOVR smokeeventrule %s: style=%s count=%u spawnradius=%.3f velocityscale=%.3f "
+			Printf("LIGHTOVR smokeeventrule %s: style=%s representation=%s queuepolicy=%s maxlatency=%s count=%u spawnradius=%.3f velocityscale=%.3f "
 				"normaloffset=%.3f direction=%s source=%s\n",
-				rule->id.GetChars(), rule->styleId.GetChars(), rule->count, rule->spawnRadius, rule->velocityScale,
+				rule->id.GetChars(), rule->styleId.GetChars(), SmokeRepresentationName(rule->representation), SmokeQueuePolicyName(rule->queuePolicy),
+				rule->hasMaxLatencySeconds ? FormatLightOverlayFloat(rule->maxLatencySeconds).GetChars() : "none", rule->count, rule->spawnRadius, rule->velocityScale,
 				rule->normalOffset, SmokeDirectionPolicyName(rule->directionPolicy),
 				SourceLocationText(rule->source).GetChars());
 		}
@@ -2544,12 +2613,17 @@ namespace
 				rule.excludeOwnerClassName.IsEmpty() ? "n/a" : (rule.excludeOwnerClassResolved ? "yes" : "no"),
 				SmokeTriggerName(rule.trigger), ActorActivationPolicyName(rule.activationPolicy), rule.emitterForeground ? "on" : "off", rule.startTime, rule.styleId.GetChars(), rule.styleResolved ? "yes" : "no", rule.styleIndex,
 				SourceLocationText(rule.source).GetChars());
+			Printf("  smoke_policy representation=%s queuepolicy=%s maxlatency=%s\n",
+				SmokeRepresentationName(rule.representation), SmokeQueuePolicyName(rule.queuePolicy),
+				rule.hasMaxLatencySeconds ? FormatLightOverlayFloat(rule.maxLatencySeconds).GetChars() : "none");
 		}
 		for (const auto& rule : resolved.smokeEventRules)
 		{
-			Printf("LIGHTOVR resolved smokeeventrule %s: style=%s style_resolved=%s style_index=%u "
+			Printf("LIGHTOVR resolved smokeeventrule %s: style=%s style_resolved=%s style_index=%u representation=%s queuepolicy=%s maxlatency=%s "
 				"velocityscale=%.3f normaloffset=%.3f direction=%s source=%s\n",
 				rule.id.GetChars(), rule.styleId.GetChars(), rule.styleResolved ? "yes" : "no", rule.styleIndex,
+				SmokeRepresentationName(rule.representation), SmokeQueuePolicyName(rule.queuePolicy),
+				rule.hasMaxLatencySeconds ? FormatLightOverlayFloat(rule.maxLatencySeconds).GetChars() : "none",
 				rule.velocityScale, rule.normalOffset, SmokeDirectionPolicyName(rule.directionPolicy),
 				SourceLocationText(rule.source).GetChars());
 		}

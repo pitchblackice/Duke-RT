@@ -52,12 +52,30 @@ uint SmokeEmissiveDiagnosticCandidate()
 
 bool SmokeEmissiveGridFroxel(float4 phase)
 {
-	return (gSmokeConstants.Flags & NRI_SMOKE_DIRECT_GRID_ENABLED) != 0u && phase.w > 1.5;
+	return (gSmokeConstants.Flags & NRI_SMOKE_DIRECT_GRID_ENABLED) != 0u &&
+		SmokeFroxelHasGridCarrier(phase) && !SmokeFroxelHasAnalyticCarrier(phase) &&
+		!SmokeFroxelHasParticleCarrier(phase);
 }
 
 bool SmokeEmissiveWorldFieldOwnsGrid(float4 phase)
 {
 	return SmokeEmissiveGridFroxel(phase) && (gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_WORLD_ENABLED) != 0u;
+}
+
+float4 SmokeEmissiveReceiverMedium(uint froxelIndex, float4 phase, float4 combinedMedium)
+{
+	// The world field already supplied the grid portion. A mixed froxel must
+	// run receiver emissive only for its analytic coefficient or grid energy is
+	// counted twice. Pure analytic/particle froxels use the common medium.
+	if ((gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_WORLD_ENABLED) != 0u &&
+		SmokeFroxelHasGridCarrier(phase) && SmokeFroxelHasAnalyticCarrier(phase))
+	{
+		uint count, stride;
+		gSmokeAnalyticFroxelMedium.GetDimensions(count, stride);
+		if (froxelIndex < count)
+			return gSmokeAnalyticFroxelMedium[froxelIndex];
+	}
+	return combinedMedium;
 }
 
 uint SmokeEmissiveLaneCount()

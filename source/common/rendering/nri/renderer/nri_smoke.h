@@ -4,6 +4,7 @@
 #include "nri_resources.h"
 #include "nri_smoke_authority.h"
 #include "nri_smoke_admission.h"
+#include "nri_smoke_analytic_carriers.h"
 #include "nri_smoke_contracts.h"
 #include "nri_smoke_emitters.h"
 #include "nri_smoke_grid.h"
@@ -47,6 +48,7 @@ struct NRISmokeStatusSnapshot
 	uint32_t styleCount = 0;
 	uint32_t commandsDropped = 0;
 	NRISmokeAdmissionSnapshot admission = {};
+	NRISmokeAnalyticCarrierSnapshot analytic = {};
 	uint32_t admissionFrame = UINT32_MAX;
 	uint64_t admissionRendererFrame = UINT64_MAX;
 	uint32_t simulationSubsteps = 0;
@@ -259,6 +261,8 @@ private:
 	{
 		NRIBufferResource upload;
 		NRIBufferResource device;
+		NRIBufferResource analyticUpload;
+		NRIBufferResource analyticDevice;
 		NRIBufferResource styleUpload;
 		NRIBufferResource controlReadback;
 		nri::DescriptorSet* inputSet = nullptr;
@@ -298,7 +302,7 @@ private:
 	NRISmokeSettings mSettings = {};
 	NRISmokeStatusSnapshot mStatus = {};
 	nri::PipelineLayout* mPipelineLayout = nullptr;
-	std::array<nri::Pipeline*, 23> mPipelines = {};
+	std::array<nri::Pipeline*, (size_t)NRISmokePass::Count> mPipelines = {};
 	std::vector<CommandSlot> mCommandSlots;
 	NRIBufferResource mStyleBuffer;
 	NRIBufferResource mCompatibilityStorage;
@@ -323,6 +327,9 @@ private:
 	NRIBufferResource mEmissiveHistory;
 	NRIBufferResource mDirectCurrent;
 	NRIBufferResource mDirectHistory;
+	NRIBufferResource mAnalyticTileHeaders;
+	NRIBufferResource mAnalyticTileIndices;
+	NRIBufferResource mAnalyticFroxelMedium;
 	NRISmokeEmitterSystem mEmitters;
 	NRISmokeAuthority mAuthority;
 	NRISmokeGrid mGrid;
@@ -331,10 +338,12 @@ private:
 	NRISmokeViewWork mViewWork;
 	NRISmokePulseOwner mPulseOwner;
 	NRISmokePromptFallback mPromptFallback;
+	NRISmokeAnalyticCarriers mAnalyticCarriers;
 	NRISmokeWorkScheduler mWorkScheduler;
 	std::vector<NRISmokeStyleGpu> mStyles;
 	std::vector<NRISmokeInjectionCommandGpu> mPendingCommands;
 	std::vector<NRISmokeInjectionCommandGpu> mSelectedGridCommands;
+	std::vector<NRISmokeAnalyticCarrierRequest> mPendingAnalyticRequests;
 	NRISmokeAdmissionScheduler mAdmissionScheduler;
 	uint64_t mPulsePlanToken = 0;
 	uint32_t mResourceParticleCapacity = 0;

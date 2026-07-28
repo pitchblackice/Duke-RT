@@ -44,6 +44,7 @@ enum class NRIGpuTimingScope : uint8_t
 	SmokeCarrier,
 	SmokeViewPrepare,
 	SmokeMaterialize,
+	SmokeAnalyticMaterialize,
 	SmokeViewPoint,
 	SmokeViewDirectional,
 	SmokeViewDirectReuse,

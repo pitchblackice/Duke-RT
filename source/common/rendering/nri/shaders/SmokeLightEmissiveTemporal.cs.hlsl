@@ -92,10 +92,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (froxelIndex >= SmokeFroxelCount() || froxelIndex >= mediumCount || froxelIndex >= phaseCount ||
 		froxelIndex >= currentCount || froxelIndex >= temporalCount)
 		return;
-	const float4 medium = gSmokeFroxelMedium[froxelIndex];
 	const float4 phase = gSmokeFroxelPhase[froxelIndex];
 	if (SmokeEmissiveWorldFieldOwnsGrid(phase))
 		return;
+	const float4 medium = SmokeEmissiveReceiverMedium(froxelIndex, phase,
+		gSmokeFroxelMedium[froxelIndex]);
 	const float anisotropy = phase.x;
 	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;
 

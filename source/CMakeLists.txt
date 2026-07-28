@@ -978,6 +978,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_renderer.cpp
 	common/rendering/nri/renderer/nri_renderer_settings.cpp
 	common/rendering/nri/renderer/nri_smoke.cpp
+	common/rendering/nri/renderer/nri_smoke_analytic_carriers.cpp
 	common/rendering/nri/renderer/nri_smoke_work_scheduler.cpp
 	common/rendering/nri/renderer/nri_smoke_interest.cpp
 	common/rendering/nri/renderer/nri_smoke_dormant_summary.cpp
@@ -1550,6 +1551,12 @@ if (HAVE_NRI)
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeEvaluateGridCompact.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokePromptFallback.cs.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokePromptFallback.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticClear.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticClear.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticBuildTiles.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticBuildTiles.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticMaterialize.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticMaterialize.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeGridLightPrepare.cs.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeGridLightPrepare.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeGridLightClearSupport.cs.dxil"
@@ -1713,6 +1720,12 @@ if (HAVE_NRI)
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -fspv-extension=SPV_KHR_ray_query -T cs_6_6 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeEvaluateGridCompact.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeEvaluateGridCompact.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokePromptFallback.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokePromptFallback.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokePromptFallback.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokePromptFallback.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticClear.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeAnalyticClear.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticClear.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeAnalyticClear.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticBuildTiles.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeAnalyticBuildTiles.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticBuildTiles.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeAnalyticBuildTiles.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticMaterialize.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeAnalyticMaterialize.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticMaterialize.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeAnalyticMaterialize.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeGridLightPrepare.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeGridLightPrepare.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeGridLightPrepare.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeGridLightPrepare.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeGridLightClearSupport.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeGridLightClearSupport.cs.hlsl"
@@ -1861,6 +1874,10 @@ if (HAVE_NRI)
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeEvaluateGrid.cs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeEvaluateGridCompact.cs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokePromptFallback.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeAnalyticClear.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeAnalyticBuildTiles.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeAnalyticMaterialize.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Include/SmokeAnalyticData.hlsli"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeGridLightPrepare.cs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeGridLightClearSupport.cs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/SmokeGridLightBuildActive.cs.hlsl"
@@ -1974,6 +1991,12 @@ if (HAVE_NRI)
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeEvaluateGridCompact.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokePromptFallback.cs.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokePromptFallback.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticClear.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticClear.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticBuildTiles.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticBuildTiles.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticMaterialize.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeAnalyticMaterialize.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeGridLightPrepare.cs.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeGridLightPrepare.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/SmokeGridLightClearSupport.cs.dxil"

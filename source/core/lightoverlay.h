@@ -32,6 +32,19 @@ enum class LightOverlaySmokeDirectionPolicy : uint8_t
 	Incoming,
 };
 
+enum class LightOverlaySmokeRepresentation : uint8_t
+{
+	Grid,
+	Analytic,
+};
+
+enum class LightOverlaySmokeQueuePolicy : uint8_t
+{
+	Retry,
+	Drop,
+	Latest,
+};
+
 struct LightOverlaySourceLocation
 {
 	FString sourceName;
@@ -321,6 +334,10 @@ struct ParsedLightOverlaySmokeActorRule
 	FString excludeOwnerClassName;
 	LightOverlaySmokeTrigger trigger = LightOverlaySmokeTrigger::Spawn;
 	LightOverlayActorActivationPolicy activationPolicy = LightOverlayActorActivationPolicy::Immediate;
+	LightOverlaySmokeRepresentation representation = LightOverlaySmokeRepresentation::Grid;
+	LightOverlaySmokeQueuePolicy queuePolicy = LightOverlaySmokeQueuePolicy::Retry;
+	bool hasMaxLatencySeconds = false;
+	float maxLatencySeconds = 0.0f;
 	bool emitterForeground = false;
 	FString styleId;
 	uint32_t count = 1;
@@ -342,6 +359,10 @@ struct ParsedLightOverlaySmokeEventRule
 	FString id;
 	LightOverlaySourceLocation source;
 	FString styleId;
+	LightOverlaySmokeRepresentation representation = LightOverlaySmokeRepresentation::Grid;
+	LightOverlaySmokeQueuePolicy queuePolicy = LightOverlaySmokeQueuePolicy::Retry;
+	bool hasMaxLatencySeconds = false;
+	float maxLatencySeconds = 0.0f;
 	uint32_t count = 1;
 	float offset[3] = { 0.0f, 0.0f, 0.0f };
 	float spawnRadius = 0.0f;

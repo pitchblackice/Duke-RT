@@ -18,15 +18,17 @@ enum NRISmokeWorkCapability : uint32_t
 	NRISmokeWorkCapability_RadianceNewInvalid = 1u << 2u,
 	NRISmokeWorkCapability_RadianceMaintenance = 1u << 3u,
 	NRISmokeWorkCapability_SimulationSubsteps = 1u << 4u,
+	NRISmokeWorkCapability_AnalyticCarriers = 1u << 5u,
 };
 
 struct NRISmokeWorkTable
 {
 	static constexpr uint32_t Unrestricted = std::numeric_limits<uint32_t>::max();
 
-	uint32_t revision = 4u;
+	uint32_t revision = 5u;
 	uint32_t emissionCommands = 256u;
 	uint32_t firstUseSources = 8u;
+	uint32_t analyticCarriers = 64u;
 	uint32_t froxelPixelSize = Unrestricted;
 	uint32_t froxelDepth = Unrestricted;
 	uint32_t emissiveLights = Unrestricted;
@@ -59,6 +61,9 @@ struct NRISmokeWorkSchedulerSnapshot
 	uint32_t promptRequested = 0u;
 	uint32_t promptScheduled = 0u;
 	uint32_t promptDeferred = 0u;
+	uint32_t analyticRequested = 0u;
+	uint32_t analyticScheduled = 0u;
+	uint32_t analyticDropped = 0u;
 	uint32_t simulationDueSubsteps = 0u;
 	uint32_t simulationScheduledSubsteps = 0u;
 	uint32_t simulationDeferredSubsteps = 0u;
@@ -77,6 +82,7 @@ public:
 		uint32_t referenceMaximumSubsteps);
 	void RecordEmission(uint32_t requested, uint32_t scheduled);
 	void RecordPrompt(uint32_t requested, uint32_t scheduled);
+	void RecordAnalytic(uint32_t requested, uint32_t scheduled);
 	void RecordSimulation(uint32_t due, uint32_t scheduled, uint32_t debt);
 	void ResetTelemetry();
 
