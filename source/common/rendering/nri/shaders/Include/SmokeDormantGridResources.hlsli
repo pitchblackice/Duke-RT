@@ -35,6 +35,7 @@ RWStructuredBuffer<float4> gDormantDynamics : register(u7, space1);
 RWStructuredBuffer<SmokeDormantGridWork> gDormantDemotions : register(u8, space1);
 RWStructuredBuffer<SmokeDormantGridWork> gDormantPromotions : register(u9, space1);
 RWStructuredBuffer<SmokeDormantGridResult> gDormantResults : register(u10, space1);
+RWStructuredBuffer<SmokeDormantGridInjection> gDormantInjections : register(u11, space1);
 
 NRI_ROOT_CONSTANTS(SmokeDormantGridConstants, gDormantConstants, 0, 2);
 

@@ -33,6 +33,8 @@ struct NRISmokeDormantGridConfig
 	uint32_t maximumDemotionsPerFrame = 4u;
 	uint32_t maximumPromotionsPerFrame = 4u;
 	uint32_t maximumEvolutionPerFrame = 0u;
+	uint32_t maximumContinuousInjectionsPerFrame = 0u;
+	float maximumEvolutionTransportCells = 0.95f;
 	float opticalMassRelativeTolerance = 0.25f;
 };
 
@@ -47,6 +49,8 @@ struct NRISmokeDormantGridFrameDesc
 	uint32_t demotionCount = 0u;
 	const NRISmokeDormantGridWorkGpu* promotions = nullptr;
 	uint32_t promotionCount = 0u;
+	const NRISmokeDormantGridInjectionGpu* injections = nullptr;
+	uint32_t injectionCount = 0u;
 };
 
 struct NRISmokeDormantGridStatusSnapshot
@@ -67,6 +71,8 @@ struct NRISmokeDormantGridStatusSnapshot
 	uint32_t submittedPromotions = 0u;
 	uint32_t clippedDemotions = 0u;
 	uint32_t clippedPromotions = 0u;
+	uint32_t submittedInjections = 0u;
+	uint32_t clippedInjections = 0u;
 	NRISmokeDormantGridControlGpu gpu = {};
 	std::vector<NRISmokeDormantGridResultGpu> results;
 	std::string failureReason = "not-requested";
@@ -92,6 +98,8 @@ public:
 		const NRISmokeDormantGridConfig& config, const NRISmokeDormantGridFrameDesc& frame);
 	bool RecordDemotions(const NRISmokeGridServices& services,
 		const NRISmokeDormantGridConfig& config, const NRISmokeDormantGridFrameDesc& frame);
+	bool RecordEvolution(const NRISmokeGridServices& services,
+		const NRISmokeDormantGridConfig& config, const NRISmokeDormantGridFrameDesc& frame);
 	bool RecordReadback(const NRISmokeGridServices& services,
 		const NRISmokeDormantGridFrameDesc& frame);
 	void Reset(uint32_t simulationEpoch, const char* reason);
@@ -108,6 +116,7 @@ private:
 	{
 		NRIBufferResource demotionUpload;
 		NRIBufferResource promotionUpload;
+		NRIBufferResource injectionUpload;
 		NRIBufferResource controlReadback;
 		NRIBufferResource resultReadback;
 		bool readbackPending = false;
@@ -142,7 +151,7 @@ private:
 
 	NRISmokeDormantGridStatusSnapshot mStatus = {};
 	nri::PipelineLayout* mPipelineLayout = nullptr;
-	std::array<nri::Pipeline*, 4> mPipelines = {};
+	std::array<nri::Pipeline*, 6> mPipelines = {};
 	nri::DescriptorSet* mFineSet = nullptr;
 	nri::DescriptorSet* mStorageSet = nullptr;
 	std::vector<FrameSlot> mFrameSlots;
@@ -158,6 +167,7 @@ private:
 	NRIBufferResource mDemotions;
 	NRIBufferResource mPromotions;
 	NRIBufferResource mResults;
+	NRIBufferResource mInjections;
 
 	uint32_t mResourceArchiveCapacity = 0u;
 	uint32_t mResourceHashCapacity = 0u;

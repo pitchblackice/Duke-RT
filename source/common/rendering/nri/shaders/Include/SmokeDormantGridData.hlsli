@@ -21,6 +21,7 @@
 #define NRI_SMOKE_DORMANT_OUTCOME_FINE_CAPACITY 10u
 #define NRI_SMOKE_DORMANT_OUTCOME_FINE_ACTIVE_CAPACITY 11u
 #define NRI_SMOKE_DORMANT_WORK_MASS_KNOWN 1u
+#define NRI_SMOKE_DORMANT_INJECTION_ESTABLISHED_AUTHORITY 1u
 
 struct SmokeDormantGridWork
 {
@@ -65,6 +66,22 @@ struct SmokeDormantGridResult
 	uint FineIndex;
 };
 
+struct SmokeDormantGridInjection
+{
+	int3 Coordinate;
+	uint Generation;
+	uint Epoch;
+	uint CadenceSteps;
+	uint SourceId;
+	uint Flags;
+	float3 Position;
+	float Radius;
+	float4 Scalar;
+	float4 Momentum;
+	float4 Optical;
+	float4 Dynamics;
+};
+
 struct SmokeDormantGridControl
 {
 	uint ArchiveCapacity;
@@ -93,8 +110,17 @@ struct SmokeDormantGridControl
 	uint EvolutionWorkExecuted;
 	uint FineActiveCompactions;
 	uint FineActiveEntriesRemoved;
-	uint2 Padding0;
-	uint4 Padding1;
+	uint EvolutionCursor;
+	uint EvolutionAttempts;
+	uint EvolutionSkipped;
+	uint InjectionAttempts;
+	uint InjectionApplied;
+	uint InjectionRejected;
+	uint InjectionMissing;
+	uint InjectionStale;
+	uint InjectionCadenceSteps;
+	uint InjectionCells;
+	uint4 Padding;
 };
 
 struct SmokeDormantGridConstants
@@ -117,7 +143,10 @@ struct SmokeDormantGridConstants
 	uint ActivePing;
 	float3 CameraPosition;
 	uint Padding0;
-	uint4 Padding1;
+	uint InjectionCount;
+	float MaximumTransportCells;
+	uint EvolutionInjectionIndex;
+	uint Padding1;
 	uint4 Padding2;
 	uint4 Padding3;
 };

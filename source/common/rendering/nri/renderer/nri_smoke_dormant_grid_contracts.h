@@ -1,12 +1,14 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
 constexpr uint32_t NRI_SMOKE_DORMANT_GRID_CELLS_PER_BRICK = 512u;
 constexpr uint32_t NRI_SMOKE_DORMANT_GRID_HASH_PROBES = 24u;
 constexpr uint32_t NRI_SMOKE_DORMANT_GRID_FINE_DESCRIPTOR_COUNT = 18u;
-constexpr uint32_t NRI_SMOKE_DORMANT_GRID_STORAGE_DESCRIPTOR_COUNT = 11u;
+constexpr uint32_t NRI_SMOKE_DORMANT_GRID_STORAGE_DESCRIPTOR_COUNT = 12u;
 constexpr uint32_t NRI_SMOKE_DORMANT_GRID_EVALUATION_DESCRIPTOR_COUNT = 7u;
 
 enum class NRISmokeDormantGridFineDescriptor : uint32_t
@@ -66,12 +68,23 @@ enum class NRISmokeDormantGridPass : uint32_t
 	Archive = 1u,
 	CompactFineActive = 2u,
 	Rehydrate = 3u,
+	Evolve = 4u,
+	Inject = 5u,
 };
 
 enum NRISmokeDormantGridWorkFlags : uint32_t
 {
 	NRISmokeDormantGridWorkFlag_None = 0u,
 	NRISmokeDormantGridWorkFlag_MassKnown = 1u << 0u,
+};
+
+enum NRISmokeDormantGridInjectionFlags : uint32_t
+{
+	NRISmokeDormantGridInjectionFlag_None = 0u,
+	// The caller has observed this continuous source while its target already
+	// had published fine or coarse authority. Injection must never create a
+	// dormant record or replay work after that authority disappears.
+	NRISmokeDormantGridInjectionFlag_EstablishedAuthority = 1u << 0u,
 };
 
 struct NRISmokeDormantGridWorkGpu
@@ -117,6 +130,26 @@ struct NRISmokeDormantGridResultGpu
 	uint32_t fineIndex = UINT32_MAX;
 };
 
+// One already-coalesced, single-use deposit into an existing dormant record.
+// The four field moments use the same representation as the fine-grid payload:
+// scalar, momentum/scale, optical, and dynamics. The producer partitions a
+// source across target brick coordinates before submission.
+struct NRISmokeDormantGridInjectionGpu
+{
+	int32_t coordinate[3] = {};
+	uint32_t generation = 0u;
+	uint32_t epoch = 0u;
+	uint32_t cadenceSteps = 0u;
+	uint32_t sourceId = 0u;
+	uint32_t flags = NRISmokeDormantGridInjectionFlag_None;
+	float position[3] = {};
+	float radius = 0.0f;
+	float scalar[4] = {};
+	float momentum[4] = {};
+	float optical[4] = {};
+	float dynamics[4] = {};
+};
+
 struct NRISmokeDormantGridControlGpu
 {
 	uint32_t archiveCapacity = 0u;
@@ -145,7 +178,17 @@ struct NRISmokeDormantGridControlGpu
 	uint32_t evolutionWorkExecuted = 0u;
 	uint32_t fineActiveCompactions = 0u;
 	uint32_t fineActiveEntriesRemoved = 0u;
-	uint32_t padding[6] = {};
+	uint32_t evolutionCursor = 0u;
+	uint32_t evolutionAttempts = 0u;
+	uint32_t evolutionSkipped = 0u;
+	uint32_t injectionAttempts = 0u;
+	uint32_t injectionApplied = 0u;
+	uint32_t injectionRejected = 0u;
+	uint32_t injectionMissing = 0u;
+	uint32_t injectionStale = 0u;
+	uint32_t injectionCadenceSteps = 0u;
+	uint32_t injectionCells = 0u;
+	uint32_t padding[4] = {};
 };
 
 struct NRISmokeDormantGridConstants
@@ -168,14 +211,18 @@ struct NRISmokeDormantGridConstants
 	uint32_t activePing = 0u;
 	float cameraPosition[3] = {};
 	uint32_t padding0 = 0u;
-	uint32_t padding[12] = {};
+	uint32_t injectionCount = 0u;
+	float maximumTransportCells = 0.95f;
+	uint32_t evolutionInjectionIndex = UINT32_MAX;
+	uint32_t padding[9] = {};
 };
 
 static_assert(sizeof(NRISmokeDormantGridWorkGpu) == 32u);
 static_assert(sizeof(NRISmokeDormantGridHashEntryGpu) == 32u);
 static_assert(sizeof(NRISmokeDormantGridRecordGpu) == 56u);
 static_assert(sizeof(NRISmokeDormantGridResultGpu) == 32u);
-static_assert(sizeof(NRISmokeDormantGridControlGpu) == 128u);
+static_assert(sizeof(NRISmokeDormantGridInjectionGpu) == 112u);
+static_assert(sizeof(NRISmokeDormantGridControlGpu) == 160u);
 static_assert(sizeof(NRISmokeDormantGridConstants) == 128u);
 static_assert(offsetof(NRISmokeDormantGridRecordGpu, fineGeneration) == 24u);
 
@@ -192,6 +239,34 @@ constexpr bool NRISmokeDormantGridMayRetireCoarse(NRISmokeDormantGridOutcome out
 constexpr bool NRISmokeDormantGridShouldCompareExpectedMass(uint32_t flags)
 {
 	return (flags & NRISmokeDormantGridWorkFlag_MassKnown) != 0u;
+}
+
+constexpr bool NRISmokeDormantGridInjectionRequiresEstablishedAuthority(uint32_t flags)
+{
+	return (flags & NRISmokeDormantGridInjectionFlag_EstablishedAuthority) != 0u;
+}
+
+constexpr uint32_t NRISmokeDormantGridEvolutionBase(uint32_t frameIndex,
+	uint32_t workCount, uint32_t archiveCapacity)
+{
+	return archiveCapacity == 0u ? 0u : (frameIndex * workCount) % archiveCapacity;
+}
+
+inline float NRISmokeDormantGridDecay(float rate, float elapsedSeconds)
+{
+	return std::exp(-std::max(rate, 0.0f) * std::max(elapsedSeconds, 0.0f));
+}
+
+inline float NRISmokeDormantGridAxisTransportWeight(int32_t source, int32_t destination,
+	float displacement)
+{
+	const float target = std::clamp((float)source + std::clamp(displacement, -0.95f, 0.95f),
+		0.0f, 7.0f);
+	const int32_t lower = (int32_t)std::floor(target);
+	const int32_t upper = std::min(lower + 1, 7);
+	const float fraction = target - (float)lower;
+	return (lower == destination ? 1.0f - fraction : 0.0f) +
+		(upper == destination ? fraction : 0.0f);
 }
 
 constexpr uint64_t NRISmokeDormantGridPayloadBytes(uint32_t archiveCapacity)

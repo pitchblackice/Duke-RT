@@ -11,6 +11,8 @@ namespace
 		"SmokeDormantGridArchive",
 		"SmokeDormantGridCompactFineActive",
 		"SmokeDormantGridRehydrate",
+		"SmokeDormantGridEvolve",
+		"SmokeDormantGridInject",
 	};
 
 	nri::AccessStage StorageAccess()
@@ -60,14 +62,14 @@ std::array<NRIBufferResource*, NRISmokeDormantGrid::StorageDescriptorCount>
 NRISmokeDormantGrid::StorageResources()
 {
 	return { &mControl, &mHash, &mRecords, &mFreeList, &mScalar, &mVelocity,
-		&mOptical, &mDynamics, &mDemotions, &mPromotions, &mResults };
+		&mOptical, &mDynamics, &mDemotions, &mPromotions, &mResults, &mInjections };
 }
 
 std::array<const NRIBufferResource*, NRISmokeDormantGrid::StorageDescriptorCount>
 NRISmokeDormantGrid::StorageResources() const
 {
 	return { &mControl, &mHash, &mRecords, &mFreeList, &mScalar, &mVelocity,
-		&mOptical, &mDynamics, &mDemotions, &mPromotions, &mResults };
+		&mOptical, &mDynamics, &mDemotions, &mPromotions, &mResults, &mInjections };
 }
 
 void NRISmokeDormantGrid::SetFailure(const char* reason)
@@ -222,8 +224,8 @@ bool NRISmokeDormantGrid::EnsureResources(const NRISmokeGridServices& services,
 {
 	const uint32_t capacity = std::clamp(config.archiveCapacity, 16u, 4096u);
 	const uint32_t hashCapacity = NextPowerOfTwo(capacity * 2u);
-	const uint32_t maximumWork = std::clamp(std::max(config.maximumDemotionsPerFrame,
-		config.maximumPromotionsPerFrame), 1u, 256u);
+	const uint32_t maximumWork = std::clamp(std::max({ config.maximumDemotionsPerFrame,
+		config.maximumPromotionsPerFrame, config.maximumContinuousInjectionsPerFrame }), 1u, 256u);
 	if (mControl.buffer != nullptr && mResourceArchiveCapacity == capacity &&
 		mResourceHashCapacity == hashCapacity && mResourceMaximumWork == maximumWork)
 		return true;
@@ -260,6 +262,10 @@ bool NRISmokeDormantGrid::EnsureResources(const NRISmokeGridServices& services,
 			nri::MemoryLocation::DEVICE, true) &&
 		CreateBuffer(services, mResults, (uint64_t)maximumWork * 2u * sizeof(NRISmokeDormantGridResultGpu),
 			sizeof(NRISmokeDormantGridResultGpu), storageCopySource,
+			nri::MemoryLocation::DEVICE, true) &&
+		CreateBuffer(services, mInjections,
+			(uint64_t)maximumWork * sizeof(NRISmokeDormantGridInjectionGpu),
+			sizeof(NRISmokeDormantGridInjectionGpu), storageCopyDestination,
 			nri::MemoryLocation::DEVICE, true);
 	for (FrameSlot& slot : mFrameSlots)
 	{
@@ -270,6 +276,10 @@ bool NRISmokeDormantGrid::EnsureResources(const NRISmokeGridServices& services,
 		created = created && CreateBuffer(services, slot.promotionUpload,
 			(uint64_t)maximumWork * sizeof(NRISmokeDormantGridWorkGpu),
 			sizeof(NRISmokeDormantGridWorkGpu), nri::BufferUsageBits::NONE,
+			nri::MemoryLocation::HOST_UPLOAD, false);
+		created = created && CreateBuffer(services, slot.injectionUpload,
+			(uint64_t)maximumWork * sizeof(NRISmokeDormantGridInjectionGpu),
+			sizeof(NRISmokeDormantGridInjectionGpu), nri::BufferUsageBits::NONE,
 			nri::MemoryLocation::HOST_UPLOAD, false);
 		created = created && CreateBuffer(services, slot.controlReadback,
 			sizeof(NRISmokeDormantGridControlGpu), sizeof(NRISmokeDormantGridControlGpu),
@@ -312,7 +322,8 @@ bool NRISmokeDormantGrid::EnsureResources(const NRISmokeGridServices& services,
 		mStatus.residentBytes += resource->memorySize;
 	for (const FrameSlot& slot : mFrameSlots)
 		mStatus.residentBytes += slot.demotionUpload.memorySize + slot.promotionUpload.memorySize +
-			slot.controlReadback.memorySize + slot.resultReadback.memorySize;
+			slot.injectionUpload.memorySize + slot.controlReadback.memorySize +
+			slot.resultReadback.memorySize;
 	mStatus.payloadBytes = cells * sizeof(float) * 4u * 4u;
 	mStatus.resourcesReady = true;
 	mStatus.failureReason = "none";
@@ -619,6 +630,125 @@ bool NRISmokeDormantGrid::RecordDemotions(const NRISmokeGridServices& services,
 	return RecordStage(services, config, frame, false);
 }
 
+bool NRISmokeDormantGrid::RecordEvolution(const NRISmokeGridServices& services,
+	const NRISmokeDormantGridConfig& config, const NRISmokeDormantGridFrameDesc& frame)
+{
+	if (!config.enabled) return true;
+	if (!services.IsRecordingValid() || !mInitialized || !mStatus.resourcesReady ||
+		!frame.fine.IsValid() || frame.simulationEpoch == 0u || mFrameSlots.empty())
+	{
+		SetFailure("invalid-evolution-frame");
+		return false;
+	}
+	const uint32_t injectionCount = std::min({ frame.injectionCount,
+		config.maximumContinuousInjectionsPerFrame, mResourceMaximumWork });
+	if (injectionCount != 0u && frame.injections == nullptr)
+	{
+		SetFailure("invalid-injection-work");
+		return false;
+	}
+	mStatus.submittedInjections += injectionCount;
+	mStatus.clippedInjections += frame.injectionCount - injectionCount;
+
+	FrameSlot& slot = mFrameSlots[std::min(services.queuedFrameIndex,
+		(uint32_t)mFrameSlots.size() - 1u)];
+	if (injectionCount != 0u)
+	{
+		const uint64_t bytes = (uint64_t)injectionCount *
+			sizeof(NRISmokeDormantGridInjectionGpu);
+		void* mapped = services.core->MapBuffer(*slot.injectionUpload.buffer, 0u, bytes);
+		if (mapped == nullptr) { SetFailure("injection-upload-map"); return false; }
+		std::memcpy(mapped, frame.injections, bytes);
+		services.core->UnmapBuffer(*slot.injectionUpload.buffer);
+	}
+
+	nri::UpdateDescriptorRangeDesc fineUpdate = {};
+	fineUpdate.descriptorSet = mFineSet;
+	fineUpdate.rangeIndex = 0u;
+	fineUpdate.descriptors = frame.fine.storage.data();
+	fineUpdate.descriptorNum = FineDescriptorCount;
+	services.core->UpdateDescriptorRanges(&fineUpdate, 1u);
+	TransitionArchiveToStorage(services);
+	if (injectionCount != 0u)
+	{
+		nri::BufferBarrierDesc copyBarrier = {};
+		copyBarrier.buffer = mInjections.buffer;
+		copyBarrier.before = StorageAccess();
+		copyBarrier.after = CopyDestinationAccess();
+		nri::BarrierDesc barrier = {};
+		barrier.buffers = &copyBarrier;
+		barrier.bufferNum = 1u;
+		services.core->CmdBarrier(*services.commandBuffer, barrier);
+		services.core->CmdCopyBuffer(*services.commandBuffer, *mInjections.buffer, 0u,
+			*slot.injectionUpload.buffer, 0u,
+			(uint64_t)injectionCount * sizeof(NRISmokeDormantGridInjectionGpu));
+		copyBarrier.before = CopyDestinationAccess();
+		copyBarrier.after = StorageAccess();
+		services.core->CmdBarrier(*services.commandBuffer, barrier);
+	}
+
+	services.core->CmdSetPipelineLayout(*services.commandBuffer,
+		nri::BindPoint::COMPUTE, *mPipelineLayout);
+	services.core->CmdSetDescriptorSet(*services.commandBuffer,
+		{ 0u, mFineSet, nri::BindPoint::COMPUTE });
+	services.core->CmdSetDescriptorSet(*services.commandBuffer,
+		{ 1u, mStorageSet, nri::BindPoint::COMPUTE });
+	NRISmokeDormantGridConstants constants = {};
+	constants.frameIndex = frame.frameIndex;
+	constants.simulationEpoch = frame.simulationEpoch;
+	constants.fieldPing = frame.fine.fieldPing;
+	constants.fineBrickCapacity = frame.fine.brickCapacity;
+	constants.fineHashCapacity = frame.fine.hashCapacity;
+	constants.fineCellCapacity = frame.fine.cellCapacity;
+	constants.archiveCapacity = mResourceArchiveCapacity;
+	constants.archiveHashCapacity = mResourceHashCapacity;
+	constants.evolutionCount = std::min(config.maximumEvolutionPerFrame,
+		mResourceArchiveCapacity);
+	constants.injectionCount = injectionCount;
+	constants.evolutionInjectionIndex = UINT32_MAX;
+	constants.cellSize = frame.fine.cellSize;
+	constants.deltaTime = std::max(frame.deltaTime, 0.0f);
+	constants.maximumTransportCells = std::clamp(
+		config.maximumEvolutionTransportCells, 0.0f, 0.95f);
+	StorageBarrier(services, frame.fine);
+
+	if (mNeedsClear || mResourceEpoch != frame.simulationEpoch)
+	{
+		Dispatch(services, constants, NRISmokeDormantGridPass::Clear,
+			Groups(std::max({ mResourceArchiveCapacity, mResourceHashCapacity,
+				mResourceMaximumWork * 2u })));
+		StorageBarrier(services, frame.fine);
+		mNeedsClear = false;
+		mResourceEpoch = frame.simulationEpoch;
+	}
+	if (constants.evolutionCount != 0u)
+	{
+		Dispatch(services, constants, NRISmokeDormantGridPass::Evolve,
+			constants.evolutionCount);
+		StorageBarrier(services, frame.fine);
+	}
+	if (injectionCount != 0u)
+	{
+		// Bring every target to the current simulation time before adding a
+		// current-time cadence aggregate. Duplicate targets are harmless: the
+		// first pass advances the record and later passes observe the frame stamp.
+		for (uint32_t i = 0u; i < injectionCount; ++i)
+		{
+			constants.evolutionInjectionIndex = i;
+			Dispatch(services, constants, NRISmokeDormantGridPass::Evolve, 1u);
+			StorageBarrier(services, frame.fine);
+		}
+		constants.evolutionInjectionIndex = UINT32_MAX;
+		// One group processes the bounded list serially. This intentionally
+		// permits several established sources to deposit into the same record
+		// without unordered float read/modify/write races or replay queues.
+		Dispatch(services, constants, NRISmokeDormantGridPass::Inject, 1u);
+		StorageBarrier(services, frame.fine);
+	}
+	mStatus.failureReason = "none";
+	return true;
+}
+
 bool NRISmokeDormantGrid::RecordReadback(const NRISmokeGridServices& services,
 	const NRISmokeDormantGridFrameDesc& frame)
 {
@@ -649,7 +779,8 @@ bool NRISmokeDormantGrid::RecordFrame(const NRISmokeGridServices& services,
 	const NRISmokeDormantGridConfig& config, const NRISmokeDormantGridFrameDesc& frame)
 {
 	return RecordPromotions(services, config, frame) &&
-		RecordDemotions(services, config, frame) && RecordReadback(services, frame);
+		RecordDemotions(services, config, frame) && RecordEvolution(services, config, frame) &&
+		RecordReadback(services, frame);
 }
 
 bool NRISmokeDormantGrid::GetEvaluationStorageDescriptors(
@@ -682,6 +813,7 @@ void NRISmokeDormantGrid::DestroyResources(const NRISmokeGridServices& services)
 	{
 		DestroyBuffer(services, slot.demotionUpload);
 		DestroyBuffer(services, slot.promotionUpload);
+		DestroyBuffer(services, slot.injectionUpload);
 		DestroyBuffer(services, slot.controlReadback);
 		DestroyBuffer(services, slot.resultReadback);
 		slot = {};
