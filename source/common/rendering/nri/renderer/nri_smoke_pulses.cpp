@@ -179,6 +179,18 @@ bool NRISmokePulseOwner::CommitRetaining(uint64_t token,
 bool NRISmokePulseOwner::Acknowledge(uint32_t pulseIdLow, uint32_t pulseIdHigh,
 	uint32_t rangeBegin, uint32_t rangeCount)
 {
+	return RetireRange(pulseIdLow, pulseIdHigh, rangeBegin, rangeCount, true);
+}
+
+bool NRISmokePulseOwner::RetireFallback(uint32_t pulseIdLow, uint32_t pulseIdHigh,
+	uint32_t rangeBegin, uint32_t rangeCount)
+{
+	return RetireRange(pulseIdLow, pulseIdHigh, rangeBegin, rangeCount, false);
+}
+
+bool NRISmokePulseOwner::RetireRange(uint32_t pulseIdLow, uint32_t pulseIdHigh,
+	uint32_t rangeBegin, uint32_t rangeCount, bool gridCommitted)
+{
 	if (mActivePlanToken != 0u || rangeCount == 0u)
 		return false;
 	NRISmokeInjectionCommandGpu acknowledged = {};
@@ -212,8 +224,16 @@ bool NRISmokePulseOwner::Acknowledge(uint32_t pulseIdLow, uint32_t pulseIdHigh,
 		right.rangeCount = (uint32_t)(originalEnd - RangeEnd(acknowledged));
 		mPending.insert(mPending.begin() + insertion, right);
 	}
-	mSnapshot.committedRanges++;
-	mSnapshot.committedMass += rangeCount;
+	if (gridCommitted)
+	{
+		mSnapshot.committedRanges++;
+		mSnapshot.committedMass += rangeCount;
+	}
+	else
+	{
+		mSnapshot.fallbackRetiredRanges++;
+		mSnapshot.fallbackRetiredMass += rangeCount;
+	}
 	RefreshPendingSnapshot();
 	return true;
 }

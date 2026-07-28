@@ -1131,15 +1131,22 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 			worldWork.gpu.radianceMaintenanceScheduled, worldWork.gpu.radianceMaintenanceDeferred,
 			worldWork.gpu.radianceMaintenanceTickets, worldWork.gpu.radianceHistoryRetained,
 			worldWork.gpu.radianceHistoryMissing, worldWork.gpu.radianceAgeOverflows);
-		Printf("PERF pt smoke transactions NRI: observe_renderer_frame=%llu observe_frame=%u pulse_enqueued_ranges=%llu pulse_enqueued_mass=%llu pulse_planned_ranges=%llu pulse_planned_mass=%llu pulse_committed_ranges=%llu pulse_committed_mass=%llu pulse_pending_ranges=%u pulse_pending_mass=%llu pulse_rollbacks=%llu pulse_resets=%llu prompt_scheduled_current=%u prompt_scheduled_total=%llu prompt_fallback_executed=%llu prompt_grid_handoffs=%llu prompt_pending_mass=%llu prompt_grid_mass=%llu prompt_fallback_mass=%llu prompt_deferred_ranges=%llu prompt_deferred_mass=%llu prompt_deferred_brick_work=%llu prompt_rollbacks=%llu prompt_internal_errors=%llu prompt_authored_renderer_frame=%llu compact=1\n",
+		Printf("PERF pt smoke transactions NRI: observe_renderer_frame=%llu observe_frame=%u pulse_enqueued_ranges=%llu pulse_enqueued_mass=%llu pulse_planned_ranges=%llu pulse_planned_mass=%llu pulse_committed_ranges=%llu pulse_committed_mass=%llu pulse_fallback_retired_ranges=%llu pulse_fallback_retired_mass=%llu pulse_pending_ranges=%u pulse_pending_mass=%llu pulse_rollbacks=%llu pulse_resets=%llu prompt_scheduled_current=%u prompt_active_slots=%u prompt_oldest_age_ms=%u prompt_scheduled_total=%llu prompt_fallback_executed=%llu prompt_grid_handoffs=%llu prompt_expired_ranges=%llu prompt_expired_mass=%llu prompt_expiry_ack_failures=%llu prompt_pending_mass=%llu prompt_grid_mass=%llu prompt_fallback_mass=%llu prompt_deferred_ranges=%llu prompt_deferred_mass=%llu prompt_deferred_brick_work=%llu prompt_rollbacks=%llu prompt_internal_errors=%llu prompt_authored_renderer_frame=%llu compact=1\n",
 			(unsigned long long)renderer.mFrameBuffer->mFrameIndex, renderer.mFrameIndex,
 			(unsigned long long)pulseWork.enqueuedPulses, (unsigned long long)pulseWork.enqueuedMass,
 			(unsigned long long)pulseWork.plannedRanges, (unsigned long long)pulseWork.plannedMass,
 			(unsigned long long)pulseWork.committedRanges, (unsigned long long)pulseWork.committedMass,
+			(unsigned long long)pulseWork.fallbackRetiredRanges,
+			(unsigned long long)pulseWork.fallbackRetiredMass,
 			pulseWork.pendingRanges, (unsigned long long)pulseWork.pendingMass,
 			(unsigned long long)pulseWork.rollbackCount, (unsigned long long)pulseWork.resetPulses,
-			promptWork.scheduledFallbackQuantity, (unsigned long long)promptWork.scheduledFallbackRanges,
+			promptWork.scheduledFallbackQuantity, promptWork.activeFallbackSlots,
+			promptWork.oldestActiveAgeMilliseconds,
+			(unsigned long long)promptWork.scheduledFallbackRanges,
 			(unsigned long long)promptWork.executedFallbackRanges, (unsigned long long)promptWork.gridHandoffs,
+			(unsigned long long)promptWork.expiredFallbackRanges,
+			(unsigned long long)promptWork.expiredFallbackMass,
+			(unsigned long long)promptWork.expiryAcknowledgeFailures,
 			(unsigned long long)promptWork.authoredPendingMass,
 			(unsigned long long)promptWork.committedDepositedMass,
 			(unsigned long long)promptWork.fallbackCarrierMass,
@@ -1249,6 +1256,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		std::floor(mAccumulator / step), (double)UINT32_MAX);
 	mWorkScheduler.RecordSimulation(dueSubsteps, substeps, debtSubsteps);
 	mStatus.simulationSubsteps = substeps;
+	mPromptSimulationSeconds += (double)substeps * (double)step * (double)mSettings.timeScale;
 	if (particleAuthority)
 		mParticleSimulationSeconds += (double)substeps * (double)step * (double)mSettings.timeScale;
 
@@ -1258,6 +1266,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	mPendingCommands.clear();
 	{
 		mPromptFallback.CommitGridHandoffs(mPulseOwner, mGrid.ConsumePromptOutcomes());
+		mPromptFallback.RetireExpired(mPulseOwner, mPromptSimulationSeconds);
 	}
 	const auto& availableCommands = mPulseOwner.PendingCommands();
 	const uint32_t maximumCommands = std::min(kMaxCommands, workTable.emissionCommands);
@@ -1297,7 +1306,8 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	if (gridAuthority && !particleAuthority)
 	{
 		const NRISmokePromptPrepareResult promptResult = mPromptFallback.Prepare(mSelectedGridCommands,
-			renderer.mFrameBuffer->mFrameIndex, mSettings.gridCellSize, retainedPromptIdentities,
+			renderer.mFrameBuffer->mFrameIndex, mPromptSimulationSeconds, mStyles, mSettings.gridCellSize,
+			retainedPromptIdentities,
 			workTable.firstUseSources);
 		mStatus.admission.uploaded -= std::min(mStatus.admission.uploaded, promptResult.deferredRanges);
 		mStatus.admission.boundedDeferred += promptResult.deferredRanges;
@@ -2533,6 +2543,7 @@ void NRISmokeSystem::Reset(const char* reason)
 	mAccumulator = 0.0f;
 	mLastGameplaySeconds = -1.0;
 	mParticleSimulationSeconds = 0.0;
+	mPromptSimulationSeconds = 0.0;
 	mLatestParticleDeathSeconds = 0.0;
 	mMayHaveParticleSmoke = false;
 	mLastPreparedFrame = UINT32_MAX;

@@ -20,6 +20,7 @@ $fallback = Read-Source 'source/common/rendering/nri/shaders/SmokePromptFallback
 $pulse = Read-Source 'source/common/rendering/nri/renderer/nri_smoke_pulses.cpp'
 $gridHeader = Read-Source 'source/common/rendering/nri/renderer/nri_smoke_grid.h'
 $promptHeader = Read-Source 'source/common/rendering/nri/renderer/nri_smoke_prompt_fallback.h'
+$promptSource = Read-Source 'source/common/rendering/nri/renderer/nri_smoke_prompt_fallback.cpp'
 
 Require-Match $grid 'NRISmokeGridPass::PrepareBricks[\s\S]{0,1000}NRISmokeGridPass::ValidatePrompt[\s\S]{0,300}NRISmokeGridPass::AuthorizePrompt[\s\S]{0,300}NRISmokeGridPass::Deposit[\s\S]{0,300}NRISmokeGridPass::FinalizePrompt' 'Prompt grid authority must validate resident mappings, authorize, deposit, then prove closure.'
 Require-Match $validate 'SmokeInjectionTraversalFits\(extent,\s*262144u\)[\s\S]*OUTCOME_FALLBACK' 'Oversized prompt kernels must select fallback before deposition.'
@@ -44,6 +45,11 @@ Require-Match $gridHeader 'promptReadbackInitialized[\s\S]*diagnosticReadbackIni
 Require-Match $grid 'promptBefore\[1\]\.before\s*=\s*slot\.promptReadbackInitialized[\s\S]*before\[2\]\.before\s*=\s*slot\.diagnosticReadbackInitialized[\s\S]*before\[3\]\.before\s*=\s*slot\.diagnosticReadbackInitialized' 'An off-to-on diagnostic toggle must not inherit prompt readback before-state.'
 Require-Match $pulse 'Validate the complete mutation set first[\s\S]*for\s*\(const auto& committed : mPlan\)[\s\S]*none_of[\s\S]*for\s*\(const auto& committed : mPlan\)' 'Retained commit must validate the whole immutable plan before the first mutation.'
 Require-Match $promptHeader 'deferredRanges[\s\S]*deferredMass[\s\S]*deferredBrickWork' 'Prompt filtering must return exact deferred count, mass, and work.'
+Require-Match $runtime 'CommitGridHandoffs[\s\S]{0,200}RetireExpired[\s\S]{0,800}PendingCommands' 'Grid acknowledgments must win before expired fallback retirement and command selection.'
+Require-Match $promptHeader 'expiredFallbackRanges[\s\S]*expiredFallbackMass[\s\S]*expiryAcknowledgeFailures' 'Prompt expiry must publish exact analytic-retirement accounting.'
+Require-Match $promptSource 'style\.radius\s*\*\s*command\.radiusScale[\s\S]{0,100}gridCellSize[\s\S]{0,300}style\.expansionVelocity\s*\*\s*age[\s\S]{0,200}std::exp2' 'Fallback retries must share minimum grid support and publish an expanded, half-life-decayed command.'
+Require-Match $pulse 'RetireFallback[\s\S]*RetireRange[\s\S]*fallbackRetiredRanges[\s\S]*fallbackRetiredMass' 'Analytic fallback retirement must remain distinct from a grid commit.'
+Require-Match $runtime 'mPromptSimulationSeconds\s*\+=' 'Prompt lifetime must advance by scheduled smoke simulation work.'
 Require-Match $runtime 'promptResult\.deferredRanges[\s\S]*admission\.uploaded[\s\S]*admission\.boundedDeferred[\s\S]*admission\.interactiveUploaded[\s\S]*estimatedBrickWorkUploaded' 'Admission telemetry must reconcile every prompt-filtered interactive range.'
 
 function Kernel-Normalization([double]$radius, [double]$halfU, [double]$halfV, [double]$cell) {

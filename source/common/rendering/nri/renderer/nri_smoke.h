@@ -351,6 +351,7 @@ private:
 	float mAccumulator = 0.0f;
 	double mLastGameplaySeconds = -1.0;
 	double mParticleSimulationSeconds = 0.0;
+	double mPromptSimulationSeconds = 0.0;
 	double mLatestParticleDeathSeconds = 0.0;
 	bool mMayHaveParticleSmoke = false;
 	bool mSyntheticRequested = false;

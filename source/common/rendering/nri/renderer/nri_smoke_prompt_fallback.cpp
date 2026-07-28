@@ -4,10 +4,12 @@
 #include "nri_smoke_pulses.h"
 
 #include <algorithm>
+#include <cmath>
 
 NRISmokePromptPrepareResult NRISmokePromptFallback::Prepare(
 	std::vector<NRISmokeInjectionCommandGpu>& commands, uint64_t rendererFrame,
-	float gridCellSize, std::vector<NRISmokePromptRangeIdentity>& retained,
+	double simulationTimeSeconds, const std::vector<NRISmokeStyleGpu>& styles, float gridCellSize,
+	std::vector<NRISmokePromptRangeIdentity>& retained,
 	uint32_t maximumFallbackCarrierQuantity)
 {
 	NRISmokePromptPrepareResult result = {};
@@ -39,6 +41,19 @@ NRISmokePromptPrepareResult NRISmokePromptFallback::Prepare(
 	};
 	auto schedule = [&](NRISmokeInjectionCommandGpu command, uint32_t slot)
 	{
+		const ActiveSlot& active = mActiveSlots[slot];
+		const float age = (float)std::max(0.0, simulationTimeSeconds - active.authoredSimulationSeconds);
+		if (command.styleIndex < styles.size())
+		{
+			const NRISmokeStyleGpu& style = styles[command.styleIndex];
+			// The normalized source kernel treats DensityScale as integrated mass.
+			// Expanding support supplies geometric dilution; only half-life decay
+			// should reduce the mass handed to either fallback or a late grid deposit.
+			const float initialRadius = std::max(std::max(command.spawnRadius,
+				style.radius * command.radiusScale), std::max(gridCellSize, 0.001f));
+			command.spawnRadius = std::max(initialRadius + style.expansionVelocity * age, 0.001f);
+			command.densityScale *= std::exp2(-age / std::max(style.densityHalfLife, 0.001f));
+		}
 		command.sourceMetadata |= NRI_SMOKE_SOURCE_METADATA_PROMPT_ELIGIBLE;
 		command.sourceMetadata &= ~NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_MASK;
 		command.sourceMetadata |= slot << NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_SHIFT;
@@ -63,7 +78,7 @@ NRISmokePromptPrepareResult NRISmokePromptFallback::Prepare(
 		const NRISmokePromptRangeIdentity identity = identityOf(commands[index]);
 		uint32_t slot = FixedFallbackCarrierQuantity;
 		for (uint32_t i = 0u; i < FixedFallbackCarrierQuantity; ++i)
-			if (matches(mActiveSlots[i], identity)) { slot = i; break; }
+			if (matches(mActiveSlots[i].identity, identity)) { slot = i; break; }
 		if (slot == FixedFallbackCarrierQuantity) continue;
 		if (mPlan.size() < fallbackQuantity)
 			schedule(commands[index], slot);
@@ -82,13 +97,16 @@ NRISmokePromptPrepareResult NRISmokePromptFallback::Prepare(
 		}
 		uint32_t slot = FixedFallbackCarrierQuantity;
 		for (uint32_t i = 0u; i < FixedFallbackCarrierQuantity; ++i)
-			if (mActiveSlots[i].rangeCount == 0u) { slot = i; break; }
+			if (mActiveSlots[i].identity.rangeCount == 0u) { slot = i; break; }
 		if (slot == FixedFallbackCarrierQuantity)
 		{
 			defer(command);
 			continue;
 		}
-		mActiveSlots[slot] = identityOf(command);
+		mActiveSlots[slot].identity = identityOf(command);
+		mActiveSlots[slot].authoredSimulationSeconds = simulationTimeSeconds;
+		mActiveSlots[slot].lifetimeSeconds = command.styleIndex < styles.size() ?
+			std::max(styles[command.styleIndex].lifetime, 0.001f) : 0.001f;
 		mNewlyClaimedSlots.push_back(slot);
 		schedule(command, slot);
 	}
@@ -104,7 +122,45 @@ NRISmokePromptPrepareResult NRISmokePromptFallback::Prepare(
 	mSnapshot.promptDeferredRanges += result.deferredRanges;
 	mSnapshot.promptDeferredMass += result.deferredMass;
 	mSnapshot.promptDeferredBrickWork += result.deferredBrickWork;
+	RefreshActiveSnapshot(simulationTimeSeconds);
 	return result;
+}
+
+void NRISmokePromptFallback::RefreshActiveSnapshot(double simulationTimeSeconds)
+{
+	mSnapshot.activeFallbackSlots = 0u;
+	double oldestAgeSeconds = 0.0;
+	for (const ActiveSlot& active : mActiveSlots)
+	{
+		if (active.identity.rangeCount == 0u) continue;
+		mSnapshot.activeFallbackSlots++;
+		oldestAgeSeconds = std::max(oldestAgeSeconds,
+			std::max(0.0, simulationTimeSeconds - active.authoredSimulationSeconds));
+	}
+	mSnapshot.oldestActiveAgeMilliseconds = (uint32_t)std::min(
+		oldestAgeSeconds * 1000.0, (double)UINT32_MAX);
+}
+
+void NRISmokePromptFallback::RetireExpired(NRISmokePulseOwner& pulses,
+	double simulationTimeSeconds)
+{
+	for (ActiveSlot& active : mActiveSlots)
+	{
+		if (active.identity.rangeCount == 0u ||
+			simulationTimeSeconds - active.authoredSimulationSeconds < active.lifetimeSeconds)
+			continue;
+		const NRISmokePromptRangeIdentity identity = active.identity;
+		if (!pulses.RetireFallback(identity.pulseIdLow, identity.pulseIdHigh,
+			identity.rangeBegin, identity.rangeCount))
+		{
+			mSnapshot.expiryAcknowledgeFailures++;
+			continue;
+		}
+		mSnapshot.expiredFallbackRanges++;
+		mSnapshot.expiredFallbackMass += identity.rangeCount;
+		active = {};
+	}
+	RefreshActiveSnapshot(simulationTimeSeconds);
 }
 
 void NRISmokePromptFallback::CommitGridHandoffs(NRISmokePulseOwner& pulses,
@@ -131,8 +187,10 @@ void NRISmokePromptFallback::CommitGridHandoffs(NRISmokePulseOwner& pulses,
 			mSnapshot.gridHandoffs++;
 			mSnapshot.committedDepositedMass += outcome.rangeCount;
 			for (auto& active : mActiveSlots)
-				if (active.pulseIdLow == outcome.pulseIdLow && active.pulseIdHigh == outcome.pulseIdHigh &&
-					active.rangeBegin == outcome.rangeBegin && active.rangeCount == outcome.rangeCount)
+				if (active.identity.pulseIdLow == outcome.pulseIdLow &&
+					active.identity.pulseIdHigh == outcome.pulseIdHigh &&
+					active.identity.rangeBegin == outcome.rangeBegin &&
+					active.identity.rangeCount == outcome.rangeCount)
 					active = {};
 		}
 	}

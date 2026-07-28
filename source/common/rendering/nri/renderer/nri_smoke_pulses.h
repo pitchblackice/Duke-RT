@@ -13,6 +13,8 @@ struct NRISmokePulseSnapshot
 	uint64_t plannedMass = 0;
 	uint64_t committedRanges = 0;
 	uint64_t committedMass = 0;
+	uint64_t fallbackRetiredRanges = 0;
+	uint64_t fallbackRetiredMass = 0;
 	uint64_t rollbackCount = 0;
 	uint64_t resetPulses = 0;
 	uint64_t resetMass = 0;
@@ -34,6 +36,8 @@ public:
 	bool Commit(uint64_t token);
 	bool CommitRetaining(uint64_t token, const std::vector<NRISmokeInjectionCommandGpu>& retained);
 	bool Acknowledge(uint32_t pulseIdLow, uint32_t pulseIdHigh, uint32_t rangeBegin, uint32_t rangeCount);
+	bool RetireFallback(uint32_t pulseIdLow, uint32_t pulseIdHigh,
+		uint32_t rangeBegin, uint32_t rangeCount);
 	bool Rollback(uint64_t token);
 	void RebaseEpoch(uint32_t epoch);
 	uint32_t Reset();
@@ -45,6 +49,8 @@ private:
 	static uint64_t PulseId(const NRISmokeInjectionCommandGpu& command);
 	static void SetPulseId(NRISmokeInjectionCommandGpu& command, uint64_t pulseId);
 	static uint64_t RangeEnd(const NRISmokeInjectionCommandGpu& command);
+	bool RetireRange(uint32_t pulseIdLow, uint32_t pulseIdHigh,
+		uint32_t rangeBegin, uint32_t rangeCount, bool gridCommitted);
 	void RefreshPendingSnapshot();
 	void ClearPlan();
 
