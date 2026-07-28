@@ -264,6 +264,10 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 	std::vector<uint32_t> deferredPerRule;
 	std::vector<uint32_t> timeDeferredPerRule;
 	std::vector<uint32_t> activatedPerRule;
+	std::vector<uint32_t> appearanceReadyPerRule;
+	std::vector<uint32_t> appearanceObservedPerRule;
+	std::vector<uint32_t> activationLatchedPerRule;
+	std::vector<uint32_t> cadenceActivePerRule;
 	if (traceMode != 0)
 	{
 		observedPerRule.resize(resolved.smokeActorRules.Size());
@@ -272,6 +276,10 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 		deferredPerRule.resize(resolved.smokeActorRules.Size());
 		timeDeferredPerRule.resize(resolved.smokeActorRules.Size());
 		activatedPerRule.resize(resolved.smokeActorRules.Size());
+		appearanceReadyPerRule.resize(resolved.smokeActorRules.Size());
+		appearanceObservedPerRule.resize(resolved.smokeActorRules.Size());
+		activationLatchedPerRule.resize(resolved.smokeActorRules.Size());
+		cadenceActivePerRule.resize(resolved.smokeActorRules.Size());
 	}
 	uint32_t verbosePrinted = 0;
 	TSpriteIterator<DCoreActor> iterator;
@@ -298,10 +306,39 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			}
 			ActorState& state = stateIt->second;
 			state.observed = true;
+			const uint32_t actorSourceId = NRIMakeSmokeSourceId("actor", resolved.activeMapName.GetChars(),
+				rule.id.GetChars(), static_cast<uint32_t>(actor->GetIndex()));
 			if (traceMode != 0) observedPerRule[ruleIndex]++;
+			const bool appearanceReady = rule.activationPolicy == LightOverlayActorActivationPolicy::Immediate ||
+				sceneLights.HasActorAppearanceEvidence(identity.actorIndex);
+			state.appearanceObserved = state.appearanceObserved || appearanceReady;
+			if (traceMode != 0)
+			{
+				appearanceReadyPerRule[ruleIndex] += appearanceReady ? 1u : 0u;
+				appearanceObservedPerRule[ruleIndex] += state.appearanceObserved ? 1u : 0u;
+			}
+			auto publishActorAuthority = [&](uint32_t emittedNow)
+			{
+				if (traceMode < 2 || rule.id.CompareNoCase("duke_fire_sustained") != 0)
+					return;
+				const bool cadenceActive = state.emitted;
+				if (state.authorityTracePublished && emittedNow == 0u &&
+					state.authorityTraceAppearanceReady == appearanceReady &&
+					state.authorityTraceActivationLatched == state.activationLatched &&
+					state.authorityTraceCadenceActive == cadenceActive)
+					return;
+				Printf("NRI PT smoke emitter: event=actor-authority rule=%s class=%s actor=%d source_id=%08x world=(%.3f,%.3f,%.3f) appearance_ready=%u appearance_seen=%u activation_latched=%u cadence_active=%u emitted_now=%u\n",
+					rule.id.GetChars(), actor->GetClass()->TypeName.GetChars(), actor->GetIndex(), actorSourceId,
+					currentPosition.X, currentPosition.Y, currentPosition.Z,
+					appearanceReady ? 1u : 0u, state.appearanceObserved ? 1u : 0u,
+					state.activationLatched ? 1u : 0u, cadenceActive ? 1u : 0u, emittedNow);
+				state.authorityTracePublished = true;
+				state.authorityTraceAppearanceReady = appearanceReady;
+				state.authorityTraceActivationLatched = state.activationLatched;
+				state.authorityTraceCadenceActive = cadenceActive;
+			};
 			if (!state.activationLatched)
 			{
-				const bool appearanceReady = sceneLights.HasActorAppearanceEvidence(identity.actorIndex);
 				if (rule.activationPolicy == LightOverlayActorActivationPolicy::Immediate || appearanceReady)
 				{
 					state.activationLatched = true;
@@ -325,9 +362,11 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 							rule.id.GetChars(), actor->GetClass()->TypeName.GetChars(), actor->GetIndex(), actor);
 						verbosePrinted++;
 					}
+					publishActorAuthority(0u);
 					continue;
 				}
 			}
+			if (traceMode != 0) activationLatchedPerRule[ruleIndex]++;
 			struct TimedEmission { DVector3 position; double gameplaySeconds = 0.0; };
 			std::vector<TimedEmission> emissions;
 			DVector3 cadenceStartPosition = state.previousPosition;
@@ -451,8 +490,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 				command.radiusScale = rule.radiusScale;
 				command.velocityCone = rule.velocityCone;
 				command.epoch = epoch;
-				command.sourceId = NRIMakeSmokeSourceId("actor", resolved.activeMapName.GetChars(),
-					rule.id.GetChars(), static_cast<uint32_t>(actor->GetIndex()));
+				command.sourceId = actorSourceId;
 				command.sourceMetadata = NRIPackSmokeSourceMetadata(NRISmokeInjectionSourceClass::InteractiveActor);
 				SetPointSourceShape(command);
 				const bool routed = routeCommand(command, rule.representation, rule.queuePolicy,
@@ -464,7 +502,9 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 					emittedPerRule[ruleIndex] += routed ? 1u : 0u;
 					particlesPerRule[ruleIndex] += routed ? command.count : 0u;
 				}
-				if (traceMode >= 2 && verbosePrinted < 32u)
+				const bool publishAuthoritySource = traceMode >= 2 && !state.sourceTracePublished &&
+					rule.id.CompareNoCase("duke_fire_sustained") == 0;
+				if (traceMode >= 2 && (verbosePrinted < 32u || publishAuthoritySource))
 				{
 					Printf("NRI PT smoke emitter: event=%s rule=%s class=%s actor=%d identity=%p serial=%u source_id=%08x source_class=%u world=(%.3f,%.3f,%.3f) render=(%.3f,%.3f,%.3f) velocity=(%.3f,%.3f,%.3f) style=%u particles=%u\n",
 						rule.trigger == LightOverlaySmokeTrigger::Interval ? "interval" : "spawn",
@@ -474,8 +514,11 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 						command.position[0], command.position[1], command.position[2],
 						command.velocity[0], command.velocity[1], command.velocity[2], command.styleIndex, command.count);
 					verbosePrinted++;
+					state.sourceTracePublished = true;
 				}
 			}
+			publishActorAuthority((uint32_t)emissions.size());
+			if (traceMode != 0) cadenceActivePerRule[ruleIndex] += state.emitted ? 1u : 0u;
 		}
 	}
 	if (traceMode != 0)
@@ -485,10 +528,12 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			if (emittedPerRule[ruleIndex] == 0u && deferredPerRule[ruleIndex] == 0u &&
 				timeDeferredPerRule[ruleIndex] == 0u && activatedPerRule[ruleIndex] == 0u) continue;
 			const auto& rule = resolved.smokeActorRules[ruleIndex];
-			Printf("NRI PT smoke emitter: event=frame-summary rule=%s class=%s observed=%u emitted=%u particles=%u activation=%s deferred=%u activated=%u starttime=%.3f time_deferred=%u\n",
+			Printf("NRI PT smoke emitter: event=frame-summary rule=%s class=%s observed=%u emitted=%u particles=%u activation=%s appearance_ready=%u appearance_seen=%u activation_latched=%u deferred=%u activated=%u starttime=%.3f time_deferred=%u cadence_active=%u\n",
 				rule.id.GetChars(), rule.actorClassName.GetChars(), observedPerRule[ruleIndex], emittedPerRule[ruleIndex], particlesPerRule[ruleIndex],
 				rule.activationPolicy == LightOverlayActorActivationPolicy::Immediate ? "immediate" : "surface",
-				deferredPerRule[ruleIndex], activatedPerRule[ruleIndex], rule.startTime, timeDeferredPerRule[ruleIndex]);
+				appearanceReadyPerRule[ruleIndex], appearanceObservedPerRule[ruleIndex], activationLatchedPerRule[ruleIndex],
+				deferredPerRule[ruleIndex], activatedPerRule[ruleIndex], rule.startTime,
+				timeDeferredPerRule[ruleIndex], cadenceActivePerRule[ruleIndex]);
 		}
 	}
 	for (auto it = mActorStates.begin(); it != mActorStates.end(); )

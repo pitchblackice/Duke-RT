@@ -44,6 +44,12 @@ private:
 		double intervalRemainder = 0.0;
 		double startDistanceTraveled = 0.0;
 		bool activationLatched = false;
+		bool appearanceObserved = false;
+		bool sourceTracePublished = false;
+		bool authorityTracePublished = false;
+		bool authorityTraceAppearanceReady = false;
+		bool authorityTraceActivationLatched = false;
+		bool authorityTraceCadenceActive = false;
 		bool startTimeElapsed = false;
 		bool emitted = false;
 		bool observed = false;
