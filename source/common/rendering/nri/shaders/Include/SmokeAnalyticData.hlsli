@@ -7,6 +7,20 @@
 // removes off-screen/non-overlapping work without making overflow destructive.
 #define NRI_SMOKE_ANALYTIC_MAX_CARRIERS_PER_TILE NRI_SMOKE_ANALYTIC_MAX_CARRIERS
 #define NRI_SMOKE_ANALYTIC_CARRIER_ACTIVE 0x1u
+#define NRI_SMOKE_ANALYTIC_CARRIER_SLOT_SHIFT 1u
+#define NRI_SMOKE_ANALYTIC_CARRIER_SLOT_MASK 0xfeu
+#define NRI_SMOKE_ANALYTIC_CARRIER_GENERATION_SHIFT 8u
+
+uint SmokeAnalyticCarrierSlot(uint flags)
+{
+	return (flags & NRI_SMOKE_ANALYTIC_CARRIER_SLOT_MASK) >>
+		NRI_SMOKE_ANALYTIC_CARRIER_SLOT_SHIFT;
+}
+
+uint SmokeAnalyticCarrierGeneration(uint flags)
+{
+	return flags >> NRI_SMOKE_ANALYTIC_CARRIER_GENERATION_SHIFT;
+}
 
 // Keep this 64-byte layout synchronized with NRISmokeAnalyticCarrierGpu.
 // CPU policy publishes already-aged position, radius, and density scale; this

@@ -55,9 +55,13 @@ int main()
 	const auto& evolved = owner.GetGpuCarriers();
 	Require(evolved.size() == 2u && std::abs(evolved[0].position[0] - 7.0f) < 1e-5f &&
 		std::abs(evolved[0].radius - 5.0f) < 1e-5f &&
-		std::abs(evolved[0].densityScale - 8.0f * std::exp2(-1.5f)) < 1e-5f &&
+		std::abs(evolved[0].densityScale - 8.0f * std::exp2(-1.5f) *
+			(2.0f * 2.0f * 2.0f) / (5.0f * 5.0f * 5.0f)) < 1e-5f &&
 		(evolved[0].flags & 1u) != 0u,
-		"GPU records must evolve from authored gameplay time without simulation replay");
+		"GPU records must evolve with half-life decay and expansion-volume dilution");
+	Require(((evolved[0].flags & 0xfeu) >> 1u) == first.handle.slot &&
+		(evolved[0].flags >> 8u) == first.handle.generation,
+		"GPU records must preserve stable physical slot and generation identity");
 
 	owner.BeginFrame(13.0, 2u);
 	Require(owner.GetSnapshot().activeQuantity == 0u &&
@@ -103,6 +107,23 @@ int main()
 	Require(snapshot.requested == 0u && snapshot.admitted == 0u &&
 		snapshot.droppedCapacity == 0u,
 		"reset must begin a fresh epoch telemetry interval");
+
+	owner.Reset(9u);
+	owner.BeginFrame(30.0, 3u);
+	auto batchA = Request(10u, 9u, 30.0);
+	auto batchB = Request(10u, 9u, 30.0);
+	Require(owner.AdmitBatch(&batchA, 1u) == 1u,
+		"an analytic batch must publish when its complete quantity fits");
+	NRISmokeAnalyticCarrierRequest pair[2] = { batchA, batchB };
+	Require(owner.AdmitBatch(pair, 2u) == 2u && owner.GetSnapshot().activeQuantity == 3u,
+		"a multi-carrier effect must be admitted atomically when it fits");
+	owner.Reset(10u);
+	owner.BeginFrame(40.0, 1u);
+	pair[0] = Request(11u, 10u, 40.0);
+	pair[1] = Request(11u, 10u, 40.0);
+	Require(owner.AdmitBatch(pair, 2u) == 0u && owner.GetSnapshot().activeQuantity == 0u &&
+		owner.GetSnapshot().droppedCapacity == 2u,
+		"capacity pressure must drop a complete multi-carrier effect without partial mass");
 
 	std::cout << "Smoke analytic carrier lifecycle tests passed.\n";
 	return 0;

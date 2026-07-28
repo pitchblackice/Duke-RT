@@ -24,6 +24,25 @@ bool Valid(const NRISmokeAnalyticCarrierRequest& request)
 		std::isfinite(request.maximumLatencySeconds) && request.maximumLatencySeconds >= 0.0f &&
 		std::isfinite(request.authoredGameplaySeconds);
 }
+
+float SupportVolume(const NRISmokeAnalyticCarrierRequest& request, float radius)
+{
+	constexpr float Pi = 3.14159265359f;
+	const float clampedRadius = std::max(radius, 0.001f);
+	if (request.shape == 0u)
+		return (4.0f * Pi / 3.0f) * clampedRadius * clampedRadius * clampedRadius;
+	const float u = std::sqrt(request.halfAxisU[0] * request.halfAxisU[0] +
+		request.halfAxisU[1] * request.halfAxisU[1] +
+		request.halfAxisU[2] * request.halfAxisU[2]);
+	const float v = std::sqrt(request.halfAxisV[0] * request.halfAxisV[0] +
+		request.halfAxisV[1] * request.halfAxisV[1] +
+		request.halfAxisV[2] * request.halfAxisV[2]);
+	const float area = 4.0f * u * v;
+	const float perimeter = 4.0f * (u + v);
+	return 2.0f * area * clampedRadius + (Pi * 0.5f) * perimeter *
+		clampedRadius * clampedRadius + (4.0f * Pi / 3.0f) *
+		clampedRadius * clampedRadius * clampedRadius;
+}
 }
 
 void NRISmokeAnalyticCarriers::BeginFrame(double gameplayTimeSeconds,
@@ -69,6 +88,28 @@ NRISmokeAnalyticCarrierAdmission NRISmokeAnalyticCarriers::Admit(
 	return Drop(NRISmokeAnalyticCarrierDropReason::Capacity);
 }
 
+uint32_t NRISmokeAnalyticCarriers::AdmitBatch(
+	const NRISmokeAnalyticCarrierRequest* requests, uint32_t count)
+{
+	if (requests == nullptr || count == 0u) return 0u;
+	uint32_t availableSlots = 0u;
+	for (const Slot& slot : mSlots)
+		availableSlots += !slot.active && slot.generation !=
+			std::numeric_limits<uint32_t>::max() ? 1u : 0u;
+	if (count > availableSlots || mSnapshot.activeQuantity + count >
+		mSnapshot.maximumActiveQuantity)
+	{
+		mSnapshot.requested += count;
+		for (uint32_t index = 0u; index < count; ++index)
+			Drop(NRISmokeAnalyticCarrierDropReason::Capacity);
+		return 0u;
+	}
+	uint32_t admitted = 0u;
+	for (uint32_t index = 0u; index < count; ++index)
+		admitted += Admit(requests[index]).Accepted() ? 1u : 0u;
+	return admitted;
+}
+
 bool NRISmokeAnalyticCarriers::IsLive(const NRISmokeAnalyticCarrierHandle& handle) const
 {
 	if (handle.slot >= mSlots.size() || handle.epoch != mSnapshot.epoch) return false;
@@ -96,8 +137,9 @@ void NRISmokeAnalyticCarriers::Refresh()
 	mGpuCarriers.clear();
 	mSnapshot.activeQuantity = 0u;
 	double oldestAgeSeconds = 0.0;
-	for (Slot& slot : mSlots)
+	for (uint32_t slotIndex = 0u; slotIndex < mSlots.size(); ++slotIndex)
 	{
+		Slot& slot = mSlots[slotIndex];
 		if (!slot.active) continue;
 		const double ageSeconds = std::max(0.0,
 			mGameplayTimeSeconds - slot.request.authoredGameplaySeconds);
@@ -120,13 +162,17 @@ void NRISmokeAnalyticCarriers::Refresh()
 		}
 		gpu.radius = std::max(slot.request.initialRadius +
 			slot.request.expansionVelocity * (float)ageSeconds, 0.001f);
-		gpu.densityScale = slot.request.initialDensity * std::exp2(
-			-(float)ageSeconds / slot.request.densityHalfLife);
+		const float initialVolume = SupportVolume(slot.request, slot.request.initialRadius);
+		const float currentVolume = SupportVolume(slot.request, gpu.radius);
+		const float expansionDilution = std::min(1.0f,
+			initialVolume / std::max(currentVolume, 1e-20f));
+		gpu.densityScale = slot.request.initialDensity * expansionDilution *
+			std::exp2(-(float)ageSeconds / slot.request.densityHalfLife);
 		gpu.shape = slot.request.shape;
 		gpu.styleIndex = slot.request.styleIndex;
 		gpu.rangeCount = slot.request.rangeCount;
 		gpu.epoch = slot.request.epoch;
-		gpu.flags = 1u | (slot.generation << 1u);
+		gpu.flags = 1u | (slotIndex << 1u) | (slot.generation << 8u);
 		mGpuCarriers.push_back(gpu);
 	}
 	mSnapshot.highWaterQuantity = std::max(mSnapshot.highWaterQuantity,

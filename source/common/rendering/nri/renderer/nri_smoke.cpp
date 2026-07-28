@@ -1294,8 +1294,15 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	mAnalyticCarriers.BeginFrame(now, workTable.analyticCarriers);
 	const uint32_t analyticRequested = (uint32_t)mPendingAnalyticRequests.size();
 	uint32_t analyticAdmitted = 0u;
-	for (const NRISmokeAnalyticCarrierRequest& request : mPendingAnalyticRequests)
-		analyticAdmitted += mAnalyticCarriers.Admit(request).Accepted() ? 1u : 0u;
+	for (uint32_t requestIndex = 0u; requestIndex < mPendingAnalyticRequests.size();)
+	{
+		const NRISmokeAnalyticCarrierRequest& request = mPendingAnalyticRequests[requestIndex];
+		const uint32_t batchCount = request.batchIndex == 0u ? std::min(request.batchCount,
+			(uint32_t)mPendingAnalyticRequests.size() - requestIndex) : 1u;
+		analyticAdmitted += mAnalyticCarriers.AdmitBatch(
+			mPendingAnalyticRequests.data() + requestIndex, batchCount);
+		requestIndex += batchCount;
+	}
 	mPendingAnalyticRequests.clear();
 	mWorkScheduler.RecordAnalytic(analyticRequested, analyticAdmitted);
 	mStatus.analytic = mAnalyticCarriers.GetSnapshot();

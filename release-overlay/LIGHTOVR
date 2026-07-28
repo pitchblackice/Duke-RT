@@ -515,6 +515,7 @@ LIGHTOVR
         representation analytic
         queuepolicy drop
         maxlatencyseconds 0.050
+        analyticcarriers 2
         count 14
         offset 0.0 0.0 0.0
         spawnradius 2.0
@@ -532,6 +533,7 @@ LIGHTOVR
         representation analytic
         queuepolicy drop
         maxlatencyseconds 0.050
+        analyticcarriers 2
         count 16
         offset 0.0 0.0 0.0
         spawnradius 2.5

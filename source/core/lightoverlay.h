@@ -338,6 +338,7 @@ struct ParsedLightOverlaySmokeActorRule
 	LightOverlaySmokeQueuePolicy queuePolicy = LightOverlaySmokeQueuePolicy::Retry;
 	bool hasMaxLatencySeconds = false;
 	float maxLatencySeconds = 0.0f;
+	uint32_t analyticCarrierCount = 1;
 	bool emitterForeground = false;
 	FString styleId;
 	uint32_t count = 1;
@@ -363,6 +364,7 @@ struct ParsedLightOverlaySmokeEventRule
 	LightOverlaySmokeQueuePolicy queuePolicy = LightOverlaySmokeQueuePolicy::Retry;
 	bool hasMaxLatencySeconds = false;
 	float maxLatencySeconds = 0.0f;
+	uint32_t analyticCarrierCount = 1;
 	uint32_t count = 1;
 	float offset[3] = { 0.0f, 0.0f, 0.0f };
 	float spawnRadius = 0.0f;

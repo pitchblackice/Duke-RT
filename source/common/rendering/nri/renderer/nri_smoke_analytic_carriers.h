@@ -23,6 +23,8 @@ struct NRISmokeAnalyticCarrierRequest
 	double authoredGameplaySeconds = 0.0;
 	float maximumLatencySeconds = 0.0f;
 	uint64_t sourceEventSerial = 0u;
+	uint32_t batchIndex = 0u;
+	uint32_t batchCount = 1u;
 };
 
 struct NRISmokeAnalyticCarrierGpu
@@ -98,6 +100,7 @@ public:
 
 	void BeginFrame(double gameplayTimeSeconds, uint32_t maximumActiveQuantity);
 	NRISmokeAnalyticCarrierAdmission Admit(const NRISmokeAnalyticCarrierRequest& request);
+	uint32_t AdmitBatch(const NRISmokeAnalyticCarrierRequest* requests, uint32_t count);
 	bool IsLive(const NRISmokeAnalyticCarrierHandle& handle) const;
 	void Reset(uint32_t epoch);
 

@@ -79,6 +79,68 @@ namespace
 		}
 		return (uint32_t)std::min<uint64_t>(bricks, UINT32_MAX);
 	}
+
+	uint32_t HashAnalyticCarrier(uint64_t eventSerial, uint32_t carrierIndex)
+	{
+		uint32_t value = (uint32_t)eventSerial ^ (uint32_t)(eventSerial >> 32u) ^
+			(carrierIndex + 1u) * 0x9e3779b9u;
+		value ^= value >> 16u;
+		value *= 0x7feb352du;
+		value ^= value >> 15u;
+		value *= 0x846ca68bu;
+		return value ^ (value >> 16u);
+	}
+
+	void ShapeAnalyticCarrier(const NRISmokeInjectionCommandGpu& command, uint64_t eventSerial,
+		uint32_t carrierIndex, uint32_t carrierCount, float initialRadius,
+		float position[3], float velocity[3])
+	{
+		std::copy(command.position, command.position + 3, position);
+		std::copy(command.velocity, command.velocity + 3, velocity);
+		if (carrierCount <= 1u) return;
+
+		const float speed = std::sqrt(velocity[0] * velocity[0] +
+			velocity[1] * velocity[1] + velocity[2] * velocity[2]);
+		if (speed <= 0.0001f) return;
+		float forward[3] = { velocity[0] / speed, velocity[1] / speed, velocity[2] / speed };
+		float tangent[3] = {};
+		if (std::abs(forward[1]) < 0.9f)
+		{
+			tangent[0] = -forward[2];
+			tangent[2] = forward[0];
+		}
+		else
+		{
+			tangent[0] = forward[1];
+			tangent[1] = -forward[0];
+		}
+		const float tangentLength = std::sqrt(tangent[0] * tangent[0] +
+			tangent[1] * tangent[1] + tangent[2] * tangent[2]);
+		for (float& axis : tangent) axis /= std::max(tangentLength, 0.0001f);
+		const float bitangent[3] = {
+			forward[1] * tangent[2] - forward[2] * tangent[1],
+			forward[2] * tangent[0] - forward[0] * tangent[2],
+			forward[0] * tangent[1] - forward[1] * tangent[0]
+		};
+		const uint32_t hash = HashAnalyticCarrier(eventSerial, carrierIndex);
+		const float phase = ((float)hash / 4294967296.0f) * 6.28318530718f;
+		const float ringRadius = initialRadius * 0.45f * std::sqrt(
+			((float)carrierIndex + 0.5f) / (float)carrierCount);
+		const float radial[3] = {
+			tangent[0] * std::cos(phase) + bitangent[0] * std::sin(phase),
+			tangent[1] * std::cos(phase) + bitangent[1] * std::sin(phase),
+			tangent[2] * std::cos(phase) + bitangent[2] * std::sin(phase)
+		};
+		for (uint32_t axis = 0u; axis < 3u; ++axis)
+			position[axis] += radial[axis] * ringRadius;
+
+		const float coneRadians = command.velocityCone * 0.01745329252f;
+		const float carrierRadius = std::sqrt(((float)carrierIndex + 0.5f) /
+			(float)carrierCount);
+		const float angle = coneRadians * carrierRadius;
+		for (uint32_t axis = 0u; axis < 3u; ++axis)
+			velocity[axis] = speed * (forward[axis] * std::cos(angle) + radial[axis] * std::sin(angle));
+	}
 }
 
 size_t NRISmokeEmitterSystem::IdentityHash::operator()(const Identity& value) const
@@ -147,7 +209,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 	auto routeCommand = [&](const NRISmokeInjectionCommandGpu& command,
 		LightOverlaySmokeRepresentation representation, LightOverlaySmokeQueuePolicy queuePolicy,
 		bool hasMaximumLatency, float maximumLatencySeconds, double authoredGameplaySeconds,
-		uint64_t sourceEventSerial) -> bool
+		uint64_t sourceEventSerial, uint32_t analyticCarrierCount) -> bool
 	{
 		if (representation != LightOverlaySmokeRepresentation::Analytic)
 		{
@@ -159,30 +221,39 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 		if (queuePolicy != LightOverlaySmokeQueuePolicy::Drop || command.styleIndex >= styles.size())
 			return false;
 		const NRISmokeStyleGpu& style = styles[command.styleIndex];
-		NRISmokeAnalyticCarrierRequest request = {};
-		std::copy(command.position, command.position + 3, request.position);
-		std::copy(command.velocity, command.velocity + 3, request.velocity);
-		std::copy(command.halfAxisU, command.halfAxisU + 3, request.halfAxisU);
-		std::copy(command.halfAxisV, command.halfAxisV + 3, request.halfAxisV);
-		request.velocity[1] -= style.riseVelocity;
-		request.initialRadius = std::max(std::max(command.spawnRadius,
+		const float initialRadius = std::max(std::max(command.spawnRadius,
 			style.radius * command.radiusScale), 0.001f);
-		const float radiusCells = request.initialRadius / std::max(gridCellSize, 0.0001f);
+		const float radiusCells = initialRadius / std::max(gridCellSize, 0.0001f);
 		const float normalization = std::max(1.0f,
 			(4.0f * 3.14159265359f / 15.0f) * radiusCells * radiusCells * radiusCells);
-		request.initialDensity = std::max(command.densityScale, 0.0f) / normalization;
-		request.shape = command.shape;
-		request.rangeCount = std::min(command.count, 256u);
-		request.expansionVelocity = style.expansionVelocity;
-		request.densityHalfLife = std::max(style.densityHalfLife, 0.001f);
-		request.lifetimeSeconds = std::max(style.lifetime, 0.001f);
-		request.styleIndex = command.styleIndex;
-		request.sourceId = command.sourceId;
-		request.epoch = command.epoch;
-		request.authoredGameplaySeconds = authoredGameplaySeconds;
-		request.maximumLatencySeconds = hasMaximumLatency ? std::max(maximumLatencySeconds, 0.0f) : 0.0f;
-		request.sourceEventSerial = sourceEventSerial;
-		analyticRequests.push_back(request);
+		const uint32_t carrierCount = std::min(std::max(analyticCarrierCount, 1u),
+			std::min(command.count, 8u));
+		for (uint32_t carrierIndex = 0u; carrierIndex < carrierCount; ++carrierIndex)
+		{
+			NRISmokeAnalyticCarrierRequest request = {};
+			ShapeAnalyticCarrier(command, sourceEventSerial, carrierIndex, carrierCount,
+				initialRadius, request.position, request.velocity);
+			std::copy(command.halfAxisU, command.halfAxisU + 3, request.halfAxisU);
+			std::copy(command.halfAxisV, command.halfAxisV + 3, request.halfAxisV);
+			request.velocity[1] -= style.riseVelocity;
+			request.initialRadius = initialRadius;
+			request.initialDensity = std::max(command.densityScale, 0.0f) / normalization;
+			request.shape = command.shape;
+			request.rangeCount = command.count / carrierCount +
+				(carrierIndex < command.count % carrierCount ? 1u : 0u);
+			request.expansionVelocity = style.expansionVelocity;
+			request.densityHalfLife = std::max(style.densityHalfLife, 0.001f);
+			request.lifetimeSeconds = std::max(style.lifetime, 0.001f);
+			request.styleIndex = command.styleIndex;
+			request.sourceId = command.sourceId;
+			request.epoch = command.epoch;
+			request.authoredGameplaySeconds = authoredGameplaySeconds;
+			request.maximumLatencySeconds = hasMaximumLatency ? std::max(maximumLatencySeconds, 0.0f) : 0.0f;
+			request.sourceEventSerial = sourceEventSerial;
+			request.batchIndex = carrierIndex;
+			request.batchCount = carrierCount;
+			analyticRequests.push_back(request);
+		}
 		return true;
 	};
 
@@ -386,7 +457,8 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 				SetPointSourceShape(command);
 				const bool routed = routeCommand(command, rule.representation, rule.queuePolicy,
 					rule.hasMaxLatencySeconds, rule.maxLatencySeconds, emission.gameplaySeconds,
-					(uint64_t)(uint32_t)actor->GetIndex() << 32u | command.serial);
+					(uint64_t)(uint32_t)actor->GetIndex() << 32u | command.serial,
+					rule.analyticCarrierCount);
 				if (traceMode != 0)
 				{
 					emittedPerRule[ruleIndex] += routed ? 1u : 0u;
@@ -710,7 +782,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			SetPointSourceShape(command);
 			const bool routed = routeCommand(command, rule.representation, rule.queuePolicy,
 				rule.hasMaxLatencySeconds, rule.maxLatencySeconds, event.absoluteTimeSeconds,
-				event.serial);
+				event.serial, rule.analyticCarrierCount);
 			if (!routed)
 			{
 				if (traceMode != 0)
