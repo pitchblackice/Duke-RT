@@ -63,6 +63,7 @@ struct NRISmokeGridFrameDesc
 	uint32_t styleCount = 0;
 	uint32_t simulationSubsteps = 0;
 	bool hashHealthDiagnostic = false;
+	bool spatialObservationReadback = false;
 	float simulationStep = 1.0f / 60.0f;
 	const nri::Descriptor* styleView = nullptr;
 	const nri::Descriptor* commandView = nullptr;
@@ -109,6 +110,8 @@ struct NRISmokeGridStatusSnapshot
 	uint32_t gpuFrameDeltaInterval = 0;
 	NRISmokeGridControlGpu gpuFrameDelta = {};
 	std::vector<NRISmokeGridSourceStatusSnapshot> sources;
+	std::vector<NRISmokeGridBrickGpu> spatialBricks;
+	uint64_t spatialGpuRendererFrame = UINT64_MAX;
 	std::string failureReason = "not-requested";
 	std::string resetReason = "initial";
 };
@@ -118,6 +121,7 @@ class NRISmokeGrid
 public:
 	static constexpr uint32_t StorageDescriptorCount = 22u;
 	static constexpr uint32_t EvaluationDescriptorCount = 11u;
+	static constexpr uint32_t DormantTransactionDescriptorCount = 18u;
 	static constexpr uint32_t SourceCapacity = 256u;
 
 	// Pipeline and descriptor-set initialization is intentionally lazy. A grid
@@ -136,6 +140,10 @@ public:
 	// control, hash, bricks, scalar A/B, velocity A/B, optical A/B, dynamics A/B.
 	bool GetEvaluationStorageDescriptors(
 		std::array<const nri::Descriptor*, EvaluationDescriptorCount>& descriptors) const;
+	// Focused writable service for the dormant authority transaction. Order:
+	// control, hash, bricks, free, active A/B, field A/B pairs, deposits 0..3.
+	bool GetDormantTransactionStorageDescriptors(
+		std::array<const nri::Descriptor*, DormantTransactionDescriptorCount>& descriptors) const;
 	const NRISmokeGridStatusSnapshot& GetStatusSnapshot() const { return mStatus; }
 	uint32_t GetActivePing() const { return mActivePing; }
 	uint32_t GetFieldPing() const { return mFieldPing; }
@@ -149,10 +157,13 @@ private:
 		NRIBufferResource controlReadback;
 		NRIBufferResource sourceReadback;
 		NRIBufferResource promptReadback;
+		NRIBufferResource spatialBrickReadback;
 		bool readbackPending = false;
 		bool diagnosticReadbackPending = false;
 		bool promptReadbackInitialized = false;
 		bool diagnosticReadbackInitialized = false;
+		bool spatialReadbackPending = false;
+		bool spatialReadbackInitialized = false;
 		uint64_t readbackRendererFrame = UINT64_MAX;
 		uint32_t readbackEpoch = 0;
 	};
@@ -173,7 +184,8 @@ private:
 		NRISmokeGridPass pass, uint32_t x, uint32_t y = 1u, uint32_t z = 1u);
 	void DispatchIndirect(const NRISmokeGridServices& services, NRISmokeGridConstants& constants,
 		NRISmokeGridPass pass, uint64_t byteOffset = 0u);
-	bool RecordControlReadback(const NRISmokeGridServices& services, const NRISmokeSettings& settings);
+	bool RecordControlReadback(const NRISmokeGridServices& services,
+		const NRISmokeSettings& settings, bool spatialObservationReadback);
 
 	std::array<NRIBufferResource*, StorageDescriptorCount> StorageResources();
 	std::array<const NRIBufferResource*, StorageDescriptorCount> StorageResources() const;

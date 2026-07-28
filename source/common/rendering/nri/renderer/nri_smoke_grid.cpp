@@ -313,10 +313,15 @@ bool NRISmokeGrid::EnsureResources(const NRISmokeGridServices& services, const N
 		created = created && CreateBuffer(services, slot.promptReadback,
 			NRI_SMOKE_PROMPT_FALLBACK_QUANTITY * sizeof(NRISmokePromptOutcomeGpu), sizeof(NRISmokePromptOutcomeGpu),
 			nri::BufferUsageBits::NONE, nri::MemoryLocation::HOST_READBACK, false);
+		created = created && CreateBuffer(services, slot.spatialBrickReadback,
+			(uint64_t)brickCapacity * sizeof(NRISmokeGridBrickGpu), sizeof(NRISmokeGridBrickGpu),
+			nri::BufferUsageBits::NONE, nri::MemoryLocation::HOST_READBACK, false);
 		slot.readbackPending = false;
 		slot.diagnosticReadbackPending = false;
 		slot.promptReadbackInitialized = false;
 		slot.diagnosticReadbackInitialized = false;
+		slot.spatialReadbackPending = false;
+		slot.spatialReadbackInitialized = false;
 	}
 	if (!created)
 	{
@@ -353,7 +358,8 @@ bool NRISmokeGrid::EnsureResources(const NRISmokeGridServices& services, const N
 	for (const NRIBufferResource* resource : StorageResources())
 		mStatus.residentBytes += resource->memorySize;
 	for (const FrameSlot& slot : mFrameSlots)
-		mStatus.residentBytes += slot.controlReadback.memorySize + slot.sourceReadback.memorySize + slot.promptReadback.memorySize;
+		mStatus.residentBytes += slot.controlReadback.memorySize + slot.sourceReadback.memorySize +
+			slot.promptReadback.memorySize + slot.spatialBrickReadback.memorySize;
 	mStatus.resourcesReady = true;
 	mStatus.failureReason = "none";
 	return true;
@@ -378,6 +384,20 @@ void NRISmokeGrid::ConsumeReadback(const NRISmokeGridServices& services, uint32_
 		}
 	}
 	slot.readbackPending = false;
+	if (slot.spatialReadbackPending && slot.spatialBrickReadback.buffer != nullptr &&
+		slot.readbackEpoch == simulationEpoch)
+	{
+		const uint64_t brickBytes = (uint64_t)mResourceBrickCapacity * sizeof(NRISmokeGridBrickGpu);
+		const void* brickMapped = services.core->MapBuffer(*slot.spatialBrickReadback.buffer, 0, brickBytes);
+		if (brickMapped != nullptr)
+		{
+			const auto* bricks = static_cast<const NRISmokeGridBrickGpu*>(brickMapped);
+			mStatus.spatialBricks.assign(bricks, bricks + mResourceBrickCapacity);
+			mStatus.spatialGpuRendererFrame = slot.readbackRendererFrame;
+			services.core->UnmapBuffer(*slot.spatialBrickReadback.buffer);
+		}
+	}
+	slot.spatialReadbackPending = false;
 	if (!slot.diagnosticReadbackPending || slot.controlReadback.buffer == nullptr || slot.sourceReadback.buffer == nullptr)
 		return;
 	mStatus.gpuStatsValid = false;
@@ -588,7 +608,8 @@ void NRISmokeGrid::DispatchIndirect(const NRISmokeGridServices& services, NRISmo
 	services.core->CmdEndAnnotation(*services.commandBuffer);
 }
 
-bool NRISmokeGrid::RecordControlReadback(const NRISmokeGridServices& services, const NRISmokeSettings& settings)
+bool NRISmokeGrid::RecordControlReadback(const NRISmokeGridServices& services,
+	const NRISmokeSettings& settings, bool spatialObservationReadback)
 {
 	if (mFrameSlots.empty())
 		return true;
@@ -655,6 +676,33 @@ bool NRISmokeGrid::RecordControlReadback(const NRISmokeGridServices& services, c
 		services.core->CmdBarrier(*services.commandBuffer, afterCopy);
 		slot.diagnosticReadbackPending = true;
 		slot.diagnosticReadbackInitialized = true;
+	}
+	if (spatialObservationReadback)
+	{
+		nri::BufferBarrierDesc before[2] = {};
+		before[0].buffer = mBricks.buffer;
+		before[0].before = StorageAccess();
+		before[0].after = NRIResourceCopySourceAccess();
+		before[1].buffer = slot.spatialBrickReadback.buffer;
+		before[1].before = slot.spatialReadbackInitialized ?
+			NRIResourceCopyDestinationAccess() : nri::AccessStage{};
+		before[1].after = NRIResourceCopyDestinationAccess();
+		nri::BarrierDesc beforeCopy = {};
+		beforeCopy.buffers = before;
+		beforeCopy.bufferNum = 2u;
+		services.core->CmdBarrier(*services.commandBuffer, beforeCopy);
+		services.core->CmdCopyBuffer(*services.commandBuffer, *slot.spatialBrickReadback.buffer, 0,
+			*mBricks.buffer, 0, (uint64_t)mResourceBrickCapacity * sizeof(NRISmokeGridBrickGpu));
+		nri::BufferBarrierDesc restore = {};
+		restore.buffer = mBricks.buffer;
+		restore.before = NRIResourceCopySourceAccess();
+		restore.after = StorageAccess();
+		nri::BarrierDesc afterCopy = {};
+		afterCopy.buffers = &restore;
+		afterCopy.bufferNum = 1u;
+		services.core->CmdBarrier(*services.commandBuffer, afterCopy);
+		slot.spatialReadbackPending = true;
+		slot.spatialReadbackInitialized = true;
 	}
 	slot.readbackPending = true;
 	slot.promptReadbackInitialized = true;
@@ -810,7 +858,8 @@ bool NRISmokeGrid::RecordFrame(const NRISmokeGridServices& services, const NRISm
 		Dispatch(services, constants, NRISmokeGridPass::BuildDispatch, 1u);
 		StorageBarrier(services);
 	}
-	const bool controlReadbackReady = RecordControlReadback(services, settings);
+	const bool controlReadbackReady = RecordControlReadback(services, settings,
+		frame.spatialObservationReadback);
 	if (!controlReadbackReady)
 	{
 		// Readback is diagnostic-only and occurs after the authoritative field
@@ -836,6 +885,21 @@ bool NRISmokeGrid::GetEvaluationStorageDescriptors(
 		[](const nri::Descriptor* descriptor) { return descriptor != nullptr; });
 }
 
+bool NRISmokeGrid::GetDormantTransactionStorageDescriptors(
+	std::array<const nri::Descriptor*, DormantTransactionDescriptorCount>& descriptors) const
+{
+	descriptors = { mControl.storageView, mHash.storageView, mBricks.storageView,
+		mFreeList.storageView, mActiveA.storageView, mActiveB.storageView,
+		mScalarA.storageView, mScalarB.storageView,
+		mVelocityA.storageView, mVelocityB.storageView,
+		mOpticalA.storageView, mOpticalB.storageView,
+		mDynamicsA.storageView, mDynamicsB.storageView,
+		mDeposit0.storageView, mDeposit1.storageView,
+		mDeposit2.storageView, mDeposit3.storageView };
+	return mStatus.resourcesReady && std::all_of(descriptors.begin(), descriptors.end(),
+		[](const nri::Descriptor* descriptor) { return descriptor != nullptr; });
+}
+
 void NRISmokeGrid::Reset(uint32_t simulationEpoch, const char* reason)
 {
 	mResourceEpoch = simulationEpoch;
@@ -848,6 +912,8 @@ void NRISmokeGrid::Reset(uint32_t simulationEpoch, const char* reason)
 	mStatus.gpuRendererFrame = UINT64_MAX;
 	mStatus.gpu = {};
 	mStatus.sources.clear();
+	mStatus.spatialBricks.clear();
+	mStatus.spatialGpuRendererFrame = UINT64_MAX;
 	mPromptCommits.clear();
 	mStatus.resetReason = reason != nullptr ? reason : "unspecified";
 }
@@ -861,10 +927,13 @@ void NRISmokeGrid::DestroyResources(const NRISmokeGridServices& services)
 		DestroyBuffer(services, slot.controlReadback);
 		DestroyBuffer(services, slot.sourceReadback);
 		DestroyBuffer(services, slot.promptReadback);
+		DestroyBuffer(services, slot.spatialBrickReadback);
 		slot.readbackPending = false;
 		slot.diagnosticReadbackPending = false;
 		slot.promptReadbackInitialized = false;
 		slot.diagnosticReadbackInitialized = false;
+		slot.spatialReadbackPending = false;
+		slot.spatialReadbackInitialized = false;
 		slot.readbackRendererFrame = UINT64_MAX;
 		slot.readbackEpoch = 0;
 	}
@@ -878,6 +947,8 @@ void NRISmokeGrid::DestroyResources(const NRISmokeGridServices& services)
 	mStatus.resourcesReady = false;
 	mStatus.residentBytes = 0;
 	mStatus.sources.clear();
+	mStatus.spatialBricks.clear();
+	mStatus.spatialGpuRendererFrame = UINT64_MAX;
 	mPromptCommits.clear();
 }
 
