@@ -495,6 +495,9 @@ LIGHTOVR
     smokeeventrule "duke.chaingun.primary"
     {
         style "duke_muzzle_smoke"
+        representation analytic
+        queuepolicy drop
+        maxlatencyseconds 0.075
         count 6
         offset 0.0 32.0 5.0
         spawnradius 1.5
@@ -509,6 +512,9 @@ LIGHTOVR
     smokeeventrule "duke.hitscan.impact.plane"
     {
         style "duke_impact_smoke"
+        representation analytic
+        queuepolicy drop
+        maxlatencyseconds 0.050
         count 14
         offset 0.0 0.0 0.0
         spawnradius 2.0
@@ -523,6 +529,9 @@ LIGHTOVR
     smokeeventrule "duke.hitscan.impact.wall"
     {
         style "duke_impact_smoke"
+        representation analytic
+        queuepolicy drop
+        maxlatencyseconds 0.050
         count 16
         offset 0.0 0.0 0.0
         spawnradius 2.5
@@ -537,6 +546,9 @@ LIGHTOVR
     smokeeventrule "duke.pistol.primary"
     {
         style "duke_muzzle_smoke"
+        representation analytic
+        queuepolicy drop
+        maxlatencyseconds 0.075
         count 10
         offset 0.0 32.0 5.0
         spawnradius 2.0
@@ -551,6 +563,9 @@ LIGHTOVR
     smokeeventrule "duke.shotgun.primary"
     {
         style "duke_muzzle_smoke"
+        representation analytic
+        queuepolicy drop
+        maxlatencyseconds 0.075
         count 22
         offset 0.0 32.0 5.0
         spawnradius 4.0

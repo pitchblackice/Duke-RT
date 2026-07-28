@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..\..\..')
 $header = Get-Content (Join-Path $root 'source\core\lightoverlay.h') -Raw
 $implementation = Get-Content (Join-Path $root 'source\core\lightoverlay.cpp') -Raw
-$authored = Get-Content (Join-Path $root 'full-voxel-overlay\LIGHTOVR') -Raw
+$authored = Get-Content (Join-Path $root 'release-overlay\LIGHTOVR') -Raw
 
 function Assert-Contains([string]$Text, [string]$Pattern, [string]$Message) {
     if ($Text -notmatch $Pattern) { throw $Message }
@@ -118,6 +118,10 @@ Assert-Contains $implementation 'AddOrReplaceLightOverlayRule\(ParsedLightOverla
 Assert-Contains $authored 'smokestyle\s+"duke_muzzle_smoke"' 'Duke muzzle smoke style is not authored.'
 foreach ($eventId in @('duke.pistol.primary', 'duke.shotgun.primary', 'duke.chaingun.primary')) {
     Assert-Contains $authored ('smokeeventrule\s+"' + [regex]::Escape($eventId) + '"') "Missing authored smoke event rule: $eventId"
+    Assert-Contains $authored ('smokeeventrule\s+"' + [regex]::Escape($eventId) + '"[\s\S]*?representation\s+analytic[\s\S]*?queuepolicy\s+drop[\s\S]*?maxlatencyseconds\s+0\.075') "Muzzle smoke must use fresh immediate-or-drop analytic presentation: $eventId"
+}
+foreach ($eventId in @('duke.hitscan.impact.plane', 'duke.hitscan.impact.wall')) {
+    Assert-Contains $authored ('smokeeventrule\s+"' + [regex]::Escape($eventId) + '"[\s\S]*?representation\s+analytic[\s\S]*?queuepolicy\s+drop[\s\S]*?maxlatencyseconds\s+0\.050') "Impact smoke must use fresh immediate-or-drop analytic presentation: $eventId"
 }
 Assert-Contains $authored 'smokeeventrule\s+"nri\.smoke\.test"' 'Missing smoke-only diagnostic event rule.'
 Assert-Contains $authored 'smokeeventrule\s+"duke\.shotgun\.primary"[\s\S]*?velocitycone\s+22\.0' 'Shotgun smoke must retain authored directional spread.'
