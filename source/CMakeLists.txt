@@ -981,6 +981,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_smoke_analytic_carriers.cpp
 	common/rendering/nri/renderer/nri_smoke_work_scheduler.cpp
 	common/rendering/nri/renderer/nri_smoke_interest.cpp
+	common/rendering/nri/renderer/nri_smoke_spatial_interest.cpp
 	common/rendering/nri/renderer/nri_smoke_dormant_summary.cpp
 	common/rendering/nri/renderer/nri_smoke_authority.cpp
 	common/rendering/nri/renderer/nri_smoke_pulses.cpp
