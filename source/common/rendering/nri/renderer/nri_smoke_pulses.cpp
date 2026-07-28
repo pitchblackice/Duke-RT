@@ -1,5 +1,7 @@
 #include "nri_smoke_pulses.h"
 
+#include "nri_smoke_admission.h"
+
 #include <algorithm>
 #include <utility>
 
@@ -25,6 +27,7 @@ void NRISmokePulseOwner::RefreshPendingSnapshot()
 	mSnapshot.pendingMass = 0;
 	for (const auto& command : mPending)
 		mSnapshot.pendingMass += command.rangeCount;
+	mSnapshot.authoredClockCount = (uint32_t)mAuthoredSimulationSeconds.size();
 	mSnapshot.planActive = mActivePlanToken != 0;
 }
 
@@ -35,7 +38,8 @@ void NRISmokePulseOwner::ClearPlan()
 	RefreshPendingSnapshot();
 }
 
-void NRISmokePulseOwner::Enqueue(const std::vector<NRISmokeInjectionCommandGpu>& commands)
+void NRISmokePulseOwner::Enqueue(const std::vector<NRISmokeInjectionCommandGpu>& commands,
+	double authoredSimulationSeconds)
 {
 	for (const auto& authored : commands)
 	{
@@ -49,10 +53,19 @@ void NRISmokePulseOwner::Enqueue(const std::vector<NRISmokeInjectionCommandGpu>&
 			pulseId = mNextPulseId++;
 		SetPulseId(command, pulseId);
 		mPending.push_back(command);
+		if (NRIIsInteractiveSmokeSource(command.sourceMetadata))
+			mAuthoredSimulationSeconds[pulseId] = authoredSimulationSeconds;
 		mSnapshot.enqueuedPulses++;
 		mSnapshot.enqueuedMass += command.rangeCount;
 	}
 	RefreshPendingSnapshot();
+}
+
+double NRISmokePulseOwner::AuthoredSimulationSeconds(const NRISmokeInjectionCommandGpu& command,
+	double fallbackSeconds) const
+{
+	const auto found = mAuthoredSimulationSeconds.find(PulseId(command));
+	return found != mAuthoredSimulationSeconds.end() ? found->second : fallbackSeconds;
 }
 
 bool NRISmokePulseOwner::Plan(const std::vector<NRISmokeInjectionCommandGpu>& selected,
@@ -172,6 +185,8 @@ bool NRISmokePulseOwner::CommitRetaining(uint64_t token,
 		mSnapshot.committedRanges++;
 		mSnapshot.committedMass += committed.rangeCount;
 	}
+	for (const auto& committed : mPlan)
+		ReleaseAuthoredTimeIfComplete(PulseId(committed));
 	ClearPlan();
 	return true;
 }
@@ -179,17 +194,26 @@ bool NRISmokePulseOwner::CommitRetaining(uint64_t token,
 bool NRISmokePulseOwner::Acknowledge(uint32_t pulseIdLow, uint32_t pulseIdHigh,
 	uint32_t rangeBegin, uint32_t rangeCount)
 {
-	return RetireRange(pulseIdLow, pulseIdHigh, rangeBegin, rangeCount, true);
+	return RetireRange(pulseIdLow, pulseIdHigh, rangeBegin, rangeCount,
+		RetirementKind::GridCommitted);
 }
 
 bool NRISmokePulseOwner::RetireFallback(uint32_t pulseIdLow, uint32_t pulseIdHigh,
 	uint32_t rangeBegin, uint32_t rangeCount)
 {
-	return RetireRange(pulseIdLow, pulseIdHigh, rangeBegin, rangeCount, false);
+	return RetireRange(pulseIdLow, pulseIdHigh, rangeBegin, rangeCount,
+		RetirementKind::FallbackCompleted);
+}
+
+bool NRISmokePulseOwner::ExpireDeferred(uint32_t pulseIdLow, uint32_t pulseIdHigh,
+	uint32_t rangeBegin, uint32_t rangeCount)
+{
+	return RetireRange(pulseIdLow, pulseIdHigh, rangeBegin, rangeCount,
+		RetirementKind::DeferredExpired);
 }
 
 bool NRISmokePulseOwner::RetireRange(uint32_t pulseIdLow, uint32_t pulseIdHigh,
-	uint32_t rangeBegin, uint32_t rangeCount, bool gridCommitted)
+	uint32_t rangeBegin, uint32_t rangeCount, RetirementKind kind)
 {
 	if (mActivePlanToken != 0u || rangeCount == 0u)
 		return false;
@@ -224,18 +248,33 @@ bool NRISmokePulseOwner::RetireRange(uint32_t pulseIdLow, uint32_t pulseIdHigh,
 		right.rangeCount = (uint32_t)(originalEnd - RangeEnd(acknowledged));
 		mPending.insert(mPending.begin() + insertion, right);
 	}
-	if (gridCommitted)
+	if (kind == RetirementKind::GridCommitted)
 	{
 		mSnapshot.committedRanges++;
 		mSnapshot.committedMass += rangeCount;
 	}
-	else
+	else if (kind == RetirementKind::FallbackCompleted)
 	{
 		mSnapshot.fallbackRetiredRanges++;
 		mSnapshot.fallbackRetiredMass += rangeCount;
 	}
+	else
+	{
+		mSnapshot.deferredExpiredRanges++;
+		mSnapshot.deferredExpiredMass += rangeCount;
+	}
+	ReleaseAuthoredTimeIfComplete(pulseId);
 	RefreshPendingSnapshot();
 	return true;
+}
+
+void NRISmokePulseOwner::ReleaseAuthoredTimeIfComplete(uint64_t pulseId)
+{
+	if (std::none_of(mPending.begin(), mPending.end(), [&](const auto& command)
+	{
+		return PulseId(command) == pulseId;
+	}))
+		mAuthoredSimulationSeconds.erase(pulseId);
 }
 
 bool NRISmokePulseOwner::Rollback(uint64_t token)
@@ -255,12 +294,22 @@ void NRISmokePulseOwner::RebaseEpoch(uint32_t epoch)
 		command.epoch = epoch;
 }
 
+void NRISmokePulseOwner::RebaseSimulationClock(double oldSimulationSeconds,
+	double newSimulationSeconds)
+{
+	const double offset = newSimulationSeconds - oldSimulationSeconds;
+	for (auto& authored : mAuthoredSimulationSeconds)
+		authored.second += offset;
+	RefreshPendingSnapshot();
+}
+
 uint32_t NRISmokePulseOwner::Reset()
 {
 	const uint32_t discarded = (uint32_t)mPending.size();
 	mSnapshot.resetPulses += discarded;
 	mSnapshot.resetMass += mSnapshot.pendingMass;
 	mPending.clear();
+	mAuthoredSimulationSeconds.clear();
 	ClearPlan();
 	return discarded;
 }

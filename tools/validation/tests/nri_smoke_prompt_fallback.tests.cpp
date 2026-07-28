@@ -43,10 +43,10 @@ int main()
 	const auto styles = Styles();
 	for (uint32_t serial = 0u; serial < 72u; ++serial)
 	{
-		pulses.Enqueue({ Interactive(serial) });
+		pulses.Enqueue({ Interactive(serial) }, serial / 60.0);
 		auto selected = pulses.PendingCommands();
 		std::vector<NRISmokePromptRangeIdentity> retained;
-		prompt.Prepare(selected, serial, serial / 60.0, styles, 8.0f, retained);
+		prompt.Prepare(selected, pulses, serial, serial / 60.0, styles, 8.0f, retained);
 		Require(selected.size() == 1u && retained.size() == 1u,
 			"an acknowledged sticky slot must be reusable beyond ledger capacity");
 		std::vector<NRISmokeInjectionCommandGpu> planned;
@@ -69,7 +69,7 @@ int main()
 		Interactive(104u), Interactive(105u), Interactive(106u), Interactive(107u), Interactive(108u) });
 	auto saturated = pulses.PendingCommands();
 	std::vector<NRISmokePromptRangeIdentity> retained;
-	const auto saturatedResult = prompt.Prepare(saturated, 100u, 100.0 / 60.0,
+	const auto saturatedResult = prompt.Prepare(saturated, pulses, 100u, 100.0 / 60.0,
 		styles, 8.0f, retained);
 	Require(saturated.size() == NRISmokePromptFallback::FixedFallbackCarrierQuantity && retained.size() == 8u,
 		"prompt work must stay at the fixed eight-range quantity");
@@ -81,27 +81,27 @@ int main()
 
 	NRISmokePromptFallback rollbackOwner;
 	std::vector<NRISmokeInjectionCommandGpu> prior = { Interactive(200u) };
-	rollbackOwner.Prepare(prior, 200u, 200.0 / 60.0, styles, 8.0f, retained);
+	rollbackOwner.Prepare(prior, pulses, 200u, 200.0 / 60.0, styles, 8.0f, retained);
 	rollbackOwner.Commit(200u); // Submitted; ack is deliberately delayed.
 	std::vector<NRISmokeInjectionCommandGpu> retry = { prior[0] };
-	rollbackOwner.Prepare(retry, 201u, 201.0 / 60.0, styles, 8.0f, retained);
+	rollbackOwner.Prepare(retry, pulses, 201u, 201.0 / 60.0, styles, 8.0f, retained);
 	rollbackOwner.Rollback();
 	std::vector<NRISmokeInjectionCommandGpu> newcomers = { Interactive(201u), Interactive(202u),
 		Interactive(203u), Interactive(204u), Interactive(205u), Interactive(206u),
 		Interactive(207u), Interactive(208u) };
-	rollbackOwner.Prepare(newcomers, 202u, 202.0 / 60.0, styles, 8.0f, retained);
+	rollbackOwner.Prepare(newcomers, pulses, 202u, 202.0 / 60.0, styles, 8.0f, retained);
 	Require(newcomers.size() == 7u,
 		"record rollback must retain a previously submitted sticky slot until exact ack");
 	rollbackOwner.Reset();
 	newcomers = { Interactive(211u), Interactive(212u), Interactive(213u), Interactive(214u),
 		Interactive(215u), Interactive(216u), Interactive(217u), Interactive(218u) };
-	rollbackOwner.Prepare(newcomers, 203u, 203.0 / 60.0, styles, 8.0f, retained);
+	rollbackOwner.Prepare(newcomers, pulses, 203u, 203.0 / 60.0, styles, 8.0f, retained);
 	Require(newcomers.size() == 8u, "epoch/resource reset must release every sticky prompt slot");
 
 	NRISmokePromptFallback profiledOwner;
 	std::vector<NRISmokeInjectionCommandGpu> profiled = { Interactive(300u), Interactive(301u),
 		Interactive(302u), Interactive(303u), Interactive(304u) };
-	const auto profiledResult = profiledOwner.Prepare(profiled, 300u, 5.0,
+	const auto profiledResult = profiledOwner.Prepare(profiled, pulses, 300u, 5.0,
 		styles, 8.0f, retained, 2u);
 	Require(profiled.size() == 2u && retained.size() == 2u && profiledResult.deferredRanges == 3u,
 		"a static first-use profile must cap scheduled sticky slots without dropping overflow");
@@ -112,12 +112,13 @@ int main()
 	std::vector<NRISmokeInjectionCommandGpu> initialSlots = { Interactive(400u), Interactive(401u),
 		Interactive(402u), Interactive(403u), Interactive(404u), Interactive(405u),
 		Interactive(406u), Interactive(407u) };
-	switchedOwner.Prepare(initialSlots, 400u, 400.0 / 60.0, styles, 8.0f, retained, 8u);
+	switchedOwner.Prepare(initialSlots, pulses, 400u, 400.0 / 60.0,
+		styles, 8.0f, retained, 8u);
 	const NRISmokeInjectionCommandGpu stickySlotSeven = initialSlots[7];
 	switchedOwner.Commit(400u);
 	std::vector<NRISmokeInjectionCommandGpu> afterReduction = { Interactive(408u), stickySlotSeven,
 		Interactive(409u) };
-	const auto reducedResult = switchedOwner.Prepare(afterReduction, 401u, 401.0 / 60.0,
+	const auto reducedResult = switchedOwner.Prepare(afterReduction, pulses, 401u, 401.0 / 60.0,
 		styles, 8.0f, retained, 2u);
 	Require(afterReduction.size() == 1u && retained.size() == 1u && reducedResult.deferredRanges == 2u,
 		"a reduced profile must schedule an existing high-slot identity without duplicating a full ledger");
@@ -129,9 +130,9 @@ int main()
 
 	NRISmokePulseOwner agingPulses;
 	NRISmokePromptFallback agingOwner;
-	agingPulses.Enqueue({ Interactive(500u) });
+	agingPulses.Enqueue({ Interactive(500u) }, 10.0);
 	auto agingCommand = agingPulses.PendingCommands();
-	agingOwner.Prepare(agingCommand, 500u, 10.0, styles, 8.0f, retained, 1u);
+	agingOwner.Prepare(agingCommand, agingPulses, 500u, 10.0, styles, 8.0f, retained, 1u);
 	std::vector<NRISmokeInjectionCommandGpu> agingPlan;
 	uint64_t agingToken = 0u;
 	Require(agingPulses.Plan(agingCommand, agingPlan, agingToken) &&
@@ -139,13 +140,13 @@ int main()
 		"aging fallback must retain pulse authority before grid handoff");
 	agingOwner.Commit(500u);
 	agingCommand = agingPulses.PendingCommands();
-	agingOwner.Prepare(agingCommand, 501u, 11.5, styles, 8.0f, retained, 1u);
+	agingOwner.Prepare(agingCommand, agingPulses, 501u, 11.5, styles, 8.0f, retained, 1u);
 	Require(std::abs(agingCommand[0].spawnRadius - 13.0f) < 1e-5f,
 		"fallback radius must expand from authored state with simulation age");
 	Require(std::abs(agingCommand[0].densityScale - std::exp2(-1.5f)) < 1e-5f,
 		"fallback density mass must follow the authored density half-life");
 	agingOwner.Commit(501u);
-	agingOwner.RetireExpired(agingPulses, 13.0);
+	agingOwner.RetireExpired(agingPulses, 13.0, styles);
 	Require(agingPulses.PendingCommands().empty(),
 		"fallback must retire exact pulse authority at the authored lifetime");
 	Require(agingPulses.GetSnapshot().committedRanges == 0u &&
@@ -157,9 +158,9 @@ int main()
 		agingOwner.GetSnapshot().expiredFallbackMass == 1u &&
 		agingOwner.GetSnapshot().expiryAcknowledgeFailures == 0u,
 		"fallback expiry telemetry must close exact retired range and mass");
-	agingPulses.Enqueue({ Interactive(501u) });
+	agingPulses.Enqueue({ Interactive(501u) }, 13.0);
 	auto replacement = agingPulses.PendingCommands();
-	agingOwner.Prepare(replacement, 502u, 13.0, styles, 8.0f, retained, 1u);
+	agingOwner.Prepare(replacement, agingPulses, 502u, 13.0, styles, 8.0f, retained, 1u);
 	Require(replacement.size() == 1u,
 		"an expired fallback must release its fixed slot for later interactive smoke");
 
@@ -167,9 +168,89 @@ int main()
 	auto smallSource = std::vector<NRISmokeInjectionCommandGpu> { Interactive(600u) };
 	smallSource[0].spawnRadius = 1.5f;
 	smallSource[0].radiusScale = 0.025f;
-	smallSourceOwner.Prepare(smallSource, 600u, 20.0, styles, 8.0f, retained, 1u);
+	smallSourceOwner.Prepare(smallSource, pulses, 600u, 20.0, styles, 8.0f, retained, 1u);
 	Require(std::abs(smallSource[0].spawnRadius - 8.0f) < 1e-5f,
 		"sub-cell muzzle fallback support must match the grid's one-cell minimum");
+
+	NRISmokePulseOwner deferredPulses;
+	NRISmokePromptFallback deferredOwner;
+	deferredPulses.Enqueue({ Interactive(700u) }, 10.0);
+	auto deferredSelection = deferredPulses.PendingCommands();
+	deferredOwner.Prepare(deferredSelection, deferredPulses, 700u, 10.0,
+		styles, 8.0f, retained, 1u);
+	std::vector<NRISmokeInjectionCommandGpu> deferredPlan;
+	uint64_t deferredToken = 0u;
+	Require(deferredPulses.Plan(deferredSelection, deferredPlan, deferredToken) &&
+		deferredPulses.CommitRetaining(deferredToken, deferredPlan),
+		"the blocker must retain the sole prompt slot");
+	deferredOwner.Commit(700u);
+	deferredPulses.Enqueue({ Interactive(701u) }, 10.25);
+	deferredSelection = deferredPulses.PendingCommands();
+	const auto blockedResult = deferredOwner.Prepare(deferredSelection, deferredPulses,
+		701u, 10.25, styles, 8.0f, retained, 1u);
+	Require(deferredSelection.size() == 1u && blockedResult.deferredRanges == 1u,
+		"a newcomer must remain pending while the sole sticky slot is occupied");
+	Require(deferredPulses.Plan(deferredSelection, deferredPlan, deferredToken) &&
+		deferredPulses.CommitRetaining(deferredToken, deferredPlan),
+		"the blocker retry must preserve both pending pulse clocks");
+	deferredOwner.Commit(701u);
+	NRISmokePromptOutcomeGpu blockerOutcome = {};
+	blockerOutcome.pulseIdLow = deferredSelection[0].pulseIdLow;
+	blockerOutcome.pulseIdHigh = deferredSelection[0].pulseIdHigh;
+	blockerOutcome.rangeBegin = deferredSelection[0].rangeBegin;
+	blockerOutcome.rangeCount = deferredSelection[0].rangeCount;
+	blockerOutcome.outcome = (uint32_t)NRISmokePromptOutcome::GridCommitted;
+	deferredOwner.CommitGridHandoffs(deferredPulses, { blockerOutcome });
+	deferredSelection = deferredPulses.PendingCommands();
+	deferredOwner.Prepare(deferredSelection, deferredPulses, 702u, 11.5,
+		styles, 8.0f, retained, 1u);
+	Require(deferredSelection.size() == 1u &&
+		std::abs(deferredSelection[0].spawnRadius - 12.5f) < 1e-5f &&
+		std::abs(deferredSelection[0].densityScale - std::exp2(-1.25f)) < 1e-5f,
+		"a deferred pulse must enter fallback at its authored age instead of being reborn");
+	Require(deferredPulses.GetSnapshot().authoredClockCount == 1u,
+		"the completed blocker's clock must be released while the deferred pulse retains its clock");
+
+	auto expiryStyles = styles;
+	expiryStyles.push_back(styles[0]);
+	expiryStyles[1].lifetime = 1.0f;
+	NRISmokePulseOwner stalePulses;
+	NRISmokePromptFallback staleOwner;
+	auto longBlocker = Interactive(800u);
+	auto staleCommand = Interactive(801u);
+	staleCommand.styleIndex = 1u;
+	stalePulses.Enqueue({ longBlocker }, 20.0);
+	stalePulses.Enqueue({ staleCommand }, 20.1);
+	auto staleSelection = stalePulses.PendingCommands();
+	staleOwner.Prepare(staleSelection, stalePulses, 800u, 20.1,
+		expiryStyles, 8.0f, retained, 1u);
+	Require(staleSelection.size() == 1u,
+		"the short-lived fixture must begin deferred behind a long-lived blocker");
+	std::vector<NRISmokeInjectionCommandGpu> stalePlan;
+	uint64_t staleToken = 0u;
+	Require(stalePulses.Plan(staleSelection, stalePlan, staleToken) &&
+		stalePulses.CommitRetaining(staleToken, stalePlan),
+		"the stale fixture must retain the blocker transaction");
+	staleOwner.Commit(800u);
+	staleOwner.RetireExpired(stalePulses, 21.2, expiryStyles);
+	Require(stalePulses.PendingCommands().size() == 1u &&
+		stalePulses.PendingCommands()[0].styleIndex == 0u,
+		"a never-published pulse must expire while deferred instead of appearing belatedly");
+	Require(stalePulses.GetSnapshot().deferredExpiredRanges == 1u &&
+		stalePulses.GetSnapshot().deferredExpiredMass == 1u &&
+		staleOwner.GetSnapshot().expiredDeferredRanges == 1u &&
+		staleOwner.GetSnapshot().expiredDeferredMass == 1u,
+		"deferred expiry must publish exact range and mass accounting");
+
+	NRISmokePulseOwner rebasedPulses;
+	rebasedPulses.Enqueue({ Interactive(900u) }, 8.0);
+	rebasedPulses.RebaseSimulationClock(10.0, 0.0);
+	Require(std::abs(rebasedPulses.AuthoredSimulationSeconds(
+		rebasedPulses.PendingCommands()[0], 99.0) + 2.0) < 1e-9,
+		"authority clock rebase must preserve the pulse's existing simulation age");
+	rebasedPulses.Reset();
+	Require(rebasedPulses.GetSnapshot().authoredClockCount == 0u,
+		"pulse reset must release every authored-time sidecar entry");
 
 	std::cout << "Smoke prompt sticky-slot transaction tests passed.\n";
 	return 0;

@@ -7,7 +7,8 @@
 #include <cmath>
 
 NRISmokePromptPrepareResult NRISmokePromptFallback::Prepare(
-	std::vector<NRISmokeInjectionCommandGpu>& commands, uint64_t rendererFrame,
+	std::vector<NRISmokeInjectionCommandGpu>& commands, const NRISmokePulseOwner& pulses,
+	uint64_t rendererFrame,
 	double simulationTimeSeconds, const std::vector<NRISmokeStyleGpu>& styles, float gridCellSize,
 	std::vector<NRISmokePromptRangeIdentity>& retained,
 	uint32_t maximumFallbackCarrierQuantity)
@@ -104,7 +105,8 @@ NRISmokePromptPrepareResult NRISmokePromptFallback::Prepare(
 			continue;
 		}
 		mActiveSlots[slot].identity = identityOf(command);
-		mActiveSlots[slot].authoredSimulationSeconds = simulationTimeSeconds;
+		mActiveSlots[slot].authoredSimulationSeconds =
+			pulses.AuthoredSimulationSeconds(command, simulationTimeSeconds);
 		mActiveSlots[slot].lifetimeSeconds = command.styleIndex < styles.size() ?
 			std::max(styles[command.styleIndex].lifetime, 0.001f) : 0.001f;
 		mNewlyClaimedSlots.push_back(slot);
@@ -142,7 +144,7 @@ void NRISmokePromptFallback::RefreshActiveSnapshot(double simulationTimeSeconds)
 }
 
 void NRISmokePromptFallback::RetireExpired(NRISmokePulseOwner& pulses,
-	double simulationTimeSeconds)
+	double simulationTimeSeconds, const std::vector<NRISmokeStyleGpu>& styles)
 {
 	for (ActiveSlot& active : mActiveSlots)
 	{
@@ -159,6 +161,30 @@ void NRISmokePromptFallback::RetireExpired(NRISmokePulseOwner& pulses,
 		mSnapshot.expiredFallbackRanges++;
 		mSnapshot.expiredFallbackMass += identity.rangeCount;
 		active = {};
+	}
+	const std::vector<NRISmokeInjectionCommandGpu> pending = pulses.PendingCommands();
+	for (const NRISmokeInjectionCommandGpu& command : pending)
+	{
+		if (!NRIIsInteractiveSmokeSource(command.sourceMetadata) || command.styleIndex >= styles.size())
+			continue;
+		const NRISmokePromptRangeIdentity identity = { command.pulseIdLow, command.pulseIdHigh,
+			command.rangeBegin, command.rangeCount };
+		const bool active = std::any_of(mActiveSlots.begin(), mActiveSlots.end(), [&](const ActiveSlot& slot)
+		{
+			return slot.identity.rangeCount != 0u && slot.identity.pulseIdLow == identity.pulseIdLow &&
+				slot.identity.pulseIdHigh == identity.pulseIdHigh &&
+				slot.identity.rangeBegin == identity.rangeBegin && slot.identity.rangeCount == identity.rangeCount;
+		});
+		if (active) continue;
+		const double authored = pulses.AuthoredSimulationSeconds(command, simulationTimeSeconds);
+		if (simulationTimeSeconds - authored < std::max(styles[command.styleIndex].lifetime, 0.001f))
+			continue;
+		if (pulses.ExpireDeferred(identity.pulseIdLow, identity.pulseIdHigh,
+			identity.rangeBegin, identity.rangeCount))
+		{
+			mSnapshot.expiredDeferredRanges++;
+			mSnapshot.expiredDeferredMass += identity.rangeCount;
+		}
 	}
 	RefreshActiveSnapshot(simulationTimeSeconds);
 }

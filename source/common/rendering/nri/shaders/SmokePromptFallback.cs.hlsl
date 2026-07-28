@@ -1,6 +1,8 @@
 #include "Include/SmokeResources.hlsli"
 #include "Include/SmokeFroxel.hlsli"
 
+static const float kPromptFallbackOpticalScale = 0.5;
+
 [numthreads(4, 4, 4)]
 void main(uint3 froxel : SV_DispatchThreadID)
 {
@@ -49,7 +51,8 @@ void main(uint3 froxel : SV_DispatchThreadID)
 			(4.0 * 3.14159265359 / 15.0) * radiusCells * radiusCells * radiusCells);
 		const float density = max(style.Density * command.DensityScale, 0.0) *
 			(float)min(command.RangeCount, 256u) * kernel / kernelNormalization;
-		const float sigmaT = density * max(style.Extinction, 0.0) * gSmokeConstants.DensityScale;
+		const float sigmaT = density * max(style.Extinction, 0.0) *
+			gSmokeConstants.DensityScale * kPromptFallbackOpticalScale;
 		const float3 sigmaS = sigmaT * saturate(style.Albedo);
 		extinction += sigmaT;
 		scattering += sigmaS;

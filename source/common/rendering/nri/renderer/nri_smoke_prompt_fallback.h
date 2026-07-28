@@ -28,6 +28,8 @@ struct NRISmokePromptFallbackSnapshot
 	uint64_t expiredFallbackRanges = 0;
 	uint64_t expiredFallbackMass = 0;
 	uint64_t expiryAcknowledgeFailures = 0;
+	uint64_t expiredDeferredRanges = 0;
+	uint64_t expiredDeferredMass = 0;
 	uint64_t rollbackCount = 0;
 	uint64_t internalErrors = 0;
 	uint64_t promptDeferredRanges = 0;
@@ -57,10 +59,12 @@ public:
 	static constexpr uint32_t FixedFallbackCarrierQuantity = 8u;
 
 	NRISmokePromptPrepareResult Prepare(std::vector<NRISmokeInjectionCommandGpu>& commands,
-		uint64_t rendererFrame, double simulationTimeSeconds, const std::vector<NRISmokeStyleGpu>& styles,
+		const NRISmokePulseOwner& pulses, uint64_t rendererFrame, double simulationTimeSeconds,
+		const std::vector<NRISmokeStyleGpu>& styles,
 		float gridCellSize, std::vector<NRISmokePromptRangeIdentity>& retained,
 		uint32_t maximumFallbackCarrierQuantity = FixedFallbackCarrierQuantity);
-	void RetireExpired(NRISmokePulseOwner& pulses, double simulationTimeSeconds);
+	void RetireExpired(NRISmokePulseOwner& pulses, double simulationTimeSeconds,
+		const std::vector<NRISmokeStyleGpu>& styles);
 	void CommitGridHandoffs(NRISmokePulseOwner& pulses,
 		const std::vector<NRISmokePromptOutcomeGpu>& outcomes);
 	void Commit(uint64_t rendererFrame);

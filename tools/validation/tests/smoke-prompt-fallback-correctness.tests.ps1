@@ -32,6 +32,7 @@ Require-Match $deposit 'OUTCOME_GRID_NEW[\s\S]*InterlockedAdd\(gSmokePromptOutco
 
 Require-Match $fallback 'command\.Epoch\s*!=\s*gSmokeConstants\.SimulationEpoch' 'Fallback materialization must reject stale epochs.'
 Require-Match $fallback 'kernelNormalization[\s\S]*command\.RangeCount[\s\S]*/\s*kernelNormalization' 'Fallback density must use the analytic source-kernel normalization.'
+Require-Match $fallback 'kPromptFallbackOpticalScale\s*=\s*0\.5[\s\S]*sigmaT[\s\S]{0,200}kPromptFallbackOpticalScale' 'Fallback-only optical density must use the conservative half-density presentation scale.'
 Require-Match $fallback 'if\s*\(extinction\s*<=\s*1e-6\)' 'Extinction-only smoke must remain a carrier when albedo is zero.'
 Require-NotMatch $fallback 'extinction\s*<=\s*1e-6\s*\|\|[\s\S]{0,50}scattering' 'Fallback must not discard extinction-only smoke for zero scattering.'
 Require-Match $fallback 'previousPhase[\s\S]*combinedWeight[\s\S]*previousPhase\.x\s*\*\s*previousWeight' 'Fallback must merge phase against existing optical weight.'
@@ -49,6 +50,7 @@ Require-Match $runtime 'CommitGridHandoffs[\s\S]{0,200}RetireExpired[\s\S]{0,800
 Require-Match $promptHeader 'expiredFallbackRanges[\s\S]*expiredFallbackMass[\s\S]*expiryAcknowledgeFailures' 'Prompt expiry must publish exact analytic-retirement accounting.'
 Require-Match $promptSource 'style\.radius\s*\*\s*command\.radiusScale[\s\S]{0,100}gridCellSize[\s\S]{0,300}style\.expansionVelocity\s*\*\s*age[\s\S]{0,200}std::exp2' 'Fallback retries must share minimum grid support and publish an expanded, half-life-decayed command.'
 Require-Match $pulse 'RetireFallback[\s\S]*RetireRange[\s\S]*fallbackRetiredRanges[\s\S]*fallbackRetiredMass' 'Analytic fallback retirement must remain distinct from a grid commit.'
+Require-Match $pulse 'AuthoredSimulationSeconds[\s\S]*ExpireDeferred[\s\S]*deferredExpiredRanges[\s\S]*deferredExpiredMass' 'Deferred pulses must retain authored time and expire without later publication.'
 Require-Match $runtime 'mPromptSimulationSeconds\s*\+=' 'Prompt lifetime must advance by scheduled smoke simulation work.'
 Require-Match $runtime 'promptResult\.deferredRanges[\s\S]*admission\.uploaded[\s\S]*admission\.boundedDeferred[\s\S]*admission\.interactiveUploaded[\s\S]*estimatedBrickWorkUploaded' 'Admission telemetry must reconcile every prompt-filtered interactive range.'
 
