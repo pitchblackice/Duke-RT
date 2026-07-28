@@ -106,6 +106,7 @@ struct PerfCompactGpuTiming
 	double smokeSimulationMs = 0.0, smokeVolumeMs = 0.0;
 	double smokeGridAllocateMs = 0.0, smokeGridInitializeMs = 0.0, smokeGridDepositMs = 0.0;
 	double smokeGridHaloMs = 0.0, smokeGridSimulateMs = 0.0, smokeGridRebuildMs = 0.0;
+	double smokeDormantArchiveMs = 0.0, smokeDormantPromoteMs = 0.0, smokeDormantEvolveMs = 0.0;
 	double smokeWorldActiveMs = 0.0, smokeWorldLinkMs = 0.0, smokeWorldProposalMs = 0.0;
 	double smokeWorldSeedMs = 0.0, smokeWorldTemporalMs = 0.0, smokeWorldFilterMs = 0.0;
 	double smokeWorldScatterMs = 0.0, smokeCarrierMs = 0.0, smokeViewPrepareMs = 0.0;
@@ -119,7 +120,8 @@ struct PerfCompactGpuTiming
 	double SmokeDetailTotalMs() const
 	{
 		return smokeGridAllocateMs + smokeGridInitializeMs + smokeGridDepositMs + smokeGridHaloMs +
-			smokeGridSimulateMs + smokeGridRebuildMs + smokeWorldActiveMs + smokeWorldLinkMs +
+			smokeGridSimulateMs + smokeGridRebuildMs + smokeDormantArchiveMs +
+			smokeDormantPromoteMs + smokeDormantEvolveMs + smokeWorldActiveMs + smokeWorldLinkMs +
 			smokeWorldProposalMs + smokeWorldSeedMs + smokeWorldTemporalMs + smokeWorldFilterMs +
 			smokeWorldScatterMs + smokeCarrierMs + smokeViewPrepareMs + smokeMaterializeMs +
 			smokeAnalyticMaterializeMs +

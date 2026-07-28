@@ -5,6 +5,7 @@
 
 #define NRI_SMOKE_GRID_MAX_FOOTPRINT_SAMPLES 2u
 #define NRI_SMOKE_GRID_MAX_DEPTH_SAMPLES 8u
+#define NRI_SMOKE_LIGHT_SOURCE_DORMANT_GRID 0x100u
 
 bool SmokeRenderGridLookup(int3 coordinate, out uint brickIndex)
 {
@@ -37,33 +38,84 @@ bool SmokeRenderGridLookup(int3 coordinate, out uint brickIndex)
 	return false;
 }
 
-void SmokeRenderGridLoadCell(int3 cell, out float4 scalar, out float4 optical)
+bool SmokeRenderDormantLookup(int3 coordinate, out uint archiveIndex)
+{
+	archiveIndex = 0xffffffffu;
+	if ((gSmokeConstants.LightSourceFlags & NRI_SMOKE_LIGHT_SOURCE_DORMANT_GRID) == 0u)
+		return false;
+	uint controlCount, ignoredStride;
+	gSmokeDormantControl.GetDimensions(controlCount, ignoredStride);
+	if (controlCount == 0u || gSmokeDormantControl[0].Epoch !=
+		gSmokeConstants.SimulationEpoch) return false;
+	uint hashCount;
+	gSmokeDormantHash.GetDimensions(hashCount, ignoredStride);
+	if (hashCount == 0u || (hashCount & (hashCount - 1u)) != 0u) return false;
+	const uint mask = hashCount - 1u;
+	const uint base = SmokeDormantGridHashCoordinate(coordinate) & mask;
+	[loop]
+	for (uint probe = 0u; probe < NRI_SMOKE_DORMANT_GRID_HASH_PROBES; ++probe)
+	{
+		const SmokeDormantGridHashEntry entry = gSmokeDormantHash[(base + probe) & mask];
+		if (entry.State == NRI_SMOKE_DORMANT_EMPTY) return false;
+		if (entry.State != NRI_SMOKE_DORMANT_RESIDENT ||
+			!all(entry.Coordinate == coordinate)) continue;
+		uint recordCount;
+		gSmokeDormantRecords.GetDimensions(recordCount, ignoredStride);
+		if (entry.ArchiveIndex >= recordCount) return false;
+		const SmokeDormantGridRecord record = gSmokeDormantRecords[entry.ArchiveIndex];
+		if (record.State == NRI_SMOKE_DORMANT_RESIDENT &&
+			record.Generation == entry.Generation && record.Epoch ==
+			gSmokeConstants.SimulationEpoch && all(record.Coordinate == coordinate))
+		{
+			archiveIndex = entry.ArchiveIndex;
+			return true;
+		}
+		return false;
+	}
+	return false;
+}
+
+void SmokeRenderGridLoadCell(int3 cell, out float4 scalar, out float4 optical,
+	out bool dormant)
 {
 	scalar = 0.0;
 	optical = 0.0;
+	dormant = false;
 	const int3 brickCoordinate = SmokeGridBrickCoordinate(cell);
 	uint brickIndex;
-	if (!SmokeRenderGridLookup(brickCoordinate, brickIndex))
+	const uint localIndex = SmokeGridLocalIndex(
+		SmokeGridLocalCoordinate(cell, brickCoordinate));
+	if (SmokeRenderGridLookup(brickCoordinate, brickIndex))
+	{
+		const uint cellIndex = brickIndex * NRI_SMOKE_GRID_CELLS_PER_BRICK + localIndex;
+		const bool fieldB = gSmokeRenderGridControl[0].FieldPing != 0u;
+		scalar = fieldB ? gSmokeRenderGridScalarB[cellIndex] : gSmokeRenderGridScalarA[cellIndex];
+		optical = fieldB ? gSmokeRenderGridOpticalB[cellIndex] : gSmokeRenderGridOpticalA[cellIndex];
 		return;
-	const uint cellIndex = brickIndex * NRI_SMOKE_GRID_CELLS_PER_BRICK +
-		SmokeGridLocalIndex(SmokeGridLocalCoordinate(cell, brickCoordinate));
-	const bool fieldB = gSmokeRenderGridControl[0].FieldPing != 0u;
-	scalar = fieldB ? gSmokeRenderGridScalarB[cellIndex] : gSmokeRenderGridScalarA[cellIndex];
-	optical = fieldB ? gSmokeRenderGridOpticalB[cellIndex] : gSmokeRenderGridOpticalA[cellIndex];
+	}
+	uint archiveIndex;
+	if (!SmokeRenderDormantLookup(brickCoordinate, archiveIndex)) return;
+	const uint archiveCell = archiveIndex * NRI_SMOKE_DORMANT_GRID_CELLS_PER_BRICK + localIndex;
+	scalar = gSmokeDormantScalar[archiveCell];
+	optical = gSmokeDormantOptical[archiveCell];
+	dormant = true;
 }
 
 void SmokeRenderGridSample(float3 worldPosition, float cellSize,
 	out int3 lower, out float3 blend, out float4 scalarCorners[8], out float4 opticalCorners[8],
-	out float4 scalar, out float4 optical)
+	out float4 scalar, out float4 optical, out bool dormant)
 {
 	const float3 gridPosition = worldPosition / cellSize - 0.5;
 	lower = (int3)floor(gridPosition);
 	blend = frac(gridPosition);
+	dormant = false;
 	[unroll]
 	for (uint i = 0u; i < 8u; ++i)
 	{
 		const int3 offset = int3(i & 1u, (i >> 1u) & 1u, (i >> 2u) & 1u);
-		SmokeRenderGridLoadCell(lower + offset, scalarCorners[i], opticalCorners[i]);
+		bool cornerDormant;
+		SmokeRenderGridLoadCell(lower + offset, scalarCorners[i], opticalCorners[i], cornerDormant);
+		dormant = dormant || cornerDormant;
 	}
 	const float4 s00 = lerp(scalarCorners[0], scalarCorners[1], blend.x);
 	const float4 s10 = lerp(scalarCorners[2], scalarCorners[3], blend.x);
@@ -137,7 +189,8 @@ bool SmokeRenderGridCorrelatedWorldSource(int3 lower, float3 blend,
 	return true;
 }
 
-void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 scalar, out float4 optical, out float3 source)
+void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 scalar,
+	out float4 optical, out float3 source, out bool dormant)
 {
 	const float sliceNearDepth = SmokeSliceNearDepth(froxel.z);
 	const float sliceFarDepth = SmokeSliceFarDepth(froxel.z);
@@ -158,6 +211,7 @@ void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 sca
 	float3 integratedSource = 0.0;
 	float3 integratedWorldDebug = 0.0;
 	float3 integratedScatterDebug = 0.0;
+	dormant = false;
 	const uint worldDebugMode = (gSmokeConstants.Flags >> NRI_SMOKE_GRID_LIGHT_DEBUG_SHIFT) & 7u;
 	[loop]
 	for (uint footprintY = 0u; footprintY < footprintSampleCount.y; ++footprintY)
@@ -181,8 +235,10 @@ void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 sca
 				float3 gridBlend;
 				float4 scalarCorners[8];
 				float4 opticalCorners[8];
+				bool sampleDormant;
 				SmokeRenderGridSample(samplePosition, cellSize, gridLower, gridBlend,
-					scalarCorners, opticalCorners, sampleScalar, sampleOptical);
+					scalarCorners, opticalCorners, sampleScalar, sampleOptical, sampleDormant);
+				dormant = dormant || sampleDormant;
 				integratedScalar += sampleScalar;
 				integratedOptical += sampleOptical;
 				if ((gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_WORLD_ENABLED) != 0u && any(sampleOptical.rgb > 0.0))
@@ -241,13 +297,21 @@ void SmokeRenderGridIntegrateFroxel(uint3 froxel, float cellSize, out float4 sca
 	optical = integratedOptical * sampleWeight;
 	source = (SmokeMultipleScatterDebug(gSmokeConstants.DebugMode) != 0u ? integratedScatterDebug :
 		(worldDebugMode == 0u ? integratedSource : integratedWorldDebug)) * sampleWeight;
+	// If a froxel straddles a fine/coarse authority boundary, route its complete
+	// medium through the shared receiver-light path. Retaining the partial fine
+	// source here would count that fraction a second time.
+	if (dormant && worldDebugMode == 0u && SmokeMultipleScatterDebug(gSmokeConstants.DebugMode) == 0u)
+		source = 0.0;
 }
 
 void SmokeEvaluateGridFroxel(uint3 dispatchThreadId)
 {
 	uint controlCount, ignoredStride;
 	gSmokeRenderGridControl.GetDimensions(controlCount, ignoredStride);
-	if (controlCount == 0u || gSmokeRenderGridControl[0].ResidentCount == 0u)
+	const bool dormantEnabled = (gSmokeConstants.LightSourceFlags &
+		NRI_SMOKE_LIGHT_SOURCE_DORMANT_GRID) != 0u;
+	if (controlCount == 0u || (gSmokeRenderGridControl[0].ResidentCount == 0u &&
+		!dormantEnabled))
 		return;
 	const float cellSize = asfloat(gSmokeRenderGridControl[0].CellSizeBits);
 	if (!isfinite(cellSize) || cellSize <= 0.0)
@@ -256,7 +320,8 @@ void SmokeEvaluateGridFroxel(uint3 dispatchThreadId)
 	float4 scalar;
 	float4 optical;
 	float3 source;
-	SmokeRenderGridIntegrateFroxel(dispatchThreadId, cellSize, scalar, optical, source);
+	bool dormant;
+	SmokeRenderGridIntegrateFroxel(dispatchThreadId, cellSize, scalar, optical, source, dormant);
 	// Deposition stores density-weighted sigma_t and sigma_s coefficients in
 	// inverse world units. Cell size controls sampling support only; dividing the
 	// coefficients by it again made the canonical eight-unit grid 8x too faint.
@@ -268,7 +333,8 @@ void SmokeEvaluateGridFroxel(uint3 dispatchThreadId)
 	gSmokeFroxelMedium[froxelIndex] = float4(scattering, extinction);
 	// The fourth phase lane identifies grid materialization to the shared direct
 	// light passes. Particle evaluation retains the value 1.
-	gSmokeFroxelPhase[froxelIndex] = float4(anisotropy, optical.w, 1.0, 2.0);
+	gSmokeFroxelPhase[froxelIndex] = float4(anisotropy, optical.w, 1.0,
+		dormant ? NRI_SMOKE_FROXEL_CARRIER_DORMANT : NRI_SMOKE_FROXEL_CARRIER_GRID);
 	uint carrierMetadata = SmokeFroxelCarrierMetadata(gSmokeConstants.SimulationEpoch);
 	if (any(source > 0.0))
 		carrierMetadata = SmokeFroxelResolveRadiance(carrierMetadata, gSmokeConstants.SimulationEpoch,

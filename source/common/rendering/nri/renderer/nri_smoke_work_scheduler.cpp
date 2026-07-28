@@ -11,14 +11,16 @@ namespace
 		NRISmokeWorkCapability_RadianceMaintenance |
 		NRISmokeWorkCapability_SimulationSubsteps |
 		NRISmokeWorkCapability_AnalyticCarriers |
-		NRISmokeWorkCapability_AnalyticLighting;
+		NRISmokeWorkCapability_AnalyticLighting |
+		NRISmokeWorkCapability_DormantResidency;
 
 	constexpr uint32_t kAlwaysEnforcedCapabilities =
 		NRISmokeWorkCapability_EmissionCommands |
 		NRISmokeWorkCapability_FirstUseSources |
 		NRISmokeWorkCapability_SimulationSubsteps |
 		NRISmokeWorkCapability_AnalyticCarriers |
-		NRISmokeWorkCapability_AnalyticLighting;
+		NRISmokeWorkCapability_AnalyticLighting |
+		NRISmokeWorkCapability_DormantResidency;
 }
 
 NRISmokeWorkTable NRISmokeWorkScheduler::BuildTable(NRISmokeWorkProfile profile,
@@ -30,6 +32,9 @@ NRISmokeWorkTable NRISmokeWorkScheduler::BuildTable(NRISmokeWorkProfile profile,
 	switch (profile)
 	{
 	case NRISmokeWorkProfile::High:
+		table.dormantArchives = 8u;
+		table.dormantPromotions = 8u;
+		table.dormantEvolution = 32u;
 		table.emissionCommands = 128u;
 		table.firstUseSources = 8u;
 		table.froxelPixelSize = 16u;
@@ -44,6 +49,9 @@ NRISmokeWorkTable NRISmokeWorkScheduler::BuildTable(NRISmokeWorkProfile profile,
 		table.simulationSubsteps = 1u;
 		break;
 	case NRISmokeWorkProfile::Medium:
+		table.dormantArchives = 4u;
+		table.dormantPromotions = 4u;
+		table.dormantEvolution = 16u;
 		table.emissionCommands = 32u;
 		table.firstUseSources = 4u;
 		table.froxelPixelSize = 24u;
@@ -58,6 +66,9 @@ NRISmokeWorkTable NRISmokeWorkScheduler::BuildTable(NRISmokeWorkProfile profile,
 		table.simulationSubsteps = 1u;
 		break;
 	case NRISmokeWorkProfile::Low:
+		table.dormantArchives = 2u;
+		table.dormantPromotions = 2u;
+		table.dormantEvolution = 8u;
 		table.emissionCommands = 16u;
 		table.firstUseSources = 2u;
 		table.froxelPixelSize = 32u;

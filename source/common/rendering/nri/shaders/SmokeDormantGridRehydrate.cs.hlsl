@@ -15,7 +15,7 @@ void RetainCoarse(uint resultIndex, SmokeDormantGridWork work, uint outcome)
 	result.ArchiveIndex = sArchiveIndex;
 	result.FineIndex = 0xffffffffu;
 	gDormantResults[resultIndex] = result;
-	gDormantControl[0].RehydrateRetainedCoarse++;
+	InterlockedAdd(gDormantControl[0].RehydrateRetainedCoarse, 1u);
 }
 
 [numthreads(64, 1, 1)]
@@ -32,18 +32,18 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 		sFineGeneration = 0u;
 		sValid = 0u;
 		if (workIndex == 0u) gDormantControl[0].FrameIndex = gDormantConstants.FrameIndex;
-		gDormantControl[0].RehydrateAttempts++;
-		gDormantControl[0].RehydrateWorkExecuted++;
+		InterlockedAdd(gDormantControl[0].RehydrateAttempts, 1u);
+		InterlockedAdd(gDormantControl[0].RehydrateWorkExecuted, 1u);
 		if (work.Epoch != gDormantConstants.SimulationEpoch ||
 			gDormantControl[0].Epoch != gDormantConstants.SimulationEpoch)
 		{
 			RetainCoarse(resultIndex, work, NRI_SMOKE_DORMANT_OUTCOME_STALE_EPOCH);
-			gDormantControl[0].RehydrateStale++;
+			InterlockedAdd(gDormantControl[0].RehydrateStale, 1u);
 		}
 		else if (work.Generation == 0u || gDormantConstants.ArchiveHashCapacity == 0u)
 		{
 			RetainCoarse(resultIndex, work, NRI_SMOKE_DORMANT_OUTCOME_STALE_GENERATION);
-			gDormantControl[0].RehydrateStale++;
+			InterlockedAdd(gDormantControl[0].RehydrateStale, 1u);
 		}
 		else
 		{
@@ -68,12 +68,12 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 			if (sArchiveIndex == 0xffffffffu)
 			{
 				RetainCoarse(resultIndex, work, NRI_SMOKE_DORMANT_OUTCOME_STALE_GENERATION);
-				gDormantControl[0].RehydrateStale++;
+				InterlockedAdd(gDormantControl[0].RehydrateStale, 1u);
 			}
 			else if (!DormantPopFineFree(sFineIndex))
 			{
 				RetainCoarse(resultIndex, work, NRI_SMOKE_DORMANT_OUTCOME_FINE_CAPACITY);
-				gDormantControl[0].RehydrateFineCapacity++;
+				InterlockedAdd(gDormantControl[0].RehydrateFineCapacity, 1u);
 			}
 			else
 			{
@@ -103,8 +103,7 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 					if (original == NRI_SMOKE_GRID_EMPTY || original == NRI_SMOKE_GRID_TOMBSTONE)
 					{
 						sFineHashSlot = slot;
-						gDormantControl[0].MaximumFineProbe = max(
-							gDormantControl[0].MaximumFineProbe, probe + 1u);
+						InterlockedMax(gDormantControl[0].MaximumFineProbe, probe + 1u);
 						break;
 					}
 				}
@@ -112,7 +111,7 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 				{
 					DormantPushFineFree(sFineIndex);
 					RetainCoarse(resultIndex, work, NRI_SMOKE_DORMANT_OUTCOME_HASH_FAILURE);
-					gDormantControl[0].RehydrateHashFailures++;
+					InterlockedAdd(gDormantControl[0].RehydrateHashFailures, 1u);
 				}
 				else
 				{
@@ -195,7 +194,7 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 			DormantPushArchiveFree(sArchiveIndex);
 			uint archiveResident;
 			InterlockedAdd(gDormantControl[0].ResidentCount, 0xffffffffu, archiveResident);
-			gDormantControl[0].RehydratePublished++;
+			InterlockedAdd(gDormantControl[0].RehydratePublished, 1u);
 			SmokeDormantGridResult result = (SmokeDormantGridResult)0;
 			result.Coordinate = work.Coordinate;
 			result.InputGeneration = work.Generation;

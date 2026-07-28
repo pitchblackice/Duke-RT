@@ -144,6 +144,8 @@ public:
 	// control, hash, bricks, free, active A/B, field A/B pairs, deposits 0..3.
 	bool GetDormantTransactionStorageDescriptors(
 		std::array<const nri::Descriptor*, DormantTransactionDescriptorCount>& descriptors) const;
+	bool GetDormantTransactionStorageBuffers(
+		std::array<nri::Buffer*, DormantTransactionDescriptorCount>& buffers) const;
 	const NRISmokeGridStatusSnapshot& GetStatusSnapshot() const { return mStatus; }
 	uint32_t GetActivePing() const { return mActivePing; }
 	uint32_t GetFieldPing() const { return mFieldPing; }

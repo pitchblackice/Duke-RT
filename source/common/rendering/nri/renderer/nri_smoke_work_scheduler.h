@@ -20,13 +20,14 @@ enum NRISmokeWorkCapability : uint32_t
 	NRISmokeWorkCapability_SimulationSubsteps = 1u << 4u,
 	NRISmokeWorkCapability_AnalyticCarriers = 1u << 5u,
 	NRISmokeWorkCapability_AnalyticLighting = 1u << 6u,
+	NRISmokeWorkCapability_DormantResidency = 1u << 7u,
 };
 
 struct NRISmokeWorkTable
 {
 	static constexpr uint32_t Unrestricted = std::numeric_limits<uint32_t>::max();
 
-	uint32_t revision = 6u;
+	uint32_t revision = 7u;
 	uint32_t emissionCommands = 256u;
 	uint32_t firstUseSources = 8u;
 	uint32_t analyticCarriers = 64u;
@@ -47,7 +48,9 @@ struct NRISmokeWorkTable
 	uint32_t radianceMaintenanceCells = Unrestricted;
 	uint32_t worldLinkRays = Unrestricted;
 	uint32_t directReceiverSamples = Unrestricted;
-	uint32_t dormantPromotions = Unrestricted;
+	uint32_t dormantArchives = 8u;
+	uint32_t dormantPromotions = 8u;
+	uint32_t dormantEvolution = 32u;
 	uint32_t simulationSubsteps = 4u;
 	uint32_t supportedCapabilities = 0u;
 	uint32_t enforcedCapabilities = 0u;

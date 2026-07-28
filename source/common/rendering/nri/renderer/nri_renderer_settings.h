@@ -173,6 +173,7 @@ struct NRISmokeSettings
 	float indirectScale = 1.0f;
 	uint32_t representation = 1;
 	uint32_t gridBrickCapacity = 512;
+	bool dormantGrid = false;
 	float gridCellSize = 8.0f;
 	float gridBuoyancy = 1.0f;
 	float gridVelocityDamping = 0.15f;

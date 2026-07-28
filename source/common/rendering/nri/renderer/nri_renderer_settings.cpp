@@ -280,6 +280,7 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.indirectScale = std::clamp((float)nri_ptsmokeindirectscale, 0.0f, 16.0f);
 	settings.representation = (uint32_t)std::clamp((int)nri_ptsmokerepresentation, 0, 2);
 	settings.gridBrickCapacity = (uint32_t)std::clamp((int)nri_ptsmokegridbricks, 64, 4096);
+	settings.dormantGrid = (bool)nri_ptsmokedormantgrid;
 	settings.gridCellSize = std::clamp((float)nri_ptsmokegridcellsize, 1.0f, 64.0f);
 	settings.gridBuoyancy = std::clamp((float)nri_ptsmokegridbuoyancy, 0.0f, 64.0f);
 	settings.gridVelocityDamping = std::clamp((float)nri_ptsmokegridvelocitydamping, 0.0f, 16.0f);

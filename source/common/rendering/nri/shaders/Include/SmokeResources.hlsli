@@ -9,6 +9,7 @@
 #include "SmokeGridLightingData.hlsli"
 #include "SmokeViewWorkData.hlsli"
 #include "SmokeAnalyticData.hlsli"
+#include "SmokeDormantGridData.hlsli"
 
 #define NRI_SMOKE_SET_INPUTS 0
 #define NRI_SMOKE_SET_BUFFERS 1
@@ -336,10 +337,12 @@ bool SmokeFroxelRadianceUnresolved(uint metadata) { return (metadata & NRI_SMOKE
 #define NRI_SMOKE_FROXEL_CARRIER_PARTICLE 0x1u
 #define NRI_SMOKE_FROXEL_CARRIER_GRID 0x2u
 #define NRI_SMOKE_FROXEL_CARRIER_ANALYTIC 0x4u
+#define NRI_SMOKE_FROXEL_CARRIER_DORMANT 0x8u
 uint SmokeFroxelCarrierOwnership(float4 phase) { return (uint)round(max(phase.w, 0.0)); }
 bool SmokeFroxelHasParticleCarrier(float4 phase) { return (SmokeFroxelCarrierOwnership(phase) & NRI_SMOKE_FROXEL_CARRIER_PARTICLE) != 0u; }
 bool SmokeFroxelHasGridCarrier(float4 phase) { return (SmokeFroxelCarrierOwnership(phase) & NRI_SMOKE_FROXEL_CARRIER_GRID) != 0u; }
 bool SmokeFroxelHasAnalyticCarrier(float4 phase) { return (SmokeFroxelCarrierOwnership(phase) & NRI_SMOKE_FROXEL_CARRIER_ANALYTIC) != 0u; }
+bool SmokeFroxelHasDormantCarrier(float4 phase) { return (SmokeFroxelCarrierOwnership(phase) & NRI_SMOKE_FROXEL_CARRIER_DORMANT) != 0u; }
 
 StructuredBuffer<SmokeStyle> gSmokeStyles : register(t0, space0);
 StructuredBuffer<SmokeInjectionCommand> gSmokeCommands : register(t1, space0);
@@ -399,6 +402,13 @@ RWStructuredBuffer<uint> gSmokeAnalyticTileIndices : register(u50, space1);
 RWStructuredBuffer<float4> gSmokeAnalyticFroxelMedium : register(u51, space1);
 RWStructuredBuffer<SmokeAnalyticEmissiveStorageRecord> gSmokeAnalyticEmissiveCurrent : register(u52, space1);
 RWStructuredBuffer<SmokeAnalyticEmissiveStorageRecord> gSmokeAnalyticEmissiveHistory : register(u53, space1);
+RWStructuredBuffer<SmokeDormantGridControl> gSmokeDormantControl : register(u54, space1);
+RWStructuredBuffer<SmokeDormantGridHashEntry> gSmokeDormantHash : register(u55, space1);
+RWStructuredBuffer<SmokeDormantGridRecord> gSmokeDormantRecords : register(u56, space1);
+RWStructuredBuffer<float4> gSmokeDormantScalar : register(u57, space1);
+RWStructuredBuffer<float4> gSmokeDormantVelocity : register(u58, space1);
+RWStructuredBuffer<float4> gSmokeDormantOptical : register(u59, space1);
+RWStructuredBuffer<float4> gSmokeDormantDynamics : register(u60, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);

@@ -1,4 +1,5 @@
 #include "nri_smoke_dormant_grid.h"
+#include "../system/nri_gpu_timing.h"
 
 #include <algorithm>
 #include <cstring>
@@ -580,6 +581,8 @@ bool NRISmokeDormantGrid::RecordStage(const NRISmokeGridServices& services,
 	}
 	if (demotionCount != 0u)
 	{
+		NRIScopedGpuTiming timing(services.gpuTimingDevice,
+			NRIGpuTimingScope::SmokeDormantArchive);
 		Dispatch(services, constants, NRISmokeDormantGridPass::Archive, demotionCount);
 		StorageBarrier(services, frame.fine);
 		Dispatch(services, constants, NRISmokeDormantGridPass::CompactFineActive, 1u);
@@ -587,6 +590,8 @@ bool NRISmokeDormantGrid::RecordStage(const NRISmokeGridServices& services,
 	}
 	if (promotionCount != 0u)
 	{
+		NRIScopedGpuTiming timing(services.gpuTimingDevice,
+			NRIGpuTimingScope::SmokeDormantPromote);
 		Dispatch(services, constants, NRISmokeDormantGridPass::Rehydrate, promotionCount);
 		StorageBarrier(services, frame.fine);
 	}
@@ -723,29 +728,33 @@ bool NRISmokeDormantGrid::RecordEvolution(const NRISmokeGridServices& services,
 		mNeedsClear = false;
 		mResourceEpoch = frame.simulationEpoch;
 	}
-	if (constants.evolutionCount != 0u)
 	{
-		Dispatch(services, constants, NRISmokeDormantGridPass::Evolve,
-			constants.evolutionCount);
-		StorageBarrier(services, frame.fine);
-	}
-	if (injectionCount != 0u)
-	{
-		// Bring every target to the current simulation time before adding a
-		// current-time cadence aggregate. Duplicate targets are harmless: the
-		// first pass advances the record and later passes observe the frame stamp.
-		for (uint32_t i = 0u; i < injectionCount; ++i)
+		NRIScopedGpuTiming timing(services.gpuTimingDevice,
+			NRIGpuTimingScope::SmokeDormantEvolve);
+		if (constants.evolutionCount != 0u)
 		{
-			constants.evolutionInjectionIndex = i;
-			Dispatch(services, constants, NRISmokeDormantGridPass::Evolve, 1u);
+			Dispatch(services, constants, NRISmokeDormantGridPass::Evolve,
+				constants.evolutionCount);
 			StorageBarrier(services, frame.fine);
 		}
-		constants.evolutionInjectionIndex = UINT32_MAX;
-		// One group processes the bounded list serially. This intentionally
-		// permits several established sources to deposit into the same record
-		// without unordered float read/modify/write races or replay queues.
-		Dispatch(services, constants, NRISmokeDormantGridPass::Inject, 1u);
-		StorageBarrier(services, frame.fine);
+		if (injectionCount != 0u)
+		{
+			// Bring every target to the current simulation time before adding a
+			// current-time cadence aggregate. Duplicate targets are harmless: the
+			// first pass advances the record and later passes observe the frame stamp.
+			for (uint32_t i = 0u; i < injectionCount; ++i)
+			{
+				constants.evolutionInjectionIndex = i;
+				Dispatch(services, constants, NRISmokeDormantGridPass::Evolve, 1u);
+				StorageBarrier(services, frame.fine);
+			}
+			constants.evolutionInjectionIndex = UINT32_MAX;
+			// One group processes the bounded list serially. This intentionally
+			// permits several established sources to deposit into the same record
+			// without unordered float read/modify/write races or replay queues.
+			Dispatch(services, constants, NRISmokeDormantGridPass::Inject, 1u);
+			StorageBarrier(services, frame.fine);
+		}
 	}
 	mStatus.failureReason = "none";
 	return true;

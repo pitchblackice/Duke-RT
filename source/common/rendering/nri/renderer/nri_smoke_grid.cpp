@@ -900,6 +900,21 @@ bool NRISmokeGrid::GetDormantTransactionStorageDescriptors(
 		[](const nri::Descriptor* descriptor) { return descriptor != nullptr; });
 }
 
+bool NRISmokeGrid::GetDormantTransactionStorageBuffers(
+	std::array<nri::Buffer*, DormantTransactionDescriptorCount>& buffers) const
+{
+	buffers = { mControl.buffer, mHash.buffer, mBricks.buffer,
+		mFreeList.buffer, mActiveA.buffer, mActiveB.buffer,
+		mScalarA.buffer, mScalarB.buffer,
+		mVelocityA.buffer, mVelocityB.buffer,
+		mOpticalA.buffer, mOpticalB.buffer,
+		mDynamicsA.buffer, mDynamicsB.buffer,
+		mDeposit0.buffer, mDeposit1.buffer,
+		mDeposit2.buffer, mDeposit3.buffer };
+	return mStatus.resourcesReady && std::all_of(buffers.begin(), buffers.end(),
+		[](const nri::Buffer* buffer) { return buffer != nullptr; });
+}
+
 void NRISmokeGrid::Reset(uint32_t simulationEpoch, const char* reason)
 {
 	mResourceEpoch = simulationEpoch;

@@ -72,9 +72,19 @@ bool SmokeAnalyticCarrierReservoirOwns(float4 phase)
 
 float4 SmokeEmissiveReceiverMedium(uint froxelIndex, float4 phase, float4 combinedMedium)
 {
-	// The world field already supplied the grid portion. A mixed froxel must
-	// run receiver emissive only for its analytic coefficient or grid energy is
-	// counted twice. Pure analytic/particle froxels use the common medium.
+	// Fine-grid world lighting and analytic admission fields each retain their
+	// ownership. Dormant archive medium has no world field, so a mixed dormant /
+	// analytic froxel sends only the non-analytic remainder through the shared
+	// receiver pass. Pure dormant medium uses the common profile-specific path.
+	if (SmokeFroxelHasDormantCarrier(phase) && SmokeFroxelHasAnalyticCarrier(phase))
+	{
+		uint count, stride;
+		gSmokeAnalyticFroxelMedium.GetDimensions(count, stride);
+		if (froxelIndex < count)
+			return max(combinedMedium - gSmokeAnalyticFroxelMedium[froxelIndex], 0.0);
+	}
+	// The world field already supplied the fine-grid portion. A mixed froxel
+	// therefore runs receiver emissive only for its analytic coefficient.
 	if ((gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_WORLD_ENABLED) != 0u &&
 		SmokeFroxelHasGridCarrier(phase) && SmokeFroxelHasAnalyticCarrier(phase))
 	{

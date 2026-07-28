@@ -8,16 +8,21 @@
 #include "nri_smoke_contracts.h"
 #include "nri_smoke_emitters.h"
 #include "nri_smoke_grid.h"
+#include "nri_smoke_dormant_grid.h"
+#include "nri_smoke_dormant_injection.h"
 #include "nri_smoke_grid_lighting.h"
 #include "nri_smoke_interest.h"
 #include "nri_smoke_pulses.h"
 #include "nri_smoke_prompt_fallback.h"
+#include "nri_smoke_spatial_interest.h"
 #include "nri_smoke_view_work.h"
 #include "nri_smoke_work_scheduler.h"
 #include "v_video.h"
 
 #include <array>
 #include <cstdint>
+#include <map>
+#include <set>
 #include <vector>
 
 class NRIRenderer;
@@ -49,6 +54,8 @@ struct NRISmokeStatusSnapshot
 	uint32_t commandsDropped = 0;
 	NRISmokeAdmissionSnapshot admission = {};
 	NRISmokeAnalyticCarrierSnapshot analytic = {};
+	NRISmokeSpatialInterestSnapshot spatialResidency = {};
+	NRISmokeDormantGridStatusSnapshot dormantGrid = {};
 	struct AnalyticLightTelemetry
 	{
 		bool valid = false;
@@ -371,8 +378,10 @@ private:
 	NRISmokeEmitterSystem mEmitters;
 	NRISmokeAuthority mAuthority;
 	NRISmokeGrid mGrid;
+	NRISmokeDormantGrid mDormantGrid;
 	NRISmokeGridLighting mGridLighting;
 	NRISmokeInterestTracker mInterest;
+	NRISmokeSpatialInterestOwner mSpatialInterest;
 	NRISmokeViewWork mViewWork;
 	NRISmokePulseOwner mPulseOwner;
 	NRISmokePromptFallback mPromptFallback;
@@ -382,6 +391,11 @@ private:
 	std::vector<NRISmokeInjectionCommandGpu> mPendingCommands;
 	std::vector<NRISmokeInjectionCommandGpu> mSelectedGridCommands;
 	std::vector<NRISmokeAnalyticCarrierRequest> mPendingAnalyticRequests;
+	std::vector<NRISmokeDormantGridWorkGpu> mDormantDemotions;
+	std::vector<NRISmokeDormantGridWorkGpu> mDormantPromotions;
+	NRISmokeDormantInjectionBuildResult mDormantInjectionBuild;
+	std::map<NRISmokeSpatialCoordinate, NRISmokeSpatialBrickObservation> mDormantAuthorities;
+	std::set<NRISmokeSpatialCoordinate> mDormantPendingDemotions;
 	NRISmokeAdmissionScheduler mAdmissionScheduler;
 	uint64_t mPulsePlanToken = 0;
 	uint32_t mResourceParticleCapacity = 0;
@@ -392,6 +406,7 @@ private:
 	uint32_t mLastPreparedFrame = UINT32_MAX;
 	uint32_t mLastSimulatedFrame = UINT32_MAX;
 	uint32_t mLastGridBrickCapacity = 0;
+	uint64_t mLastDormantResultFrame = UINT64_MAX;
 	float mLastGridCellSize = 0.0f;
 	bool mGridLayoutTracked = false;
 	uint32_t mNextCommandSerial = 1;
