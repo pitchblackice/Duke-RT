@@ -78,20 +78,31 @@ int main()
 	Require(capped.demotions[0].coordinate.x == 20 && capped.demotions[1].coordinate.x == 21,
 		"equal-age demotion ordering must be stable and prefer lower optical mass");
 
-	std::reverse(input.bricks.begin(), input.bricks.end());
+	input.bricks[0] = Brick(20, 7u, NRISmokeSpatialAuthority::Coarse);
 	input.rendererFrame = 4u;
+	const auto& archived = owner.Update(input, config);
+	Require(archived.dormant == 3u && archived.promotions.empty(),
+		"a transactional fine-to-coarse generation change must preserve dormant hysteresis");
+	input.bricks[0] = Brick(20, 8u, NRISmokeSpatialAuthority::Fine);
+	input.rendererFrame = 5u;
+	const auto& rehydrated = owner.Update(input, config);
+	Require(rehydrated.dormant == 3u && rehydrated.demotions.size() == 2u,
+		"a transactional coarse-to-fine generation change must not restart discovery grace");
+
+	std::reverse(input.bricks.begin(), input.bricks.end());
+	input.rendererFrame = 6u;
 	const auto& reordered = owner.Update(input, config);
 	Require(reordered.demotions[0].coordinate.x == 20 && reordered.demotions[1].coordinate.x == 21,
 		"caller observation order must not affect worklist order");
 
 	input.conservativeInterestComplete = false;
-	input.rendererFrame = 5u;
+	input.rendererFrame = 7u;
 	const auto& incomplete = owner.Update(input, config);
 	Require(!incomplete.demotionEvidenceValid && incomplete.warm == 3u && incomplete.demotions.empty(),
 		"incomplete positive-interest evidence must never authorize demotion");
 	input.conservativeInterestComplete = true;
 	input.runtimePortalUncertain = true;
-	input.rendererFrame = 6u;
+	input.rendererFrame = 8u;
 	const auto& uncertainPortal = owner.Update(input, config);
 	Require(!uncertainPortal.demotionEvidenceValid && uncertainPortal.warm == 3u,
 		"unresolved runtime portals must preserve potentially reachable smoke");

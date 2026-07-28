@@ -143,14 +143,27 @@ const NRISmokeSpatialInterestSnapshot& NRISmokeSpatialInterestOwner::Update(
 		}
 		mSnapshot.observed++;
 		BrickState& state = mStates[brick.coordinate];
-		const bool firstObservation = state.generation == 0u || state.generation != brick.generation;
+		const bool authorityTransition = state.generation != 0u &&
+			state.authority != brick.authority;
+		const bool firstObservation = state.generation == 0u ||
+			(state.generation != brick.generation && !authorityTransition);
 		if (firstObservation)
 		{
 			state = {};
 			state.generation = brick.generation;
+			state.authority = brick.authority;
 			state.tier = NRISmokeInterestTier::Warm;
 			state.firstObservedFrame = input.rendererFrame;
 			state.tierSinceFrame = input.rendererFrame;
+		}
+		else if (authorityTransition)
+		{
+			// Publish-before-release and rehydrate-before-retire change physical
+			// generations without changing the logical smoke at this coordinate.
+			// Preserve hysteresis so a new archive is not immediately promoted by
+			// discovery grace (or a rehydrated brick immediately re-demoted).
+			state.generation = brick.generation;
+			state.authority = brick.authority;
 		}
 		state.observed = true;
 		state.lastObservedFrame = input.rendererFrame;

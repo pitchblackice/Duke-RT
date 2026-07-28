@@ -149,6 +149,7 @@ private:
 	struct BrickState
 	{
 		uint32_t generation = 0u;
+		NRISmokeSpatialAuthority authority = NRISmokeSpatialAuthority::Fine;
 		NRISmokeInterestTier tier = NRISmokeInterestTier::Warm;
 		uint32_t firstObservedFrame = 0u;
 		uint32_t lastObservedFrame = 0u;
