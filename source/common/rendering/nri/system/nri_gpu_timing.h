@@ -49,6 +49,8 @@ enum class NRIGpuTimingScope : uint8_t
 	SmokeViewDirectional,
 	SmokeViewDirectReuse,
 	SmokeViewEmissive,
+	SmokeAnalyticEmissiveBuild,
+	SmokeAnalyticEmissiveApply,
 	SmokeViewIndirect,
 	SmokeIntegrate,
 	SmokeReconstruction,
@@ -59,8 +61,8 @@ class NRIGpuTiming
 {
 public:
 	static constexpr uint32_t SlotCount = 3;
-	static constexpr uint32_t QueryCapacity = 192;
-	static constexpr uint32_t ScopeCapacity = 95;
+	static constexpr uint32_t QueryCapacity = 194;
+	static constexpr uint32_t ScopeCapacity = 96;
 
 	void Prepare(nri::CoreInterface& core, nri::Device& device);
 	void Destroy(nri::CoreInterface& core);

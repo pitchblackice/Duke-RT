@@ -112,6 +112,7 @@ struct PerfCompactGpuTiming
 	double smokeMaterializeMs = 0.0, smokeAnalyticMaterializeMs = 0.0;
 	double smokeViewPointMs = 0.0, smokeViewDirectionalMs = 0.0;
 	double smokeViewDirectReuseMs = 0.0, smokeViewEmissiveMs = 0.0, smokeViewIndirectMs = 0.0;
+	double smokeAnalyticEmissiveBuildMs = 0.0, smokeAnalyticEmissiveApplyMs = 0.0;
 	double smokeIntegrateMs = 0.0, smokeReconstructionMs = 0.0;
 	uint32_t segmentCount = 0, invalidPairs = 0, droppedScopes = 0;
 

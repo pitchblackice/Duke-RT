@@ -15,7 +15,7 @@ $gridOwner = Read-Source 'source\common\rendering\nri\renderer\nri_smoke_grid.cp
 $worldOwner = Read-Source 'source\common\rendering\nri\renderer\nri_smoke_grid_lighting.cpp'
 $smokeOwner = Read-Source 'source\common\rendering\nri\renderer\nri_smoke.cpp'
 
-Assert-Match $timingHeader 'QueryCapacity\s*=\s*192[\s\S]*ScopeCapacity\s*=\s*95' 'Step 0 timing capacity must cover eight smoke substeps plus base and voxel timing.'
+Assert-Match $timingHeader 'QueryCapacity\s*=\s*194[\s\S]*ScopeCapacity\s*=\s*96' 'Smoke timing capacity must cover independent analytic build/apply scopes plus base and voxel timing.'
 Assert-Match $gridHeader 'NRIRenderDevice\* gpuTimingDevice' 'Focused grid owners must use the existing render-device timing service.'
 Assert-Match $gridHeader 'uint64_t rendererFrame' 'Smoke readbacks must retain the render-device frame used by GPU timing.'
 Assert-Match $timingOwner 'CmdCopyQueries' 'Generic timing must retain asynchronous GPU query readback.'
@@ -44,6 +44,8 @@ $scopes = @(
     @{ Enum = 'SmokeViewDirectional'; Field = 'smokeViewDirectionalMs'; Key = 'smoke_view_directional' },
     @{ Enum = 'SmokeViewDirectReuse'; Field = 'smokeViewDirectReuseMs'; Key = 'smoke_view_direct_reuse' },
     @{ Enum = 'SmokeViewEmissive'; Field = 'smokeViewEmissiveMs'; Key = 'smoke_view_emissive' },
+    @{ Enum = 'SmokeAnalyticEmissiveBuild'; Field = 'smokeAnalyticEmissiveBuildMs'; Key = 'smoke_analytic_emissive_build' },
+    @{ Enum = 'SmokeAnalyticEmissiveApply'; Field = 'smokeAnalyticEmissiveApplyMs'; Key = 'smoke_analytic_emissive_apply' },
     @{ Enum = 'SmokeViewIndirect'; Field = 'smokeViewIndirectMs'; Key = 'smoke_view_indirect' },
     @{ Enum = 'SmokeIntegrate'; Field = 'smokeIntegrateMs'; Key = 'smoke_integrate' },
     @{ Enum = 'SmokeReconstruction'; Field = 'smokeReconstructionMs'; Key = 'smoke_reconstruction' }
