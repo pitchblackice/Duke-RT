@@ -456,8 +456,8 @@ bool NRISmokeSystem::EnsureResources(NRIRenderer& renderer, uint32_t representat
 		!CreateBuffer(renderer, mAnalyticTileHeaders, analyticTiles * sizeof(uint32_t) * 2u, sizeof(uint32_t) * 2u, storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mAnalyticTileIndices, analyticTiles * NRISmokeAnalyticCarriers::FixedCarrierCapacity * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) ||
 		!CreateBuffer(renderer, mAnalyticFroxelMedium, froxels * sizeof(float) * 4u, sizeof(float) * 4u, storage, nri::MemoryLocation::DEVICE, false, true) ||
-		!CreateBuffer(renderer, mAnalyticEmissiveA, NRISmokeAnalyticCarriers::FixedCarrierCapacity * sizeof(NRISmokeAnalyticEmissiveStorageGpu), sizeof(NRISmokeAnalyticEmissiveStorageGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
-		!CreateBuffer(renderer, mAnalyticEmissiveB, NRISmokeAnalyticCarriers::FixedCarrierCapacity * sizeof(NRISmokeAnalyticEmissiveStorageGpu), sizeof(NRISmokeAnalyticEmissiveStorageGpu), storage, nri::MemoryLocation::DEVICE, false, true))
+				!CreateBuffer(renderer, mAnalyticEmissiveA, NRISmokeAnalyticCarriers::FixedCarrierCapacity * 2u * sizeof(NRISmokeAnalyticEmissiveStorageGpu), sizeof(NRISmokeAnalyticEmissiveStorageGpu), storage, nri::MemoryLocation::DEVICE, false, true) ||
+				!CreateBuffer(renderer, mAnalyticEmissiveB, NRISmokeAnalyticCarriers::FixedCarrierCapacity * 2u * sizeof(NRISmokeAnalyticEmissiveStorageGpu), sizeof(NRISmokeAnalyticEmissiveStorageGpu), storage, nri::MemoryLocation::DEVICE, false, true))
 	{
 		DestroyViewResources(renderer);
 		return false;
@@ -639,8 +639,8 @@ bool NRISmokeSystem::RebuildAuthorityResourcesTransactional(NRIRenderer& rendere
 			CreateBuffer(renderer, replacement.analyticTileHeaders, analyticTiles * sizeof(uint32_t) * 2u, sizeof(uint32_t) * 2u, storage, nri::MemoryLocation::DEVICE, false, true) &&
 			CreateBuffer(renderer, replacement.analyticTileIndices, analyticTiles * NRISmokeAnalyticCarriers::FixedCarrierCapacity * sizeof(uint32_t), sizeof(uint32_t), storage, nri::MemoryLocation::DEVICE, false, true) &&
 			CreateBuffer(renderer, replacement.analyticFroxelMedium, froxels * sizeof(float) * 4u, sizeof(float) * 4u, storage, nri::MemoryLocation::DEVICE, false, true) &&
-			CreateBuffer(renderer, replacement.analyticEmissiveA, NRISmokeAnalyticCarriers::FixedCarrierCapacity * sizeof(NRISmokeAnalyticEmissiveStorageGpu), sizeof(NRISmokeAnalyticEmissiveStorageGpu), storage, nri::MemoryLocation::DEVICE, false, true) &&
-			CreateBuffer(renderer, replacement.analyticEmissiveB, NRISmokeAnalyticCarriers::FixedCarrierCapacity * sizeof(NRISmokeAnalyticEmissiveStorageGpu), sizeof(NRISmokeAnalyticEmissiveStorageGpu), storage, nri::MemoryLocation::DEVICE, false, true);
+			CreateBuffer(renderer, replacement.analyticEmissiveA, NRISmokeAnalyticCarriers::FixedCarrierCapacity * 2u * sizeof(NRISmokeAnalyticEmissiveStorageGpu), sizeof(NRISmokeAnalyticEmissiveStorageGpu), storage, nri::MemoryLocation::DEVICE, false, true) &&
+			CreateBuffer(renderer, replacement.analyticEmissiveB, NRISmokeAnalyticCarriers::FixedCarrierCapacity * 2u * sizeof(NRISmokeAnalyticEmissiveStorageGpu), sizeof(NRISmokeAnalyticEmissiveStorageGpu), storage, nri::MemoryLocation::DEVICE, false, true);
 	}
 	if (!created)
 	{
@@ -1302,7 +1302,15 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	mPromptSimulationSeconds += (double)substeps * (double)step * (double)mSettings.timeScale;
 	if (particleAuthority)
 		mParticleSimulationSeconds += (double)substeps * (double)step * (double)mSettings.timeScale;
-	mAnalyticCarriers.BeginFrame(now, workTable.analyticCarriers);
+	NRISmokeAnalyticLightPolicy analyticLightPolicy = {};
+	analyticLightPolicy.enabled = mSettings.emissiveLights &&
+		workTable.analyticLightEvents != 0u;
+	analyticLightPolicy.maximumEventBuilds = workTable.analyticLightEvents;
+	analyticLightPolicy.anchorsPerEvent = workTable.analyticLightAnchors;
+	analyticLightPolicy.samplesPerAnchor =
+		workTable.analyticLightSamples == NRISmokeWorkTable::Unrestricted
+		? mSettings.lightSamples : workTable.analyticLightSamples;
+	mAnalyticCarriers.BeginFrame(now, workTable.analyticCarriers, analyticLightPolicy);
 	const uint32_t analyticRequested = (uint32_t)mPendingAnalyticRequests.size();
 	uint32_t analyticAdmitted = 0u;
 	for (uint32_t requestIndex = 0u; requestIndex < mPendingAnalyticRequests.size();)
@@ -1545,11 +1553,8 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	outputs[kSmokeAnalyticStorageBase] = mAnalyticTileHeaders.storageView;
 	outputs[kSmokeAnalyticStorageBase + 1u] = mAnalyticTileIndices.storageView;
 	outputs[kSmokeAnalyticStorageBase + 2u] = mAnalyticFroxelMedium.storageView;
-	const bool analyticEmissivePing = (renderer.mFrameIndex & 1u) != 0u;
-	outputs[kSmokeAnalyticStorageBase + 3u] = analyticEmissivePing ?
-		mAnalyticEmissiveB.storageView : mAnalyticEmissiveA.storageView;
-	outputs[kSmokeAnalyticStorageBase + 4u] = analyticEmissivePing ?
-		mAnalyticEmissiveA.storageView : mAnalyticEmissiveB.storageView;
+	outputs[kSmokeAnalyticStorageBase + 3u] = mAnalyticEmissiveA.storageView;
+	outputs[kSmokeAnalyticStorageBase + 4u] = mAnalyticEmissiveB.storageView;
 	nri::UpdateDescriptorRangeDesc updates[2] = {};
 	updates[0].descriptorSet = slot.inputSet; updates[0].rangeIndex = 0; updates[0].descriptors = inputs; updates[0].descriptorNum = 3;
 	updates[1].descriptorSet = slot.bufferSet; updates[1].rangeIndex = 0; updates[1].descriptors = outputs.data(); updates[1].descriptorNum = kSmokeStorageDescriptorCount;
@@ -2344,13 +2349,21 @@ bool NRISmokeSystem::RecordVolume(NRIRenderer& renderer, const NRISmokeRouteDesc
 	mStatus.analyticEmissiveCarrierOwned = runCarrierEmissive;
 	if (runCarrierEmissive)
 	{
-		NRIScopedGpuTiming timing(renderer.mFrameBuffer, NRIGpuTimingScope::SmokeViewEmissive);
 		const uint32_t savedParticleCapacity = constants.particleCapacity;
 		constants.particleCapacity = analyticCount;
-		dispatch(NRISmokePass::AnalyticEmissiveBuild, Groups(analyticCount), 1, 1);
-		storageBarrier();
-		dispatch(NRISmokePass::AnalyticEmissiveResolve, Groups(froxelCount), 1, 1);
-		storageBarrier();
+		{
+			NRIScopedGpuTiming timing(renderer.mFrameBuffer,
+				NRIGpuTimingScope::SmokeAnalyticEmissiveBuild);
+			dispatch(NRISmokePass::AnalyticEmissiveBuild, Groups(analyticCount), 1, 1);
+			storageBarrier();
+		}
+		mAnalyticCarriers.CommitLightBuilds();
+		{
+			NRIScopedGpuTiming timing(renderer.mFrameBuffer,
+				NRIGpuTimingScope::SmokeAnalyticEmissiveApply);
+			dispatch(NRISmokePass::AnalyticEmissiveResolve, Groups(froxelCount), 1, 1);
+			storageBarrier();
+		}
 		constants.particleCapacity = savedParticleCapacity;
 	}
 	const bool runLegacyEmissive = renderParticles || !worldEmissiveReady ||
@@ -2813,7 +2826,7 @@ void NRISmokeSystem::PrintStatus(const NRIRenderer& renderer) const
 		(unsigned long long)analytic.droppedDisabled, (unsigned long long)analytic.droppedInvalidRequest,
 		(unsigned long long)analytic.droppedStaleEpoch, (unsigned long long)analytic.droppedExpiredOnArrival,
 		(unsigned long long)analytic.droppedStaleOnArrival, (unsigned long long)analytic.droppedCapacity,
-		mStatus.analyticEmissiveCarrierOwned ? "carrier-reservoir" : "shared-receiver");
+		mStatus.analyticEmissiveCarrierOwned ? "event-anchor-field" : "shared-receiver");
 	Printf("NRI PT smoke representation: requested=%u effective=%u authority=%s operational=%s reason=%s "
 		"preparation=%s transition=%u@%u grid=%s fallback=%s particle_payload_bytes=%llu descriptor_sentinel_bytes=%llu "
 		"particle_payload_mib=%.3f descriptor_sentinel_mib=%.3f particle_lifetime_active=%s "

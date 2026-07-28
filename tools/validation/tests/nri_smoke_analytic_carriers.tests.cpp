@@ -112,8 +112,15 @@ int main()
 	owner.BeginFrame(30.0, 3u);
 	auto batchA = Request(10u, 9u, 30.0);
 	auto batchB = Request(10u, 9u, 30.0);
+	batchA.sourceEventSerial = 100u;
 	Require(owner.AdmitBatch(&batchA, 1u) == 1u,
 		"an analytic batch must publish when its complete quantity fits");
+	batchA.sourceEventSerial = 101u;
+	batchA.batchIndex = 0u;
+	batchA.batchCount = 2u;
+	batchB.sourceEventSerial = 101u;
+	batchB.batchIndex = 1u;
+	batchB.batchCount = 2u;
 	NRISmokeAnalyticCarrierRequest pair[2] = { batchA, batchB };
 	Require(owner.AdmitBatch(pair, 2u) == 2u && owner.GetSnapshot().activeQuantity == 3u,
 		"a multi-carrier effect must be admitted atomically when it fits");
@@ -121,9 +128,42 @@ int main()
 	owner.BeginFrame(40.0, 1u);
 	pair[0] = Request(11u, 10u, 40.0);
 	pair[1] = Request(11u, 10u, 40.0);
+	pair[0].sourceEventSerial = pair[1].sourceEventSerial = 102u;
+	pair[0].batchIndex = 0u; pair[0].batchCount = 2u;
+	pair[1].batchIndex = 1u; pair[1].batchCount = 2u;
 	Require(owner.AdmitBatch(pair, 2u) == 0u && owner.GetSnapshot().activeQuantity == 0u &&
 		owner.GetSnapshot().droppedCapacity == 2u,
 		"capacity pressure must drop a complete multi-carrier effect without partial mass");
+
+	owner.Reset(11u);
+	NRISmokeAnalyticLightPolicy lightPolicy = { 1u, 4u, 4u, true };
+	owner.BeginFrame(50.0, 4u, lightPolicy);
+	pair[0] = Request(12u, 11u, 50.0);
+	pair[1] = Request(12u, 11u, 50.0);
+	pair[0].sourceEventSerial = pair[1].sourceEventSerial = 103u;
+	pair[0].batchIndex = 0u; pair[0].batchCount = 2u;
+	pair[1].batchIndex = 1u; pair[1].batchCount = 2u;
+	Require(owner.AdmitBatch(pair, 2u) == 2u,
+		"a divided event must reserve its complete admission-time lighting work");
+	const auto& lit = owner.GetGpuCarriers();
+	Require(lit.size() == 2u && lit[0].lightGroupSlot == lit[1].lightGroupSlot &&
+		lit[0].lightGroupGeneration == lit[1].lightGroupGeneration &&
+		lit[0].lightAnchorCount == 4u && lit[1].lightAnchorCount == 4u &&
+		(lit[0].lightSampleCountAndFlags & 0xffu) == 4u &&
+		(lit[0].lightSampleCountAndFlags & 0x300u) == 0x300u &&
+		(lit[1].lightSampleCountAndFlags & 0x300u) == 0u,
+		"every carrier in one event must share one complete owner-built lighting field");
+	auto lightingOverflow = Request(13u, 11u, 50.0);
+	lightingOverflow.sourceEventSerial = 104u;
+	Require(owner.Admit(lightingOverflow).dropReason ==
+		NRISmokeAnalyticCarrierDropReason::LightingBudget &&
+		owner.GetSnapshot().droppedLightingBudget == 1u,
+		"the event-build quantity must reject a complete later event without deferral");
+	owner.CommitLightBuilds();
+	owner.BeginFrame(50.1, 4u, lightPolicy);
+	const auto& settled = owner.GetGpuCarriers();
+	Require((settled[0].lightSampleCountAndFlags & 0x200u) == 0u,
+		"an admitted lighting group must not rebuild or converge on later frames");
 
 	std::cout << "Smoke analytic carrier lifecycle tests passed.\n";
 	return 0;

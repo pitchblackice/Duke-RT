@@ -1,107 +1,144 @@
 #include "Include/SmokeEmissiveReservoir.hlsli"
 
-SmokeEmissiveReservoirRecord SmokeBuildAnalyticCarrierReservoir(
-	SmokeAnalyticCarrier carrier, uint slot, uint mediumHash, bool diagnostics)
+static const float3 NRI_SMOKE_ANALYTIC_LIGHT_LOBE_AXES[6] = {
+	float3(1.0, 0.0, 0.0), float3(-1.0, 0.0, 0.0),
+	float3(0.0, 1.0, 0.0), float3(0.0, -1.0, 0.0),
+	float3(0.0, 0.0, 1.0), float3(0.0, 0.0, -1.0)
+};
+
+float3 SmokeAnalyticCarrierSupportExtent(SmokeAnalyticCarrier carrier)
 {
-	SmokeEmissiveReservoirRecord reservoir = SmokeEmptyEmissiveReservoir();
-	const uint proposalCount = SmokeEmissiveLaneCount();
-	uint selectionState = SmokeEmissiveLaneSeed(carrier.Position, slot, 0u, 0xa13c9e57u);
-	[loop]
-	for (uint proposal = 0u; proposal < proposalCount; ++proposal)
+	return carrier.Shape == NRI_SMOKE_INJECTION_SHAPE_RECTANGLE
+		? abs(carrier.HalfAxisU) + abs(carrier.HalfAxisV) + carrier.Radius
+		: carrier.Radius.xxx;
+}
+
+float3 SmokeAnalyticLightAnchor(uint anchorIndex, float3 lower, float3 upper)
+{
+	const float3 center = (lower + upper) * 0.5;
+	const float3 extent = (upper - lower) * 0.28867513;
+	if (anchorIndex == 0u) return center + extent * float3(1.0, 1.0, 1.0);
+	if (anchorIndex == 1u) return center + extent * float3(-1.0, -1.0, 1.0);
+	if (anchorIndex == 2u) return center + extent * float3(-1.0, 1.0, -1.0);
+	return center + extent * float3(1.0, -1.0, -1.0);
+}
+
+void SmokeStoreAnalyticLightAnchor(uint groupSlot, uint groupGeneration, uint epoch,
+	uint anchorIndex, uint sampleCount, float3 anchorPosition, float3 lobes[6])
+{
+	SmokeAnalyticEmissiveStorageRecord record = (SmokeAnalyticEmissiveStorageRecord)0;
+	[unroll]
+	for (uint lobe = 0u; lobe < 6u; ++lobe)
+		SmokeAnalyticLightStoreLobe(record, lobe, lobes[lobe]);
+	record.Data2.yzw = asuint(anchorPosition);
+	record.Data3 = uint4(groupSlot, groupGeneration, epoch,
+		NRI_SMOKE_ANALYTIC_LIGHT_RECORD_VALID | ((anchorIndex & 3u) << 8u) |
+		min(sampleCount, 255u));
+	const uint bankIndex = groupSlot * NRI_SMOKE_ANALYTIC_LIGHT_ANCHORS_PER_BANK +
+		(anchorIndex % NRI_SMOKE_ANALYTIC_LIGHT_ANCHORS_PER_BANK);
+	uint capacity, stride;
+	if (anchorIndex < NRI_SMOKE_ANALYTIC_LIGHT_ANCHORS_PER_BANK)
 	{
-		uint randomState = SmokeEmissiveLaneSeed(carrier.Position, slot, proposal, 0x63d83595u);
-		if (diagnostics)
-			InterlockedAdd(gSmokeControl[0].EmissiveSamples, 1u);
-		const uint candidateIndex = SmokeSampleEmissivePrimitive(randomState);
-		if (candidateIndex == 0xffffffffu)
-			continue;
-		const EmissivePrimitiveData candidate = gSmokeEmissivePrimitives[candidateIndex];
-		SmokeEmissiveReservoirRecord proposalRecord = SmokeEmptyEmissiveReservoir();
-		proposalRecord.CandidateIndex = candidateIndex;
-		proposalRecord.SampleSeed = randomState;
-		proposalRecord.StableKeyLo = candidate.stableKeyLo;
-		proposalRecord.StableKeyHi = candidate.stableKeyHi;
-		proposalRecord.Generation = gSmokeConstants.CommandCount;
-		proposalRecord.Metadata = SmokePackEmissiveMetadata(1u, mediumHash, 0u);
-		float3 incident, direction;
-		float distanceToLight;
-		if (!SmokeEvaluateEmissiveIncident(proposalRecord, carrier.Position, diagnostics,
-			incident, direction, distanceToLight))
-			continue;
-		const float target = SmokeEmissiveLuminance(incident);
-		SmokeReservoirMerge(reservoir, proposalRecord, target,
-			target / max(candidate.selectionPdf, 1e-6), 1u, mediumHash, 0u, selectionState);
+		gSmokeAnalyticEmissiveCurrent.GetDimensions(capacity, stride);
+		if (bankIndex < capacity) gSmokeAnalyticEmissiveCurrent[bankIndex] = record;
 	}
-	return reservoir;
+	else
+	{
+		gSmokeAnalyticEmissiveHistory.GetDimensions(capacity, stride);
+		if (bankIndex < capacity) gSmokeAnalyticEmissiveHistory[bankIndex] = record;
+	}
 }
 
 [numthreads(64, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-	uint carrierCapacity, carrierStride, currentCapacity, currentStride;
+	uint carrierCapacity, carrierStride;
 	gSmokeAnalyticCarriers.GetDimensions(carrierCapacity, carrierStride);
-	gSmokeAnalyticEmissiveCurrent.GetDimensions(currentCapacity, currentStride);
 	const uint carrierIndex = dispatchThreadId.x;
-	if (carrierIndex >= min(min(carrierCapacity, NRI_SMOKE_ANALYTIC_MAX_CARRIERS),
-		gSmokeConstants.ParticleCapacity))
+	const uint activeCapacity = min(min(carrierCapacity, NRI_SMOKE_ANALYTIC_MAX_CARRIERS),
+		gSmokeConstants.ParticleCapacity);
+	if (carrierIndex >= activeCapacity)
 		return;
-	const SmokeAnalyticCarrier carrier = gSmokeAnalyticCarriers[carrierIndex];
-	if ((carrier.Flags & NRI_SMOKE_ANALYTIC_CARRIER_ACTIVE) == 0u ||
-		carrier.Epoch != gSmokeConstants.SimulationEpoch ||
-		carrier.StyleIndex >= gSmokeConstants.StyleCount)
+	const SmokeAnalyticCarrier owner = gSmokeAnalyticCarriers[carrierIndex];
+	if ((owner.Flags & NRI_SMOKE_ANALYTIC_CARRIER_ACTIVE) == 0u ||
+		owner.Epoch != gSmokeConstants.SimulationEpoch ||
+		(owner.LightSampleCountAndFlags & NRI_SMOKE_ANALYTIC_LIGHT_GROUP_OWNER) == 0u ||
+		(owner.LightSampleCountAndFlags & NRI_SMOKE_ANALYTIC_LIGHT_BUILD_PENDING) == 0u ||
+		owner.LightAnchorCount == 0u)
 		return;
-	const uint slot = SmokeAnalyticCarrierSlot(carrier.Flags);
-	const uint generation = SmokeAnalyticCarrierGeneration(carrier.Flags);
-	if (slot >= currentCapacity)
-		return;
-	const SmokeStyle style = gSmokeStyles[carrier.StyleIndex];
-	const uint mediumHash = SmokeHash(carrier.StyleIndex ^ 0x4f1bbcdcu) & 0x1fu;
-	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;
-	SmokeEmissiveReservoirRecord reservoir = SmokeBuildAnalyticCarrierReservoir(
-		carrier, slot, mediumHash, diagnostics);
 
-	uint historyCapacity, historyStride;
-	gSmokeAnalyticEmissiveHistory.GetDimensions(historyCapacity, historyStride);
-	const bool temporalEnabled = SmokeEmissiveReuseMode() >= 1u &&
-		(gSmokeConstants.Flags & NRI_SMOKE_EMISSIVE_HISTORY_VALID) != 0u;
-	if (temporalEnabled && slot < historyCapacity)
+	float3 supportLower = float3(3.402823466e+38, 3.402823466e+38, 3.402823466e+38);
+	float3 supportUpper = -supportLower;
+	[loop]
+	for (uint index = 0u; index < activeCapacity; ++index)
 	{
-		const SmokeAnalyticEmissiveStorageRecord historyStorage =
-			gSmokeAnalyticEmissiveHistory[slot];
-		const SmokeEmissiveReservoirRecord history =
-			SmokeUnpackAnalyticEmissive(historyStorage);
-		if (SmokeAnalyticEmissiveIdentityMatches(historyStorage, slot, generation,
-			carrier.Epoch) && SmokeEmissiveRecordValid(history) &&
-			SmokeEmissiveIdentityValid(history))
-		{
-			float3 incident, direction;
-			float distanceToLight;
-			if (SmokeEvaluateEmissiveIncident(history, carrier.Position, diagnostics,
-				incident, direction, distanceToLight))
-			{
-				const float target = SmokeEmissiveLuminance(incident);
-				const uint retainedSamples = min(SmokeEmissiveRecordM(history), 32u);
-				const float adjustedWeight = SmokeRetargetedEmissiveWeight(
-					history, target, retainedSamples);
-				uint selectionState = SmokeEmissiveLaneSeed(carrier.Position, slot, 0u,
-					0x9e52d7a1u);
-				const uint age = min(SmokeEmissiveRecordAge(history) + 1u, 15u);
-				SmokeReservoirMerge(reservoir, history, target, adjustedWeight,
-					retainedSamples, mediumHash, age, selectionState);
-				if (diagnostics)
-				{
-					InterlockedAdd(gSmokeControl[0].EmissiveTemporalAccepted, 1u);
-					InterlockedMax(gSmokeControl[0].EmissiveMaximumAge, age);
-				}
-			}
-		}
-		else if (diagnostics)
-			InterlockedAdd(gSmokeControl[0].EmissiveTemporalRejected, 1u);
+		const SmokeAnalyticCarrier carrier = gSmokeAnalyticCarriers[index];
+		if ((carrier.Flags & NRI_SMOKE_ANALYTIC_CARRIER_ACTIVE) == 0u ||
+			carrier.Epoch != owner.Epoch || carrier.LightGroupSlot != owner.LightGroupSlot ||
+			carrier.LightGroupGeneration != owner.LightGroupGeneration)
+			continue;
+		const float3 extent = SmokeAnalyticCarrierSupportExtent(carrier);
+		supportLower = min(supportLower, carrier.Position - extent);
+		supportUpper = max(supportUpper, carrier.Position + extent);
 	}
-	const float density = max(style.Density * carrier.DensityScale, 0.0) *
-		(float)min(carrier.RangeCount, 256u);
-	reservoir.ReceiverPosition = carrier.Position;
-	reservoir.SigmaT = density * max(style.Extinction, 0.0) * gSmokeConstants.DensityScale;
-	gSmokeAnalyticEmissiveCurrent[slot] = SmokePackAnalyticEmissive(
-		reservoir, slot, generation, carrier.Epoch);
+	if (!all(isfinite(supportLower)) || !all(isfinite(supportUpper)))
+		return;
+
+	const uint anchorCount = min(owner.LightAnchorCount, 4u);
+	const uint sampleCount = clamp(owner.LightSampleCountAndFlags & 0xffu, 1u, 4u);
+	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;
+	[loop]
+	for (uint anchorIndex = 0u; anchorIndex < anchorCount; ++anchorIndex)
+	{
+		const float3 anchorPosition = SmokeAnalyticLightAnchor(anchorIndex,
+			supportLower, supportUpper);
+		float3 lobes[6];
+		[unroll] for (uint lobe = 0u; lobe < 6u; ++lobe) lobes[lobe] = 0.0;
+		[loop]
+		for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
+		{
+			uint randomState = SmokeEmissiveLaneSeed(anchorPosition, owner.LightGroupSlot,
+				anchorIndex * 4u + sampleIndex, owner.LightGroupGeneration ^ 0x6b50d76bu);
+			if (diagnostics) InterlockedAdd(gSmokeControl[0].EmissiveSamples, 1u);
+			const uint candidateIndex = SmokeSampleEmissivePrimitive(randomState);
+			if (candidateIndex == 0xffffffffu) continue;
+			const EmissivePrimitiveData candidate = gSmokeEmissivePrimitives[candidateIndex];
+			SmokeEmissiveReservoirRecord proposal = SmokeEmptyEmissiveReservoir();
+			proposal.CandidateIndex = candidateIndex;
+			proposal.SampleSeed = randomState;
+			proposal.StableKeyLo = candidate.stableKeyLo;
+			proposal.StableKeyHi = candidate.stableKeyHi;
+			proposal.Generation = gSmokeConstants.CommandCount;
+			float3 incident, lightDirection;
+			float lightDistance;
+			if (!SmokeEvaluateEmissiveIncident(proposal, anchorPosition, diagnostics,
+				incident, lightDirection, lightDistance))
+				continue;
+			bool visible = true;
+			if (gSmokeConstants.LightMode >= 2u)
+			{
+				if (diagnostics) InterlockedAdd(gSmokeControl[0].EmissiveShadowRays, 1u);
+				visible = SmokeFilteredVisibilityEffective()
+					? SmokeEmissiveVisibleFiltered(anchorPosition, lightDirection, lightDistance, diagnostics)
+					: SmokeEmissiveVisible(anchorPosition, lightDirection, lightDistance, diagnostics);
+			}
+			if (!visible) continue;
+			const float3 estimator = incident / max(candidate.selectionPdf, 1e-6);
+			float weights[6];
+			float weightSum = 0.0;
+			[unroll]
+			for (uint lobe = 0u; lobe < 6u; ++lobe)
+			{
+				weights[lobe] = max(dot(lightDirection,
+					NRI_SMOKE_ANALYTIC_LIGHT_LOBE_AXES[lobe]), 0.0);
+				weightSum += weights[lobe];
+			}
+			[unroll]
+			for (uint lobe = 0u; lobe < 6u; ++lobe)
+				lobes[lobe] += estimator * (weights[lobe] /
+					max(weightSum * (float)sampleCount, 1e-6));
+		}
+		SmokeStoreAnalyticLightAnchor(owner.LightGroupSlot, owner.LightGroupGeneration,
+			owner.Epoch, anchorIndex, sampleCount, anchorPosition, lobes);
+	}
 }

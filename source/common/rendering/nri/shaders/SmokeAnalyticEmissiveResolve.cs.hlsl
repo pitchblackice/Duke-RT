@@ -1,5 +1,11 @@
 #include "Include/SmokeEmissiveReservoir.hlsli"
 
+static const float3 NRI_SMOKE_ANALYTIC_LIGHT_LOBE_AXES[6] = {
+	float3(1.0, 0.0, 0.0), float3(-1.0, 0.0, 0.0),
+	float3(0.0, 1.0, 0.0), float3(0.0, -1.0, 0.0),
+	float3(0.0, 0.0, 1.0), float3(0.0, 0.0, -1.0)
+};
+
 float SmokeAnalyticEmissiveRectangleKernel(SmokeAnalyticCarrier carrier,
 	float3 ray, float nearDepth, float farDepth)
 {
@@ -18,6 +24,53 @@ float SmokeAnalyticEmissiveRectangleKernel(SmokeAnalyticCarrier carrier,
 	return integral * 0.25;
 }
 
+bool SmokeLoadAnalyticLightAnchor(SmokeAnalyticCarrier carrier, uint anchorIndex,
+	out SmokeAnalyticEmissiveStorageRecord record)
+{
+	record = (SmokeAnalyticEmissiveStorageRecord)0;
+	const uint bankIndex = carrier.LightGroupSlot * NRI_SMOKE_ANALYTIC_LIGHT_ANCHORS_PER_BANK +
+		(anchorIndex % NRI_SMOKE_ANALYTIC_LIGHT_ANCHORS_PER_BANK);
+	uint capacity, stride;
+	if (anchorIndex < NRI_SMOKE_ANALYTIC_LIGHT_ANCHORS_PER_BANK)
+	{
+		gSmokeAnalyticEmissiveCurrent.GetDimensions(capacity, stride);
+		if (bankIndex >= capacity) return false;
+		record = gSmokeAnalyticEmissiveCurrent[bankIndex];
+	}
+	else
+	{
+		gSmokeAnalyticEmissiveHistory.GetDimensions(capacity, stride);
+		if (bankIndex >= capacity) return false;
+		record = gSmokeAnalyticEmissiveHistory[bankIndex];
+	}
+	return SmokeAnalyticLightIdentityMatches(record, carrier.LightGroupSlot,
+		carrier.LightGroupGeneration, carrier.Epoch, anchorIndex);
+}
+
+float3 SmokeEvaluateAnalyticLightField(SmokeAnalyticCarrier carrier,
+	float3 receiverPosition, float3 viewRay, float anisotropy)
+{
+	float3 source = 0.0;
+	float weightSum = 0.0;
+	const uint anchorCount = min(carrier.LightAnchorCount, 4u);
+	[loop]
+	for (uint anchorIndex = 0u; anchorIndex < anchorCount; ++anchorIndex)
+	{
+		SmokeAnalyticEmissiveStorageRecord record;
+		if (!SmokeLoadAnalyticLightAnchor(carrier, anchorIndex, record)) continue;
+		const float3 offset = receiverPosition - SmokeAnalyticLightAnchorPosition(record);
+		const float weight = rcp(max(dot(offset, offset), 1.0));
+		float3 anchorSource = 0.0;
+		[unroll]
+		for (uint lobe = 0u; lobe < 6u; ++lobe)
+			anchorSource += SmokeAnalyticLightLobe(record, lobe) * SmokeHenyeyGreenstein(
+				dot(NRI_SMOKE_ANALYTIC_LIGHT_LOBE_AXES[lobe], viewRay), anisotropy);
+		source += anchorSource * weight;
+		weightSum += weight;
+	}
+	return weightSum > 0.0 ? source / weightSum : 0.0;
+}
+
 [numthreads(64, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -32,97 +85,66 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		min(gSmokeControl[0].OccupiedCount, occupiedCapacity))
 		return;
 	const uint froxelIndex = gSmokeOccupiedFroxelIndices[dispatchThreadId.x];
-	if (froxelIndex >= min(min(phaseCapacity, sourceCapacity), analyticCapacity))
-		return;
+	if (froxelIndex >= min(min(phaseCapacity, sourceCapacity), analyticCapacity)) return;
 	const float4 phase = gSmokeFroxelPhase[froxelIndex];
-	if (!SmokeAnalyticCarrierReservoirOwns(phase))
-		return;
+	if (!SmokeAnalyticCarrierReservoirOwns(phase)) return;
 	const float4 analyticMedium = gSmokeAnalyticFroxelMedium[froxelIndex];
-	if (analyticMedium.a <= 0.0 || !any(analyticMedium.rgb > 0.0))
-		return;
+	if (analyticMedium.a <= 0.0 || !any(analyticMedium.rgb > 0.0)) return;
 
 	const uint3 froxel = SmokeFroxelCoordinates(froxelIndex);
 	const float3 ray = SmokeFroxelRay(froxel.xy);
 	const float nearDepth = SmokeSliceNearDepth(froxel.z);
 	const float farDepth = SmokeSliceFarDepth(froxel.z);
+	const float3 receiverPosition = SmokeFroxelCenter(froxel, ray);
 	const uint2 tileCount = SmokeAnalyticTileCount(
 		gSmokeConstants.FroxelWidth, gSmokeConstants.FroxelHeight);
 	const uint tileIndex = SmokeAnalyticTileIndex(
 		froxel.xy / NRI_SMOKE_ANALYTIC_TILE_SIZE, tileCount);
 	uint headerCapacity, headerStride;
 	gSmokeAnalyticTileHeaders.GetDimensions(headerCapacity, headerStride);
-	if (tileIndex >= headerCapacity)
-		return;
+	if (tileIndex >= headerCapacity) return;
 	const uint candidateCount = min(gSmokeAnalyticTileHeaders[tileIndex].Count,
 		NRI_SMOKE_ANALYTIC_MAX_CARRIERS_PER_TILE);
 	uint carrierCapacity, carrierStride, indexCapacity, indexStride;
 	gSmokeAnalyticCarriers.GetDimensions(carrierCapacity, carrierStride);
 	gSmokeAnalyticTileIndices.GetDimensions(indexCapacity, indexStride);
-	float bestWeight = 0.0;
-	uint bestSlot = 0xffffffffu;
+	float3 analyticSource = 0.0;
 	[loop]
 	for (uint candidate = 0u; candidate < candidateCount; ++candidate)
 	{
 		const uint listIndex = tileIndex * NRI_SMOKE_ANALYTIC_MAX_CARRIERS_PER_TILE + candidate;
-		if (listIndex >= indexCapacity)
-			break;
+		if (listIndex >= indexCapacity) break;
 		const uint carrierIndex = gSmokeAnalyticTileIndices[listIndex];
-		if (carrierIndex >= min(carrierCapacity, gSmokeConstants.ParticleCapacity))
-			continue;
+		if (carrierIndex >= min(carrierCapacity, gSmokeConstants.ParticleCapacity)) continue;
 		const SmokeAnalyticCarrier carrier = gSmokeAnalyticCarriers[carrierIndex];
 		if ((carrier.Flags & NRI_SMOKE_ANALYTIC_CARRIER_ACTIVE) == 0u ||
 			carrier.Epoch != gSmokeConstants.SimulationEpoch ||
-			carrier.StyleIndex >= gSmokeConstants.StyleCount)
+			carrier.StyleIndex >= gSmokeConstants.StyleCount || carrier.LightAnchorCount == 0u)
 			continue;
 		const SmokeStyle style = gSmokeStyles[carrier.StyleIndex];
 		const float kernel = carrier.Shape == NRI_SMOKE_INJECTION_SHAPE_RECTANGLE
 			? SmokeAnalyticEmissiveRectangleKernel(carrier, ray, nearDepth, farDepth)
 			: SmokeSphereSegmentKernelAverage(carrier.Position, carrier.Radius,
 				ray, nearDepth, farDepth);
-		const float weight = kernel * max(style.Density * carrier.DensityScale, 0.0) *
+		if (kernel <= 0.0) continue;
+		const float density = max(style.Density * carrier.DensityScale, 0.0) *
 			(float)min(carrier.RangeCount, 256u);
-		if (weight > bestWeight)
-		{
-			bestWeight = weight;
-			bestSlot = SmokeAnalyticCarrierSlot(carrier.Flags);
-		}
+		const float sigmaT = kernel * density * max(style.Extinction, 0.0) *
+			gSmokeConstants.DensityScale;
+		if (sigmaT <= 1e-6) continue;
+		const float3 incident = SmokeEvaluateAnalyticLightField(carrier,
+			receiverPosition, normalize(ray), clamp(style.Anisotropy, -0.95, 0.95));
+		analyticSource += sigmaT * saturate(style.Albedo) * incident *
+			gSmokeConstants.RadianceScale;
 	}
-	uint reservoirCapacity, reservoirStride;
-	gSmokeAnalyticEmissiveCurrent.GetDimensions(reservoirCapacity, reservoirStride);
-	if (bestSlot == 0xffffffffu || bestSlot >= reservoirCapacity)
-		return;
-	const SmokeEmissiveReservoirRecord reservoir = SmokeUnpackAnalyticEmissive(
-		gSmokeAnalyticEmissiveCurrent[bestSlot]);
-	if (!SmokeEmissiveRecordValid(reservoir) || !SmokeEmissiveIdentityValid(reservoir))
-		return;
-	const bool diagnostics = (gSmokeConstants.Flags & 2u) != 0u;
-	const float3 receiverPosition = SmokeFroxelCenter(froxel, ray);
-	float3 incident, lightDirection;
-	float distanceToLight;
-	if (!SmokeEvaluateEmissiveIncident(reservoir, receiverPosition, diagnostics,
-		incident, lightDirection, distanceToLight))
-		return;
-	float visibility = 1.0;
-	if (gSmokeConstants.LightMode >= 2u)
-	{
-		if (diagnostics)
-			InterlockedAdd(gSmokeControl[0].EmissiveShadowRays, 1u);
-		visibility = (SmokeFilteredVisibilityEffective()
-			? SmokeEmissiveVisibleFiltered(receiverPosition, lightDirection, distanceToLight, diagnostics)
-			: SmokeEmissiveVisible(receiverPosition, lightDirection, distanceToLight, diagnostics)) ? 1.0 : 0.0;
-	}
-	const float normalization = reservoir.WeightSum /
-		max((float)SmokeEmissiveRecordM(reservoir) * reservoir.Target, 1e-8);
-	float3 integrand = incident * SmokeHenyeyGreenstein(
-		dot(lightDirection, normalize(ray)), phase.x) *
-		(normalization * visibility * gSmokeConstants.RadianceScale);
-	const float luminance = SmokeEmissiveLuminance(integrand);
+	const float luminance = SmokeEmissiveLuminance(analyticSource);
 	if (luminance > gSmokeConstants.DeltaTime)
-		integrand *= gSmokeConstants.DeltaTime / luminance;
+		analyticSource *= gSmokeConstants.DeltaTime / luminance;
+	if (!any(analyticSource > 0.0)) return;
 	uint metadata = SmokeFroxelMetadata(gSmokeFroxelSource[froxelIndex].w);
 	metadata = SmokeFroxelResolveRadiance(metadata, gSmokeConstants.SimulationEpoch,
 		NRI_SMOKE_FALLBACK_EMISSIVE, 0u);
 	gSmokeFroxelSource[froxelIndex] = float4(
-		gSmokeFroxelSource[froxelIndex].rgb + analyticMedium.rgb * integrand,
+		gSmokeFroxelSource[froxelIndex].rgb + analyticSource,
 		SmokeFroxelMetadataValue(metadata));
 }

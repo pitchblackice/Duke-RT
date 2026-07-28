@@ -10,13 +10,15 @@ namespace
 		NRISmokeWorkCapability_RadianceNewInvalid |
 		NRISmokeWorkCapability_RadianceMaintenance |
 		NRISmokeWorkCapability_SimulationSubsteps |
-		NRISmokeWorkCapability_AnalyticCarriers;
+		NRISmokeWorkCapability_AnalyticCarriers |
+		NRISmokeWorkCapability_AnalyticLighting;
 
 	constexpr uint32_t kAlwaysEnforcedCapabilities =
 		NRISmokeWorkCapability_EmissionCommands |
 		NRISmokeWorkCapability_FirstUseSources |
 		NRISmokeWorkCapability_SimulationSubsteps |
-		NRISmokeWorkCapability_AnalyticCarriers;
+		NRISmokeWorkCapability_AnalyticCarriers |
+		NRISmokeWorkCapability_AnalyticLighting;
 }
 
 NRISmokeWorkTable NRISmokeWorkScheduler::BuildTable(NRISmokeWorkProfile profile,
@@ -35,6 +37,7 @@ NRISmokeWorkTable NRISmokeWorkScheduler::BuildTable(NRISmokeWorkProfile profile,
 		table.emissiveLights = 1u;
 		table.emissiveBackend = 2u;
 		table.lightSamples = 4u;
+		table.analyticLightSamples = 4u;
 		table.maximumLightCandidates = 8u;
 		table.radianceNewInvalidCells = 16384u;
 		table.radianceMaintenanceCells = 65536u;
@@ -48,6 +51,7 @@ NRISmokeWorkTable NRISmokeWorkScheduler::BuildTable(NRISmokeWorkProfile profile,
 		table.emissiveLights = 1u;
 		table.emissiveBackend = 2u;
 		table.lightSamples = 4u;
+		table.analyticLightSamples = 4u;
 		table.maximumLightCandidates = 8u;
 		table.radianceNewInvalidCells = 8192u;
 		table.radianceMaintenanceCells = 32768u;
@@ -61,6 +65,9 @@ NRISmokeWorkTable NRISmokeWorkScheduler::BuildTable(NRISmokeWorkProfile profile,
 		table.emissiveLights = 0u;
 		table.emissiveBackend = 0u;
 		table.lightSamples = 1u;
+		table.analyticLightEvents = 0u;
+		table.analyticLightAnchors = 0u;
+		table.analyticLightSamples = 0u;
 		table.maximumLightCandidates = 4u;
 		table.radianceNewInvalidCells = 4096u;
 		table.radianceMaintenanceCells = 8192u;

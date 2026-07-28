@@ -25,6 +25,14 @@ bool Valid(const NRISmokeAnalyticCarrierRequest& request)
 		std::isfinite(request.authoredGameplaySeconds);
 }
 
+bool SameLightPolicy(const NRISmokeAnalyticLightPolicy& a,
+	const NRISmokeAnalyticLightPolicy& b)
+{
+	return a.maximumEventBuilds == b.maximumEventBuilds &&
+		a.anchorsPerEvent == b.anchorsPerEvent &&
+		a.samplesPerAnchor == b.samplesPerAnchor && a.enabled == b.enabled;
+}
+
 float SupportVolume(const NRISmokeAnalyticCarrierRequest& request, float radius)
 {
 	constexpr float Pi = 3.14159265359f;
@@ -46,12 +54,44 @@ float SupportVolume(const NRISmokeAnalyticCarrierRequest& request, float radius)
 }
 
 void NRISmokeAnalyticCarriers::BeginFrame(double gameplayTimeSeconds,
-	uint32_t maximumActiveQuantity)
+	uint32_t maximumActiveQuantity, const NRISmokeAnalyticLightPolicy& lightPolicy)
 {
 	mGameplayTimeSeconds = gameplayTimeSeconds;
 	mSnapshot.maximumActiveQuantity = std::min(maximumActiveQuantity, FixedCarrierCapacity);
+	mSnapshot.lightEventsBuiltThisFrame = 0u;
 	mPrepared = std::isfinite(gameplayTimeSeconds);
+	NRISmokeAnalyticLightPolicy resolved = lightPolicy;
+	resolved.maximumEventBuilds = std::min(resolved.maximumEventBuilds, FixedCarrierCapacity);
+	resolved.anchorsPerEvent = std::min(resolved.anchorsPerEvent, 4u);
+	resolved.samplesPerAnchor = std::min(resolved.samplesPerAnchor, 4u);
+	resolved.enabled = resolved.enabled && resolved.maximumEventBuilds > 0u &&
+		resolved.anchorsPerEvent > 0u && resolved.samplesPerAnchor > 0u;
+	const bool lightPolicyChanged = !SameLightPolicy(resolved, mLightPolicy);
+	mLightPolicy = resolved;
 	Refresh();
+	if (lightPolicyChanged)
+	{
+		for (uint32_t ownerIndex = 0u; ownerIndex < mSlots.size(); ++ownerIndex)
+		{
+			Slot& owner = mSlots[ownerIndex];
+			if (!owner.active || !owner.lightGroupOwner) continue;
+			owner.lightGroupGeneration++;
+			if (owner.lightGroupGeneration == 0u) owner.lightGroupGeneration++;
+			for (Slot& slot : mSlots)
+			{
+				if (!slot.active || slot.lightGroupSlot != ownerIndex) continue;
+				slot.lightGroupGeneration = owner.lightGroupGeneration;
+				slot.lightAnchorCount = resolved.enabled ? resolved.anchorsPerEvent : 0u;
+				slot.lightSampleCount = resolved.enabled ? resolved.samplesPerAnchor : 0u;
+				slot.lightBuildPending = resolved.enabled && slot.lightGroupOwner;
+			}
+		}
+		Refresh();
+	}
+	mSnapshot.lightEventsBuiltThisFrame = 0u;
+	for (const Slot& slot : mSlots)
+		if (slot.active && slot.lightGroupOwner && slot.lightBuildPending)
+			mSnapshot.lightEventsBuiltThisFrame++;
 }
 
 NRISmokeAnalyticCarrierAdmission NRISmokeAnalyticCarriers::Admit(
@@ -71,6 +111,9 @@ NRISmokeAnalyticCarrierAdmission NRISmokeAnalyticCarriers::Admit(
 		return Drop(NRISmokeAnalyticCarrierDropReason::StaleOnArrival);
 	if (mSnapshot.activeQuantity >= mSnapshot.maximumActiveQuantity)
 		return Drop(NRISmokeAnalyticCarrierDropReason::Capacity);
+	if (mLightPolicy.enabled &&
+		mSnapshot.lightEventsBuiltThisFrame >= mLightPolicy.maximumEventBuilds)
+		return Drop(NRISmokeAnalyticCarrierDropReason::LightingBudget);
 
 	for (uint32_t index = 0u; index < mSlots.size(); ++index)
 	{
@@ -78,8 +121,15 @@ NRISmokeAnalyticCarrierAdmission NRISmokeAnalyticCarriers::Admit(
 		if (slot.active || slot.generation == std::numeric_limits<uint32_t>::max()) continue;
 		slot.generation++;
 		slot.request = request;
+		slot.lightGroupSlot = index;
+		slot.lightGroupGeneration = slot.generation;
+		slot.lightAnchorCount = mLightPolicy.enabled ? mLightPolicy.anchorsPerEvent : 0u;
+		slot.lightSampleCount = mLightPolicy.enabled ? mLightPolicy.samplesPerAnchor : 0u;
+		slot.lightGroupOwner = true;
+		slot.lightBuildPending = mLightPolicy.enabled;
 		slot.active = true;
 		mSnapshot.admitted++;
+		if (mLightPolicy.enabled) mSnapshot.lightEventsBuiltThisFrame++;
 		Refresh();
 		return { { index, slot.generation, mSnapshot.epoch },
 			NRISmokeAnalyticCarrierDropReason::None };
@@ -92,6 +142,42 @@ uint32_t NRISmokeAnalyticCarriers::AdmitBatch(
 	const NRISmokeAnalyticCarrierRequest* requests, uint32_t count)
 {
 	if (requests == nullptr || count == 0u) return 0u;
+	if (count == 1u) return Admit(requests[0]).Accepted() ? 1u : 0u;
+	mSnapshot.requested += count;
+	if (!mPrepared)
+	{
+		for (uint32_t index = 0u; index < count; ++index)
+			Drop(NRISmokeAnalyticCarrierDropReason::NotPrepared);
+		return 0u;
+	}
+	if (mSnapshot.maximumActiveQuantity == 0u)
+	{
+		for (uint32_t index = 0u; index < count; ++index)
+			Drop(NRISmokeAnalyticCarrierDropReason::Disabled);
+		return 0u;
+	}
+	NRISmokeAnalyticCarrierDropReason invalidReason = NRISmokeAnalyticCarrierDropReason::None;
+	const uint64_t eventSerial = requests[0].sourceEventSerial;
+	for (uint32_t index = 0u; index < count; ++index)
+	{
+		const NRISmokeAnalyticCarrierRequest& request = requests[index];
+		if (!Valid(request) || request.sourceEventSerial != eventSerial ||
+			request.batchIndex != index || request.batchCount != count)
+			invalidReason = NRISmokeAnalyticCarrierDropReason::InvalidRequest;
+		else if (request.epoch != mSnapshot.epoch)
+			invalidReason = NRISmokeAnalyticCarrierDropReason::StaleEpoch;
+		else if (mGameplayTimeSeconds - request.authoredGameplaySeconds >= request.lifetimeSeconds)
+			invalidReason = NRISmokeAnalyticCarrierDropReason::ExpiredOnArrival;
+		else if (request.maximumLatencySeconds > 0.0f &&
+			mGameplayTimeSeconds - request.authoredGameplaySeconds > request.maximumLatencySeconds)
+			invalidReason = NRISmokeAnalyticCarrierDropReason::StaleOnArrival;
+		if (invalidReason != NRISmokeAnalyticCarrierDropReason::None) break;
+	}
+	if (invalidReason != NRISmokeAnalyticCarrierDropReason::None)
+	{
+		for (uint32_t index = 0u; index < count; ++index) Drop(invalidReason);
+		return 0u;
+	}
 	uint32_t availableSlots = 0u;
 	for (const Slot& slot : mSlots)
 		availableSlots += !slot.active && slot.generation !=
@@ -99,15 +185,48 @@ uint32_t NRISmokeAnalyticCarriers::AdmitBatch(
 	if (count > availableSlots || mSnapshot.activeQuantity + count >
 		mSnapshot.maximumActiveQuantity)
 	{
-		mSnapshot.requested += count;
 		for (uint32_t index = 0u; index < count; ++index)
 			Drop(NRISmokeAnalyticCarrierDropReason::Capacity);
 		return 0u;
 	}
-	uint32_t admitted = 0u;
-	for (uint32_t index = 0u; index < count; ++index)
-		admitted += Admit(requests[index]).Accepted() ? 1u : 0u;
-	return admitted;
+	if (mLightPolicy.enabled &&
+		mSnapshot.lightEventsBuiltThisFrame >= mLightPolicy.maximumEventBuilds)
+	{
+		for (uint32_t index = 0u; index < count; ++index)
+			Drop(NRISmokeAnalyticCarrierDropReason::LightingBudget);
+		return 0u;
+	}
+	uint32_t freeIndices[FixedCarrierCapacity] = {};
+	uint32_t freeCount = 0u;
+	for (uint32_t index = 0u; index < mSlots.size() && freeCount < count; ++index)
+		if (!mSlots[index].active && mSlots[index].generation !=
+			std::numeric_limits<uint32_t>::max()) freeIndices[freeCount++] = index;
+	const uint32_t groupSlot = freeIndices[0];
+	uint32_t groupGeneration = 0u;
+	for (uint32_t batchIndex = 0u; batchIndex < count; ++batchIndex)
+	{
+		Slot& slot = mSlots[freeIndices[batchIndex]];
+		slot.generation++;
+		if (batchIndex == 0u) groupGeneration = slot.generation;
+		slot.request = requests[batchIndex];
+		slot.lightGroupSlot = groupSlot;
+		slot.lightGroupGeneration = groupGeneration;
+		slot.lightAnchorCount = mLightPolicy.enabled ? mLightPolicy.anchorsPerEvent : 0u;
+		slot.lightSampleCount = mLightPolicy.enabled ? mLightPolicy.samplesPerAnchor : 0u;
+		slot.lightGroupOwner = batchIndex == 0u;
+		slot.lightBuildPending = mLightPolicy.enabled && batchIndex == 0u;
+		slot.active = true;
+	}
+	mSnapshot.admitted += count;
+	if (mLightPolicy.enabled) mSnapshot.lightEventsBuiltThisFrame++;
+	Refresh();
+	return count;
+}
+
+void NRISmokeAnalyticCarriers::CommitLightBuilds()
+{
+	for (Slot& slot : mSlots)
+		if (slot.active && slot.lightGroupOwner) slot.lightBuildPending = false;
 }
 
 bool NRISmokeAnalyticCarriers::IsLive(const NRISmokeAnalyticCarrierHandle& handle) const
@@ -123,6 +242,12 @@ void NRISmokeAnalyticCarriers::Reset(uint32_t epoch)
 	{
 		if (slot.generation != std::numeric_limits<uint32_t>::max()) slot.generation++;
 		slot.request = {};
+		slot.lightGroupSlot = UINT32_MAX;
+		slot.lightGroupGeneration = 0u;
+		slot.lightAnchorCount = 0u;
+		slot.lightSampleCount = 0u;
+		slot.lightGroupOwner = false;
+		slot.lightBuildPending = false;
 		slot.active = false;
 	}
 	mGpuCarriers.clear();
@@ -130,6 +255,7 @@ void NRISmokeAnalyticCarriers::Reset(uint32_t epoch)
 	mSnapshot.epoch = epoch;
 	mGameplayTimeSeconds = 0.0;
 	mPrepared = false;
+	mLightPolicy = {};
 }
 
 void NRISmokeAnalyticCarriers::Refresh()
@@ -173,6 +299,12 @@ void NRISmokeAnalyticCarriers::Refresh()
 		gpu.rangeCount = slot.request.rangeCount;
 		gpu.epoch = slot.request.epoch;
 		gpu.flags = 1u | (slotIndex << 1u) | (slot.generation << 8u);
+		gpu.lightGroupSlot = slot.lightGroupSlot;
+		gpu.lightGroupGeneration = slot.lightGroupGeneration;
+		gpu.lightAnchorCount = slot.lightAnchorCount;
+		gpu.lightSampleCountAndFlags = slot.lightSampleCount |
+			(slot.lightGroupOwner ? 0x100u : 0u) |
+			(slot.lightBuildPending ? 0x200u : 0u);
 		mGpuCarriers.push_back(gpu);
 	}
 	mSnapshot.highWaterQuantity = std::max(mSnapshot.highWaterQuantity,
@@ -195,6 +327,8 @@ NRISmokeAnalyticCarrierAdmission NRISmokeAnalyticCarriers::Drop(
 	case NRISmokeAnalyticCarrierDropReason::StaleOnArrival:
 		mSnapshot.droppedStaleOnArrival++; break;
 	case NRISmokeAnalyticCarrierDropReason::Capacity: mSnapshot.droppedCapacity++; break;
+	case NRISmokeAnalyticCarrierDropReason::LightingBudget:
+		mSnapshot.droppedLightingBudget++; break;
 	case NRISmokeAnalyticCarrierDropReason::None: break;
 	}
 	return { {}, reason };

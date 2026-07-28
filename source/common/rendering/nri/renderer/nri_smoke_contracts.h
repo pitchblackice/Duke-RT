@@ -289,6 +289,8 @@ struct NRISmokeEmissiveStorageGpu
 
 struct NRISmokeAnalyticEmissiveStorageGpu
 {
+	// Four packed directional-lobe anchor records per analytic event are split
+	// evenly across the two persistent analytic emissive storage banks.
 	uint32_t data[16] = {};
 };
 

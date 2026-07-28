@@ -116,34 +116,6 @@ SmokeEmissiveReservoirRecord SmokeUnpackEmissiveReservoir(SmokeEmissiveStorageRe
 	return record;
 }
 
-SmokeAnalyticEmissiveStorageRecord SmokePackAnalyticEmissive(
-	SmokeEmissiveReservoirRecord reservoir, uint slot, uint generation, uint epoch)
-{
-	const SmokeEmissiveStorageRecord common = SmokePackEmissiveReservoir(reservoir);
-	SmokeAnalyticEmissiveStorageRecord storage;
-	storage.Data0 = common.Data0;
-	storage.Data1 = common.Data1;
-	storage.Data2 = common.Data2;
-	storage.Data3 = uint4(slot, generation, epoch, gSmokeConstants.FrameIndex);
-	return storage;
-}
-
-SmokeEmissiveReservoirRecord SmokeUnpackAnalyticEmissive(
-	SmokeAnalyticEmissiveStorageRecord storage)
-{
-	SmokeEmissiveStorageRecord common;
-	common.Data0 = storage.Data0;
-	common.Data1 = storage.Data1;
-	common.Data2 = storage.Data2;
-	return SmokeUnpackEmissiveReservoir(common);
-}
-
-bool SmokeAnalyticEmissiveIdentityMatches(
-	SmokeAnalyticEmissiveStorageRecord storage, uint slot, uint generation, uint epoch)
-{
-	return all(storage.Data3 == uint4(slot, generation, epoch, gSmokeConstants.FrameIndex - 1u));
-}
-
 SmokeEmissiveLaneRecord SmokeEmptyEmissiveLane()
 {
 	SmokeEmissiveLaneRecord lane = (SmokeEmissiveLaneRecord)0;

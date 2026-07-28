@@ -39,10 +39,22 @@ struct NRISmokeAnalyticCarrierGpu
 	uint32_t rangeCount = 0u;
 	uint32_t epoch = 0u;
 	uint32_t flags = 0u;
+	uint32_t lightGroupSlot = UINT32_MAX;
+	uint32_t lightGroupGeneration = 0u;
+	uint32_t lightAnchorCount = 0u;
+	uint32_t lightSampleCountAndFlags = 0u;
 };
 
-static_assert(sizeof(NRISmokeAnalyticCarrierGpu) == 64u,
-	"analytic carrier GPU records must retain a four-register layout");
+static_assert(sizeof(NRISmokeAnalyticCarrierGpu) == 80u,
+	"analytic carrier GPU records must retain an explicit five-register layout");
+
+struct NRISmokeAnalyticLightPolicy
+{
+	uint32_t maximumEventBuilds = 0u;
+	uint32_t anchorsPerEvent = 0u;
+	uint32_t samplesPerAnchor = 0u;
+	bool enabled = false;
+};
 
 struct NRISmokeAnalyticCarrierHandle
 {
@@ -61,6 +73,7 @@ enum class NRISmokeAnalyticCarrierDropReason : uint32_t
 	ExpiredOnArrival,
 	StaleOnArrival,
 	Capacity,
+	LightingBudget,
 };
 
 struct NRISmokeAnalyticCarrierAdmission
@@ -84,11 +97,13 @@ struct NRISmokeAnalyticCarrierSnapshot
 	uint64_t droppedExpiredOnArrival = 0u;
 	uint64_t droppedStaleOnArrival = 0u;
 	uint64_t droppedCapacity = 0u;
+	uint64_t droppedLightingBudget = 0u;
 	uint32_t epoch = 0u;
 	uint32_t maximumActiveQuantity = 0u;
 	uint32_t activeQuantity = 0u;
 	uint32_t highWaterQuantity = 0u;
 	uint32_t oldestActiveAgeMilliseconds = 0u;
+	uint32_t lightEventsBuiltThisFrame = 0u;
 };
 
 // Owns immediate analytic smoke admission and gameplay-time lifetime state.
@@ -98,9 +113,11 @@ class NRISmokeAnalyticCarriers
 public:
 	static constexpr uint32_t FixedCarrierCapacity = 128u;
 
-	void BeginFrame(double gameplayTimeSeconds, uint32_t maximumActiveQuantity);
+	void BeginFrame(double gameplayTimeSeconds, uint32_t maximumActiveQuantity,
+		const NRISmokeAnalyticLightPolicy& lightPolicy = {});
 	NRISmokeAnalyticCarrierAdmission Admit(const NRISmokeAnalyticCarrierRequest& request);
 	uint32_t AdmitBatch(const NRISmokeAnalyticCarrierRequest* requests, uint32_t count);
+	void CommitLightBuilds();
 	bool IsLive(const NRISmokeAnalyticCarrierHandle& handle) const;
 	void Reset(uint32_t epoch);
 
@@ -112,6 +129,12 @@ private:
 	{
 		NRISmokeAnalyticCarrierRequest request = {};
 		uint32_t generation = 0u;
+		uint32_t lightGroupSlot = UINT32_MAX;
+		uint32_t lightGroupGeneration = 0u;
+		uint32_t lightAnchorCount = 0u;
+		uint32_t lightSampleCount = 0u;
+		bool lightGroupOwner = false;
+		bool lightBuildPending = false;
 		bool active = false;
 	};
 
@@ -123,4 +146,5 @@ private:
 	NRISmokeAnalyticCarrierSnapshot mSnapshot = {};
 	double mGameplayTimeSeconds = 0.0;
 	bool mPrepared = false;
+	NRISmokeAnalyticLightPolicy mLightPolicy = {};
 };
