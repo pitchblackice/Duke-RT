@@ -2365,6 +2365,9 @@ private:
 		NRIBufferResource sceneInstanceBuffer;
 		SceneBufferDebugStats sceneInstanceStats = { "SceneDataSnapshotSceneInstance" };
 		uint64_t retireFenceValue = 0;
+		uint64_t publishedMapEpoch = 0;
+		uint64_t publishedBuildEpoch = 0;
+		bool descriptorsInitialized = false;
 	};
 
 	using RuntimeMutationResidentUploadRange = ::RuntimeMutationResidentUploadRange;
@@ -2669,6 +2672,7 @@ private:
 	std::vector<nri::DescriptorSet*> mSceneDataSets;
 	std::vector<SceneDataDescriptorSnapshot> mSceneDataSnapshots;
 	nri::DescriptorSet* mActiveSceneDataSet = nullptr;
+	SceneDataDescriptorSnapshot* mActiveSceneDataSnapshot = nullptr;
 	uint64_t mActiveSceneDataSetFrameIndex = UINT64_MAX;
 	uint32_t mSceneDataSnapshotCursor = 0;
 	nri::DescriptorSet* mFrameTextureSet = nullptr;
@@ -2948,6 +2952,8 @@ private:
 	uint32_t mBoundRuntimeLightTileIndexCount = 0;
 	uint32_t mBoundRuntimeLightMaxTileOccupancy = 0;
 	std::vector<uint8_t> mSceneDataDescriptorsInitialized;
+	std::vector<uint64_t> mSceneDataDescriptorMapEpochs;
+	std::vector<uint64_t> mSceneDataDescriptorBuildEpochs;
 	bool mRuntimeLightPayloadCacheValid = false;
 	uint64_t mRuntimeLightPayloadHash = 0;
 	bool mRuntimeLightClusterCacheValid = false;

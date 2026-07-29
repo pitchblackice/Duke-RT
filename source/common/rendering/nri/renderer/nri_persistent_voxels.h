@@ -1082,6 +1082,15 @@ public:
 	bool HasValidBatch() const;
 	bool HasRenderableOverlay() const;
 	bool HasResidentIndirectOnlyActor(int32_t actorIndex) const;
+	bool HasTlasAppendEligibleActor(
+		uint32_t frameIndex,
+		const NRIPersistentVoxelSettings& settings,
+		const NRIPersistentVoxelTlasServices& services) const;
+	bool IsIndirectOnlyActorTlasAppendEligible(
+		int32_t actorIndex,
+		uint32_t frameIndex,
+		const NRIPersistentVoxelSettings& settings,
+		const NRIPersistentVoxelTlasServices& services) const;
 	bool HasPreloadPending() const;
 	NRIPersistentVoxelPreloadStatus BuildPreloadStatusSnapshot() const;
 	uint32_t OverlayMaterialCount() const;
@@ -1143,6 +1152,11 @@ public:
 		uint64_t materialKeyHash,
 		const PersistentVoxelReadinessStatus& status,
 		bool traceEnabled) const;
+	bool IsActorTlasAppendEligible(
+		const PersistentVoxelBatch::ActorEntry& actor,
+		uint32_t frameIndex,
+		const NRIPersistentVoxelSettings& settings,
+		const NRIPersistentVoxelTlasServices& services) const;
 
 	bool IsPostLoadAdmissionGraceActive(uint32_t frameIndex) const;
 

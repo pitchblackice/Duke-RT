@@ -867,7 +867,10 @@ bool NRIPassDispatcher::DispatchComposition(NRIPassDispatchContext& context, NRI
 
 	context.mCommands.SetPipelineLayout(context.mPipelineLayout);
 	context.mCommands.SetRootConstants(&constants, sizeof(constants));
-	context.mSceneBinding.BindSceneRootDescriptors();
+	if (!context.mSceneBinding.BindSceneRootDescriptors())
+	{
+		return false;
+	}
 	context.mCommands.SetDescriptorSet(0, context.mSamplerSet);
 	context.mCommands.SetDescriptorSet(1, context.mSceneBinding.GetCurrentSceneTextureSet());
 	context.mCommands.SetDescriptorSet(2, context.mSceneBinding.GetCurrentSceneDataSet());
@@ -979,7 +982,10 @@ bool NRIPassDispatcher::DispatchUpscalerPrepass(NRIPassDispatchContext& context,
 	constants.Flags = context.mFrame.resetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
 	context.mCommands.SetPipelineLayout(context.mPipelineLayout);
 	context.mCommands.SetRootConstants(&constants, sizeof(constants));
-	context.mSceneBinding.BindSceneRootDescriptors();
+	if (!context.mSceneBinding.BindSceneRootDescriptors())
+	{
+		return false;
+	}
 	context.mCommands.SetDescriptorSet(0, context.mSamplerSet);
 	context.mCommands.SetDescriptorSet(1, context.mSceneBinding.GetCurrentSceneTextureSet());
 	context.mCommands.SetDescriptorSet(2, context.mSceneBinding.GetCurrentSceneDataSet());
@@ -1481,7 +1487,10 @@ bool NRIPassDispatcher::DispatchFinal(NRIPassDispatchContext& context)
 
 	context.mCommands.SetPipelineLayout(context.mPipelineLayout);
 	context.mCommands.SetRootConstants(&constants, sizeof(constants));
-	context.mSceneBinding.BindSceneRootDescriptors();
+	if (!context.mSceneBinding.BindSceneRootDescriptors())
+	{
+		return false;
+	}
 	context.mCommands.SetDescriptorSet(0, context.mSamplerSet);
 	context.mCommands.SetDescriptorSet(1, context.mSceneBinding.GetCurrentSceneTextureSet());
 	context.mCommands.SetDescriptorSet(2, context.mSceneBinding.GetCurrentSceneDataSet());

@@ -76,10 +76,13 @@ bool NRIDescriptorSetManager::AllocateDescriptorSets(NRIRenderer& renderer)
 	renderer.mSceneTextureSetHashValid.assign(queuedFrameCount, 0);
 	renderer.mSceneDataSets.assign(queuedFrameCount, nullptr);
 	renderer.mSceneDataDescriptorsInitialized.assign(queuedFrameCount, 0u);
+	renderer.mSceneDataDescriptorMapEpochs.assign(queuedFrameCount, 0ull);
+	renderer.mSceneDataDescriptorBuildEpochs.assign(queuedFrameCount, 0ull);
 	const uint32_t sceneDataSnapshotCount = std::max(8u, queuedFrameCount * 4u);
 	renderer.mSceneDataSnapshots.clear();
 	renderer.mSceneDataSnapshots.resize(sceneDataSnapshotCount);
 	renderer.mActiveSceneDataSet = nullptr;
+	renderer.mActiveSceneDataSnapshot = nullptr;
 	renderer.mActiveSceneDataSetFrameIndex = UINT64_MAX;
 	renderer.mSceneDataSnapshotCursor = 0;
 
@@ -271,19 +274,51 @@ nri::DescriptorSet* NRIDescriptorSetManager::GetCurrentSceneDataSet(const NRIRen
 
 bool NRIDescriptorSetManager::IsCurrentSceneDataDescriptorsInitialized(const NRIRenderer& renderer)
 {
+	const uint64_t currentMapEpoch = renderer.mMapWorld.valid ? renderer.mMapWorld.buildSerial : 0ull;
+	const uint64_t currentBuildEpoch = renderer.mStaticMapScene.valid ? renderer.mStaticMapScene.buildSerial : 0ull;
+	if (renderer.mActiveSceneDataSnapshot != nullptr &&
+		renderer.mActiveSceneDataSet == renderer.mActiveSceneDataSnapshot->sceneDataSet &&
+		renderer.mActiveSceneDataSetFrameIndex == renderer.mFrameIndex)
+	{
+		return renderer.mActiveSceneDataSnapshot->descriptorsInitialized &&
+			renderer.mActiveSceneDataSnapshot->publishedMapEpoch == currentMapEpoch &&
+			renderer.mActiveSceneDataSnapshot->publishedBuildEpoch == currentBuildEpoch;
+	}
+
 	const uint32_t queuedFrameIndex = renderer.GetCurrentQueuedFrameIndex();
-	return queuedFrameIndex < renderer.mSceneDataDescriptorsInitialized.size() && renderer.mSceneDataDescriptorsInitialized[queuedFrameIndex] != 0;
+	return queuedFrameIndex < renderer.mSceneDataDescriptorsInitialized.size() &&
+		queuedFrameIndex < renderer.mSceneDataDescriptorMapEpochs.size() &&
+		queuedFrameIndex < renderer.mSceneDataDescriptorBuildEpochs.size() &&
+		renderer.mSceneDataDescriptorsInitialized[queuedFrameIndex] != 0 &&
+		renderer.mSceneDataDescriptorMapEpochs[queuedFrameIndex] == currentMapEpoch &&
+		renderer.mSceneDataDescriptorBuildEpochs[queuedFrameIndex] == currentBuildEpoch;
 }
 
 void NRIDescriptorSetManager::SetCurrentSceneDataDescriptorsInitialized(NRIRenderer& renderer, bool value)
 {
+	const uint64_t currentMapEpoch = renderer.mMapWorld.valid ? renderer.mMapWorld.buildSerial : 0ull;
+	const uint64_t currentBuildEpoch = renderer.mStaticMapScene.valid ? renderer.mStaticMapScene.buildSerial : 0ull;
+	if (renderer.mActiveSceneDataSnapshot != nullptr &&
+		renderer.mActiveSceneDataSet == renderer.mActiveSceneDataSnapshot->sceneDataSet &&
+		renderer.mActiveSceneDataSetFrameIndex == renderer.mFrameIndex)
+	{
+		renderer.mActiveSceneDataSnapshot->descriptorsInitialized = value;
+		renderer.mActiveSceneDataSnapshot->publishedMapEpoch = value ? currentMapEpoch : 0ull;
+		renderer.mActiveSceneDataSnapshot->publishedBuildEpoch = value ? currentBuildEpoch : 0ull;
+		return;
+	}
+
 	const uint32_t queuedFrameIndex = renderer.GetCurrentQueuedFrameIndex();
-	if (queuedFrameIndex >= renderer.mSceneDataDescriptorsInitialized.size())
+	if (queuedFrameIndex >= renderer.mSceneDataDescriptorsInitialized.size() ||
+		queuedFrameIndex >= renderer.mSceneDataDescriptorMapEpochs.size() ||
+		queuedFrameIndex >= renderer.mSceneDataDescriptorBuildEpochs.size())
 	{
 		return;
 	}
 
 	renderer.mSceneDataDescriptorsInitialized[queuedFrameIndex] = value ? 1u : 0u;
+	renderer.mSceneDataDescriptorMapEpochs[queuedFrameIndex] = value ? currentMapEpoch : 0ull;
+	renderer.mSceneDataDescriptorBuildEpochs[queuedFrameIndex] = value ? currentBuildEpoch : 0ull;
 }
 
 void NRIDescriptorSetManager::TraceSharedDescriptorRewrite(

@@ -1031,6 +1031,115 @@ bool NRIPersistentVoxelResidency::HasResidentIndirectOnlyActor(int32_t actorInde
 	return false;
 }
 
+bool NRIPersistentVoxelResidency::IsIndirectOnlyActorTlasAppendEligible(
+	int32_t actorIndex,
+	uint32_t frameIndex,
+	const NRIPersistentVoxelSettings& settings,
+	const NRIPersistentVoxelTlasServices& services) const
+{
+	if (actorIndex < 0 || !batch.valid)
+	{
+		return false;
+	}
+
+	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	{
+		if (actor.active && actor.indirectOnly && actor.actorIndex == actorIndex &&
+			IsActorTlasAppendEligible(actor, frameIndex, settings, services))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool NRIPersistentVoxelResidency::HasTlasAppendEligibleActor(
+	uint32_t frameIndex,
+	const NRIPersistentVoxelSettings& settings,
+	const NRIPersistentVoxelTlasServices& services) const
+{
+	if (!batch.valid)
+	{
+		return false;
+	}
+
+	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	{
+		if (actor.active && IsActorTlasAppendEligible(actor, frameIndex, settings, services))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool NRIPersistentVoxelResidency::IsActorTlasAppendEligible(
+	const PersistentVoxelBatch::ActorEntry& actor,
+	uint32_t frameIndex,
+	const NRIPersistentVoxelSettings& settings,
+	const NRIPersistentVoxelTlasServices& services) const
+{
+	if (services.getAccelerationStructureHandle == nullptr ||
+		settings.omitTlasOccurrences ||
+			(actor.resolvedVoxelIndex >= 0 &&
+				(actor.resolvedVoxelIndex == settings.excludeIndices[0] ||
+				 actor.resolvedVoxelIndex == settings.excludeIndices[1] ||
+				 actor.resolvedVoxelIndex == settings.excludeIndices[2])) ||
+		(settings.excludeMinPrimitives > 0 && actor.primitiveCount >= settings.excludeMinPrimitives))
+	{
+		return false;
+	}
+
+	const auto meshIt = meshVariantResources.find(actor.meshResourceKey);
+	const auto materialIt = materialVariantResources.find(actor.materialKeyHash);
+	if (meshIt == meshVariantResources.end() || materialIt == materialVariantResources.end())
+	{
+		return false;
+	}
+	const PersistentVoxelMeshVariantResource& mesh = meshIt->second;
+	const PersistentVoxelMaterialVariantResource& material = materialIt->second;
+	if (!materialRangeAllocator.Owns(PersistentVoxelMaterialRangeHandle(material)) ||
+		!PersistentVoxelMaterialRangeMatches(actor, material) ||
+		mesh.accelerationStructure.accelerationStructure == nullptr ||
+		(!mesh.directComputePublished &&
+			(mesh.indexBuffer.shaderView == nullptr || mesh.vertexBuffer.shaderView == nullptr)) ||
+		vertexBuffer.shaderView == nullptr ||
+		indexBuffer.shaderView == nullptr ||
+		primitiveBuffer.shaderView == nullptr ||
+		materialBuffer.shaderView == nullptr)
+	{
+		return false;
+	}
+	const bool primitiveRangeValid =
+		(uint64_t)actor.primitiveOffset + (uint64_t)actor.primitiveCount <= (uint64_t)arenaPrimitiveCursor;
+	const bool materialRangeValid =
+		(uint64_t)actor.materialOffset + (uint64_t)actor.materialCount <= materialRangeAllocator.Stats().cursorRows;
+	const bool meshRangeMatches =
+		actor.primitiveOffset == mesh.primitiveOffset &&
+		actor.primitiveCount == mesh.primitiveCount &&
+		actor.indexOffset == mesh.indexOffset &&
+		actor.indexCount == mesh.indexCount;
+	const auto transformFinite = [](const std::array<float, 12>& transform)
+	{
+		for (float value : transform)
+		{
+			if (!std::isfinite(value))
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	return
+		primitiveRangeValid &&
+		materialRangeValid &&
+		meshRangeMatches &&
+		transformFinite(actor.instanceTransform) &&
+		transformFinite(actor.previousInstanceTransform) &&
+		(mesh.tlasPublished || mesh.tlasReadyFrame <= frameIndex) &&
+		services.GetAccelerationStructureHandle(mesh.accelerationStructure) != 0;
+}
+
 bool NRIPersistentVoxelResidency::HasPreloadPending() const
 {
 	return preloadPending;

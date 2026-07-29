@@ -555,6 +555,22 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	uint32_t selectedPersistentVoxelSceneInstanceCount = 0;
 	uint32_t selectedSceneInstanceCount = 0;
 	uint32_t selectedTlasInstanceCount = 0;
+	const auto currentTraceBindingsReady = [&]()
+	{
+		const NRIWorldTlasFrameSlot& worldTlas = GetCurrentWorldTlasFrameSlot();
+		const uint32_t queuedFrameIndex = GetCurrentQueuedFrameIndex();
+		return
+			worldTlas.publicationValid &&
+			worldTlas.accelerationStructure.accelerationStructure != nullptr &&
+			worldTlas.accelerationStructure.descriptor != nullptr &&
+			worldTlas.publishedMapEpoch == mMapWorld.buildSerial &&
+			worldTlas.publishedBuildEpoch == mStaticMapScene.buildSerial &&
+			GetCurrentSceneTextureSet() != nullptr &&
+			queuedFrameIndex < mSceneTextureSetHashValid.size() &&
+			mSceneTextureSetHashValid[queuedFrameIndex] != 0 &&
+			GetCurrentSceneDataSet() != nullptr &&
+			IsCurrentSceneDataDescriptorsInitialized();
+	};
 	{
 		ScopedPtPerfTimer sceneSelectTimer(mLastPerfShellTraceStats.sceneSelectMs);
 		const bool staticMapSceneReady = allowStaticMapScene && [&]()
@@ -720,8 +736,21 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			IsNRILocalPlayerPrimaryVisibleFromViewpoint(viewpointActorIndex, localPlayerActorIndex);
 		NRISceneInstanceVisibilityContext sceneInstanceVisibilityContext = {};
 		sceneInstanceVisibilityContext.localPlayerActorIndex = localPlayerActorIndex;
+		NRIPersistentVoxelTlasServices persistentVoxelEligibilityServices = {};
+		persistentVoxelEligibilityServices.user = this;
+		persistentVoxelEligibilityServices.getAccelerationStructureHandle = [](void* user, const NRIAccelerationStructureResource& resource) -> uint64_t
+		{
+			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			return resource.accelerationStructure != nullptr ?
+				renderer->mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*resource.accelerationStructure) :
+				0ull;
+		};
 		const bool residentLocalPlayerVoxelReady =
-			mPersistentVoxels.HasResidentIndirectOnlyActor(localPlayerActorIndex);
+			mPersistentVoxels.IsIndirectOnlyActorTlasAppendEligible(
+				localPlayerActorIndex,
+				(uint32_t)mFrameIndex,
+				persistentVoxelSettings,
+				persistentVoxelEligibilityServices);
 		NRILocalPlayerReflectionCaptureResult localPlayerReflectionResult = {};
 		const bool hasLocalPlayerReflectionScene = !deferOverlayThisFrame && [&]()
 		{
@@ -1018,7 +1047,12 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		overlayEligibilityInputs.runtimeSpaceLinkBuilt = hasRuntimeSpaceLinkOverlay;
 		overlayEligibilityInputs.runtimeMutationBuilt = hasRuntimeMutationOverlay;
 		overlayEligibilityInputs.hasPersistentVoxelBatch = hasPersistentVoxelBatch;
-		overlayEligibilityInputs.persistentVoxelRenderable = hasPersistentVoxelBatch ? mPersistentVoxels.HasRenderableOverlay() : false;
+		overlayEligibilityInputs.persistentVoxelRenderable =
+			hasPersistentVoxelBatch &&
+			mPersistentVoxels.HasTlasAppendEligibleActor(
+				(uint32_t)mFrameIndex,
+				persistentVoxelSettings,
+				persistentVoxelEligibilityServices);
 		overlayEligibilityInputs.activeDynamicGeometry = activeDynamicGeometry;
 		overlayEligibilityInputs.activeDynamicMaterials = activeDynamicMaterials;
 		overlayEligibilityInputs.hasLocalPlayerReflectionScene = hasLocalPlayerReflectionScene;
@@ -2046,57 +2080,14 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		return false;
 	}
 
-	const auto currentTraceBindingsReady = [&]()
-	{
-		const NRIWorldTlasFrameSlot& worldTlas = GetCurrentWorldTlasFrameSlot();
-		const uint32_t queuedFrameIndex = GetCurrentQueuedFrameIndex();
-		return
-			worldTlas.publicationValid &&
-			worldTlas.accelerationStructure.accelerationStructure != nullptr &&
-			worldTlas.accelerationStructure.descriptor != nullptr &&
-			worldTlas.publishedMapEpoch == mMapWorld.buildSerial &&
-			worldTlas.publishedBuildEpoch == mStaticMapScene.buildSerial &&
-			GetCurrentSceneTextureSet() != nullptr &&
-			queuedFrameIndex < mSceneTextureSetHashValid.size() &&
-			mSceneTextureSetHashValid[queuedFrameIndex] != 0 &&
-			GetCurrentSceneDataSet() != nullptr &&
-			IsCurrentSceneDataDescriptorsInitialized();
-	};
 	if (!currentTraceBindingsReady())
 	{
-		LogFallback("PT current queued-frame scene bindings were incomplete; republishing the resident static world.");
-		const bool staticBindingsRestored =
-			EnsurePaletteTexture(mStaticMapScene.materialBridge) &&
-			EnsureSceneTextures(
-				mStaticMapScene.sceneView,
-				mStaticMapScene.materialBridge,
-				capturedGpuMaterials,
-				false,
-				"static_binding_repair") &&
-			RestoreStaticTopLevelScene();
-		if (!staticBindingsRestored || !currentTraceBindingsReady())
+		LogFallback("PT current queued-frame scene bindings became incomplete after scene construction; skipping TraceOpaque.");
+		if (preserveHistory)
 		{
-			LogFallback("PT current queued-frame scene binding repair failed; skipping TraceOpaque.");
-			if (preserveHistory)
-			{
-				RestoreRenderSceneHistorySnapshot(history);
-			}
-			return false;
+			RestoreRenderSceneHistorySnapshot(history);
 		}
-
-		mGpuSceneHasDynamicOverlay = false;
-		mUsedDynamicSceneLastFrame = false;
-		mUsedStaticMapSceneLastFrame = true;
-		activeSceneView = &mStaticMapScene.sceneView;
-		activeGeometry = &mStaticMapScene.geometry;
-		activeGpuMaterials = &mStaticMapScene.gpuMaterials;
-		activeMaterialBridge = &mStaticMapScene.materialBridge;
-		activeStats = mStaticMapScene.sceneView.stats;
-		paletteReady = true;
-		texturesReady = true;
-		buffersReady = true;
-		accelerationReady = true;
-		PrepareSceneTextureInputsForCompute();
+		return false;
 	}
 
 	TraceRuntimeLinkEvents(di);
