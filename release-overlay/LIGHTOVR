@@ -500,7 +500,7 @@ LIGHTOVR
         maxlatencyseconds 0.075
         count 10
         offset 0.0 32.0 5.0
-        spawnradius 2.0
+        spawnradius 3.0
         densityscale 1
         radiusscale 0.025
         velocitycone 10.0
@@ -519,7 +519,7 @@ LIGHTOVR
         count 14
         offset 0.0 0.0 0.0
         spawnradius 2.0
-        densityscale 1.1
+        densityscale 0.8
         radiusscale 0.95
         velocitycone 42.0
         velocityscale 7.0
@@ -537,7 +537,7 @@ LIGHTOVR
         count 16
         offset 0.0 0.0 0.0
         spawnradius 2.5
-        densityscale 1.2
+        densityscale 0.9
         radiusscale 1.0
         velocitycone 38.0
         velocityscale 8.0
@@ -553,7 +553,7 @@ LIGHTOVR
         maxlatencyseconds 0.075
         count 10
         offset 0.0 32.0 5.0
-        spawnradius 2.0
+        spawnradius 3.0
         densityscale 1
         radiusscale 0.025
         velocitycone 14.0
