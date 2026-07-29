@@ -393,16 +393,16 @@ LIGHTOVR
         anisotropy -0.1
         radius 10.0
         expansionvelocity 2.0
-        lifetime 12.0
-        densityhalflife 5.5
-        risevelocity 5.0
+        lifetime 4.0
+        densityhalflife 0.5
+        risevelocity 7.0
         velocityrandom 2.0
         velocityinherit 0.2
-        buoyancy 1.5
+        buoyancy 5.5
         drag 0.7
         turbulence 10.2
         turbulencescale 2.0
-        temperature 1.0
+        temperature 3.0
         momentumscale 1.0
         coolinghalflife 2.0
     }
@@ -415,12 +415,12 @@ LIGHTOVR
         anisotropy 0.05
         radius 12.0
         expansionvelocity 2.5
-        lifetime 18.0
-        densityhalflife 9.0
-        risevelocity 0.5
+        lifetime 2.0
+        densityhalflife 6.0
+        risevelocity 3.5
         velocityrandom 2.5
         velocityinherit 0.25
-        buoyancy 0.15
+        buoyancy 2.15
         drag 0.35
         turbulence 5.0
         turbulencescale 56.0
@@ -447,7 +447,7 @@ LIGHTOVR
         velocitycone 180.0
         velocityscale 1.0
         intervalseconds 0.1
-        starttime 0.5
+        starttime 0.75
         startdistance 0.0
         spacing 0.0
         maxsegmentsperframe 1
@@ -730,7 +730,7 @@ LIGHTOVR
             size 56.0 128.0
             rotation 330.0
             offset 1.0
-            count 8
+            count 3
             intervalseconds 0.2
             spawnradius 0.0
             densityscale 1.0
