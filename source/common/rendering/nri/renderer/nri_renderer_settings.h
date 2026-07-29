@@ -121,7 +121,7 @@ struct NRISmokeSettings
 	bool readback = false;
 	bool viewCompare = false;
 	uint32_t viewRoute = 0;
-	uint32_t workProfile = 0;
+	uint32_t workProfile = 2;
 	uint32_t quality = 2;
 	uint32_t particleCapacity = 8192;
 	uint32_t froxelPixelSize = 16;

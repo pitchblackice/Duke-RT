@@ -1637,7 +1637,7 @@ OptionValue NRISettingsProfile
 
 OptionValue NRISmokeWorkProfile
 {
-	0, "Reference"
+	0, "Ultra"
 	1, "High"
 	2, "Medium"
 	3, "Low"

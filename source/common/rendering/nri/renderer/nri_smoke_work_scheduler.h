@@ -11,6 +11,11 @@ enum class NRISmokeWorkProfile : uint32_t
 	Low = 3,
 };
 
+static_assert((uint32_t)NRISmokeWorkProfile::Reference == 0u);
+static_assert((uint32_t)NRISmokeWorkProfile::High == 1u);
+static_assert((uint32_t)NRISmokeWorkProfile::Medium == 2u);
+static_assert((uint32_t)NRISmokeWorkProfile::Low == 3u);
+
 enum NRISmokeWorkCapability : uint32_t
 {
 	NRISmokeWorkCapability_EmissionCommands = 1u << 0u,

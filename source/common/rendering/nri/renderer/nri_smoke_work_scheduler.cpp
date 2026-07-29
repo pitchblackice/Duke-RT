@@ -170,7 +170,7 @@ const char* NRISmokeWorkScheduler::ProfileName(NRISmokeWorkProfile profile)
 	case NRISmokeWorkProfile::Medium: return "medium";
 	case NRISmokeWorkProfile::Low: return "low";
 	case NRISmokeWorkProfile::Reference:
-	default: return "reference";
+	default: return "ultra";
 	}
 }
 

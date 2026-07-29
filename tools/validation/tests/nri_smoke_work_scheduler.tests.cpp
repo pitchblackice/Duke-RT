@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <string>
 
 namespace
 {
@@ -14,24 +15,26 @@ void Require(bool condition, const char* message)
 int main()
 {
 	NRISmokeWorkScheduler scheduler;
-	const auto& reference = scheduler.Resolve(0u, 7u);
-	Require(reference.effectiveProfile == NRISmokeWorkProfile::Reference,
-		"profile zero must preserve reference behavior");
-	Require(reference.table.emissionCommands == 256u && reference.table.firstUseSources == 8u &&
-		reference.table.simulationSubsteps == 7u,
-		"reference must retain existing command, prompt, and authored substep limits");
-	Require(reference.table.radianceNewInvalidCells == NRISmokeWorkTable::Unrestricted &&
-		!NRISmokeWorkScheduler::Enforces(reference.table, NRISmokeWorkCapability_RadianceNewInvalid),
-		"reference radiance must not advertise a fake profile cap");
-	Require(reference.table.materializedFroxels == NRISmokeWorkTable::Unrestricted,
+	const auto& ultra = scheduler.Resolve(0u, 7u);
+	Require(ultra.effectiveProfile == NRISmokeWorkProfile::Reference,
+		"profile zero must preserve ultra behavior");
+	Require(std::string(NRISmokeWorkScheduler::ProfileName(ultra.effectiveProfile)) == "ultra",
+		"profile zero diagnostics must identify Ultra");
+	Require(ultra.table.emissionCommands == 256u && ultra.table.firstUseSources == 8u &&
+		ultra.table.simulationSubsteps == 7u,
+		"ultra must retain existing command, prompt, and authored substep limits");
+	Require(ultra.table.radianceNewInvalidCells == NRISmokeWorkTable::Unrestricted &&
+		!NRISmokeWorkScheduler::Enforces(ultra.table, NRISmokeWorkCapability_RadianceNewInvalid),
+		"ultra radiance must not advertise a fake profile cap");
+	Require(ultra.table.materializedFroxels == NRISmokeWorkTable::Unrestricted,
 		"unsupported materialization work must remain explicitly unrestricted");
-	Require(reference.table.analyticCarriers == 64u &&
-		NRISmokeWorkScheduler::Enforces(reference.table, NRISmokeWorkCapability_AnalyticCarriers),
+	Require(ultra.table.analyticCarriers == 64u &&
+		NRISmokeWorkScheduler::Enforces(ultra.table, NRISmokeWorkCapability_AnalyticCarriers),
 		"analytic carriers must have an explicit static admission quantity");
-	Require(reference.table.analyticLightEvents == 64u &&
-		reference.table.analyticLightAnchors == 4u &&
-		reference.table.analyticLightSamples == NRISmokeWorkTable::Unrestricted,
-		"reference analytic lighting must preserve the resolved authored sample quantity");
+	Require(ultra.table.analyticLightEvents == 64u &&
+		ultra.table.analyticLightAnchors == 4u &&
+		ultra.table.analyticLightSamples == NRISmokeWorkTable::Unrestricted,
+		"ultra analytic lighting must preserve the resolved authored sample quantity");
 
 	const auto& high = scheduler.Resolve(1u, 8u);
 	Require(high.table.emissionCommands == 128u && high.table.firstUseSources == 8u &&
@@ -73,7 +76,7 @@ int main()
 	const auto& invalid = scheduler.Resolve(999u, 3u);
 	Require(invalid.effectiveProfile == NRISmokeWorkProfile::Reference &&
 		invalid.requestedProfile == 999u && invalid.table.simulationSubsteps == 3u,
-		"invalid values must fail visibly to reference behavior");
+		"invalid values must fail visibly to ultra behavior");
 
 	scheduler.RecordEmission(40u, 16u);
 	scheduler.RecordPrompt(7u, 2u);
