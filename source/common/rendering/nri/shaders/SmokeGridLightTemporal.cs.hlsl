@@ -25,8 +25,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	if (!SmokeGridLightRecordValid(current, brick.Generation, gSmokeConstants.SimulationEpoch))
 		return;
+	// Seed already copied compatible history for unscheduled partition work.
+	// Its positive age is explicit incomplete-radiance state, not a new sample.
+	if (SmokeGridLightAge(current) > 0u)
+		return;
 	uint outputCount = SmokeGridLightSampleCount(current);
-	uint outputAge = 0u;
 	if (SmokeGridLightRecordValid(history, brick.Generation, gSmokeConstants.SimulationEpoch))
 	{
 		const uint historyCount = SmokeGridLightSampleCount(history);
@@ -40,15 +43,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			SmokeGridLightStoreLobe(current, lobe, mean, second);
 		}
 		outputCount = min(historyCount + outputCount, NRI_SMOKE_GRID_LIGHT_MAX_HISTORY);
-		outputAge = min(SmokeGridLightAge(history) + 1u, 65535u);
 		InterlockedAdd(gSmokeGridLightControl[0].TemporalAccepted, 1u);
-		InterlockedMax(gSmokeGridLightControl[0].MaximumAge, outputAge);
 	}
 	else
 		InterlockedAdd(gSmokeGridLightControl[0].TemporalRejected, 1u);
 	SmokeGridLightSetMetadata(current, brick.Generation, gSmokeConstants.SimulationEpoch, outputCount,
 		gSmokeConstants.FrameIndex & 0xffu, (float)outputCount / 64.0, SmokeGridLightEvidence(current),
-		gSmokeConstants.FrameIndex, outputAge);
+		gSmokeConstants.FrameIndex, 0u);
 	if (targetHistory) gSmokeGridLightHistory[cellIndex] = current; else gSmokeGridLightCurrent[cellIndex] = current;
 
 	if (!SmokeSelfShadowEnabled(gSmokeConstants.DebugMode))

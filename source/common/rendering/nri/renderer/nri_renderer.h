@@ -7,6 +7,7 @@
 #include "nri_exposure.h"
 #include "nri_frame_graph.h"
 #include "nri_frame_resources.h"
+#include "nri_indirect_radiance_cache.h"
 #include "nri_nrd.h"
 #include "nri_persistent_voxels.h"
 #include "nri_pipeline_state.h"
@@ -1746,6 +1747,7 @@ public:
 		uint32_t traceSplitShadow = 0;
 		uint32_t traceFastEmissiveShadow = 0;
 		uint32_t traceVisibleChunkGate = 0;
+		uint32_t traceVoxelOccurrenceControl = 0;
 		uint32_t activePrimitiveCount = 0;
 		uint32_t dynamicPrimitiveCount = 0;
 		uint32_t activeMaterialCount = 0;
@@ -2033,6 +2035,7 @@ public:
 	const PerfShellTraceStats& GetLastPerfShellTraceStats() const { return mLastPerfShellTraceStats; }
 	const PerfResourceTraceStats& GetLastPerfResourceTraceStats() const { return mLastPerfResourceTraceStats; }
 	const PerfTraceShaderStats& GetLastPerfTraceShaderStats() const { return mLastPerfTraceShaderStats; }
+	const NRIVoxelRepresentationSnapshot& GetVoxelRepresentationSnapshot() const { return mVoxelRepresentationPolicy.GetSnapshot(); }
 	NRISE29FloorDeformerRouteFrameStats GetSE29FloorDeformerRouteFrameStats() const;
 	NRIMapMaterialOnlyRouteFrameStats GetMapMaterialOnlyRouteFrameStats() const;
 	nri_scene::PTMapMaterialStateVariantStats GetMapMaterialVariantStats() const;
@@ -2106,6 +2109,7 @@ public:
 	enum class PipelineSlot : uint32_t
 	{
 		TraceOpaque,
+		TraceOpaqueCache,
 		Composition,
 		TraceTransparent,
 		ExposureHistogramClear,
@@ -2145,6 +2149,7 @@ private:
 	friend class NRIAccelerationStructureManager;
 	friend class NRIDescriptorSetManager;
 	friend class NRIFrameResources;
+	friend NRIIndirectRadianceCacheServices BuildNRIIndirectRadianceCacheServices(NRIRenderer& renderer);
 	friend class NRIPipelineStateManager;
 	friend class NRISmokeSystem;
 	friend class NRIPreloadCoordinator;
@@ -2649,6 +2654,7 @@ private:
 	std::unique_ptr<NRISmokeSystem> mSmoke;
 	NRIWeaponEventBatch mWeaponEventBatch;
 	nri::PipelineLayout* mPipelineLayout = nullptr;
+	nri::PipelineLayout* mIndirectRadianceCachePipelineLayout = nullptr;
 	nri::PipelineLayout* mTaaPipelineLayout = nullptr;
 	nri::PipelineLayout* mPresentPipelineLayout = nullptr;
 	nri::PipelineLayout* mExposurePipelineLayout = nullptr;
@@ -2722,6 +2728,8 @@ private:
 	NRIBufferResource mVisibleChunkBuffer;
 	NRIBufferResource mVisibleFlatPlaneBuffer;
 	NRITraceShaderStats mTraceShaderStats;
+	NRIIndirectRadianceCache mIndirectRadianceCache;
+	NRIIndirectRadianceCacheTelemetrySnapshot mLastIndirectRadianceCacheTelemetry = {};
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mResidentStaticBlasScratchBuffer;
 	NRIBufferResource mEmissiveTopLevelScratchBuffer;
@@ -2805,6 +2813,7 @@ private:
 	NRISurfaceLightOverlayCache mSurfaceLightOverlayCache;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	NRIPersistentVoxelResidency mPersistentVoxels;
+	NRIVoxelRepresentationPolicy mVoxelRepresentationPolicy;
 	StateCommitDomainGenerations mLastStateCommitDomainGenerations = {};
 	bool mHasLastStateCommitDomainGenerations = false;
 	nri_material_policy::ActorMaterialOverrideCache mActorMaterialOverrideCache = {};

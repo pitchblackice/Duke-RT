@@ -3,6 +3,36 @@
 
 #define NRI_SMOKE_GRID_BRICK_AXIS 8
 #define NRI_SMOKE_GRID_CELLS_PER_BRICK 512u
+#define NRI_SMOKE_PROMPT_FALLBACK_QUANTITY 8u
+#define NRI_SMOKE_PROMPT_LEDGER_CAPACITY NRI_SMOKE_PROMPT_FALLBACK_QUANTITY
+#define NRI_SMOKE_PROMPT_OUTCOME_NONE 0u
+#define NRI_SMOKE_PROMPT_OUTCOME_FALLBACK 1u
+#define NRI_SMOKE_PROMPT_OUTCOME_GRID_NEW 2u
+#define NRI_SMOKE_PROMPT_OUTCOME_GRID_COMMITTED 3u
+#define NRI_SMOKE_PROMPT_OUTCOME_INTERNAL_ERROR 4u
+
+struct SmokePromptOutcome
+{
+	uint PulseIdLow;
+	uint PulseIdHigh;
+	uint RangeBegin;
+	uint RangeCount;
+	uint CommandIndex;
+	uint Outcome;
+	uint RequestedBricks;
+	uint AdmittedBricks;
+};
+
+struct SmokePromptLedger
+{
+	uint PulseIdLow;
+	uint PulseIdHigh;
+	uint RangeBegin;
+	uint RangeCount;
+	uint Epoch;
+	uint Committed;
+	uint2 Padding;
+};
 #define NRI_SMOKE_GRID_HASH_PROBES 24u
 #define NRI_SMOKE_GRID_EMPTY 0u
 #define NRI_SMOKE_GRID_CLAIMED 1u
@@ -11,6 +41,19 @@
 #define NRI_SMOKE_GRID_TOMBSTONE 4u
 #define NRI_SMOKE_GRID_BRICK_CONTENT 1u
 #define NRI_SMOKE_GRID_BRICK_HALO 2u
+#define NRI_SMOKE_GRID_BRICK_BORROWED_FIRST_USE 4u
+#define NRI_SMOKE_GRID_BRICK_PROMPT_PROVISIONAL 8u
+#define NRI_SMOKE_GRID_BRICK_PROMPT_SLOT_SHIFT 4u
+#define NRI_SMOKE_GRID_BRICK_PROMPT_SLOT_MASK 0xf0u
+#define NRI_SMOKE_GRID_FIRST_USE_CORE_MINIMUM 8u
+#define NRI_SMOKE_GRID_FIRST_USE_CORE_DIVISOR 16u
+#define NRI_SMOKE_GRID_FIRST_USE_BLOCKED_NONE 0u
+#define NRI_SMOKE_GRID_FIRST_USE_BLOCKED_NO_BORROWED 1u
+#define NRI_SMOKE_GRID_FIRST_USE_BLOCKED_VISIBLE 2u
+#define NRI_SMOKE_GRID_FIRST_USE_BLOCKED_PROBE 3u
+#define NRI_SMOKE_GRID_FIRST_USE_BLOCKED_INVALID 4u
+#define NRI_SMOKE_GRID_FLAG_HASH_HEALTH 1u
+#define NRI_SMOKE_GRID_FLAG_COMPACT_DRAINED_HASH 2u
 
 struct SmokeGridHashEntry
 {
@@ -65,6 +108,70 @@ struct SmokeGridControl
 	uint ActivePing;
 	uint FieldPing;
 	uint CellSizeBits;
+	uint AdmissionSourceCount;
+	uint AdmissionRequested;
+	uint AdmissionExisting;
+	uint AdmissionAdmitted;
+	uint AdmissionRejected;
+	uint AdmissionCapacityRejected;
+	uint AdmissionProbeRejected;
+	uint AdmissionInvalidRejected;
+	uint AdmissionFootprintCulled;
+	uint HashEmpty;
+	uint HashClaimed;
+	uint HashResident;
+	uint HashNew;
+	uint HashTombstone;
+	uint HashInvalidState;
+	uint HashInvalidMapping;
+	uint ControlProbeTotal;
+	uint ControlProbeBin1;
+	uint ControlProbeBin2To4;
+	uint ControlProbeBin5To8;
+	uint ControlProbeBin9To16;
+	uint ControlProbeBin17To24;
+	uint LookupProbeTotal;
+	uint InsertionProbeTotal;
+	uint LookupProbeLimitFailures;
+	uint InsertionProbeLimitFailures;
+	uint InsertionCapacityFailures;
+	uint InsertionActiveFailures;
+	uint ReclaimInvalidMappingFailures;
+	uint HashRebuildAttempts;
+	uint HashRebuildSuccesses;
+	uint HashRebuildFailures;
+	uint FirstUseCoreCapacity;
+	uint BorrowedResident;
+	uint BorrowedAllocations;
+	uint BorrowedReturns;
+	uint BorrowedPromotions;
+	uint BorrowedReclaims;
+	uint FirstUseReplacementAdmissions;
+	uint FirstUseBlockedNoBorrowed;
+	uint FirstUseBlockedVisible;
+	uint FirstUseBlockedProbe;
+	uint FirstUseBlockedInvalid;
+	uint FirstUseCapacityFailures;
+};
+
+struct SmokeGridSourceStats
+{
+	uint SourceId;
+	uint SourceClass;
+	uint Priority;
+	uint Commands;
+	uint RequestedBricks;
+	uint ExistingHits;
+	uint AdmittedNew;
+	uint RejectedCapacity;
+	uint RejectedProbe;
+	uint RejectedInvalid;
+	uint DepositionCells;
+	uint FootprintCulled;
+	uint RequestedMassQ;
+	uint DepositedMassQ;
+	uint RejectedMassQ;
+	uint AdmittedKeyHash;
 };
 
 struct SmokeGridConstants

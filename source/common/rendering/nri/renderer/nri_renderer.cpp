@@ -1756,6 +1756,7 @@ void NRIRenderer::Shutdown()
 
 	mNrd.Shutdown();
 	mUpscaler.Shutdown(*mFrameBuffer);
+	mIndirectRadianceCache.Destroy(BuildResourceServices());
 	DestroyNRIVoxelComputeMeshingDiagnostics(*this);
 	DestroyAccelerationStructures();
 	ClearRuntimePointLights();
@@ -1790,6 +1791,11 @@ void NRIRenderer::Shutdown()
 	{
 		mFrameBuffer->mCore.DestroyPipelineLayout(mPipelineLayout);
 		mPipelineLayout = nullptr;
+	}
+	if (mIndirectRadianceCachePipelineLayout != nullptr)
+	{
+		mFrameBuffer->mCore.DestroyPipelineLayout(mIndirectRadianceCachePipelineLayout);
+		mIndirectRadianceCachePipelineLayout = nullptr;
 	}
 	if (mTaaPipelineLayout != nullptr)
 	{
@@ -1861,6 +1867,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 			"level-unload",
 			(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats,
 			BuildNRIPersistentVoxelResetServices(*this));
+		mVoxelRepresentationPolicy.Reset();
 		mPersistentVoxels.CompactMaterialRangesForQuiescentLevelTransition(
 			"level-unload",
 			(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats);
@@ -2018,6 +2025,7 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 			"level-load",
 			(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats,
 			BuildNRIPersistentVoxelResetServices(*this));
+		mVoxelRepresentationPolicy.Reset();
 	}
 
 	mMapWorld = {};
@@ -2062,7 +2070,8 @@ void NRIRenderer::OnLevelFirstFrameRelease()
 	if (runtimeCaptureFrames > 0)
 	{
 		perf_looptraceframes = runtimeCaptureFrames;
-		Printf("PERF pt voxel preload runtime tail capture NRI: build_serial=%llu frame=%u frames=%d\n",
+		perf_compactframes = runtimeCaptureFrames;
+		Printf("PERF pt voxel preload runtime tail capture NRI: build_serial=%llu frame=%u frames=%d compact=1\n",
 			(unsigned long long)mMapWorld.buildSerial,
 			mFrameIndex,
 			runtimeCaptureFrames);
@@ -2071,6 +2080,7 @@ void NRIRenderer::OnLevelFirstFrameRelease()
 		mFrameIndex,
 		BuildNRIPersistentVoxelSettingsFromCVars(),
 		(int)nri_ptloadingtrace);
+	NRIPreloadCoordinator::QueueStrictPreloadFirstFrameReleaseCommand(*this);
 }
 
 NRIRenderer::LevelTransitionSnapshot NRIRenderer::BuildLevelTransitionSnapshot() const

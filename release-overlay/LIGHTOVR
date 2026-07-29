@@ -393,16 +393,16 @@ LIGHTOVR
         anisotropy -0.1
         radius 10.0
         expansionvelocity 2.0
-        lifetime 12.0
-        densityhalflife 5.5
-        risevelocity 5.0
+        lifetime 4.0
+        densityhalflife 0.5
+        risevelocity 7.0
         velocityrandom 2.0
         velocityinherit 0.2
-        buoyancy 1.5
+        buoyancy 5.5
         drag 0.7
         turbulence 10.2
         turbulencescale 2.0
-        temperature 1.0
+        temperature 3.0
         momentumscale 1.0
         coolinghalflife 2.0
     }
@@ -415,12 +415,12 @@ LIGHTOVR
         anisotropy 0.05
         radius 12.0
         expansionvelocity 2.5
-        lifetime 18.0
-        densityhalflife 9.0
-        risevelocity 0.5
+        lifetime 2.0
+        densityhalflife 6.0
+        risevelocity 3.5
         velocityrandom 2.5
         velocityinherit 0.25
-        buoyancy 0.15
+        buoyancy 2.15
         drag 0.35
         turbulence 5.0
         turbulencescale 56.0
@@ -434,6 +434,9 @@ LIGHTOVR
         actorclass "DukeExplosion2"
         trigger spawn
         activation immediate
+        representation grid
+        queuepolicy retry
+        analyticcarriers 1
         emitterforeground off
         style "duke_explosion_smoke"
         count 72
@@ -444,7 +447,7 @@ LIGHTOVR
         velocitycone 180.0
         velocityscale 1.0
         intervalseconds 0.1
-        starttime 0.5
+        starttime 0.75
         startdistance 0.0
         spacing 0.0
         maxsegmentsperframe 1
@@ -455,6 +458,9 @@ LIGHTOVR
         actorclass "DukeFire"
         trigger interval
         activation surface
+        representation grid
+        queuepolicy retry
+        analyticcarriers 1
         emitterforeground on
         style "duke_fire_smoke"
         count 9
@@ -476,6 +482,10 @@ LIGHTOVR
         actorclass "DukeRPG"
         trigger interval
         activation immediate
+        representation grid
+        queuepolicy latest
+        maxlatencyseconds 0.15
+        analyticcarriers 1
         emitterforeground off
         style "duke_trail_smoke"
         count 14
@@ -495,10 +505,15 @@ LIGHTOVR
     smokeeventrule "duke.chaingun.primary"
     {
         style "duke_muzzle_smoke"
-        count 6
-        offset 0.0 32.0 5.0
-        spawnradius 1.5
-        densityscale 1
+        representation analytic
+        queuepolicy drop
+        maxlatencyseconds 0.075
+        analyticcarriers 1
+        count 10
+        offset 2.5 32.0 5.0
+        offsetrandom 6.0 0.0 0.0
+        spawnradius 3.0
+        densityscale 1.0
         radiusscale 0.025
         velocitycone 10.0
         velocityscale 1.8
@@ -509,10 +524,15 @@ LIGHTOVR
     smokeeventrule "duke.hitscan.impact.plane"
     {
         style "duke_impact_smoke"
+        representation analytic
+        queuepolicy drop
+        maxlatencyseconds 0.05
+        analyticcarriers 2
         count 14
         offset 0.0 0.0 0.0
+        offsetrandom 0.0 0.0 0.0
         spawnradius 2.0
-        densityscale 1.1
+        densityscale 0.8
         radiusscale 0.95
         velocitycone 42.0
         velocityscale 7.0
@@ -523,10 +543,15 @@ LIGHTOVR
     smokeeventrule "duke.hitscan.impact.wall"
     {
         style "duke_impact_smoke"
+        representation analytic
+        queuepolicy drop
+        maxlatencyseconds 0.05
+        analyticcarriers 2
         count 16
         offset 0.0 0.0 0.0
+        offsetrandom 0.0 0.0 0.0
         spawnradius 2.5
-        densityscale 1.2
+        densityscale 0.9
         radiusscale 1.0
         velocitycone 38.0
         velocityscale 8.0
@@ -537,10 +562,15 @@ LIGHTOVR
     smokeeventrule "duke.pistol.primary"
     {
         style "duke_muzzle_smoke"
+        representation analytic
+        queuepolicy drop
+        maxlatencyseconds 0.075
+        analyticcarriers 1
         count 10
-        offset 0.0 32.0 5.0
-        spawnradius 2.0
-        densityscale 1
+        offset 2.5 32.0 7.0
+        offsetrandom 0.0 0.0 0.0
+        spawnradius 3.0
+        densityscale 1.0
         radiusscale 0.025
         velocitycone 14.0
         velocityscale 2.0
@@ -551,8 +581,13 @@ LIGHTOVR
     smokeeventrule "duke.shotgun.primary"
     {
         style "duke_muzzle_smoke"
+        representation analytic
+        queuepolicy drop
+        maxlatencyseconds 0.075
+        analyticcarriers 1
         count 22
         offset 0.0 32.0 5.0
+        offsetrandom 0.0 0.0 0.0
         spawnradius 4.0
         densityscale 1.5
         radiusscale 0.05
@@ -565,8 +600,12 @@ LIGHTOVR
     smokeeventrule "nri.smoke.test"
     {
         style "duke_muzzle_smoke"
+        representation grid
+        queuepolicy retry
+        analyticcarriers 1
         count 10
         offset 0.0 16.0 0.0
+        offsetrandom 0.0 0.0 0.0
         spawnradius 2.0
         densityscale 1.25
         radiusscale 1.1
@@ -691,7 +730,7 @@ LIGHTOVR
             size 56.0 128.0
             rotation 330.0
             offset 1.0
-            count 8
+            count 3
             intervalseconds 0.2
             spawnradius 0.0
             densityscale 1.0
@@ -772,7 +811,7 @@ LIGHTOVR
         {
             color 0.75 0.75 0.85
             intensity 1.0
-            direction 0.4 0.6 -1.4
+            direction 1.9 1.9 -0.5
             angularsize 0.05
             shadow on
         }
@@ -1372,9 +1411,9 @@ LIGHTOVR
             fixturematerialresponse on
             type "point"
             color 1.0 0.9 1.0
-            intensity 2.5
+            intensity 1.0
             radius 416.0
-            sectorresponse on
+            sectorresponse off
             signal sector 410
             responseintensity 16.0
             responsemin 0.05
@@ -1466,6 +1505,27 @@ LIGHTOVR
             responseintensity 16.0
             responsemin 0.05
             responsemax 8.0
+        }
+        surfacelight "Chapel"
+        {
+            anchor surface
+            position 1296.2 31.99 -2654.72
+            normal 0.0 -1.0 0.0
+            size 24.0 24.0
+            offset 0.5
+            sector 222
+            tile 1976
+            fixture texture "#00705"
+            fixturematerialresponse on
+            type "point"
+            color 1.0 1.0 1.0
+            intensity 0.4
+            radius 352.0
+            sectorresponse off
+            signal sector 222
+            responseintensity 4.0
+            responsemin 0.0
+            responsemax 2.0
         }
     }
 
@@ -2737,8 +2797,8 @@ LIGHTOVR
             fixturematerialresponse on
             type "point"
             color 1.0 1.0 1.0
-            intensity 1.5
-            radius 416.0
+            intensity 2.0
+            radius 1024.0
             sectorresponse on
             signal sector 437
             responseintensity 4.0
@@ -2758,8 +2818,8 @@ LIGHTOVR
             fixturematerialresponse on
             type "point"
             color 1.0 1.0 1.0
-            intensity 1.5
-            radius 416.0
+            intensity 2.0
+            radius 1024.0
             sectorresponse on
             signal sector 438
             responseintensity 4.0

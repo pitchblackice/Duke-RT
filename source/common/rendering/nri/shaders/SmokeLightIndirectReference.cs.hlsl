@@ -111,6 +111,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	{
 		gSmokeFroxelSource[froxelIndex].rgb += medium.rgb * incidentRadiance *
 			(gSmokeConstants.IndirectScale * gSmokeConstants.RadianceScale);
+		uint metadata = SmokeFroxelMetadata(gSmokeFroxelSource[froxelIndex].w);
+		metadata = SmokeFroxelResolveRadiance(metadata, gSmokeConstants.SimulationEpoch,
+			NRI_SMOKE_FALLBACK_CACHED, 0u);
+		gSmokeFroxelSource[froxelIndex].w = SmokeFroxelMetadataValue(metadata);
 	}
 	else
 	{

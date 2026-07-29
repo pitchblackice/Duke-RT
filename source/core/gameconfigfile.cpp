@@ -45,7 +45,7 @@
 #include "gamecontrol.h"
 #include "version.h"
 
-#define LASTRUNVERSION "7"
+#define LASTRUNVERSION "8"
 
 #if !defined _MSC_VER && !defined __APPLE__
 #include "i_system.h"  // for SHARE_DIR
@@ -441,6 +441,23 @@ void FGameConfigFile::DoGlobalSetup ()
 					v.Int = 1;
 					var->SetGenericRep(v, CVAR_Int);
 				}
+			}
+			if (last < 8)
+			{
+				auto migrateIntCVar = [](const char* name, int oldValue, int newValue)
+				{
+					auto var = FindCVar(name, nullptr);
+					if (var != nullptr && var->GetGenericRep(CVAR_Int).Int == oldValue)
+					{
+						UCVarValue v;
+						v.Int = newValue;
+						var->SetGenericRep(v, CVAR_Int);
+					}
+				};
+				migrateIntCVar("nri_ptlightbounces", 4, 2);
+				migrateIntCVar("nri_ptmirrorbounces", 8, 2);
+				migrateIntCVar("nri_ptportaldepth", 6, 3);
+				migrateIntCVar("nri_ptemissivesamples", 4, 1);
 			}
 		}
 	}

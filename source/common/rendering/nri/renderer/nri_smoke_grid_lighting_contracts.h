@@ -13,6 +13,7 @@ constexpr uint32_t NRI_SMOKE_GRID_SCATTER_PROBES_PER_BRICK = 64u;
 enum class NRISmokeGridLightingPass : uint32_t
 {
 	Prepare = 0,
+	ClearSupport,
 	BuildActive,
 	BuildProposals,
 	Seed,
@@ -44,6 +45,9 @@ struct NRISmokeGridLightControlGpu
 	uint32_t activeCount = 0;
 	uint32_t supportCount = 0;
 	uint32_t sourceCount = 0;
+	uint32_t supportOnlyCount = 0;
+	uint32_t duplicateCount = 0;
+	uint32_t supportOverflowCount = 0;
 	uint32_t scheduledCount = 0;
 	uint32_t samples = 0;
 	uint32_t visible = 0;
@@ -118,6 +122,21 @@ struct NRISmokeGridLightControlGpu
 	uint32_t explicitZeroProbes = 0;
 	uint32_t splitBlockedProbes = 0;
 	uint32_t selfShadowPadding[2] = {};
+	uint32_t radiancePartitionCount = 1;
+	uint32_t radianceNewInvalidQuantity = 0;
+	uint32_t radianceMaintenanceQuantity = 0;
+	uint32_t radianceMaximumAge = 0;
+	uint32_t radianceNewInvalidRequested = 0;
+	uint32_t radianceNewInvalidScheduled = 0;
+	uint32_t radianceNewInvalidDeferred = 0;
+	uint32_t radianceMaintenanceRequested = 0;
+	uint32_t radianceMaintenanceScheduled = 0;
+	uint32_t radianceMaintenanceDeferred = 0;
+	uint32_t radianceHistoryRetained = 0;
+	uint32_t radianceHistoryMissing = 0;
+	uint32_t radianceAgeOverflows = 0;
+	uint32_t radianceNewInvalidTickets = 0;
+	uint32_t radianceMaintenanceTickets = 0;
 };
 
 struct NRISmokeGridLightProposalGpu
@@ -126,6 +145,12 @@ struct NRISmokeGridLightProposalGpu
 	uint32_t count = 0;
 	uint32_t brickGeneration = 0;
 	uint32_t simulationEpoch = 0;
+	uint32_t frameStamp = 0;
+};
+
+struct NRISmokeGridLightSupportStampGpu
+{
+	uint32_t brickGeneration = 0;
 	uint32_t frameStamp = 0;
 };
 
@@ -146,6 +171,8 @@ struct NRISmokeGridLightingStatusSnapshot
 	bool requested = false;
 	bool initialized = false;
 	bool resourcesReady = false;
+	bool gpuStatsValid = false;
+	uint64_t gpuRendererFrame = UINT64_MAX;
 	bool filterRequested = false;
 	bool filterAllocated = false;
 	bool multipleScatterRequested = false;
@@ -165,6 +192,11 @@ struct NRISmokeGridLightingStatusSnapshot
 	uint32_t emissivePointCandidatesRequested = 1;
 	uint32_t emissivePointCandidatesEffective = 1;
 	int32_t emissiveCandidateTarget = -1;
+	uint32_t radiancePartitionCount = 1;
+	uint32_t radianceNewInvalidQuantity = 0;
+	uint32_t radianceMaintenanceQuantity = 0;
+	uint32_t radianceMaximumAge = 0;
+	bool radianceWorkLimited = false;
 	uint32_t lastUpdatedFrame = UINT32_MAX;
 	uint64_t fieldBytes = 0;
 	uint64_t workBytes = 0;
@@ -178,6 +210,8 @@ struct NRISmokeGridLightingStatusSnapshot
 	uint64_t selfShadowFieldBytes = 0;
 	uint64_t filterBytes = 0;
 	uint64_t totalBytes = 0;
+	uint64_t controlReadbackBytes = 0;
+	NRISmokeGridLightControlGpu gpu = {};
 	const char* authority = "disabled";
 	const char* failureReason = "not-requested";
 	const char* filterDecision = "not-requested";
@@ -187,6 +221,7 @@ struct NRISmokeGridLightingStatusSnapshot
 };
 
 static_assert(sizeof(NRISmokeGridLightRecordGpu) == 96);
-static_assert(sizeof(NRISmokeGridLightControlGpu) == 320);
+static_assert(sizeof(NRISmokeGridLightControlGpu) == 392);
 static_assert(sizeof(NRISmokeGridLightProposalGpu) == 80);
+static_assert(sizeof(NRISmokeGridLightSupportStampGpu) == 8);
 static_assert(sizeof(NRISmokeGridScatterMetadataGpu) == 32);

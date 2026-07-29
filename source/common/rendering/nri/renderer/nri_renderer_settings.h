@@ -90,10 +90,15 @@ struct NRIPersistentVoxelSettings
 	uint32_t sharedBlasBuildsPerFrame = 0;
 	bool sharedBlasLoadingWarmupEnabled = false;
 	bool sharedBlasRouteEnabled = false;
+	bool shadowProxyBuildEnabled = false;
+	bool shadowProxyRouteEnabled = false;
+	uint32_t shadowProxyBuildsPerFrame = 0;
+	uint32_t shadowProxyTransitionsPerFrame = 0;
 	bool transformKeyed = false;
 	bool diagnosticsEnabled = false;
 	std::array<int32_t, 3> excludeIndices = { -1, -1, -1 };
 	uint32_t excludeMinPrimitives = 0;
+	bool omitTlasOccurrences = false;
 };
 
 struct NRIRuntimeMutationSettings
@@ -114,7 +119,10 @@ struct NRISmokeSettings
 {
 	bool enabled = false;
 	bool readback = false;
-	uint32_t quality = 1;
+	bool viewCompare = false;
+	uint32_t viewRoute = 0;
+	uint32_t workProfile = 2;
+	uint32_t quality = 2;
 	uint32_t particleCapacity = 8192;
 	uint32_t froxelPixelSize = 16;
 	uint32_t froxelDepth = 48;
@@ -124,19 +132,23 @@ struct NRISmokeSettings
 	bool pointLights = true;
 	bool directionalLight = true;
 	bool emissiveLights = true;
-	uint32_t emissiveReuseMode = 2;
+	uint32_t emissiveReuseMode = 1;
 	bool emissiveReference = false;
 	uint32_t emissivePointCandidates = 4;
 	int32_t emissiveCandidateTarget = -1;
-	uint32_t emissiveBackend = 0;
+	uint32_t emissiveBackend = 2;
 	bool emissiveWorldFilter = false;
 	bool emissiveLocalProposals = true;
 	uint32_t emissiveWorldDebug = 0;
+	uint32_t worldRadiancePartitions = 1;
+	uint32_t worldRadianceNewCells = 8192;
+	uint32_t worldRadianceMaintenanceCells = 32768;
+	uint32_t worldRadianceMaximumAge = 16;
 	bool emissiveLegacyGatherDisabled = false;
 	bool emissiveQuarterKey = false;
 	float emissiveSourceClamp = 32.0f;
 	uint32_t directReuseMode = 2;
-	uint32_t directReferenceMode = 0;
+	uint32_t directReferenceMode = 1;
 	bool volumeHistory = true;
 	uint32_t dlrrMode = 1;
 	bool indirect = false;
@@ -147,8 +159,8 @@ struct NRISmokeSettings
 	uint32_t multipleScatterDebug = 0;
 	bool selfShadow = false;
 	uint32_t selfShadowDebug = 0;
-	uint32_t lightMode = 1;
-	uint32_t lightSamples = 1;
+	uint32_t lightMode = 3;
+	uint32_t lightSamples = 4;
 	uint32_t maxLightCandidates = 8;
 	bool filteredVisibility = true;
 	uint32_t debugMode = 0;
@@ -159,8 +171,9 @@ struct NRISmokeSettings
 	float densityScale = 5.0f;
 	float radianceScale = 1.0f;
 	float indirectScale = 1.0f;
-	uint32_t representation = 0;
+	uint32_t representation = 1;
 	uint32_t gridBrickCapacity = 512;
+	bool dormantGrid = true;
 	float gridCellSize = 8.0f;
 	float gridBuoyancy = 1.0f;
 	float gridVelocityDamping = 0.15f;

@@ -18,9 +18,21 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 	if (commandIndex >= min(gSmokeGridConstants.CommandCount, commandCapacity))
 		return;
 	const SmokeInjectionCommand command = gSmokeGridCommands[commandIndex];
+	if (SmokeInjectionPromptEligible(command))
+	{
+		const uint promptSlot = SmokeInjectionPromptSlot(command);
+		if (promptSlot >= NRI_SMOKE_PROMPT_FALLBACK_QUANTITY ||
+			gSmokePromptOutcomes[promptSlot].CommandIndex != commandIndex ||
+			gSmokePromptOutcomes[promptSlot].Outcome != NRI_SMOKE_PROMPT_OUTCOME_GRID_NEW)
+			return;
+	}
 	if (command.Epoch != gSmokeGridConstants.SimulationEpoch || command.StyleIndex >= min(gSmokeGridConstants.StyleCount, styleCapacity))
 		return;
 	const SmokeStyle style = gSmokeGridStyles[command.StyleIndex];
+	uint sourceCapacity, sourceStride;
+	gSmokeGridSourceStats.GetDimensions(sourceCapacity, sourceStride);
+	const bool sourceStatsValid = command.SourceSlot < sourceCapacity &&
+		gSmokeGridSourceStats[command.SourceSlot].SourceId == command.SourceId;
 	const float radius = min(max(max(command.SpawnRadius, style.Radius * command.RadiusScale), gSmokeGridConstants.CellSize),
 		gSmokeGridConstants.CellSize * 16.0);
 	float3 halfAxisU, halfAxisV;
@@ -32,7 +44,7 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 	if (!SmokeInjectionTraversalFits(extent, 262144u))
 		return;
 	const uint cellCount = extent.x * extent.y * extent.z;
-	const float commandMass = max(style.Density * command.DensityScale, 0.0) * (float)min(command.Count, 256u);
+	const float commandMass = max(style.Density * command.DensityScale, 0.0) * (float)min(command.RangeCount, 256u);
 	const float inverseCellSize = rcp(max(gSmokeGridConstants.CellSize, 0.0001));
 	const float radiusCells = radius * inverseCellSize;
 	const float halfUCells = length(halfAxisU) * inverseCellSize;
@@ -58,14 +70,20 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 		const float kernel = normalized * normalized * (3.0 - 2.0 * normalized);
 		if (kernel <= 0.0)
 			continue;
+		if (SmokeInjectionPromptEligible(command))
+			InterlockedAdd(gSmokePromptOutcomes[SmokeInjectionPromptSlot(command)].RequestedBricks, 1u);
 		const float mass = commandMass * kernel / kernelNormalization;
+		const uint massQ = (uint)max(SmokeGridQuantize(mass,
+			gSmokeGridConstants.MassQuantization), 0);
 		const int3 brickCoordinate = SmokeGridBrickCoordinate(cell);
 		uint brickIndex;
 		if (!SmokeGridLookupBrick(brickCoordinate, brickIndex))
 		{
 			InterlockedAdd(gSmokeGridControl[0].DepositionRejected, 1u);
 			InterlockedAdd(gSmokeGridControl[0].RejectedMassQ,
-				(uint)max(SmokeGridQuantize(mass, gSmokeGridConstants.MassQuantization), 0));
+				massQ);
+			if (sourceStatsValid)
+				InterlockedAdd(gSmokeGridSourceStats[command.SourceSlot].RejectedMassQ, massQ);
 			continue;
 		}
 		const uint cellIndex = SmokeGridCellIndex(brickIndex, SmokeGridLocalCoordinate(cell, brickCoordinate));
@@ -125,7 +143,14 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 		InterlockedAdd(gSmokeGridDeposit3[cellIndex].w, SmokeGridQuantize(mass *
 			max(abs(SmokeSourceFinite(style.TurbulenceScale, gSmokeGridConstants.CellSize)), 0.0001),
 			gSmokeGridConstants.MassQuantization), original);
-		InterlockedAdd(gSmokeGridControl[0].DepositedMassQ, (uint)max(SmokeGridQuantize(mass, gSmokeGridConstants.MassQuantization), 0));
+		InterlockedAdd(gSmokeGridControl[0].DepositedMassQ, massQ);
 		InterlockedAdd(gSmokeGridControl[0].DepositionCells, 1u);
+		if (sourceStatsValid)
+		{
+			InterlockedAdd(gSmokeGridSourceStats[command.SourceSlot].DepositedMassQ, massQ);
+			InterlockedAdd(gSmokeGridSourceStats[command.SourceSlot].DepositionCells, 1u);
+		}
+		if (SmokeInjectionPromptEligible(command))
+			InterlockedAdd(gSmokePromptOutcomes[SmokeInjectionPromptSlot(command)].AdmittedBricks, 1u);
 	}
 }

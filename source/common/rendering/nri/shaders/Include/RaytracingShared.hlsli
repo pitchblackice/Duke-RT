@@ -10,6 +10,9 @@ struct HitData
 	uint primitiveIndex;
 	uint portalIndex;
 	uint instanceId;
+#if defined(NRI_INDIRECT_RADIANCE_CACHE)
+	uint pathFlags;
+#endif
 	float2 barycentrics;
 	float distance;
 	float3 position;
@@ -25,6 +28,10 @@ static const uint PORTAL_TRAVERSAL_CLASS_NONE = 0u;
 static const uint PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
 static const uint PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
 static const uint PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
+#if defined(NRI_INDIRECT_RADIANCE_CACHE)
+static const uint HIT_PATH_FLAG_REFLECTION = 1u;
+static const uint HIT_PATH_FLAG_SPACE_TRANSFER = 2u;
+#endif
 static const float TRACE_MIN_DISTANCE = 1e-4;
 static const float TRACE_FILTER_CONTINUE_BIAS = 1e-6;
 static const uint TRACE_FILTER_SKIP_LIMIT = 64u;
@@ -751,16 +758,19 @@ float4 SampleSurfaceColorRaw(uint materialIndex, uint dataSource, float2 uv)
 bool IsTransparentSurfaceSample(uint materialIndex, uint dataSource, float2 uv)
 {
 	const MaterialData material = GetMaterialData(materialIndex, dataSource);
+	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;
+	// Ordinary indexed floors/walls are always opaque. Reject that common case
+	// before fetching a raw texel that cannot affect the result.
+	if (indexed && (material.flags & MATERIAL_FLAG_ALPHA_CLIP) == 0)
+	{
+		return false;
+	}
+
 	const float4 rawSample = SampleMaterialBaseColorRaw(materialIndex, dataSource, uv);
-	if ((material.flags & MATERIAL_FLAG_INDEXED) != 0)
+	if (indexed)
 	{
 		// In the paletted path, only explicitly alpha-clipped carriers treat
 		// color index 0 as transparent. Ordinary indexed floors/walls remain opaque.
-		if ((material.flags & MATERIAL_FLAG_ALPHA_CLIP) == 0)
-		{
-			return false;
-		}
-
 		const uint paletteIndex = (uint)round(saturate(rawSample.r) * 255.0);
 		return paletteIndex == 0u;
 	}
@@ -1088,6 +1098,18 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 			continue;
 		}
 
+		// Shadow visibility only needs to know that this committed material does
+		// not block light. Reject it before barycentric/UV and alpha-sample work.
+		if (ignoreNoShadowCast && !MaterialCastsShadow(GetMaterialData(materialIndex, instanceData.dataSource)))
+		{
+			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
+			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
+			TraceShaderStatAdd(TRACE_STAT_REJECT_NO_SHADOW, 1u);
+			TraceShaderStatSource(TRACE_STAT_REJECT_STATIC, TRACE_STAT_REJECT_DYNAMIC, TRACE_STAT_REJECT_VOXEL, instanceData.dataSource);
+			accumulatedDistance = committedDistance;
+			continue;
+		}
+
 		const float2 bary = rayQuery.CommittedTriangleBarycentrics();
 		const float3 weights = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
 		const float2 uv = primitive.uv0 * weights.x + primitive.uv1 * weights.y + primitive.uv2 * weights.z;
@@ -1096,16 +1118,6 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
 			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
 			TraceShaderStatAdd(TRACE_STAT_REJECT_TRANSPARENT, 1u);
-			TraceShaderStatSource(TRACE_STAT_REJECT_STATIC, TRACE_STAT_REJECT_DYNAMIC, TRACE_STAT_REJECT_VOXEL, instanceData.dataSource);
-			accumulatedDistance = committedDistance;
-			continue;
-		}
-
-		if (ignoreNoShadowCast && !MaterialCastsShadow(GetMaterialData(materialIndex, instanceData.dataSource)))
-		{
-			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
-			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
-			TraceShaderStatAdd(TRACE_STAT_REJECT_NO_SHADOW, 1u);
 			TraceShaderStatSource(TRACE_STAT_REJECT_STATIC, TRACE_STAT_REJECT_DYNAMIC, TRACE_STAT_REJECT_VOXEL, instanceData.dataSource);
 			accumulatedDistance = committedDistance;
 			continue;
@@ -1139,6 +1151,9 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 	float3 origin = startOrigin;
 	float3 direction = startDirection;
 	float remainingDistance = maxDistance;
+#if defined(NRI_INDIRECT_RADIANCE_CACHE)
+	uint pathFlags = 0u;
+#endif
 
 	[loop]
 	for (uint continuationStep = 0u; continuationStep < 32u; ++continuationStep)
@@ -1156,6 +1171,9 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 
 		if (reflectivePortal && mirrorBudget > 0u)
 		{
+#if defined(NRI_INDIRECT_RADIANCE_CACHE)
+			pathFlags |= HIT_PATH_FLAG_REFLECTION;
+#endif
 			remainingDistance = max(remainingDistance - hitData.distance, 0.0);
 			origin = hitData.position + hitData.normal * 0.05;
 			direction = reflect(direction, hitData.normal);
@@ -1169,6 +1187,9 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 
 		if (transferPortal && portalBudget > 0u)
 		{
+#if defined(NRI_INDIRECT_RADIANCE_CACHE)
+			pathFlags |= HIT_PATH_FLAG_SPACE_TRANSFER;
+#endif
 			remainingDistance = max(remainingDistance - hitData.distance, 0.0);
 			origin = hitData.position + direction * 0.05 + portalData.delta;
 			exitDirection = direction;
@@ -1177,6 +1198,9 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 			continue;
 		}
 
+#if defined(NRI_INDIRECT_RADIANCE_CACHE)
+		hitData.pathFlags = pathFlags;
+#endif
 		exitDirection = direction;
 		return true;
 	}

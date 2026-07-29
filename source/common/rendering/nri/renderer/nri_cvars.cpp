@@ -210,6 +210,8 @@ CVAR(Bool, nri_ptscenedataring, true, 0)
 CVAR(Bool, nri_ptscenedataringtrace, false, 0)
 
 CVAR(Bool, nri_ptemissivestabilitytrace, false, 0)
+CVAR(Bool, nri_ptindirectradiancecache, false, 0)
+CVAR(Bool, nri_ptindirectradiancecacheaccept, false, 0)
 
 CVAR(Bool, nri_ptwaitpresent, true, 0)
 
@@ -304,7 +306,7 @@ CUSTOM_CVAR(Int, nri_ptswapflags, -1, 0)
 
 // Moved from source/common/rendering/nri/scene/nri_portal_bridge.cpp
 
-CVAR(Int, nri_ptportaldepth, 6, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptportaldepth, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CUSTOM_CVAR(Int, nri_ptscenedataringmaxbytes, 0, 0)
 {
@@ -383,6 +385,8 @@ CVAR(Bool, nri_ptvoxelcomputepreloadstrict, false, 0)
 
 CVAR(String, nri_ptvoxelcomputepreloadterminalcommand, "", 0)
 
+CVAR(String, nri_ptvoxelcomputepreloadreleasecommand, "", 0)
+
 CVAR(Bool, nri_ptvoxelcomputepreloadbalancedoptional, false, 0)
 
 CVAR(Int, nri_ptvoxelcomputepreloadbalancedmaxpriority, 1, 0)
@@ -415,7 +419,7 @@ CVAR(Int, nri_ptvoxelcomputepreloadpeakpercent, 175, 0)
 
 CVAR(Int, nri_ptvoxelcomputepreloadminreservemb, 1024, 0)
 
-CVAR(Int, nri_ptvoxelblaspolicy, 0, 0)
+CVAR(Int, nri_ptvoxelblaspolicy, 3, 0)
 
 CVAR(Bool, nri_ptvoxelarenapresize, false, 0)
 
@@ -822,6 +826,7 @@ CUSTOM_CVAR(Bool, nri_ptsmoke, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		: "";
 }
 CVAR(Int, nri_ptsmokequality, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptsmokeworkprofile, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsmokeparticles, 8192, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsmokefroxelpixels, 16, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsmokefroxelz, 48, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -846,6 +851,10 @@ CVAR(Int, nri_ptsmokeemissivebackend, 2, 0)
 CVAR(Bool, nri_ptsmokeemissiveworldfilter, false, 0)
 CVAR(Bool, nri_ptsmokeemissivelocal, true, 0)
 CVAR(Int, nri_ptsmokeemissiveworlddebug, 0, 0)
+CVAR(Int, nri_ptsmokeworldpartitions, 1, 0)
+CVAR(Int, nri_ptsmokeworldnewcells, 8192, 0)
+CVAR(Int, nri_ptsmokeworldmaintenancecells, 32768, 0)
+CVAR(Int, nri_ptsmokeworldradiancemaxage, 16, 0)
 CVAR(Bool, nri_ptsmokeemissivelegacygatherdisable, false, 0)
 CVAR(Bool, nri_ptsmokeemissivequarterkey, false, 0)
 CVAR(Float, nri_ptsmokeemissiveclamp, 32.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -868,9 +877,12 @@ CVAR(Bool, nri_ptsmokefilteredvisibility, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG
 CVAR(Int, nri_ptsmokedebug, 0, 0)
 CVAR(Int, nri_ptsmoketrace, 0, 0)
 CVAR(Bool, nri_ptsmokereadback, false, 0)
+CVAR(Bool, nri_ptsmokeviewcompare, false, 0)
+CVAR(Int, nri_ptsmokeviewroute, 0, 0)
 CVAR(Float, nri_ptsmokeindirectscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsmokerepresentation, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsmokegridbricks, 512, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptsmokedormantgrid, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsmokegridcellsize, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsmokegridbuoyancy, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsmokegridvelocitydamping, 0.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -1320,9 +1332,9 @@ CUSTOM_CVAR(Float, nri_ptanalyticsoftshadowradius, 4.0f, 0)
 	NotifyActiveAnalyticLightSettingsChange();
 }
 
-CVAR(Int, nri_ptlightbounces, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptlightbounces, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_ptmirrorbounces, 8, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptmirrorbounces, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -1463,7 +1475,7 @@ CVAR(Bool, nri_ptemissivetlas, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, nri_ptemissivefastshadow, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_ptemissivesamples, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptemissivesamples, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 // Session-only policy: 0 preserves the requested count; 1..4 cap only the primary direct loop.
 CUSTOM_CVAR(Int, nri_ptemissiveprimarybudget, 2, 0)
@@ -1664,6 +1676,14 @@ CVAR(Bool, nri_ptvoxelsharedblasloading, false, 0)
 
 CVAR(Bool, nri_ptvoxelsharedblasroute, false, 0)
 
+CVAR(Bool, nri_ptvoxelshadowproxybuild, false, 0)
+
+CVAR(Bool, nri_ptvoxelshadowproxyroute, false, 0)
+
+CVAR(Int, nri_ptvoxelshadowproxybuilds, 1, 0)
+
+CVAR(Int, nri_ptvoxelshadowproxytransitions, 8, 0)
+
 CVAR(Int, nri_ptvoxelexcludeindex, -1, 0)
 
 CVAR(Int, nri_ptvoxelexcludeindex2, -1, 0)
@@ -1671,6 +1691,8 @@ CVAR(Int, nri_ptvoxelexcludeindex2, -1, 0)
 CVAR(Int, nri_ptvoxelexcludeindex3, -1, 0)
 
 CVAR(Int, nri_ptvoxelexcludeminprims, 0, 0)
+
+CVAR(Bool, nri_ptvoxelomitoccurrences, false, 0)
 
 CVAR(Bool, nri_ptruntimeworklist, true, 0)
 

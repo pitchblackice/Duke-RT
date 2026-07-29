@@ -59,7 +59,7 @@ Current parser fields by block:
 - `smokeactorrule`
   `actorclass`, `ownerclass`, `excludeownerclass`, `trigger`, `activation`, `emitterforeground`, `style`, `count`, `offset`, `spawnradius`, `densityscale`, `radiusscale`, `velocitycone`, `velocityscale`, `intervalseconds`, `starttime`, `startdistance`, `spacing`, `maxsegmentsperframe`
 - `smokeeventrule`
-  `style`, `count`, `offset`, `spawnradius`, `densityscale`, `radiusscale`, `velocitycone`, `velocityscale`, `normaloffset`, `direction`
+  `style`, `count`, `offset`, `offsetrandom`, `spawnradius`, `densityscale`, `radiusscale`, `velocitycone`, `velocityscale`, `normaloffset`, `direction`
 - `smokeemitter`
   `style`, `position`, `normal`, `size`, `rotation`, `offset`, `count`, `intervalseconds`, `spawnradius`, `densityscale`, `radiusscale`, `velocityscale`, `velocitycone`, `maxsegmentsperframe`
 - `directional`
@@ -234,6 +234,17 @@ Smoke requires the NRI/PT renderer and `nri_ptsmoke true`. The same setting is e
 
 The source rule controls **where, when, and how much** smoke is injected. The style controls **what that smoke looks like and how it moves or dissipates after injection**. Reusing one style across several source rules keeps their appearance consistent while allowing each source to have different offsets, cadence, density scaling, and radius scaling.
 
+Actor and event rules also own representation and responsiveness policy:
+
+| Field | Default and accepted values | Effect |
+| --- | --- | --- |
+| `representation <mode>` | `grid`; `grid` or `analytic` | `grid` routes the emission through sparse-grid admission, simulation, and the grid's recovery path. `analytic` selects the dedicated ungridded carrier path for short-lived effects. Omitting the field preserves existing grid behavior. |
+| `queuepolicy <mode>` | `retry`; `retry`, `drop`, or `latest` | Controls what happens when the selected representation cannot accept the emission immediately. `retry` retains existing grid work, `drop` discards work that cannot be presented promptly, and `latest` keeps only the newest work for a stable source. Analytic one-shot effects should use `drop`; they must not use delayed replay. |
+| `maxlatencyseconds <seconds>` | omitted; minimum `0` | Optional maximum gameplay/presentation age at first publication. Work older than the bound is discarded instead of appearing belatedly. This clock is independent of smoke simulation debt. Omitting the field leaves the current representation's existing latency behavior unchanged. |
+| `analyticcarriers <count>` | `1`; `1` through `8` | Fixed carrier quantity for each analytic emission. Authored particle mass is divided exactly across the carriers; the quantity does not vary with frame time or available GPU headroom. Use multiple carriers to avoid collapsing a broad impact into one opaque kernel. |
+
+Representation is source policy rather than style policy. A style can therefore be reused by grid and analytic rules, but their motion is not identical: grid smoke receives deposition, neighbor transport, thermal buoyancy, and grid turbulence, while analytic smoke uses closed-form carrier expansion, fading, and motion. Prefer analytic representation for immediate, short-lived muzzle or impact feedback; use grid representation for persistent plumes, trails, and fire whose transport matters.
+
 ### Minimal Actor Smoke Example
 
 This example creates a reusable fire-smoke style and emits it continuously from a visible `DukeFire` actor:
@@ -332,6 +343,9 @@ Opacity is approximately driven by `density × densityscale × count × extincti
 | `trigger <mode>` | `spawn`; `spawn` or `interval` | `spawn` emits once when eligible. `interval` emits once when eligible and then continues using spatial or timed cadence. |
 | `activation <mode>` | `immediate`; `immediate` or `surface` | `immediate` starts when the live actor/rule is first observed. `surface` waits until renderer appearance evidence exists, then latches; use it for hidden or scripted fire actors. |
 | `emitterforeground <state>` | `off`; `on` or `off` | With `on`, matching actor sprite/voxel pixels remain in front of smoke. This is a coarse actor mask: it suppresses **all** smoke at those pixels, not only smoke from this source. |
+| `representation <mode>` | `grid`; `grid` or `analytic` | Selects the source representation described above. |
+| `queuepolicy <mode>` | `retry`; `retry`, `drop`, or `latest` | Selects overload handling described above. |
+| `maxlatencyseconds <seconds>` | Omitted; minimum `0` | Optional first-publication freshness bound in gameplay/presentation time. |
 | `style <id>` | Empty; a resolvable style is required | `smokestyle` used by emitted commands. An unresolved reference makes the rule inert. |
 | `count <integer>` | `1`; `[1,256]` | Particle carriers per source in particle mode; deposited-mass multiplier in grid mode. This is a strong source-density control and directly affects compatibility-mode particle work. |
 | `offset <x> <y> <z>` | `0 0 0` | Actor-local right, forward, and Build/world-Z offset. Negative Z moves visually upward; positive Z moves downward. |
@@ -366,8 +380,12 @@ Thermal buoyancy and turbulence then continue to modify the field while drag dam
 | Field | Default and accepted values | Effect |
 | --- | --- | --- |
 | `style <id>` | Empty; a resolvable style is required | Smoke style emitted by the event. |
+| `representation <mode>` | `grid`; `grid` or `analytic` | Selects the source representation described above. |
+| `queuepolicy <mode>` | `retry`; `retry`, `drop`, or `latest` | Selects overload handling described above. Analytic impacts and muzzle puffs normally use `drop`. |
+| `maxlatencyseconds <seconds>` | Omitted; minimum `0` | Optional first-publication freshness bound in gameplay/presentation time. |
 | `count <integer>` | `1`; `[1,256]` | Particle count or grid deposited-mass multiplier, as described for actor rules. |
 | `offset <x> <y> <z>` | `0 0 0` | Event-local right, forward, and producer-supplied third-basis offset. Current Duke weapon producers use positive Build Z for that third vector at level aim, so a negative third offset moves visually upward. With no basis, this offset is ignored. |
+| `offsetrandom <right> <forward> <up>` | `0 0 0`; each component is finite and nonnegative | Per-event local-axis jitter half-extents added to `offset`. Each event deterministically samples right, forward, and up within the corresponding `[-extent,+extent]` interval. One sampled origin is shared by the complete event rather than changing per frame; zero leaves the fixed offset unchanged. With no producer basis, this jitter is ignored. |
 | `spawnradius <units>` | `0`, minimum `0` | Initial event-source spread/support. |
 | `densityscale <scale>` | `1`, minimum `0` | Per-event multiplier on style density/mass. |
 | `radiusscale <scale>` | `1`, minimum `0` | Per-event multiplier on style radius. |

@@ -459,6 +459,24 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		mWeaponEventBatch.Capture(*mFrameBuffer, mFrameIndex);
 	}
 	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
+	mLastPerfShellTraceStats.traceVoxelOccurrenceControl = persistentVoxelSettings.omitTlasOccurrences ? 1u : 0u;
+	if (!inputs.preserveHistory)
+	{
+		NRIVoxelRepresentationFrameInput voxelRepresentationFrame = {};
+		voxelRepresentationFrame.mapBuildSerial = mMapWorld.valid ? mMapWorld.buildSerial : 0ull;
+		voxelRepresentationFrame.frameIndex = mFrameIndex;
+		voxelRepresentationFrame.renderWidth = mRenderWidth;
+		voxelRepresentationFrame.renderHeight = mRenderHeight;
+		voxelRepresentationFrame.cameraPosition = { mCurrentCameraPos[0], mCurrentCameraPos[1], mCurrentCameraPos[2] };
+		voxelRepresentationFrame.cameraForward = { mCurrentCameraForward[0], mCurrentCameraForward[1], mCurrentCameraForward[2] };
+		voxelRepresentationFrame.cameraRight = { mCurrentCameraRight[0], mCurrentCameraRight[1], mCurrentCameraRight[2] };
+		voxelRepresentationFrame.cameraUp = { mCurrentCameraUp[0], mCurrentCameraUp[1], mCurrentCameraUp[2] };
+		voxelRepresentationFrame.tanHalfFovX = mCurrentTanHalfFovX;
+		voxelRepresentationFrame.tanHalfFovY = mCurrentTanHalfFovY;
+		voxelRepresentationFrame.shadowProxyRouteEnabled = persistentVoxelSettings.shadowProxyRouteEnabled;
+		voxelRepresentationFrame.shadowProxyTransitionsPerFrame = persistentVoxelSettings.shadowProxyTransitionsPerFrame;
+		mVoxelRepresentationPolicy.BeginFrame(voxelRepresentationFrame);
+	}
 	const bool allowStaticMapScene = !bootstrapCapturedView && !rawTraceDirectScene && mMapWorld.valid;
 	nri_scene::SceneView& capturedSceneView = frame.capturedSceneView;
 	nri_scene::SceneView& dynamicSceneView = frame.dynamicSceneView;
@@ -1356,6 +1374,13 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 								renderer->mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*resource.accelerationStructure) :
 								0ull;
 						};
+						if (!inputs.preserveHistory)
+						{
+							persistentVoxelTlasServices.evaluateRepresentation = [](void* user, const NRIVoxelRepresentationFacts& facts) -> NRIVoxelRepresentationDecision
+							{
+								return static_cast<NRIRenderer*>(user)->mVoxelRepresentationPolicy.EvaluateExact(facts);
+							};
+						}
 						NRIPersistentVoxelTlasBuildStats persistentVoxelTlasStats = {};
 						if (!mPersistentVoxels.AppendTlasInstances(
 							instances,
@@ -1371,6 +1396,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						}
 						mLastPerfShellTraceStats.persistentVoxelSharedMeshResources = persistentVoxelTlasStats.sharedMeshResourceCount;
 						mLastPerfShellTraceStats.persistentVoxelTlasInstances += persistentVoxelTlasStats.instanceCount;
+						mLastPerfShellTraceStats.persistentVoxelInstancePrimitiveCount = persistentVoxelTlasStats.instancePrimitiveCount;
 						mLastPerfShellTraceStats.persistentVoxelBakedFallbackInstances += persistentVoxelTlasStats.bakedFallbackInstanceCount;
 					}
 

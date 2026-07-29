@@ -19,6 +19,7 @@ class NRIPreloadCoordinator
 {
 public:
 	static bool Run(NRIRenderer& renderer, const NRIPreloadLevelSceneInputs& inputs);
+	static void QueueStrictPreloadFirstFrameReleaseCommand(NRIRenderer& renderer);
 
 private:
 	struct Context

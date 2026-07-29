@@ -107,6 +107,152 @@ bool NRIPipelineStateManager::CreatePipelineLayout(NRIRenderer& renderer)
 	return renderer.mFrameBuffer->mCore.CreatePipelineLayout(*renderer.mFrameBuffer->mDevice, desc, renderer.mPipelineLayout) == nri::Result::SUCCESS;
 }
 
+bool NRIPipelineStateManager::EnsureIndirectRadianceCachePipeline(NRIRenderer& renderer)
+{
+	if (renderer.mFrameBuffer == nullptr || renderer.mFrameBuffer->mDevice == nullptr)
+	{
+		return false;
+	}
+	if (renderer.mPipelines[(size_t)NRIRenderer::PipelineSlot::TraceOpaqueCache] != nullptr)
+	{
+		return true;
+	}
+
+	// Keep this layout separate from the ordinary TraceOpaque layout so the
+	// default-disabled route retains its existing descriptor contract.
+	nri::DescriptorRangeDesc samplerRange = {};
+	samplerRange.baseRegisterIndex = 0;
+	samplerRange.descriptorNum = NRI_SAMPLER_DESCRIPTOR_NUM;
+	samplerRange.descriptorType = nri::DescriptorType::SAMPLER;
+	samplerRange.shaderStages = PipelineComputeStage();
+
+	nri::DescriptorRangeDesc sceneTextureRange = {};
+	sceneTextureRange.baseRegisterIndex = 0;
+	sceneTextureRange.descriptorNum = NRI_SCENE_DESCRIPTOR_NUM;
+	sceneTextureRange.descriptorType = nri::DescriptorType::TEXTURE;
+	sceneTextureRange.shaderStages = PipelineComputeStage();
+	sceneTextureRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+
+	nri::DescriptorRangeDesc sceneDataRange = {};
+	sceneDataRange.baseRegisterIndex = 0;
+	sceneDataRange.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
+	sceneDataRange.descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
+	sceneDataRange.shaderStages = PipelineComputeStage();
+	sceneDataRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+
+	nri::DescriptorRangeDesc inputRange = {};
+	inputRange.baseRegisterIndex = 0;
+	inputRange.descriptorNum = NRI_INPUT_DESCRIPTOR_NUM;
+	inputRange.descriptorType = nri::DescriptorType::TEXTURE;
+	inputRange.shaderStages = PipelineComputeStage();
+	inputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+
+	nri::DescriptorRangeDesc outputRange = {};
+	outputRange.baseRegisterIndex = 0;
+	outputRange.descriptorNum = NRI_OUTPUT_DESCRIPTOR_NUM;
+	outputRange.descriptorType = nri::DescriptorType::STORAGE_TEXTURE;
+	outputRange.shaderStages = PipelineComputeStage();
+	outputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+
+	nri::DescriptorRangeDesc traceStatsRange = {};
+	traceStatsRange.baseRegisterIndex = NRI_OUTPUT_DESCRIPTOR_NUM;
+	traceStatsRange.descriptorNum = NRI_TRACE_SHADER_STATS_DESCRIPTOR_NUM;
+	traceStatsRange.descriptorType = nri::DescriptorType::STORAGE_STRUCTURED_BUFFER;
+	traceStatsRange.shaderStages = PipelineComputeStage();
+	traceStatsRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+
+	nri::DescriptorRangeDesc cacheRange = {};
+	cacheRange.baseRegisterIndex = 0;
+	cacheRange.descriptorNum = NRI_INDIRECT_RADIANCE_CACHE_DESCRIPTOR_NUM;
+	cacheRange.descriptorType = nri::DescriptorType::STORAGE_STRUCTURED_BUFFER;
+	cacheRange.shaderStages = PipelineComputeStage();
+
+	nri::DescriptorRangeDesc outputRanges[2] = { outputRange, traceStatsRange };
+	nri::DescriptorSetDesc descriptorSets[6] = {};
+	descriptorSets[0].registerSpace = 0;
+	descriptorSets[0].ranges = &samplerRange;
+	descriptorSets[0].rangeNum = 1;
+	descriptorSets[1].registerSpace = 1;
+	descriptorSets[1].ranges = &sceneTextureRange;
+	descriptorSets[1].rangeNum = 1;
+	descriptorSets[1].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
+	descriptorSets[2].registerSpace = 2;
+	descriptorSets[2].ranges = &sceneDataRange;
+	descriptorSets[2].rangeNum = 1;
+	descriptorSets[2].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
+	descriptorSets[3].registerSpace = 3;
+	descriptorSets[3].ranges = &inputRange;
+	descriptorSets[3].rangeNum = 1;
+	descriptorSets[3].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
+	descriptorSets[4].registerSpace = 4;
+	descriptorSets[4].ranges = outputRanges;
+	descriptorSets[4].rangeNum = (uint32_t)std::size(outputRanges);
+	descriptorSets[4].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
+	descriptorSets[NRI_INDIRECT_RADIANCE_CACHE_SET_INDEX].registerSpace = NRI_INDIRECT_RADIANCE_CACHE_REGISTER_SPACE;
+	descriptorSets[NRI_INDIRECT_RADIANCE_CACHE_SET_INDEX].ranges = &cacheRange;
+	descriptorSets[NRI_INDIRECT_RADIANCE_CACHE_SET_INDEX].rangeNum = 1;
+
+	nri::RootConstantDesc rootConstant = {};
+	rootConstant.registerIndex = 0;
+	rootConstant.size = sizeof(NRITraceSceneConstants);
+	rootConstant.shaderStages = PipelineComputeStage();
+
+	nri::RootDescriptorDesc rootDescriptor = {};
+	rootDescriptor.registerIndex = 0;
+	rootDescriptor.shaderStages = PipelineComputeStage();
+	rootDescriptor.descriptorType = nri::DescriptorType::ACCELERATION_STRUCTURE;
+
+	nri::PipelineLayoutDesc desc = {};
+	desc.rootRegisterSpace = 5;
+	desc.rootConstants = &rootConstant;
+	desc.rootConstantNum = 1;
+	desc.rootDescriptors = &rootDescriptor;
+	desc.rootDescriptorNum = 1;
+	desc.descriptorSets = descriptorSets;
+	desc.descriptorSetNum = (uint32_t)std::size(descriptorSets);
+	desc.shaderStages = PipelineComputeStage();
+
+	if (renderer.mIndirectRadianceCachePipelineLayout == nullptr &&
+		renderer.mFrameBuffer->mCore.CreatePipelineLayout(
+			*renderer.mFrameBuffer->mDevice,
+			desc,
+			renderer.mIndirectRadianceCachePipelineLayout) != nri::Result::SUCCESS)
+	{
+		return false;
+	}
+
+	const bool d3d12 = renderer.mFrameBuffer->GetSelectedAPI() == nri::GraphicsAPI::D3D12;
+	const std::string fileName = std::string("TraceOpaqueCache.cs.") + (d3d12 ? "dxil" : "spirv");
+	std::vector<uint8_t> shaderBlob;
+	if (!renderer.mFrameBuffer->LoadShaderBlob(fileName.c_str(), shaderBlob))
+	{
+		Printf("NRI PT pipeline create failed: shader=%s reason=load\n", fileName.c_str());
+		return false;
+	}
+
+	nri::ShaderDesc shader = {};
+	shader.stage = nri::StageBits::COMPUTE_SHADER;
+	shader.bytecode = shaderBlob.data();
+	shader.size = shaderBlob.size();
+	shader.entryPointName = "main";
+	nri::ComputePipelineDesc pipeline = {};
+	pipeline.pipelineLayout = renderer.mIndirectRadianceCachePipelineLayout;
+	pipeline.shader = shader;
+	const nri::Result result = renderer.mFrameBuffer->mCore.CreateComputePipeline(
+		*renderer.mFrameBuffer->mDevice,
+		pipeline,
+		renderer.mPipelines[(size_t)NRIRenderer::PipelineSlot::TraceOpaqueCache]);
+	if (result != nri::Result::SUCCESS)
+	{
+		Printf("NRI PT pipeline create failed: shader=%s slot=%u result=%d\n",
+			fileName.c_str(),
+			(unsigned)NRIRenderer::PipelineSlot::TraceOpaqueCache,
+			(int)result);
+		return false;
+	}
+	return true;
+}
+
 bool NRIPipelineStateManager::CreateTaaPipelineLayout(NRIRenderer& renderer)
 {
 	nri::DescriptorRangeDesc inputRange = {};

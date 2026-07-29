@@ -43,6 +43,25 @@ namespace
 		return !!nri_ptshaderstats && ShouldTracePtPerf();
 	}
 
+	static NRITraceShaderStatsFenceServices BuildTraceShaderStatsFenceServices(NRIRenderDevice* device)
+	{
+		NRITraceShaderStatsFenceServices services = {};
+		services.user = device;
+		services.getRecordingCommandFenceValue = [](void* user) -> uint64_t
+		{
+			return user != nullptr ? static_cast<NRIRenderDevice*>(user)->GetRecordingCommandFenceValue() : 0;
+		};
+		services.isCommandFenceValueComplete = [](void* user, uint64_t fenceValue) -> bool
+		{
+			return user != nullptr && static_cast<NRIRenderDevice*>(user)->IsCommandFenceValueComplete(fenceValue);
+		};
+		services.isCommandFenceValueAbandoned = [](void* user, uint64_t fenceValue) -> bool
+		{
+			return user != nullptr && static_cast<NRIRenderDevice*>(user)->IsCommandFenceValueAbandoned(fenceValue);
+		};
+		return services;
+	}
+
 	class ScopedPtPerfTimer
 	{
 	public:
@@ -389,19 +408,39 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	ScopedPtPerfTimer traceOpaqueTimer(context.mLastPerfShellTraceStats.traceOpaqueMs);
 	{
 		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueReadbackMs);
-		NRITraceShaderStatsReadbackInput input = {};
-		input.enabled = (bool)nri_ptshaderstats;
-		input.boundSceneInstances = &context.mBoundSceneInstances;
-		input.staticPrimitiveCount = context.mSceneStats.staticPrimitiveCount;
-		input.dynamicPrimitiveCount = context.mSceneStats.dynamicPrimitiveCount;
-		input.persistentVoxelPrimitiveCount = context.mPersistentVoxels.BoundPrimitiveCount();
-		input.user = &context;
-		input.estimatePersistentVoxelPrimitiveCount = [](void* user, uint32_t primitiveOffset) -> uint32_t
-		{
-			return static_cast<NRIPassDispatchContext*>(user)->mPersistentVoxels.EstimatePrimitiveCountForInstanceOffset(primitiveOffset);
-		};
-		context.mTraceShaderStats.Readback(context.mResources.BuildResourceServices(), input, context.mLastPerfTraceShaderStats);
+		context.mTraceShaderStats.Readback(
+			context.mResources.BuildResourceServices(),
+			ShouldCollectTraceShaderStats(),
+			BuildTraceShaderStatsFenceServices(context.mResources.frameBuffer),
+			context.mLastPerfTraceShaderStats);
 		context.mExposureService.ReadbackAutoExposureStats();
+		context.mIndirectRadianceCacheService.ReadbackTelemetry(!!nri_ptindirectradiancecache);
+	}
+	if (ShouldTracePtPerf())
+	{
+		const NRIIndirectRadianceCacheTelemetrySnapshot& cache = context.mIndirectRadianceCacheService.GetTelemetry();
+		const bool cacheAcceptRequested = (bool)nri_ptindirectradiancecache && (bool)nri_ptindirectradiancecacheaccept;
+		Printf("PERF pt indirect radiance cache NRI: frame=%u requested=%u accept_requested=%u mode=%s valid=%u telemetry_frame=%llu lookups=%llu accepted=%llu forced_miss=%llu collision=%llu stale=%llu unsupported=%llu exact_fallback=%llu occupancy=%llu updates=%llu clears=%llu table_bytes=%llu total_bytes=%llu invalidation=0x%x pending_readbacks=%u\n",
+			context.mFrame.frameIndex,
+			(bool)nri_ptindirectradiancecache ? 1u : 0u,
+			cacheAcceptRequested ? 1u : 0u,
+			cacheAcceptRequested ? "age-one" : "exact-miss",
+			cache.valid ? 1u : 0u,
+			(unsigned long long)cache.frameNumber,
+			(unsigned long long)cache.lookupCount,
+			(unsigned long long)cache.acceptedHitCount,
+			(unsigned long long)cache.forcedMissCount,
+			(unsigned long long)cache.collisionCount,
+			(unsigned long long)cache.staleGenerationCount,
+			(unsigned long long)cache.unsupportedRouteCount,
+			(unsigned long long)cache.exactFallbackCount,
+			(unsigned long long)cache.occupancy,
+			(unsigned long long)cache.updateCount,
+			(unsigned long long)cache.clearCount,
+			(unsigned long long)cache.tableMemoryBytes,
+			(unsigned long long)cache.totalMemoryBytes,
+			cache.invalidationMask,
+			cache.pendingReadbacks);
 	}
 
 	if (!context.mResources.UpdateReprojectionBuffer())
@@ -424,6 +463,24 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	context.mActiveIndirectSamplingMode =
 		context.mEffectiveIndirectSamplingMode != 0u &&
 		!context.mFrame.resetHistory ? 1u : 0u;
+	const bool indirectRadianceCacheRequested =
+		(bool)nri_ptindirectradiancecache &&
+		bootstrapMode == 0u &&
+		!directSceneTrace &&
+		traceSettings.lightBounceCount > 1u;
+	NRIIndirectRadianceCachePrepareResult indirectRadianceCache =
+		context.mIndirectRadianceCacheService.Prepare(indirectRadianceCacheRequested);
+	bool indirectRadianceCacheActive = indirectRadianceCache.active;
+	if (indirectRadianceCacheActive && !context.mIndirectRadianceCacheService.RecordPendingClear())
+	{
+		indirectRadianceCacheActive = false;
+	}
+	const bool indirectRadianceCacheAccept =
+		indirectRadianceCacheActive &&
+		(bool)nri_ptindirectradiancecacheaccept &&
+		indirectRadianceCache.invalidationMask == NRI_INDIRECT_RADIANCE_CACHE_INVALID_NONE &&
+		!indirectRadianceCache.clearRequired &&
+		!context.mFrame.resetHistory;
 	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars(context.mEffectiveIndirectSamplingMode);
 	const bool useTemporalJitter =
 		!nri_ptbootstrap &&
@@ -460,6 +517,8 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		(nri_ptvisiblechunkgate ? NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS : 0u) |
 		(ShouldCollectTraceShaderStats() ? NRI_FLAG_TRACE_SHADER_STATS : 0u) |
 		(context.mActiveIndirectSamplingMode != 0u ? NRI_FLAG_PROBABILISTIC_INDIRECT : 0u) |
+		(indirectRadianceCacheActive ? NRI_FLAG_INDIRECT_RADIANCE_CACHE : 0u) |
+		(indirectRadianceCacheAccept ? NRI_FLAG_INDIRECT_RADIANCE_CACHE_ACCEPT : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u) |
 		NRIPackTemporalJitterPhaseCount(jitterPhaseCount) |
 		PackVoxelNormalBlend8(nri_ptvoxelnormalblend);
@@ -520,7 +579,13 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	context.mOutputDescriptors[14] = context.mTextures.Get(NRIRenderer::FrameTextureSlot::DirectEmission).storageView;
 	context.mDescriptors.UpdateOutputSet();
 
-	context.mCommands.SetPipelineLayout(context.mPipelineLayout);
+	const nri::PipelineLayout* tracePipelineLayout = indirectRadianceCacheActive ?
+		context.mPipelines.GetIndirectRadianceCachePipelineLayout() : context.mPipelineLayout;
+	if (tracePipelineLayout == nullptr)
+	{
+		return false;
+	}
+	context.mCommands.SetPipelineLayout(const_cast<nri::PipelineLayout*>(tracePipelineLayout));
 	context.mCommands.SetRootConstants(&constants, sizeof(constants));
 	context.mSceneBinding.BindSceneRootDescriptors();
 	context.mCommands.SetDescriptorSet(0, context.mSamplerSet);
@@ -528,6 +593,10 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	context.mCommands.SetDescriptorSet(2, context.mSceneBinding.GetCurrentSceneDataSet());
 	context.mCommands.SetDescriptorSet(3, context.mFrameTextureSet);
 	context.mCommands.SetDescriptorSet(4, context.mOutputSet);
+	if (indirectRadianceCacheActive)
+	{
+		context.mCommands.SetDescriptorSet(NRI_INDIRECT_RADIANCE_CACHE_SET_INDEX, indirectRadianceCache.descriptorSet);
+	}
 	const uint32_t dispatchX = GetDispatchSize(context.mFrame.renderWidth);
 	const uint32_t dispatchY = GetDispatchSize(context.mFrame.renderHeight);
 	const uint32_t dispatchZ = 1;
@@ -592,7 +661,8 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		constants.StaticMaterialCount, constants.DynamicMaterialCount, constants.PortalCount,
 		constants.RuntimeLightCount, context.mSceneStats.runtimeLightTileSize,
 		context.mSceneStats.runtimeLightTileIndexCount, context.mSceneStats.runtimeLightMaxTileOccupancy,
-		context.mSceneStats.emissivePrimitiveCount, (uint32_t)resolvedMainUpscaler, (uint32_t)resolvedUpscalerMode
+		context.mSceneStats.emissivePrimitiveCount, (uint32_t)resolvedMainUpscaler, (uint32_t)resolvedUpscalerMode,
+		tracePerf.traceVoxelOccurrenceControl
 	};
 	for (uint64_t value : workloadValues) workloadKey = AppendTraceWorkloadHash(workloadKey, value);
 	uint32_t emissivePowerBits = 0;
@@ -603,7 +673,8 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueCommandMs);
 		context.mTraceShaderStats.ResetBuffer(context.mResources.BuildResourceServices(), ShouldCollectTraceShaderStats());
 		context.mCommands.core->CmdBeginAnnotation(*context.mCommands.commandBuffer, "Raze.TraceOpaque.Dispatch", nri::BGRA_UNUSED);
-		context.mCommands.SetPipeline(context.mPipelines.Get(NRIRenderer::PipelineSlot::TraceOpaque));
+		context.mCommands.SetPipeline(context.mPipelines.Get(
+			indirectRadianceCacheActive ? NRIRenderer::PipelineSlot::TraceOpaqueCache : NRIRenderer::PipelineSlot::TraceOpaque));
 		{
 			NRIScopedGpuTiming dispatchGpuTiming(context.mResources.frameBuffer, NRIGpuTimingScope::TraceDispatch);
 			context.mCommands.Dispatch(dispatchX, dispatchY, dispatchZ);
@@ -612,7 +683,20 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	}
 	{
 		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueStatsCopyMs);
-		context.mTraceShaderStats.CopyForReadback(context.mResources.BuildResourceServices(), ShouldCollectTraceShaderStats(), (uint64_t)context.mFrame.frameIndex);
+		NRITraceShaderStatsCopyInput input = {};
+		input.enabled = ShouldCollectTraceShaderStats();
+		input.frameNumber = (uint64_t)context.mFrame.frameIndex;
+		input.fences = BuildTraceShaderStatsFenceServices(context.mResources.frameBuffer);
+		input.boundSceneInstances = &context.mBoundSceneInstances;
+		input.staticPrimitiveCount = context.mSceneStats.staticPrimitiveCount;
+		input.dynamicPrimitiveCount = context.mSceneStats.dynamicPrimitiveCount;
+		input.persistentVoxelPrimitiveCount = context.mPersistentVoxels.BoundPrimitiveCount();
+		context.mTraceShaderStats.CopyForReadback(context.mResources.BuildResourceServices(), input);
+		if (indirectRadianceCacheActive)
+		{
+			context.mIndirectRadianceCacheService.CopyTelemetry((uint64_t)context.mFrame.frameIndex);
+			context.mIndirectRadianceCacheService.AdvanceFrame();
+		}
 	}
 	return true;
 }
@@ -1231,7 +1315,11 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 		std::memcpy(upscalerDesc.worldToViewMatrix, context.mFrame.currentWorldToView.data(), sizeof(upscalerDesc.worldToViewMatrix));
 		upscalerDesc.sharpness = Clamp01((float)nri_sharpness);
 		upscalerDesc.resetHistory = context.mFrame.resetHistory;
-		if (!context.mUpscalerService.DispatchMainUpscaler(mainKind, upscalerDesc))
+		const bool mainUpscalerDispatched = context.mUpscalerService.DispatchMainUpscaler(mainKind, upscalerDesc);
+		// NRI upscalers bind private descriptor pools while recording dispatches.
+		// Restore Raze's pool before any subsequent pass binds our descriptor sets.
+		context.mCommands.RestoreDescriptorPool();
+		if (!mainUpscalerDispatched)
 		{
 			return false;
 		}
@@ -1272,7 +1360,9 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 	Copy2(context.mFrame.currentJitter.data(), postDesc.cameraJitter);
 	postDesc.sharpness = Clamp01((float)nri_sharpness);
 	postDesc.resetHistory = context.mFrame.resetHistory;
-	if (!context.mUpscalerService.DispatchPostSharpen(postSharpenKind, postDesc))
+	const bool postSharpenDispatched = context.mUpscalerService.DispatchPostSharpen(postSharpenKind, postDesc);
+	context.mCommands.RestoreDescriptorPool();
+	if (!postSharpenDispatched)
 	{
 		return false;
 	}

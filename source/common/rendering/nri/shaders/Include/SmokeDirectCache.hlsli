@@ -23,7 +23,10 @@ bool SmokeDirectGridEnabled()
 
 bool SmokeDirectFroxelIsGrid(float4 phase)
 {
-	return SmokeDirectGridEnabled() && phase.w > 1.5;
+	// Analytic carriers use the receiver-sampled direct path and its profile
+	// reuse policy, but remain distinct from persistent grid-world ownership.
+	return SmokeDirectGridEnabled() &&
+		(SmokeFroxelHasGridCarrier(phase) || SmokeFroxelHasAnalyticCarrier(phase));
 }
 
 uint SmokeDirectReceiverSampleCount()

@@ -2400,6 +2400,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	{
 		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
 		renderer->mPersistentVoxels.Reset("static-acceleration-rebuild", false, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildNRIPersistentVoxelResetServices(*renderer));
+		renderer->mVoxelRepresentationPolicy.Reset();
 	};
 	services.createBottomLevelAccelerationStructure = [](void* user, const nri::AccelerationStructureDesc& desc, NRIAccelerationStructureResource& outAccelerationStructure)
 	{

@@ -1089,6 +1089,7 @@ OptionMenu "VideoOptions" protected
 	Option "Settings Profile",					"nri_settingsprofile",			"NRISettingsProfile"
 	Option "Bloom",								"nri_ptbloom",					"OnOff"
 	Option "Smoke",								"nri_ptsmoke",					"OnOff"
+	Option "Smoke Work Profile",				"nri_ptsmokeworkprofile",		"NRISmokeWorkProfile"
 	CVarStaticText "nri_settingsprofilewarning"
 	CVarStaticText "nri_ptsmokemenuwarning"
 	StaticText ""
@@ -1660,6 +1661,14 @@ OptionValue NRISettingsProfile
 	4, "Fast Preset - DLSS-SR"
 	5, "Medium Preset - DLSS-SR"
 	6, "Beautiful Preset - DLSS-SR"
+}
+
+OptionValue NRISmokeWorkProfile
+{
+	0, "Ultra"
+	1, "High"
+	2, "Medium"
+	3, "Low"
 }
 
 OptionString NRIGraphicsAPI

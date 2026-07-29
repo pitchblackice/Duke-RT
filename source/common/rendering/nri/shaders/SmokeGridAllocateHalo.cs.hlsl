@@ -29,7 +29,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				continue;
 			const int3 neighborCoordinate = source.Coordinate + int3(x, y, z);
 			uint existingIndex;
-			if (SmokeGridLookupBrick(neighborCoordinate, existingIndex))
+			if (SmokeGridLookupBrickControlSerial(neighborCoordinate, existingIndex))
 			{
 				gSmokeGridBricks[existingIndex].Flags |= NRI_SMOKE_GRID_BRICK_HALO;
 				gSmokeGridBricks[existingIndex].IdleFrames = 0u;

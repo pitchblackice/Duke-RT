@@ -118,6 +118,7 @@ struct NRIVoxelComputePreloadStats
 	uint32_t rawSelectedUniqueMaterials = 0;
 	uint32_t rawSelectedUniqueTextures = 0;
 	uint64_t rawSelectedUniqueGeometryBytes = 0;
+	uint64_t rawSelectedLargestUniqueGeometryBytes = 0;
 	uint64_t rawSelectedUniqueSourceBytes = 0;
 	uint64_t currentTrackedBytes = 0;
 	uint64_t localMemoryBudgetBytes = 0;

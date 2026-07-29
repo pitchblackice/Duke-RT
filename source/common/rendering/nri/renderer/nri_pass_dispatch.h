@@ -53,11 +53,17 @@ public:
 	struct PipelineService
 	{
 		using GetPipelineFn = nri::Pipeline* (*)(void* user, PipelineSlot slot);
+		using EnsureIndirectRadianceCachePipelineFn = bool (*)(void* user);
+		using GetIndirectRadianceCachePipelineLayoutFn = nri::PipelineLayout* (*)(void* user);
 
 		void* user = nullptr;
 		GetPipelineFn getPipeline = nullptr;
+		EnsureIndirectRadianceCachePipelineFn ensureIndirectRadianceCachePipeline = nullptr;
+		GetIndirectRadianceCachePipelineLayoutFn getIndirectRadianceCachePipelineLayout = nullptr;
 
 		nri::Pipeline* Get(PipelineSlot slot) const;
+		bool EnsureIndirectRadianceCachePipeline() const;
+		nri::PipelineLayout* GetIndirectRadianceCachePipelineLayout() const;
 	};
 
 	struct DescriptorService
@@ -225,6 +231,31 @@ public:
 		FrameTextureSlot GetVolumeSlot(bool metadata) const;
 	};
 
+	struct IndirectRadianceCacheService
+	{
+		using PrepareFn = NRIIndirectRadianceCachePrepareResult (*)(void* user, bool enabled);
+		using RecordPendingClearFn = bool (*)(void* user);
+		using AdvanceFrameFn = void (*)(void* user);
+		using CopyTelemetryFn = void (*)(void* user, uint64_t frameNumber);
+		using ReadbackTelemetryFn = void (*)(void* user, bool enabled);
+		using GetTelemetryFn = const NRIIndirectRadianceCacheTelemetrySnapshot& (*)(void* user);
+
+		void* user = nullptr;
+		PrepareFn prepare = nullptr;
+		RecordPendingClearFn recordPendingClear = nullptr;
+		AdvanceFrameFn advanceFrame = nullptr;
+		CopyTelemetryFn copyTelemetry = nullptr;
+		ReadbackTelemetryFn readbackTelemetry = nullptr;
+		GetTelemetryFn getTelemetry = nullptr;
+
+		NRIIndirectRadianceCachePrepareResult Prepare(bool enabled) const;
+		bool RecordPendingClear() const;
+		void AdvanceFrame() const;
+		void CopyTelemetry(uint64_t frameNumber) const;
+		void ReadbackTelemetry(bool enabled) const;
+		const NRIIndirectRadianceCacheTelemetrySnapshot& GetTelemetry() const;
+	};
+
 	struct FrameSnapshot
 	{
 		uint32_t frameIndex = 0;
@@ -293,6 +324,7 @@ public:
 		UpscalerService upscalerService;
 		SelfTestService selfTest;
 		SmokeService smokeService;
+		IndirectRadianceCacheService indirectRadianceCacheService;
 		nri::PipelineLayout** pipelineLayout = nullptr;
 		nri::PipelineLayout** taaPipelineLayout = nullptr;
 		nri::PipelineLayout** presentPipelineLayout = nullptr;
@@ -348,6 +380,7 @@ public:
 	UpscalerService mUpscalerService;
 	SelfTestService mSelfTest;
 	SmokeService mSmokeService;
+	IndirectRadianceCacheService mIndirectRadianceCacheService;
 	nri::PipelineLayout*& mPipelineLayout;
 	nri::PipelineLayout*& mTaaPipelineLayout;
 	nri::PipelineLayout*& mPresentPipelineLayout;
