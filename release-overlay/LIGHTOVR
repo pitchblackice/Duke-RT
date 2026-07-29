@@ -498,9 +498,9 @@ LIGHTOVR
         representation analytic
         queuepolicy drop
         maxlatencyseconds 0.075
-        count 6
+        count 10
         offset 0.0 32.0 5.0
-        spawnradius 1.5
+        spawnradius 2.0
         densityscale 1
         radiusscale 0.025
         velocitycone 10.0

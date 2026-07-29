@@ -125,6 +125,7 @@ foreach ($eventId in @('duke.hitscan.impact.plane', 'duke.hitscan.impact.wall'))
 }
 Assert-Contains $authored 'smokeeventrule\s+"nri\.smoke\.test"' 'Missing smoke-only diagnostic event rule.'
 Assert-Contains $authored 'smokeeventrule\s+"duke\.shotgun\.primary"[\s\S]*?velocitycone\s+22\.0' 'Shotgun smoke must retain authored directional spread.'
+Assert-Contains $authored 'smokeeventrule\s+"duke\.chaingun\.primary"[\s\S]*?count\s+10[\s\S]*?spawnradius\s+2\.0' 'Chaingun muzzle smoke must retain pistol-scale analytic support.'
 if ($authored -match 'smokeactorrule\s+"duke_fire_sustained"') {
     Assert-Contains $authored 'smokeactorrule\s+"duke_fire_sustained"[\s\S]*?actorclass\s+"DukeFire"[\s\S]*?emitterforeground\s+on' 'The local Duke dumpster-fire smoke rule must keep its emitter surface in the foreground.'
 }
