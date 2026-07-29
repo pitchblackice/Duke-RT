@@ -55,6 +55,17 @@ struct NRISmokePromptPrepareResult
 	uint64_t deferredBrickWork = 0;
 };
 
+enum class NRISmokePromptBridgeOutcomeKind : uint8_t { Fallback, GridCommitted };
+
+struct NRISmokePromptBridgeOutcome
+{
+	NRISmokePromptBridgeOutcomeKind kind = NRISmokePromptBridgeOutcomeKind::Fallback;
+	uint64_t sourceKey = 0u;
+	uint64_t segmentRevision = 0u;
+	uint32_t epoch = 0u;
+	uint32_t rangeCount = 0u;
+};
+
 // Owns the fixed first-use transaction. A planned interactive range retains
 // CPU pulse authority until the grid reports a committed deposit. Until that
 // handoff, the GPU publishes the same stable range as a coarse source kernel.
@@ -71,7 +82,8 @@ public:
 	void RetireExpired(NRISmokePulseOwner& pulses, double simulationTimeSeconds,
 		const std::vector<NRISmokeStyleGpu>& styles);
 	void CommitGridHandoffs(NRISmokePulseOwner& pulses,
-		const std::vector<NRISmokePromptOutcomeGpu>& outcomes);
+		const std::vector<NRISmokePromptOutcomeGpu>& outcomes,
+		std::vector<NRISmokePromptBridgeOutcome>* bridgeOutcomes = nullptr);
 	void Commit(uint64_t rendererFrame);
 	void Commit(uint64_t rendererFrame, NRISmokePulseOwner& pulses);
 	void Rollback();
@@ -85,6 +97,9 @@ private:
 		NRISmokePromptRangeIdentity identity = {};
 		double authoredSimulationSeconds = 0.0;
 		float lifetimeSeconds = 0.0f;
+		uint64_t analyticBridgeSourceKey = 0u;
+		uint64_t analyticBridgeSegmentRevision = 0u;
+		uint32_t epoch = 0u;
 	};
 	void RefreshActiveSnapshot(double simulationTimeSeconds);
 

@@ -91,6 +91,7 @@ enum class NRISmokeInjectionSourceClass : uint32_t
 constexpr uint32_t NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_SHIFT = 16u;
 constexpr uint32_t NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_MASK = 0x000f0000u;
 constexpr uint32_t NRI_SMOKE_SOURCE_METADATA_PROMPT_ELIGIBLE = 0x00100000u;
+constexpr uint32_t NRI_SMOKE_SOURCE_METADATA_ANALYTIC_BRIDGE = 0x00200000u;
 
 struct NRISmokeInjectionCommandGpu
 {

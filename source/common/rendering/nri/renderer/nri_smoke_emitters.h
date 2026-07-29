@@ -2,6 +2,7 @@
 
 #include "nri_smoke_contracts.h"
 #include "nri_smoke_analytic_carriers.h"
+#include "nri_smoke_analytic_trail_bridge.h"
 #include "nri_smoke_continuous_sources.h"
 #include "nri_smoke_interest.h"
 #include "nri_smoke_pulses.h"
@@ -20,6 +21,7 @@ public:
 		const SceneLightSystem& sceneLights,
 		std::vector<NRISmokeStyleGpu>& styles, std::vector<NRISmokeInjectionCommandGpu>& commands,
 		std::vector<NRISmokePulseEnqueueInfo>& commandEnqueueInfo,
+		std::vector<NRISmokeAnalyticTrailObservationBatch>& trailObservations,
 		std::vector<NRISmokeAnalyticCarrierRequest>& analyticRequests,
 		uint32_t& nextSerial, uint32_t traceMode, const NRISmokeInterestSnapshot& interest,
 		float gridCellSize, uint32_t gridBrickCapacity);
@@ -50,6 +52,7 @@ private:
 		double startDistanceTraveled = 0.0;
 		uint64_t continuousStableKey = 0;
 		uint64_t continuousCadenceOrdinal = 0;
+		uint64_t trailUpdateOrdinal = 0;
 		bool activationLatched = false;
 		bool appearanceObserved = false;
 		bool sourceTracePublished = false;

@@ -177,6 +177,32 @@ int main()
 	Require((settled[0].lightSampleCountAndFlags & 0x200u) == 0u,
 		"an admitted lighting group must not rebuild or converge on later frames");
 
+	owner.Reset(12u);
+	owner.BeginFrame(60.0, 2u, lightPolicy);
+	auto latest = Request(20u, 12u, 60.0);
+	latest.replacementKey = 0x1234u;
+	latest.sourceEventSerial = latest.replacementKey;
+	Require(owner.AdmitLatest(latest).Accepted(),
+		"a first newest-only source must receive ordinary bounded admission");
+	owner.CommitLightBuilds();
+	const auto firstLatest = owner.GetGpuCarriers()[0];
+	owner.BeginFrame(60.05, 2u, lightPolicy);
+	latest.position[0] = 9.0f;
+	latest.authoredGameplaySeconds = 60.05;
+	Require(owner.AdmitLatest(latest).Accepted(),
+		"a newer segment must replace the existing source carrier");
+	const auto replacedLatest = owner.GetGpuCarriers()[0];
+	Require(owner.GetSnapshot().activeQuantity == 1u &&
+		owner.GetSnapshot().replacements == 1u &&
+		replacedLatest.lightGroupSlot == firstLatest.lightGroupSlot &&
+		replacedLatest.lightGroupGeneration == firstLatest.lightGroupGeneration &&
+		owner.GetSnapshot().lightEventsRequestedThisFrame == 0u,
+		"replacement must preserve one carrier and its settled lighting field");
+	Require(owner.RetireLatest(latest.replacementKey) &&
+		owner.GetSnapshot().activeQuantity == 0u &&
+		owner.GetSnapshot().replacementRetirements == 1u,
+		"exact-grid handoff must retire the source-owned carrier immediately");
+
 	std::cout << "Smoke analytic carrier lifecycle tests passed.\n";
 	return 0;
 }

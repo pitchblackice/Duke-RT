@@ -1175,7 +1175,8 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 	const double gameplayTimeSeconds = PlayClock > 0 ? (double)PlayClock * (1.0 / 120.0) : 0.0;
 	mEmitters.SetContinuousSourceWorkQuantity(dormantConfig.maximumEvolutionPerFrame);
 	mEmitters.Gather(mStatus.simulationEpoch, gameplayTimeSeconds, weaponEvents, renderer.mSceneLights,
-		mStyles, mPendingCommands, mPendingPulseEnqueueInfo, mPendingAnalyticRequests,
+		mStyles, mPendingCommands, mPendingPulseEnqueueInfo, mPendingTrailObservations,
+		mPendingAnalyticRequests,
 		mNextCommandSerial, mSettings.traceMode, mInterest.GetSnapshot(),
 		mSettings.gridCellSize, mSettings.gridBrickCapacity);
 	std::set<NRISmokeSpatialCoordinate> promotionCoordinates;
@@ -1311,10 +1312,13 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 		std::vector<NRISmokeInjectionCommandGpu> transitionCommands = std::move(mPendingCommands);
 		std::vector<NRISmokePulseEnqueueInfo> transitionEnqueueInfo =
 			std::move(mPendingPulseEnqueueInfo);
+		std::vector<NRISmokeAnalyticTrailObservationBatch> transitionTrailObservations =
+			std::move(mPendingTrailObservations);
 		std::vector<NRISmokeAnalyticCarrierRequest> transitionAnalytic = std::move(mPendingAnalyticRequests);
 		Reset("authority-transition");
 		mPendingCommands = std::move(transitionCommands);
 		mPendingPulseEnqueueInfo = std::move(transitionEnqueueInfo);
+		mPendingTrailObservations = std::move(transitionTrailObservations);
 		mPendingAnalyticRequests = std::move(transitionAnalytic);
 		mStatus.preparedFrame = renderer.mFrameIndex;
 		mLastPreparedFrame = renderer.mFrameIndex;
@@ -1373,6 +1377,8 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 		const NRISmokeGridLightingStatusSnapshot& worldWork = mGridLighting.GetStatusSnapshot();
 		const NRISmokePulseSnapshot& pulseWork = mPulseOwner.GetSnapshot();
 		const NRISmokePromptFallbackSnapshot& promptWork = mPromptFallback.GetSnapshot();
+		const NRISmokeAnalyticTrailBridgeSnapshot& trailBridgeWork =
+			mAnalyticTrailBridge.GetSnapshot();
 		const bool joined = gridWork.gpuStatsValid && worldWork.gpuStatsValid && mStatus.gpuStatsValid &&
 			gridWork.gpuRendererFrame == worldWork.gpuRendererFrame &&
 			gridWork.gpuRendererFrame == mStatus.gpuStatsFrame &&
@@ -1419,7 +1425,7 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 			worldWork.gpu.radianceMaintenanceScheduled, worldWork.gpu.radianceMaintenanceDeferred,
 			worldWork.gpu.radianceMaintenanceTickets, worldWork.gpu.radianceHistoryRetained,
 			worldWork.gpu.radianceHistoryMissing, worldWork.gpu.radianceAgeOverflows);
-		Printf("PERF pt smoke transactions NRI: observe_renderer_frame=%llu observe_frame=%u pulse_enqueued_ranges=%llu pulse_enqueued_mass=%llu pulse_planned_ranges=%llu pulse_planned_mass=%llu pulse_committed_ranges=%llu pulse_committed_mass=%llu pulse_fallback_retired_ranges=%llu pulse_fallback_retired_mass=%llu pulse_deferred_expired_ranges=%llu pulse_deferred_expired_mass=%llu pulse_pending_ranges=%u pulse_pending_mass=%llu pulse_authored_clocks=%u pulse_rollbacks=%llu pulse_resets=%llu prompt_scheduled_current=%u prompt_active_slots=%u prompt_oldest_age_ms=%u prompt_scheduled_total=%llu prompt_fallback_executed=%llu prompt_fallback_requested_cells=%llu prompt_fallback_admitted_cells=%llu prompt_fallback_empty_closures=%llu prompt_fallback_partial_closures=%llu prompt_fallback_closed_closures=%llu prompt_grid_handoffs=%llu prompt_expired_ranges=%llu prompt_expired_mass=%llu prompt_deferred_expired_ranges=%llu prompt_deferred_expired_mass=%llu prompt_expiry_ack_failures=%llu prompt_pending_mass=%llu prompt_grid_mass=%llu prompt_fallback_mass=%llu prompt_deferred_ranges=%llu prompt_deferred_mass=%llu prompt_deferred_brick_work=%llu prompt_rollbacks=%llu prompt_internal_errors=%llu prompt_authored_renderer_frame=%llu compact=1\n",
+		Printf("PERF pt smoke transactions NRI: observe_renderer_frame=%llu observe_frame=%u pulse_enqueued_ranges=%llu pulse_enqueued_mass=%llu pulse_planned_ranges=%llu pulse_planned_mass=%llu pulse_committed_ranges=%llu pulse_committed_mass=%llu pulse_fallback_retired_ranges=%llu pulse_fallback_retired_mass=%llu pulse_deferred_expired_ranges=%llu pulse_deferred_expired_mass=%llu pulse_superseded_ranges=%llu pulse_superseded_mass=%llu pulse_stale_dropped_ranges=%llu pulse_stale_dropped_mass=%llu pulse_pending_ranges=%u pulse_pending_mass=%llu pulse_authored_clocks=%u pulse_rollbacks=%llu pulse_resets=%llu prompt_scheduled_current=%u prompt_active_slots=%u prompt_oldest_age_ms=%u prompt_scheduled_total=%llu prompt_fallback_executed=%llu prompt_fallback_requested_cells=%llu prompt_fallback_admitted_cells=%llu prompt_fallback_empty_closures=%llu prompt_fallback_partial_closures=%llu prompt_fallback_closed_closures=%llu prompt_grid_handoffs=%llu prompt_expired_ranges=%llu prompt_expired_mass=%llu prompt_deferred_expired_ranges=%llu prompt_deferred_expired_mass=%llu prompt_expiry_ack_failures=%llu prompt_pending_mass=%llu prompt_grid_mass=%llu prompt_fallback_mass=%llu prompt_deferred_ranges=%llu prompt_deferred_mass=%llu prompt_deferred_brick_work=%llu prompt_rollbacks=%llu prompt_internal_errors=%llu prompt_authored_renderer_frame=%llu trail_bridge_active=%u trail_bridge_high_water=%u trail_bridge_replacements=%llu trail_bridge_publications=%llu trail_bridge_grid_handoffs=%llu compact=1\n",
 			(unsigned long long)renderer.mFrameBuffer->mFrameIndex, renderer.mFrameIndex,
 			(unsigned long long)pulseWork.enqueuedPulses, (unsigned long long)pulseWork.enqueuedMass,
 			(unsigned long long)pulseWork.plannedRanges, (unsigned long long)pulseWork.plannedMass,
@@ -1428,6 +1434,10 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 			(unsigned long long)pulseWork.fallbackRetiredMass,
 			(unsigned long long)pulseWork.deferredExpiredRanges,
 			(unsigned long long)pulseWork.deferredExpiredMass,
+			(unsigned long long)pulseWork.supersededPulses,
+			(unsigned long long)pulseWork.supersededMass,
+			(unsigned long long)pulseWork.staleDroppedPulses,
+			(unsigned long long)pulseWork.staleDroppedMass,
 			pulseWork.pendingRanges, (unsigned long long)pulseWork.pendingMass,
 			pulseWork.authoredClockCount,
 			(unsigned long long)pulseWork.rollbackCount, (unsigned long long)pulseWork.resetPulses,
@@ -1453,7 +1463,11 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 			(unsigned long long)promptWork.promptDeferredMass,
 			(unsigned long long)promptWork.promptDeferredBrickWork,
 			(unsigned long long)promptWork.rollbackCount, (unsigned long long)promptWork.internalErrors,
-			(unsigned long long)promptWork.authoredRendererFrame);
+			(unsigned long long)promptWork.authoredRendererFrame,
+			trailBridgeWork.activeSources, trailBridgeWork.highWaterSources,
+			(unsigned long long)trailBridgeWork.replacements,
+			(unsigned long long)trailBridgeWork.fallbackPublications,
+			(unsigned long long)trailBridgeWork.handoffsCommitted);
 		Printf("PERF pt smoke hash health NRI: observe_renderer_frame=%llu observe_frame=%u joined=%u grid_valid=%u renderer_frame=%llu frame=%u epoch=%u delta_valid=%u hash_capacity=%u hash_empty=%u hash_claimed=%u hash_resident=%u hash_new=%u hash_tombstone=%u hash_invalid_state=%u hash_invalid_mapping=%u control_probe_total=%u control_probe_delta=%u control_probe_max=%u probe_bin_1_total=%u probe_bin_1_delta=%u probe_bin_2_4_total=%u probe_bin_2_4_delta=%u probe_bin_5_8_total=%u probe_bin_5_8_delta=%u probe_bin_9_16_total=%u probe_bin_9_16_delta=%u probe_bin_17_24_total=%u probe_bin_17_24_delta=%u lookup_probe_total=%u lookup_probe_delta=%u insertion_probe_total=%u insertion_probe_delta=%u lookup_probe_limit_failures_total=%u lookup_probe_limit_failures_delta=%u insertion_probe_limit_failures_total=%u insertion_probe_limit_failures_delta=%u insertion_capacity_failures_total=%u insertion_capacity_failures_delta=%u insertion_active_failures_total=%u insertion_active_failures_delta=%u reclaim_invalid_mapping_failures_total=%u reclaim_invalid_mapping_failures_delta=%u hash_rebuild_attempts_total=%u hash_rebuild_attempts_delta=%u hash_rebuild_successes_total=%u hash_rebuild_successes_delta=%u hash_rebuild_failures_total=%u hash_rebuild_failures_delta=%u compact=1\n",
 			(unsigned long long)renderer.mFrameBuffer->mFrameIndex, renderer.mFrameIndex, joined ? 1u : 0u,
 			gridWork.gpuStatsValid ? 1u : 0u, (unsigned long long)gridWork.gpuRendererFrame,
@@ -1566,8 +1580,38 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	analyticLightPolicy.samplesPerAnchor =
 		workTable.analyticLightSamples == NRISmokeWorkTable::Unrestricted
 		? mSettings.lightSamples : workTable.analyticLightSamples;
+	mAnalyticTrailBridge.BeginFrame(now, mStatus.simulationEpoch);
+	std::vector<NRISmokePromptBridgeOutcome> bridgeOutcomes;
+	mPromptFallback.CommitGridHandoffs(mPulseOwner, mGrid.ConsumePromptOutcomes(),
+		&bridgeOutcomes);
+	std::vector<uint64_t> bridgeRetirements;
+	for (const NRISmokePromptBridgeOutcome& outcome : bridgeOutcomes)
+	{
+		if (outcome.kind == NRISmokePromptBridgeOutcomeKind::Fallback)
+			mAnalyticTrailBridge.PublishFallback(outcome.sourceKey,
+				outcome.segmentRevision, outcome.epoch);
+		else if (mAnalyticTrailBridge.CommitExactGridRange(outcome.sourceKey,
+			outcome.segmentRevision, outcome.epoch, outcome.rangeCount))
+			bridgeRetirements.push_back(outcome.sourceKey);
+	}
+
+	// Authored pulses become persistent before selection. The immutable plan is
+	// committed only after every authoritative consumer has recorded it.
+	mPulseOwner.Enqueue(mPendingCommands, mPendingPulseEnqueueInfo,
+		mPromptSimulationSeconds, now);
+	mPendingCommands.clear();
+	mPendingPulseEnqueueInfo.clear();
+	mPromptFallback.RetireExpired(mPulseOwner, mPromptSimulationSeconds, mStyles);
+	mPulseOwner.ExpireStale(now);
+	for (const NRISmokeAnalyticTrailObservationBatch& batch : mPendingTrailObservations)
+		mAnalyticTrailBridge.Observe(batch.observation, batch.points.data(),
+			batch.points.size());
+	mPendingTrailObservations.clear();
+
 	mAnalyticCarriers.BeginFrame(now, workTable.analyticCarriers, analyticLightPolicy);
-	const uint32_t analyticRequested = (uint32_t)mPendingAnalyticRequests.size();
+	for (const uint64_t sourceKey : bridgeRetirements)
+		mAnalyticCarriers.RetireLatest(sourceKey);
+	uint32_t analyticRequested = (uint32_t)mPendingAnalyticRequests.size();
 	uint32_t analyticAdmitted = 0u;
 	for (uint32_t requestIndex = 0u; requestIndex < mPendingAnalyticRequests.size();)
 	{
@@ -1579,20 +1623,15 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		requestIndex += batchCount;
 	}
 	mPendingAnalyticRequests.clear();
+	for (const NRISmokeAnalyticTrailPresentation& presentation :
+		mAnalyticTrailBridge.GetPresentations())
+	{
+		analyticRequested++;
+		analyticAdmitted += mAnalyticCarriers.AdmitLatest(presentation.carrier).Accepted() ? 1u : 0u;
+	}
 	mWorkScheduler.RecordAnalytic(analyticRequested, analyticAdmitted);
 	mStatus.analytic = mAnalyticCarriers.GetSnapshot();
 
-	// Authored pulses become persistent before selection. The immutable plan is
-	// committed only after every authoritative consumer has recorded it.
-	mPulseOwner.Enqueue(mPendingCommands, mPendingPulseEnqueueInfo,
-		mPromptSimulationSeconds, now);
-	mPendingCommands.clear();
-	mPendingPulseEnqueueInfo.clear();
-	{
-		mPromptFallback.CommitGridHandoffs(mPulseOwner, mGrid.ConsumePromptOutcomes());
-		mPromptFallback.RetireExpired(mPulseOwner, mPromptSimulationSeconds, mStyles);
-	}
-	mPulseOwner.ExpireStale(now);
 	const auto& availableCommands = mPulseOwner.PendingCommands();
 	const uint32_t maximumCommands = std::min(kMaxCommands, workTable.emissionCommands);
 	if (gridAuthority && !particleAuthority)
@@ -2052,6 +2091,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 	}
 	mPendingCommands.clear();
 	mPendingPulseEnqueueInfo.clear();
+	mPendingTrailObservations.clear();
 	mSelectedGridCommands.clear();
 	mPendingAnalyticRequests.clear();
 	return true;
@@ -3046,12 +3086,14 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.filterResourceDowngrades = 0;
 	mPendingCommands.clear();
 	mPendingPulseEnqueueInfo.clear();
+	mPendingTrailObservations.clear();
 	mSelectedGridCommands.clear();
 	mAdmissionScheduler.Reset();
 	mWorkScheduler.ResetTelemetry();
 	mPulsePlanToken = 0u;
 	mPromptFallback.Reset();
 	mAnalyticCarriers.Reset(mStatus.simulationEpoch);
+	mAnalyticTrailBridge.Reset(mStatus.simulationEpoch);
 	mStatus.analytic = mAnalyticCarriers.GetSnapshot();
 	if (std::strcmp(mStatus.resetReason, "authority-transition") == 0)
 	{

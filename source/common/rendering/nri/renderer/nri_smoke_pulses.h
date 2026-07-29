@@ -21,6 +21,16 @@ struct NRISmokePulseEnqueueInfo
 	float maximumLatencySeconds = 0.0f;
 	NRISmokePulseQueuePolicy queuePolicy = NRISmokePulseQueuePolicy::Retry;
 	bool transitory = false;
+	uint64_t analyticBridgeSourceKey = 0u;
+	uint64_t analyticBridgeSegmentRevision = 0u;
+};
+
+struct NRISmokePulseBridgeIdentity
+{
+	uint64_t sourceKey = 0u;
+	uint64_t segmentRevision = 0u;
+	uint32_t epoch = 0u;
+	bool Valid() const { return sourceKey != 0u && segmentRevision != 0u; }
 };
 
 struct NRISmokePulseSnapshot
@@ -81,6 +91,8 @@ public:
 	const NRISmokePulseSnapshot& GetSnapshot() const { return mSnapshot; }
 	double AuthoredSimulationSeconds(const NRISmokeInjectionCommandGpu& command,
 		double fallbackSeconds) const;
+	NRISmokePulseBridgeIdentity BridgeIdentity(
+		const NRISmokeInjectionCommandGpu& command) const;
 
 private:
 	struct PulseState
@@ -91,6 +103,8 @@ private:
 		NRISmokePulseQueuePolicy queuePolicy = NRISmokePulseQueuePolicy::Retry;
 		bool transitory = false;
 		bool visible = false;
+		uint64_t analyticBridgeSourceKey = 0u;
+		uint64_t analyticBridgeSegmentRevision = 0u;
 	};
 
 	static uint64_t PulseId(const NRISmokeInjectionCommandGpu& command);

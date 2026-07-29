@@ -283,6 +283,44 @@ int main()
 		visiblePulses.GetSnapshot().supersededPulses == 0u,
 		"a committed prompt dispatch must protect visible work from latest replacement");
 
+	NRISmokePulseOwner bridgePulses;
+	NRISmokePromptFallback bridgeOwner;
+	auto bridgeCommand = Interactive(960u);
+	bridgeCommand.sourceId = 77u;
+	auto bridgeInfo = Latest(40.0);
+	bridgeInfo.analyticBridgeSourceKey = 0xabcdefu;
+	bridgeInfo.analyticBridgeSegmentRevision = 3u;
+	bridgePulses.Enqueue({ bridgeCommand }, { bridgeInfo }, 20.0, 40.0);
+	auto bridgeSelection = bridgePulses.PendingCommands();
+	bridgeOwner.Prepare(bridgeSelection, bridgePulses, 960u, 20.0,
+		styles, 8.0f, retained, 1u);
+	std::vector<NRISmokeInjectionCommandGpu> bridgePlan;
+	uint64_t bridgeToken = 0u;
+	Require(bridgePulses.Plan(bridgeSelection, bridgePlan, bridgeToken) &&
+		bridgePulses.CommitRetaining(bridgeToken, bridgePlan),
+		"the bridge fixture must retain exact grid authority");
+	NRISmokePromptOutcomeGpu fallbackOutcome = {};
+	fallbackOutcome.pulseIdLow = bridgePlan[0].pulseIdLow;
+	fallbackOutcome.pulseIdHigh = bridgePlan[0].pulseIdHigh;
+	fallbackOutcome.rangeBegin = bridgePlan[0].rangeBegin;
+	fallbackOutcome.rangeCount = bridgePlan[0].rangeCount;
+	fallbackOutcome.outcome = (uint32_t)NRISmokePromptOutcome::Fallback;
+	std::vector<NRISmokePromptBridgeOutcome> bridgeOutcomes;
+	bridgeOwner.CommitGridHandoffs(bridgePulses, { fallbackOutcome }, &bridgeOutcomes);
+	Require(bridgeOutcomes.size() == 1u &&
+		bridgeOutcomes[0].sourceKey == bridgeInfo.analyticBridgeSourceKey &&
+		bridgeOutcomes[0].segmentRevision == bridgeInfo.analyticBridgeSegmentRevision,
+		"fallback readback must recover the CPU-only source/revision bridge identity");
+	bridgeOwner.Commit(960u, bridgePulses);
+	auto newestBridgeCommand = Interactive(961u);
+	newestBridgeCommand.sourceId = 77u;
+	bridgeInfo.authoredGameplaySeconds = 40.1;
+	bridgeInfo.analyticBridgeSegmentRevision = 4u;
+	bridgePulses.Enqueue({ newestBridgeCommand }, { bridgeInfo }, 20.1, 40.1);
+	Require(bridgePulses.PendingCommands().size() == 1u &&
+		bridgePulses.GetSnapshot().supersededPulses == 1u,
+		"an analytic bridge must leave the old grid attempt replaceable by its newest segment");
+
 	std::cout << "Smoke prompt sticky-slot transaction tests passed.\n";
 	return 0;
 }

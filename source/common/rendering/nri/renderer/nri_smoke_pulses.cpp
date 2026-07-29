@@ -70,6 +70,8 @@ void NRISmokePulseOwner::Enqueue(const std::vector<NRISmokeInjectionCommandGpu>&
 		state.maximumLatencySeconds = std::max(info.maximumLatencySeconds, 0.0f);
 		state.queuePolicy = info.queuePolicy;
 		state.transitory = info.transitory;
+		state.analyticBridgeSourceKey = info.analyticBridgeSourceKey;
+		state.analyticBridgeSegmentRevision = info.analyticBridgeSegmentRevision;
 		if (commands[index].count != 0u && state.transitory &&
 			state.queuePolicy == NRISmokePulseQueuePolicy::Latest &&
 			!IsStale(state, fallbackGameplaySeconds))
@@ -125,6 +127,15 @@ void NRISmokePulseOwner::Enqueue(const std::vector<NRISmokeInjectionCommandGpu>&
 		mSnapshot.enqueuedMass += command.rangeCount;
 	}
 	RefreshPendingSnapshot();
+}
+
+NRISmokePulseBridgeIdentity NRISmokePulseOwner::BridgeIdentity(
+	const NRISmokeInjectionCommandGpu& command) const
+{
+	const auto found = mPulseStates.find(PulseId(command));
+	if (found == mPulseStates.end()) return {};
+	return { found->second.analyticBridgeSourceKey,
+		found->second.analyticBridgeSegmentRevision, command.epoch };
 }
 
 bool NRISmokePulseOwner::IsStale(const PulseState& state, double gameplaySeconds) const

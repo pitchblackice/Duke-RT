@@ -23,6 +23,7 @@ struct NRISmokeAnalyticCarrierRequest
 	double authoredGameplaySeconds = 0.0;
 	float maximumLatencySeconds = 0.0f;
 	uint64_t sourceEventSerial = 0u;
+	uint64_t replacementKey = 0u;
 	uint32_t batchIndex = 0u;
 	uint32_t batchCount = 1u;
 };
@@ -98,6 +99,8 @@ struct NRISmokeAnalyticCarrierSnapshot
 	uint64_t droppedStaleOnArrival = 0u;
 	uint64_t droppedCapacity = 0u;
 	uint64_t droppedLightingBudget = 0u;
+	uint64_t replacements = 0u;
+	uint64_t replacementRetirements = 0u;
 	uint32_t epoch = 0u;
 	uint32_t maximumActiveQuantity = 0u;
 	uint32_t activeQuantity = 0u;
@@ -136,7 +139,9 @@ public:
 	void BeginFrame(double gameplayTimeSeconds, uint32_t maximumActiveQuantity,
 		const NRISmokeAnalyticLightPolicy& lightPolicy = {});
 	NRISmokeAnalyticCarrierAdmission Admit(const NRISmokeAnalyticCarrierRequest& request);
+	NRISmokeAnalyticCarrierAdmission AdmitLatest(const NRISmokeAnalyticCarrierRequest& request);
 	uint32_t AdmitBatch(const NRISmokeAnalyticCarrierRequest* requests, uint32_t count);
+	bool RetireLatest(uint64_t replacementKey);
 	void CommitLightBuilds();
 	bool IsLive(const NRISmokeAnalyticCarrierHandle& handle) const;
 	void Reset(uint32_t epoch);

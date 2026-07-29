@@ -166,6 +166,53 @@ NRISmokeAnalyticCarrierAdmission NRISmokeAnalyticCarriers::Admit(
 	return DropEvent(NRISmokeAnalyticCarrierDropReason::Capacity);
 }
 
+NRISmokeAnalyticCarrierAdmission NRISmokeAnalyticCarriers::AdmitLatest(
+	const NRISmokeAnalyticCarrierRequest& request)
+{
+	if (request.replacementKey == 0u)
+		return Admit(request);
+	mSnapshot.requested++;
+	if (!mPrepared) return Drop(NRISmokeAnalyticCarrierDropReason::NotPrepared);
+	if (mSnapshot.maximumActiveQuantity == 0u)
+		return Drop(NRISmokeAnalyticCarrierDropReason::Disabled);
+	if (!Valid(request)) return Drop(NRISmokeAnalyticCarrierDropReason::InvalidRequest);
+	if (request.epoch != mSnapshot.epoch)
+		return Drop(NRISmokeAnalyticCarrierDropReason::StaleEpoch);
+	if (mGameplayTimeSeconds - request.authoredGameplaySeconds >= request.lifetimeSeconds)
+		return Drop(NRISmokeAnalyticCarrierDropReason::ExpiredOnArrival);
+	if (request.maximumLatencySeconds > 0.0f &&
+		mGameplayTimeSeconds - request.authoredGameplaySeconds > request.maximumLatencySeconds)
+		return Drop(NRISmokeAnalyticCarrierDropReason::StaleOnArrival);
+	for (Slot& slot : mSlots)
+	{
+		if (!slot.active || slot.request.replacementKey != request.replacementKey) continue;
+		slot.request = request;
+		mSnapshot.admitted++;
+		mSnapshot.replacements++;
+		Refresh();
+		return { { (uint32_t)(&slot - mSlots.data()), slot.generation, mSnapshot.epoch },
+			NRISmokeAnalyticCarrierDropReason::None };
+	}
+	// First publication uses ordinary admission so it receives one complete,
+	// profile-bounded lighting field. Later source updates preserve that field.
+	mSnapshot.requested--;
+	return Admit(request);
+}
+
+bool NRISmokeAnalyticCarriers::RetireLatest(uint64_t replacementKey)
+{
+	if (replacementKey == 0u) return false;
+	for (Slot& slot : mSlots)
+	{
+		if (!slot.active || slot.request.replacementKey != replacementKey) continue;
+		slot.active = false;
+		mSnapshot.replacementRetirements++;
+		Refresh();
+		return true;
+	}
+	return false;
+}
+
 uint32_t NRISmokeAnalyticCarriers::AdmitBatch(
 	const NRISmokeAnalyticCarrierRequest* requests, uint32_t count)
 {

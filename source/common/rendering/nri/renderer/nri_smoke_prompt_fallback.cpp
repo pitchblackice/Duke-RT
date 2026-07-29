@@ -34,6 +34,19 @@ NRISmokePromptPrepareResult NRISmokePromptFallback::Prepare(
 			left.pulseIdHigh == right.pulseIdHigh && left.rangeBegin == right.rangeBegin &&
 			left.rangeCount == right.rangeCount;
 	};
+	// Latest/transitory pulses may retire before a sticky prompt slot does.
+	// Reclaim those orphaned identities before preserving existing slots.
+	for (ActiveSlot& active : mActiveSlots)
+	{
+		if (active.identity.rangeCount == 0u ||
+			active.analyticBridgeSourceKey == 0u) continue;
+		const bool stillPending = std::any_of(pulses.PendingCommands().begin(),
+			pulses.PendingCommands().end(), [&](const NRISmokeInjectionCommandGpu& command)
+			{
+				return matches(active.identity, identityOf(command));
+			});
+		if (!stillPending) active = {};
+	}
 	auto defer = [&](const NRISmokeInjectionCommandGpu& command)
 	{
 		result.deferredRanges++;
@@ -56,6 +69,8 @@ NRISmokePromptPrepareResult NRISmokePromptFallback::Prepare(
 			command.densityScale *= std::exp2(-age / std::max(style.densityHalfLife, 0.001f));
 		}
 		command.sourceMetadata |= NRI_SMOKE_SOURCE_METADATA_PROMPT_ELIGIBLE;
+		if (active.analyticBridgeSourceKey != 0u)
+			command.sourceMetadata |= NRI_SMOKE_SOURCE_METADATA_ANALYTIC_BRIDGE;
 		command.sourceMetadata &= ~NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_MASK;
 		command.sourceMetadata |= slot << NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_SHIFT;
 		mPlan.push_back(identityOf(command));
@@ -109,6 +124,10 @@ NRISmokePromptPrepareResult NRISmokePromptFallback::Prepare(
 			pulses.AuthoredSimulationSeconds(command, simulationTimeSeconds);
 		mActiveSlots[slot].lifetimeSeconds = command.styleIndex < styles.size() ?
 			std::max(styles[command.styleIndex].lifetime, 0.001f) : 0.001f;
+		const NRISmokePulseBridgeIdentity bridge = pulses.BridgeIdentity(command);
+		mActiveSlots[slot].analyticBridgeSourceKey = bridge.sourceKey;
+		mActiveSlots[slot].analyticBridgeSegmentRevision = bridge.segmentRevision;
+		mActiveSlots[slot].epoch = bridge.epoch;
 		mNewlyClaimedSlots.push_back(slot);
 		schedule(command, slot);
 	}
@@ -190,8 +209,19 @@ void NRISmokePromptFallback::RetireExpired(NRISmokePulseOwner& pulses,
 }
 
 void NRISmokePromptFallback::CommitGridHandoffs(NRISmokePulseOwner& pulses,
-	const std::vector<NRISmokePromptOutcomeGpu>& outcomes)
+	const std::vector<NRISmokePromptOutcomeGpu>& outcomes,
+	std::vector<NRISmokePromptBridgeOutcome>* bridgeOutcomes)
 {
+	auto activeFor = [&](const NRISmokePromptOutcomeGpu& outcome) -> ActiveSlot*
+	{
+		for (ActiveSlot& active : mActiveSlots)
+			if (active.identity.pulseIdLow == outcome.pulseIdLow &&
+				active.identity.pulseIdHigh == outcome.pulseIdHigh &&
+				active.identity.rangeBegin == outcome.rangeBegin &&
+				active.identity.rangeCount == outcome.rangeCount)
+				return &active;
+		return nullptr;
+	};
 	for (const auto& outcome : outcomes)
 	{
 		if (outcome.outcome == (uint32_t)NRISmokePromptOutcome::Fallback)
@@ -206,6 +236,13 @@ void NRISmokePromptFallback::CommitGridHandoffs(NRISmokePulseOwner& pulses,
 				mSnapshot.fallbackPartialClosures++;
 			else
 				mSnapshot.fallbackClosedClosures++;
+			ActiveSlot* active = activeFor(outcome);
+			if (bridgeOutcomes != nullptr && active != nullptr &&
+				active->analyticBridgeSourceKey != 0u)
+				bridgeOutcomes->push_back({ NRISmokePromptBridgeOutcomeKind::Fallback,
+					active->analyticBridgeSourceKey,
+					active->analyticBridgeSegmentRevision, active->epoch,
+					outcome.rangeCount });
 			continue;
 		}
 		if (outcome.outcome == (uint32_t)NRISmokePromptOutcome::InternalError)
@@ -215,6 +252,13 @@ void NRISmokePromptFallback::CommitGridHandoffs(NRISmokePulseOwner& pulses,
 		}
 		if (outcome.outcome != (uint32_t)NRISmokePromptOutcome::GridCommitted)
 			continue;
+		ActiveSlot* bridgeActive = activeFor(outcome);
+		if (bridgeOutcomes != nullptr && bridgeActive != nullptr &&
+			bridgeActive->analyticBridgeSourceKey != 0u)
+			bridgeOutcomes->push_back({ NRISmokePromptBridgeOutcomeKind::GridCommitted,
+				bridgeActive->analyticBridgeSourceKey,
+				bridgeActive->analyticBridgeSegmentRevision, bridgeActive->epoch,
+				outcome.rangeCount });
 		if (pulses.Acknowledge(outcome.pulseIdLow, outcome.pulseIdHigh,
 			outcome.rangeBegin, outcome.rangeCount))
 		{
@@ -242,7 +286,9 @@ void NRISmokePromptFallback::Commit(uint64_t rendererFrame, NRISmokePulseOwner& 
 	for (const uint32_t slot : mNewlyClaimedSlots)
 	{
 		if (slot >= mActiveSlots.size()) continue;
-		const NRISmokePromptRangeIdentity& identity = mActiveSlots[slot].identity;
+		const ActiveSlot& active = mActiveSlots[slot];
+		if (active.analyticBridgeSourceKey != 0u) continue;
+		const NRISmokePromptRangeIdentity& identity = active.identity;
 		pulses.MarkVisible(identity.pulseIdLow, identity.pulseIdHigh,
 			identity.rangeBegin, identity.rangeCount);
 	}

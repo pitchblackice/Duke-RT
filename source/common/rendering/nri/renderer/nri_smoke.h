@@ -386,10 +386,12 @@ private:
 	NRISmokePulseOwner mPulseOwner;
 	NRISmokePromptFallback mPromptFallback;
 	NRISmokeAnalyticCarriers mAnalyticCarriers;
+	NRISmokeAnalyticTrailBridge mAnalyticTrailBridge;
 	NRISmokeWorkScheduler mWorkScheduler;
 	std::vector<NRISmokeStyleGpu> mStyles;
 	std::vector<NRISmokeInjectionCommandGpu> mPendingCommands;
 	std::vector<NRISmokePulseEnqueueInfo> mPendingPulseEnqueueInfo;
+	std::vector<NRISmokeAnalyticTrailObservationBatch> mPendingTrailObservations;
 	std::vector<NRISmokeInjectionCommandGpu> mSelectedGridCommands;
 	std::vector<NRISmokeAnalyticCarrierRequest> mPendingAnalyticRequests;
 	std::vector<NRISmokeDormantGridWorkGpu> mDormantDemotions;

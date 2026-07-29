@@ -27,6 +27,8 @@ void main(uint3 froxel : SV_DispatchThreadID)
 		if (outcome.Outcome != NRI_SMOKE_PROMPT_OUTCOME_FALLBACK || outcome.CommandIndex >= commandCapacity)
 			continue;
 		const SmokeInjectionCommand command = gSmokeCommands[outcome.CommandIndex];
+		if ((command.SourceMetadata & NRI_SMOKE_SOURCE_METADATA_ANALYTIC_BRIDGE) != 0u)
+			continue;
 		if (command.PulseIdLow != outcome.PulseIdLow || command.PulseIdHigh != outcome.PulseIdHigh ||
 			command.RangeBegin != outcome.RangeBegin || command.RangeCount != outcome.RangeCount ||
 			command.Epoch != gSmokeConstants.SimulationEpoch || command.StyleIndex >= gSmokeConstants.StyleCount)

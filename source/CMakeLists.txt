@@ -979,6 +979,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_renderer_settings.cpp
 	common/rendering/nri/renderer/nri_smoke.cpp
 	common/rendering/nri/renderer/nri_smoke_analytic_carriers.cpp
+	common/rendering/nri/renderer/nri_smoke_analytic_trail_bridge.cpp
 	common/rendering/nri/renderer/nri_smoke_work_scheduler.cpp
 	common/rendering/nri/renderer/nri_smoke_interest.cpp
 	common/rendering/nri/renderer/nri_smoke_spatial_interest.cpp
