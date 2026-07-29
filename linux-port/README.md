@@ -10,9 +10,22 @@ checkout. Run `../auto-setup-linux-rt.sh`; it needs no root.
 | `ffx-sdk-1.1.4-linux.patch` | Makes the AMD FidelityFX SDK 1.1.4 build with GCC on Linux (25 files) |
 | `ffx_linux_compat.h` | MSVC/CRT shims the SDK relies on (`_countof`, `wcscpy_s`, `sprintf_s`, …) |
 | `ffx_win32_thread_compat.h` | Win32 threading/timing on pthreads, for the Vulkan frame-interpolation swapchain |
+| `LICENSE.FidelityFX-SDK.txt` | AMD's MIT licence, retained because the patch carries FidelityFX SDK code |
 
 The FidelityFX pieces are optional. Without them the build falls back to the
 frame generation stub and everything else still works.
+
+## Attribution
+
+`ffx-sdk-1.1.4-linux.patch` contains code from the AMD FidelityFX SDK,
+Copyright (C) 2024 Advanced Micro Devices, Inc., used under the MIT licence
+reproduced in `LICENSE.FidelityFX-SDK.txt`. The patch is a modification of that
+SDK; the original is at
+<https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK>.
+
+The compatibility headers (`ffx_linux_compat.h`, `ffx_win32_thread_compat.h`)
+are original work for this port and contain no AMD code, but exist solely to
+build the SDK and are covered by the same terms in spirit.
 
 ## What the patch covers
 
