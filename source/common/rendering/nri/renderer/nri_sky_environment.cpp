@@ -22,7 +22,15 @@
 #define NOMINMAX
 #endif
 
+#ifdef _WIN32
 #include <windows.h>
+#define RAZE_SKYENV_TRY __try
+#define RAZE_SKYENV_EXCEPT __except (EXCEPTION_EXECUTE_HANDLER)
+#else
+// No SEH equivalent on GCC/Clang; the pointer sanity checks above are the guard.
+#define RAZE_SKYENV_TRY if (true)
+#define RAZE_SKYENV_EXCEPT else
+#endif
 
 
 RendererSkyPerfTraceStats gRendererSkyPerfTraceStats = {};
@@ -186,11 +194,11 @@ namespace
 		}
 
 		FTexture* baseTexture = nullptr;
-		__try
+		RAZE_SKYENV_TRY
 		{
 			baseTexture = texture->GetTexture();
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
+		RAZE_SKYENV_EXCEPT
 		{
 			baseTexture = nullptr;
 		}
@@ -206,11 +214,11 @@ namespace
 		}
 
 		FGameTexture* face = nullptr;
-		__try
+		RAZE_SKYENV_TRY
 		{
 			face = skybox->GetSkyFace(index);
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
+		RAZE_SKYENV_EXCEPT
 		{
 			face = nullptr;
 		}

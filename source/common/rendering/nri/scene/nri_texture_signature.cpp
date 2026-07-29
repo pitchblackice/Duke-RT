@@ -12,7 +12,16 @@
 #endif
 
 #include <algorithm>
+#ifdef _WIN32
 #include <windows.h>
+#define RAZE_PTRPROBE_TRY __try
+#define RAZE_PTRPROBE_EXCEPT __except (EXCEPTION_EXECUTE_HANDLER)
+#else
+// GCC/Clang have no SEH for hardware faults and no portable VirtualQuery; the
+// cheap pointer sanity checks remain, the guarded access runs unprotected.
+#define RAZE_PTRPROBE_TRY if (true)
+#define RAZE_PTRPROBE_EXCEPT else
+#endif
 
 namespace
 {
@@ -28,11 +37,11 @@ namespace
 		}
 
 		FTexture* baseTexture = nullptr;
-		__try
+		RAZE_PTRPROBE_TRY
 		{
 			baseTexture = texture->GetTexture();
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
+		RAZE_PTRPROBE_EXCEPT
 		{
 			baseTexture = nullptr;
 		}
@@ -70,11 +79,11 @@ namespace
 		}
 
 		FGameTexture* face = nullptr;
-		__try
+		RAZE_PTRPROBE_TRY
 		{
 			face = skybox->GetSkyFace(index);
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
+		RAZE_PTRPROBE_EXCEPT
 		{
 			face = nullptr;
 		}
@@ -90,11 +99,11 @@ namespace
 		}
 
 		FGameTexture* previous = nullptr;
-		__try
+		RAZE_PTRPROBE_TRY
 		{
 			previous = skybox->previous;
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
+		RAZE_PTRPROBE_EXCEPT
 		{
 			previous = nullptr;
 		}

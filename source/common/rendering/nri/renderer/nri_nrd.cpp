@@ -165,7 +165,11 @@ bool NRINrdContext::EnsureReady(nri::Device& device, uint32_t width, uint32_t he
 	instanceCreationDesc.denoisersNum = (uint32_t)std::size(gDenoisers);
 
 	nrd::IntegrationCreationDesc integrationDesc = {};
+#ifdef _WIN32
 	strcpy_s(integrationDesc.name, "RazeNRI");
+#else
+	snprintf(integrationDesc.name, sizeof(integrationDesc.name), "%s", "RazeNRI");
+#endif
 	integrationDesc.resourceWidth = (uint16_t)width;
 	integrationDesc.resourceHeight = (uint16_t)height;
 	integrationDesc.queuedFrameNum = queuedFrameNum;

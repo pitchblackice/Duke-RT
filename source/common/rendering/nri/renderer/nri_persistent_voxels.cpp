@@ -748,6 +748,11 @@ bool NRIPersistentVoxelAdmissionServices::IsCommandFenceValueComplete(uint64_t f
 	return isCommandFenceValueComplete != nullptr && isCommandFenceValueComplete(user, fenceValue);
 }
 
+bool NRIPersistentVoxelAdmissionServices::IsCommandFenceValueAbandoned(uint64_t fenceValue) const
+{
+	return isCommandFenceValueAbandoned != nullptr && isCommandFenceValueAbandoned(user, fenceValue);
+}
+
 bool NRIPersistentVoxelAdmissionServices::BarrierBuildInputs(const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) const
 {
 	return barrierBuildInputs != nullptr && barrierBuildInputs(user, vertexBuffer, indexBuffer);
@@ -4765,6 +4770,13 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		if (entry.directBlasFenceValue == 0)
 		{
 			return rollbackAdmission("direct-blas-missing-fence", "direct_blas_poll");
+		}
+		// A fence belonging to a discarded command buffer is recorded as abandoned
+		// and never completes, so without this the entry would wait forever and the
+		// voxel would never be published.
+		if (services.IsCommandFenceValueAbandoned(entry.directBlasFenceValue))
+		{
+			return rollbackAdmission("direct-blas-fence-abandoned", "direct_blas_poll");
 		}
 		if (!services.IsCommandFenceValueComplete(entry.directBlasFenceValue))
 		{

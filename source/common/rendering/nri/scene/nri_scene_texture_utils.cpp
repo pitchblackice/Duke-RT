@@ -5,7 +5,16 @@
 #endif
 
 #include <cstdint>
+#ifdef _WIN32
 #include <windows.h>
+#define RAZE_PTRPROBE_TRY __try
+#define RAZE_PTRPROBE_EXCEPT __except (EXCEPTION_EXECUTE_HANDLER)
+#else
+// GCC/Clang have no SEH for hardware faults and no portable VirtualQuery; the
+// cheap pointer sanity checks remain, the guarded access runs unprotected.
+#define RAZE_PTRPROBE_TRY if (true)
+#define RAZE_PTRPROBE_EXCEPT else
+#endif
 
 namespace nri_scene
 {
@@ -19,6 +28,7 @@ bool IsUsableGameTexturePointer(FGameTexture* texture)
 		return false;
 	}
 
+#ifdef _WIN32
 	MEMORY_BASIC_INFORMATION pointerInfo = {};
 	if (VirtualQuery(texture, &pointerInfo, sizeof(pointerInfo)) != sizeof(pointerInfo) ||
 		pointerInfo.State != MEM_COMMIT ||
@@ -26,13 +36,14 @@ bool IsUsableGameTexturePointer(FGameTexture* texture)
 	{
 		return false;
 	}
+#endif
 
 	void* vtable = nullptr;
-	__try
+	RAZE_PTRPROBE_TRY
 	{
 		vtable = *(void**)texture;
 	}
-	__except (EXCEPTION_EXECUTE_HANDLER)
+	RAZE_PTRPROBE_EXCEPT
 	{
 		vtable = nullptr;
 	}
@@ -42,9 +53,14 @@ bool IsUsableGameTexturePointer(FGameTexture* texture)
 		return false;
 	}
 
+#ifdef _WIN32
 	MEMORY_BASIC_INFORMATION vtableInfo = {};
 	return VirtualQuery(vtable, &vtableInfo, sizeof(vtableInfo)) == sizeof(vtableInfo) &&
 		vtableInfo.State == MEM_COMMIT &&
 		(vtableInfo.Protect & (PAGE_NOACCESS | PAGE_GUARD)) == 0;
+#else
+	// A non-null vtable pointer is as much as can be verified portably.
+	return true;
+#endif
 }
 }

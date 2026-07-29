@@ -172,7 +172,14 @@ namespace
 		nri_upscaler = preset.upscaler;
 		nri_postsharpen = 0;
 		nri_upscalermode = preset.upscalerMode;
+#ifdef _WIN32
 		nri_ptoutputmode = preset.outputMode;
+#else
+		// HDR output has no path off Windows: NRI's DisplayDescHelper is a stub
+		// there and X11 has no HDR handoff. Selecting it from a preset would put
+		// the renderer in a mode it cannot present, so pin presets to SDR.
+		nri_ptoutputmode = kNRIOutputSdr;
+#endif
 		nri_pttaa = false;
 
 		nri_denoise = preset.denoise;
@@ -776,7 +783,24 @@ CVAR(Bool, nri_denoise, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Int, nri_nrddenoiser, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CVAR(Int, nri_upscaler, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, nri_upscaler, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	// DLRR (ray reconstruction) does its own denoising and expects NRD to be
+	// off; every other mode relies on NRD still running. Without this the menu
+	// can easily land on an undenoised or double-denoised image, because the two
+	// settings live in different sections.
+	if (self == kNRIUpscalerDlrr)
+	{
+		if (nri_denoise)
+		{
+			nri_denoise = false;
+		}
+	}
+	else if (!nri_denoise)
+	{
+		nri_denoise = true;
+	}
+}
 
 CVAR(Int, nri_postsharpen, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 

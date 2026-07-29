@@ -25,7 +25,18 @@
 #include "hw_portal.h"
 #include "hw_renderstate.h"
 #include "skyboxtexture.h"
+
+#ifdef _WIN32
 #include <windows.h>
+#define RAZE_SKY_TRY __try
+#define RAZE_SKY_EXCEPT __except (EXCEPTION_EXECUTE_HANDLER)
+#else
+// GCC/Clang have no equivalent of MSVC structured exception handling for hardware
+// faults, and there is no portable VirtualQuery. The cheap pointer sanity checks
+// below still apply; the guarded accesses simply run unprotected.
+#define RAZE_SKY_TRY if (true)
+#define RAZE_SKY_EXCEPT else
+#endif
 
 CVAR(Float, skyoffsettest, 0.f, 0)
 
@@ -41,6 +52,7 @@ namespace
 			return false;
 		}
 
+#ifdef _WIN32
 		MEMORY_BASIC_INFORMATION pointerInfo = {};
 		if (VirtualQuery(texture, &pointerInfo, sizeof(pointerInfo)) != sizeof(pointerInfo) ||
 			pointerInfo.State != MEM_COMMIT ||
@@ -48,13 +60,14 @@ namespace
 		{
 			return false;
 		}
+#endif
 
 		void* vtable = nullptr;
-		__try
+		RAZE_SKY_TRY
 		{
 			vtable = *(void**)texture;
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
+		RAZE_SKY_EXCEPT
 		{
 			vtable = nullptr;
 		}
@@ -64,6 +77,7 @@ namespace
 			return false;
 		}
 
+#ifdef _WIN32
 		MEMORY_BASIC_INFORMATION vtableInfo = {};
 		if (VirtualQuery(vtable, &vtableInfo, sizeof(vtableInfo)) != sizeof(vtableInfo) ||
 			vtableInfo.State != MEM_COMMIT ||
@@ -71,6 +85,7 @@ namespace
 		{
 			return false;
 		}
+#endif
 
 		return true;
 	}
@@ -83,11 +98,11 @@ namespace
 		}
 
 		FTexture* baseTexture = nullptr;
-		__try
+		RAZE_SKY_TRY
 		{
 			baseTexture = texture->GetTexture();
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
+		RAZE_SKY_EXCEPT
 		{
 			baseTexture = nullptr;
 		}
@@ -102,13 +117,13 @@ namespace
 			return false;
 		}
 
-		__try
+		RAZE_SKY_TRY
 		{
 			displayHeight = texture->GetDisplayHeight();
 			skyOffset = texture->GetSkyOffset();
 			return true;
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
+		RAZE_SKY_EXCEPT
 		{
 			displayHeight = 0.0f;
 			skyOffset = 0;

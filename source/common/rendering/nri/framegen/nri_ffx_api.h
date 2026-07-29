@@ -1,10 +1,10 @@
 #pragma once
 
 #ifdef _WIN32
-
 #include <d3d12.h>
 #include <dxgi.h>
 #include <dxgi1_5.h>
+#endif
 
 #include <cstdint>
 #include <cstring>
@@ -57,6 +57,7 @@ enum
 {
 	NRI_FFX_API_CONFIGURE_DESC_TYPE_GLOBALDEBUG1 = 0x0000001u,
 	NRI_FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12 = 0x0000002u,
+	NRI_FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_VK = 0x0000003u,
 	NRI_FFX_API_QUERY_DESC_TYPE_GET_PROVIDER_VERSION = 6u,
 	NRI_FFX_API_EFFECT_ID_FRAMEGENERATION = 0x00020000u,
 	NRI_FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION = 0x00020001u,
@@ -212,10 +213,23 @@ struct ffxConfigureDescGlobalDebug1
 	uint32_t debugLevel;
 };
 
+#ifdef _WIN32
 struct ffxCreateBackendDX12Desc
 {
 	ffxCreateContextDescHeader header;
 	ID3D12Device* device;
+};
+#endif  // _WIN32
+
+// Vulkan backend. VkDevice/VkPhysicalDevice are dispatchable handles (opaque
+// pointers) and vkGetDeviceProcAddr is a plain function pointer, so this stays
+// free of any Vulkan headers - matching how the DX12 side is declared here.
+struct ffxCreateBackendVKDesc
+{
+	ffxCreateContextDescHeader header;
+	void* vkDevice;
+	void* vkPhysicalDevice;
+	void* vkDeviceProcAddr;
 };
 
 struct FfxApiDimensions2D
@@ -291,6 +305,7 @@ struct ffxCreateContextDescFrameGenerationHudless
 	uint32_t hudlessBackBufferFormat;
 };
 
+#ifdef _WIN32
 struct ffxCreateContextDescFrameGenerationSwapChainWrapDX12
 {
 	ffxCreateContextDescHeader header;
@@ -317,6 +332,7 @@ struct ffxCreateContextDescFrameGenerationSwapChainForHwndDX12
 	IDXGIFactory* dxgiFactory;
 	ID3D12CommandQueue* gameQueue;
 };
+#endif  // _WIN32
 
 struct ffxCallbackDescFrameGenerationPresent
 {
@@ -428,6 +444,7 @@ static inline void NriFfxInitHeader(ffxApiHeader& header, uint64_t type)
 	header.pNext = nullptr;
 }
 
+#ifdef _WIN32
 static inline uint32_t NriFfxGetSurfaceFormatDX12(DXGI_FORMAT format)
 {
 	switch (format)
@@ -486,7 +503,9 @@ static inline uint32_t NriFfxGetSurfaceFormatDX12(DXGI_FORMAT format)
 	default: return NRI_FFX_API_SURFACE_FORMAT_UNKNOWN;
 	}
 }
+#endif  // _WIN32
 
+#ifdef _WIN32
 static inline uint32_t NriFfxGetResourceStateFromDx12State(D3D12_RESOURCE_STATES state)
 {
 	if ((state & D3D12_RESOURCE_STATE_UNORDERED_ACCESS) != 0)
@@ -566,5 +585,4 @@ static inline FfxApiResource NriFfxGetResourceDX12(ID3D12Resource* resource, uin
 	result.description.usage |= additionalUsages;
 	return result;
 }
-
-#endif
+#endif  // _WIN32

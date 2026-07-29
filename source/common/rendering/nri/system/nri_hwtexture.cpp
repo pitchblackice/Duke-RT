@@ -4,7 +4,9 @@
 #include "nri_renderdevice.h"
 #include "printf.h"
 #include "textures.h"
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 namespace
 {
@@ -41,6 +43,9 @@ namespace
 			return false;
 		}
 
+#ifdef _WIN32
+		// ReadProcessMemory validates readability instead of faulting on a bad
+		// source pointer, which the Windows build relies on as a safety net.
 		SIZE_T bytesRead = 0;
 		if (ReadProcessMemory(GetCurrentProcess(), src, dst, size, &bytesRead) && bytesRead == size)
 		{
@@ -48,6 +53,11 @@ namespace
 		}
 
 		return false;
+#else
+		// No portable equivalent; the null/size checks above are the only guard.
+		memcpy(dst, src, size);
+		return true;
+#endif
 	}
 }
 

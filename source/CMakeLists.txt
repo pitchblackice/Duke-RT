@@ -447,6 +447,10 @@ set( PLAT_SDL_SOURCES
 	common/platform/posix/sdl/i_system.cpp
 	common/platform/posix/sdl/sdlglvideo.cpp
 	common/platform/posix/sdl/st_start.cpp )
+if (HAVE_NRI)
+	set( PLAT_SDL_SOURCES ${PLAT_SDL_SOURCES}
+		common/platform/posix/sdl/sdlnrivideo.cpp )
+endif()
 set( PLAT_UNIX_SOURCES
 	common/platform/posix/unix/i_specialpaths.cpp
 	common/platform/posix/unix/gtk_dialogs.cpp )
@@ -924,7 +928,6 @@ set (NRI_SOURCES
 	common/rendering/nri/system/nri_gpu_timing.cpp
 	common/rendering/nri/system/nri_hwbuffer.cpp
 	common/rendering/nri/system/nri_hwtexture.cpp
-	common/rendering/nri/framegen/nri_framegen.cpp
 	common/rendering/nri/renderer/nri_acceleration.cpp
 	common/rendering/nri/renderer/nri_actor_sprite_diagnostics.cpp
 	common/rendering/nri/renderer/nri_bloom.cpp
@@ -1407,7 +1410,69 @@ else()
 endif()
 
 if (HAVE_NRI)
+	# NGX/DLSS ships its runtime as shared libraries that NGX resolves relative to
+	# the executable. NRI's own CMake stages them next to libNRI.so, which is not
+	# where the game runs from, so CreateUpscaler fails with FAILURE and the
+	# upscale pass emits a black frame. Copy them next to the binary.
+	if (NOT WIN32)
+		file( GLOB RAZE_NGX_RUNTIME "${CMAKE_BINARY_DIR}/_deps/ngx-src/lib/Linux_x86_64/rel/libnvidia-ngx-*.so.*" )
+		if (RAZE_NGX_RUNTIME)
+			file( COPY ${RAZE_NGX_RUNTIME} DESTINATION "${CMAKE_BINARY_DIR}" )
+			foreach( _ngx_lib ${RAZE_NGX_RUNTIME} )
+				get_filename_component( _ngx_name "${_ngx_lib}" NAME )
+				string( REGEX REPLACE "\\.so\\..*$" ".so" _ngx_soname "${_ngx_name}" )
+				file( CREATE_LINK "${_ngx_name}" "${CMAKE_BINARY_DIR}/${_ngx_soname}" SYMBOLIC )
+			endforeach()
+			message( STATUS "DLSS/NGX runtime staged next to the executable" )
+		else()
+			message( STATUS "DLSS/NGX runtime not found; upscalers will be unavailable" )
+		endif()
+	endif()
+
+	# Frame generation is built on the AMD FidelityFX SDK. The Windows path drives
+	# it through amd_fidelityfx_dx12.dll; elsewhere we use the natively built
+	# libamd_fidelityfx_vk.so when it is present, and fall back to the stub that
+	# reports the feature as unavailable when it is not.
+	if (WIN32)
+		list( APPEND NRI_SOURCES common/rendering/nri/framegen/nri_framegen.cpp )
+	else()
+		find_library( FFX_VK_RUNTIME
+			NAMES amd_fidelityfx_vk
+			PATHS "${CMAKE_SOURCE_DIR}/build/ffx-sdk/ffx-api/build-vk"
+			NO_DEFAULT_PATH )
+		if (FFX_VK_RUNTIME)
+			message( STATUS "Frame generation: using ${FFX_VK_RUNTIME}" )
+			list( APPEND NRI_SOURCES common/rendering/nri/framegen/nri_framegen_vk.cpp )
+			# Loaded with dlopen at runtime, so it only needs to sit beside the
+			# executable. Staged at configure time because the target that would
+			# carry a POST_BUILD copy is not created until later.
+			file( COPY "${FFX_VK_RUNTIME}" DESTINATION "${CMAKE_BINARY_DIR}" )
+		else()
+			message( STATUS "Frame generation: libamd_fidelityfx_vk.so not found, using stub" )
+			list( APPEND NRI_SOURCES common/rendering/nri/framegen/nri_framegen_stub.cpp )
+		endif()
+	endif()
+
 	set( PCH_SOURCES ${PCH_SOURCES} ${NRI_SOURCES} )
+	# Neither NRI nor NRD is linked: NRI is resolved at runtime (NRIRenderDevice::
+	# LoadNRI) and NRD's sources are compiled directly into this target. The NRD
+	# subdirectory is still configured so it generates NRDConfig and the embedded
+	# SPIR-V shader headers that those sources include.
+
+	# NVIDIA's MathLib, pulled in by NRD's headers, uses SSSE3 intrinsics. MSVC
+	# enables those unconditionally; GCC/Clang need the flag. NRD's own target sets
+	# -mssse3 too, so this just matches it for the copies built into this target.
+	if( NOT MSVC )
+		set_source_files_properties(
+			../libraries/NRD/Source/Wrapper.cpp
+			../libraries/NRD/Source/InstanceImpl.cpp
+			../libraries/NRD/Source/Reblur.cpp
+			../libraries/NRD/Source/Relax.cpp
+			../libraries/NRD/Source/Sigma.cpp
+			../libraries/NRD/Source/Reference.cpp
+			../libraries/NRD/Source/Timer.cpp
+			PROPERTIES COMPILE_OPTIONS "-mssse3" )
+	endif()
 endif()
 
 set( GAME_SOURCES
@@ -1481,8 +1546,11 @@ if (HAVE_NRI)
 		NRD_SUPPORTS_BASECOLOR_METALNESS=1
 		NRD_SUPPORTS_ANTIFIREFLY=0
 		REBLUR_PERFORMANCE_MODE=0
-		NRD_EMBEDS_DXBC_SHADERS=1
-		NRD_EMBEDS_DXIL_SHADERS=1
+		# NRD's sources are compiled straight into this target, so these have to
+		# match what NRD itself was configured with. DXBC/DXIL embeds require the
+		# D3D11/D3D12 backends and are Windows-only.
+		NRD_EMBEDS_DXBC_SHADERS=$<BOOL:${WIN32}>
+		NRD_EMBEDS_DXIL_SHADERS=$<BOOL:${WIN32}>
 		NRD_EMBEDS_SPIRV_SHADERS=1
 		SPIRV_SREG_OFFSET=0
 		SPIRV_BREG_OFFSET=2

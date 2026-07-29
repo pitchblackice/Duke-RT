@@ -897,6 +897,10 @@ public:
 		{
 			return static_cast<NRIRenderer*>(user)->IsCommandFenceValueComplete(fenceValue);
 		};
+		services.isCommandFenceValueAbandoned = [](void* user, uint64_t fenceValue) -> bool
+		{
+			return static_cast<NRIRenderer*>(user)->IsCommandFenceValueAbandoned(fenceValue);
+		};
 		services.retireBuffer = [](void* user, NRIBufferResource& resource)
 		{
 			static_cast<NRIRenderer*>(user)->RetireResidentBufferResource(resource);

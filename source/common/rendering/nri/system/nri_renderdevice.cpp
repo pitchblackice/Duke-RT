@@ -11,7 +11,9 @@
 #include "c_cvars.h"
 #include "cmdlib.h"
 #include "d_eventbase.h"
+#ifdef _WIN32
 #include "i_mainwindow.h"
+#endif
 #include "i_time.h"
 #include "printf.h"
 #include "textures.h"
@@ -32,9 +34,27 @@
 #include "lightoverlay.h"
 #include "startup_recovery.h"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
+#else
+#include <dlfcn.h>
+#endif
+
+// NRI is resolved at runtime rather than linked, so the platform loader is
+// abstracted here. On Linux the backend is the Vulkan one built as libNRI.so.
+#ifdef _WIN32
+static constexpr const char* kNriLibraryName = "NRI.dll";
+static void* NriOpenLibrary(const char* name) { return (void*)LoadLibraryA(name); }
+static void* NriFindSymbol(void* handle, const char* name) { return (void*)GetProcAddress((HMODULE)handle, name); }
+static void NriCloseLibrary(void* handle) { FreeLibrary((HMODULE)handle); }
+#else
+static constexpr const char* kNriLibraryName = "libNRI.so";
+static void* NriOpenLibrary(const char* name) { return dlopen(name, RTLD_NOW | RTLD_LOCAL); }
+static void* NriFindSymbol(void* handle, const char* name) { return dlsym(handle, name); }
+static void NriCloseLibrary(void* handle) { dlclose(handle); }
+#endif
 
 #ifdef ERROR
 #undef ERROR
@@ -611,6 +631,7 @@ namespace
 		}
 	}
 
+#ifdef _WIN32
 	static HRESULT CreateDxgiFactoryForTelemetry(IDXGIFactory4** factory)
 	{
 		if (factory == nullptr)
@@ -638,6 +659,7 @@ namespace
 
 		return createFactory2(0u, IID_PPV_ARGS(factory));
 	}
+#endif // _WIN32
 
 	static bool IsFullscreenPaletteBlendCommand(const F2DDrawer& drawer, const F2DDrawer::RenderCommand& cmd)
 	{
@@ -857,7 +879,9 @@ namespace
 {
 	static nri::Result(NRI_CALL* gNriGetInterfaceForwarder)(const nri::Device&, const char*, size_t, void*) = nullptr;
 	static void (NRI_CALL* gNriDestroyDeviceForwarder)(nri::Device*) = nullptr;
+#ifdef _WIN32
 	using PFN_D3D12_GET_DEBUG_INTERFACE = HRESULT(WINAPI*)(REFIID, void**);
+#endif // _WIN32
 
 	template<typename T>
 	static T NRIFlags(T a, T b)
@@ -888,6 +912,7 @@ namespace
 		return remainder == 0 ? value : value + alignment - remainder;
 	}
 
+#ifdef _WIN32
 	static const char* GetDxgiErrorName(HRESULT hr)
 	{
 		switch (hr)
@@ -1236,16 +1261,6 @@ namespace
 		infoQueue->Release();
 	}
 
-	template<typename T>
-	static void SetNriDebugName(const nri::CoreInterface& core, T* object, const char* name)
-	{
-		if (object == nullptr || name == nullptr || *name == '\0' || core.SetDebugName == nullptr)
-		{
-			return;
-		}
-
-		core.SetDebugName(reinterpret_cast<nri::Object*>(object), name);
-	}
 
 	static void LogD3D12DeviceRemovedReason(const nri::CoreInterface& core, nri::Device* device, const char* context)
 	{
@@ -1326,6 +1341,19 @@ namespace
 
 		infoQueue->ClearStoredMessages();
 		infoQueue->Release();
+	}
+#endif // _WIN32
+
+	// Generic NRI helper - not D3D12 specific, needed on every platform.
+	template<typename T>
+	static void SetNriDebugName(const nri::CoreInterface& core, T* object, const char* name)
+	{
+		if (object == nullptr || name == nullptr || *name == '\0' || core.SetDebugName == nullptr)
+		{
+			return;
+		}
+
+		core.SetDebugName(reinterpret_cast<nri::Object*>(object), name);
 	}
 
 	static NRIRenderDevice* GetActiveNRIRenderDevice()
@@ -2456,7 +2484,7 @@ NRIRenderDevice::~NRIRenderDevice()
 
 	if (mNriModule != nullptr)
 	{
-		FreeLibrary((HMODULE)mNriModule);
+		NriCloseLibrary(mNriModule);
 		mNriModule = nullptr;
 	}
 
@@ -2686,6 +2714,7 @@ void NRIRenderDevice::BeginFrame()
 	mAcquireSemaphoreIndex = mSwapChainImages.empty() ? 0 : (uint32_t)(mFrameIndex % mSwapChainImages.size());
 	mLastFrameBoundaryStats.acquireSemaphoreIndex = mAcquireSemaphoreIndex;
 
+#ifdef _WIN32  // present bridge is D3D12/FFX only
 	if (IsFrameGenerationPresentPathActive())
 	{
 		IDXGISwapChain4* frameGenSwapChain = mFrameGeneration.GetPresentSwapChain();
@@ -2714,6 +2743,7 @@ void NRIRenderDevice::BeginFrame()
 		mCurrentPresentTarget = &mFrameGenerationPresentImages[mCurrentSwapChainImage];
 	}
 	else
+#endif // _WIN32
 	{
 		const bool waitableSwapChain = ((uint32_t)mSwapChainFlags & (uint32_t)nri::SwapChainBits::WAITABLE) != 0;
 		const bool allowWaitForPresent = waitableSwapChain;
@@ -3426,6 +3456,7 @@ void NRIRenderDevice::WaitForCommands(bool finish)
 			return;
 		}
 		mCore.DeviceWaitIdle(mDevice);
+#ifdef _WIN32
 		if (mCreatedDeviceApi == nri::GraphicsAPI::D3D12 &&
 			mNativeD3D12Device != nullptr &&
 			mNativeD3D12Device->GetDeviceRemovedReason() != S_OK)
@@ -3437,6 +3468,7 @@ void NRIRenderDevice::WaitForCommands(bool finish)
 				FatalTerminalDeviceLoss("DeviceWaitIdle");
 			}
 		}
+#endif
 		return;
 	}
 
@@ -3585,12 +3617,14 @@ bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 		if (mGpuTiming != nullptr) mGpuTiming->AbandonSlot(mCurrentQueuedFrameIndex);
 		AbandonRecordingCommandFenceValue();
 		mLastSubmitAndWaitResult = fenceResult;
+#ifdef _WIN32
 		if (mCreatedDeviceApi == nri::GraphicsAPI::D3D12 &&
 			mNativeD3D12Device != nullptr &&
 			mNativeD3D12Device->GetDeviceRemovedReason() != S_OK)
 		{
 			mLastSubmitAndWaitResult = nri::Result::DEVICE_LOST;
 		}
+#endif
 		return false;
 	}
 
@@ -3687,11 +3721,13 @@ void NRIRenderDevice::MarkTerminalDeviceLoss(const char* context)
 	MarkTerminalDeviceLoss(failureContext);
 
 	FString reason = "device_lost";
+#ifdef _WIN32
 	if (mCreatedDeviceApi == nri::GraphicsAPI::D3D12 && mNativeD3D12Device != nullptr)
 	{
 		const HRESULT hr = mNativeD3D12Device->GetDeviceRemovedReason();
 		reason = FStringf("%s (0x%08X)", GetDxgiErrorName(hr), (unsigned)hr);
 	}
+#endif
 
 	I_FatalError("NRI renderer device lost during %s: %s.\n"
 		"The renderer cannot recover this graphics device during the current run. "
@@ -8612,29 +8648,29 @@ bool NRIRenderDevice::LoadNRI()
 		return true;
 	}
 
-	HMODULE module = LoadLibraryA("NRI.dll");
+	void* module = NriOpenLibrary(kNriLibraryName);
 	if (module == nullptr)
 	{
 		FString localPath = progdir;
-		localPath << "NRI.dll";
-		module = LoadLibraryA(localPath.GetChars());
+		localPath << kNriLibraryName;
+		module = NriOpenLibrary(localPath.GetChars());
 	}
 
 	if (module == nullptr)
 	{
-		Printf(TEXTCOLOR_RED "Failed to load NRI.dll.\n");
+		Printf(TEXTCOLOR_RED "Failed to load %s.\n", kNriLibraryName);
 		return false;
 	}
 
-	mEnumerateAdapters = (PFN_nriEnumerateAdapters)GetProcAddress(module, "nriEnumerateAdapters");
-	mCreateDeviceFn = (PFN_nriCreateDevice)GetProcAddress(module, "nriCreateDevice");
-	mDestroyDeviceFn = (PFN_nriDestroyDevice)GetProcAddress(module, "nriDestroyDevice");
-	mGetInterfaceFn = (PFN_nriGetInterface)GetProcAddress(module, "nriGetInterface");
+	mEnumerateAdapters = (PFN_nriEnumerateAdapters)NriFindSymbol(module, "nriEnumerateAdapters");
+	mCreateDeviceFn = (PFN_nriCreateDevice)NriFindSymbol(module, "nriCreateDevice");
+	mDestroyDeviceFn = (PFN_nriDestroyDevice)NriFindSymbol(module, "nriDestroyDevice");
+	mGetInterfaceFn = (PFN_nriGetInterface)NriFindSymbol(module, "nriGetInterface");
 
 	if (mEnumerateAdapters == nullptr || mCreateDeviceFn == nullptr || mDestroyDeviceFn == nullptr || mGetInterfaceFn == nullptr)
 	{
-		Printf(TEXTCOLOR_RED "NRI.dll is missing required exports.\n");
-		FreeLibrary(module);
+		Printf(TEXTCOLOR_RED "%s is missing required exports.\n", kNriLibraryName);
+		NriCloseLibrary(module);
 		return false;
 	}
 
@@ -8655,11 +8691,13 @@ bool NRIRenderDevice::CreateDevice()
 		Printf("NRI Vulkan graphics API validation is temporarily disabled; continuing with NRI validation only.\n");
 	}
 
+#ifdef _WIN32
 	if (selectedApi == nri::GraphicsAPI::D3D12)
 	{
 		ConfigureD3D12DebugLayer();
 		ConfigureD3D12Dred();
 	}
+#endif
 
 	nri::AdapterDesc adapters[8] = {};
 	uint32_t adapterCount = (uint32_t)std::size(adapters);
@@ -8739,6 +8777,7 @@ bool NRIRenderDevice::CreateDevice()
 		StartupRecovery_MarkNriStartupFailure("nri_get_interfaces", "get_interfaces_failed");
 		return false;
 	}
+#ifdef _WIN32
 	if (selectedApi == nri::GraphicsAPI::D3D12)
 	{
 		ConfigureD3D12InfoQueue(mCore, mDevice);
@@ -8748,6 +8787,7 @@ bool NRIRenderDevice::CreateDevice()
 			mWrapperD3D12 = {};
 		}
 	}
+#endif
 
 	mLowLatency = {};
 	const nri::Result lowLatencyResult = mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::LowLatencyInterface), &mLowLatency);
@@ -8806,6 +8846,7 @@ bool NRIRenderDevice::CreateDevice()
 
 void NRIRenderDevice::LogD3D12FailureDiagnostics(const char* context)
 {
+#ifdef _WIN32
 	if (GetLiveAPI() != nri::GraphicsAPI::D3D12)
 	{
 		return;
@@ -8993,11 +9034,25 @@ void NRIRenderDevice::LogD3D12FailureDiagnostics(const char* context)
 	}
 
 	dred->Release();
+#endif // _WIN32
 }
 
 bool NRIRenderDevice::CreateSwapChain()
 {
+#ifndef _WIN32
+	// Implemented by the SDL video backend.
+	extern bool I_GetNriWindowHandles(void** x11Display, uint64_t* x11Window, void** waylandDisplay, void** waylandSurface);
+
+	void* nriX11Display = nullptr;
+	uint64_t nriX11Window = 0;
+	void* nriWaylandDisplay = nullptr;
+	void* nriWaylandSurface = nullptr;
+	const bool nriHaveWindow = I_GetNriWindowHandles(&nriX11Display, &nriX11Window, &nriWaylandDisplay, &nriWaylandSurface);
+
+	if (mDevice == nullptr || mGraphicsQueue == nullptr || !nriHaveWindow)
+#else
 	if (mDevice == nullptr || mGraphicsQueue == nullptr || mainwindow.GetHandle() == nullptr)
+#endif
 	{
 		return false;
 	}
@@ -9013,7 +9068,20 @@ bool NRIRenderDevice::CreateSwapChain()
 	const uint32_t height = (uint32_t)(std::max)(GetClientHeight(), 1);
 
 	nri::SwapChainDesc swapChainDesc = {};
+#ifdef _WIN32
 	swapChainDesc.window.windows.hwnd = mainwindow.GetHandle();
+#else
+	if (nriWaylandDisplay != nullptr)
+	{
+		swapChainDesc.window.wayland.display = nriWaylandDisplay;
+		swapChainDesc.window.wayland.surface = nriWaylandSurface;
+	}
+	else
+	{
+		swapChainDesc.window.x11.dpy = nriX11Display;
+		swapChainDesc.window.x11.window = nriX11Window;
+	}
+#endif
 	swapChainDesc.queue = mGraphicsQueue;
 	swapChainDesc.width = width;
 	swapChainDesc.height = height;
@@ -10849,6 +10917,16 @@ void NRIRenderDevice::ResetFrameTracking(bool presentedAcquiredImage)
 	if (mCommandBufferOpen)
 	{
 		AbandonRecordingCommandFenceValue();
+
+		// The recording is being discarded, but Vulkan still requires the command
+		// buffer to be ended before it can be begun again - otherwise the next
+		// BeginCommandList fails with "already in the recording state" and no
+		// further work is ever recorded. D3D12 discards implicitly on the next
+		// Reset, so ending here is a no-op difference there.
+		if (mCommandBuffer != nullptr)
+		{
+			mCore.EndCommandBuffer(*mCommandBuffer);
+		}
 	}
 	mFrameBegun = false;
 	mCommandBufferOpen = false;

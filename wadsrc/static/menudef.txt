@@ -1075,7 +1075,15 @@ OptionMenu "VideoOptions" protected
 	StaticText ""
 
 	StaticText "Rendering Profile"
-	Option "Graphics API",						"nri_api",						"NRIGraphicsAPI"
+	ifoption(Windows)
+	{
+		Option "Graphics API",					"nri_api",						"NRIGraphicsAPI"
+	}
+	else
+	{
+		// The NRI D3D12 backend is Windows-only; Vulkan is the sole path elsewhere.
+		Option "Graphics API",					"nri_api",						"NRIGraphicsAPIVulkanOnly"
+	}
 	StaticText "$VK_RESTART"
 	Option "HDR / SDR",							"nri_ptoutputmode",				"NRIPTOutputMode"
 	Option "Settings Profile",					"nri_settingsprofile",			"NRISettingsProfile"
@@ -1142,7 +1150,15 @@ OptionMenu "NRIOptions" protected
 	Option "Frame Gen Async",					"nri_framegenasync",			"OnOff"
 	Slider "Render Scale",						"nri_renderscale",				0.33, 1.0, 0.01, 2
 	Slider "Sharpness",							"nri_sharpness",				0.0, 1.0, 0.05, 2
-	StaticText "Frame generation currently targets windowed D3D12."
+	ifoption(Windows)
+	{
+		StaticText "Frame generation currently targets windowed D3D12."
+	}
+	else
+	{
+		StaticText "Frame generation: FSR3 runtime loads; Vulkan present"
+		StaticText "bridge is not implemented yet, so it stays inactive."
+	}
 	StaticText "----------------"
 	StaticText "Bloom"
 	Option "Bloom",								"nri_ptbloom",					"OnOff"
@@ -1238,6 +1254,18 @@ OptionMenu "NRIOptions" protected
 	Slider "Sky Brightness",					"nri_ptskybrightness",		0.00, 4.00, 0.05, 2
 	StaticText "Output calibration affects final present; light energy remains upstream."
 	StaticText "Output-mode changes reset PT history."
+	StaticText ""
+
+	StaticText "----------------"
+	StaticText "Voxels"
+	Option "Voxel Models",						"r_voxels",						"OnOff"
+	Option "PT Voxel Compute",					"nri_ptvoxelcompute",			"OnOff"
+	Option "Voxel Stats",						"nri_voxelstats",				"OnOff"
+	Slider "Voxel Actor Captures",				"nri_ptvoxelcaptureactors",		0, 8, 1, 0
+	Slider "Voxel Mesh Builds",					"nri_ptvoxelmeshbuilds",		0, 8, 1, 0
+	Slider "Voxel Emission Boost",				"nri_voxelemissionboost",		0.0, 8.0, 0.25, 2
+	Slider "Voxel Normal Blend",				"nri_ptvoxelnormalblend",		0.0, 1.0, 0.05, 2
+	StaticText "Voxel Models off renders those actors as flat sprites."
 	StaticText ""
 
 	StaticText "Commands"
@@ -1637,6 +1665,11 @@ OptionValue NRISettingsProfile
 OptionString NRIGraphicsAPI
 {
 	"d3d12", "D3D12"
+	"vulkan", "Vulkan"
+}
+
+OptionString NRIGraphicsAPIVulkanOnly
+{
 	"vulkan", "Vulkan"
 }
 

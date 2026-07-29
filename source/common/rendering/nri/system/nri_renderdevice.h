@@ -1,6 +1,11 @@
 #pragma once
 
+#ifdef _WIN32
 #include "base_sysfb.h"
+#else
+// The SDL backend declares SystemBaseFrameBuffer in gl_sysfb.h instead.
+#include "gl_sysfb.h"
+#endif
 #include "../nri_output.h"
 #include "../framegen/nri_framegen.h"
 #include "nri_frame_shell.h"
@@ -176,13 +181,19 @@ public:
 	void PrintPathTracingMapChunkDump(int32_t chunkIndex) const;
 	void PrintPathTracingMapChunkCompare(int32_t chunkIndex) const;
 	bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const override;
+#ifdef _WIN32
 	bool IsFullscreenModeActive() const { return m_Fullscreen; }
+#else
+	// The SDL base class exposes only the non-const IsFullscreen() accessor.
+	bool IsFullscreenModeActive() const { return const_cast<NRIRenderDevice*>(this)->IsFullscreen(); }
+#endif
 #ifdef _WIN32
 	ID3D12Device* GetNativeD3D12Device() const { return mNativeD3D12Device; }
 	ID3D12CommandQueue* GetNativeD3D12GraphicsQueue() const { return mNativeD3D12GraphicsQueue; }
 	IDXGISwapChain4* GetNativeD3D12SwapChain() const { return mNativeD3D12SwapChain; }
-	bool IsFrameGenerationPresentPathActive() const { return !mFrameGenerationPresentImages.empty() && mFrameGeneration.ShouldUsePresentBridge(); }
 #endif
+	// Not D3D12-specific: the frame generation stub keeps this false on Linux.
+	bool IsFrameGenerationPresentPathActive() const { return !mFrameGenerationPresentImages.empty() && mFrameGeneration.ShouldUsePresentBridge(); }
 	uint64_t GetAdapterLocalBudgetBytes() const { return mAdapterLocalBudgetBytes; }
 	NRIAdapterMemoryTelemetry GetAdapterMemoryTelemetry() const;
 	uint64_t GetAdapterNonLocalBudgetBytes() const { return mAdapterNonLocalBudgetBytes; }
@@ -435,8 +446,15 @@ private:
 	ID3D12Device* mNativeD3D12Device = nullptr;
 	ID3D12CommandQueue* mNativeD3D12GraphicsQueue = nullptr;
 	IDXGISwapChain4* mNativeD3D12SwapChain = nullptr;
-	bool mFrameGenerationPresentAllowsTearing = false;
+#else
+	// Permanently null on Linux, where there is no D3D12 backend. Keeping the
+	// members declared lets the shared diagnostics and null checks compile as-is;
+	// only the handful of sites that dereference them are guarded.
+	void* mNativeD3D12Device = nullptr;
+	void* mNativeD3D12GraphicsQueue = nullptr;
+	void* mNativeD3D12SwapChain = nullptr;
 #endif
+	bool mFrameGenerationPresentAllowsTearing = false;
 	uint64_t mFrameIndex = 0;
 	uint64_t mSubmittedFenceValue = 0;
 	uint64_t mRecordingCommandFenceValue = 0;

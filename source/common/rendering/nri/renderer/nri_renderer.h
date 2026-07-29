@@ -2135,6 +2135,7 @@ public:
 	bool IsFrameFenceValueComplete(uint64_t fenceValue) const;
 	uint64_t GetRecordingCommandFenceValue() const;
 	bool IsCommandFenceValueComplete(uint64_t fenceValue) const;
+	bool IsCommandFenceValueAbandoned(uint64_t fenceValue) const;
 	void PrintSmokeStatus() const;
 	void ResetSmoke(const char* reason = "console");
 	void QueueSyntheticSmoke();
