@@ -2,7 +2,7 @@
 
 ![Duke-RT gameplay](images/28.png)
 
-Duke-RT is a fork of Raze that adds a new ray-tracing render backend based on [NVIDIA NRI](https://github.com/NVIDIA-RTX/NRI). The existing Build-engine game support from Raze remains the foundation, while this fork focuses on path tracing, RT renderer bring-up, lighting authoring, custom material authoring, denoising/upscaling integration, and backend diagnostics. It also includes tooling and overlay workflows so users can create their own material and lighting rules for Duke content. It only works on Windows due to reliance on libraries for DLSS, frame generation, denoising, etc. [Watch the latest gameplay video](https://www.youtube.com/watch?v=7z7txcZg2q0).
+Duke-RT is a fork of Raze that adds a new ray-tracing render backend based on [NVIDIA NRI](https://github.com/NVIDIA-RTX/NRI). The existing Build-engine game support from Raze remains the foundation, while this fork focuses on path tracing, RT renderer bring-up, lighting authoring, custom material authoring, denoising/upscaling integration, and backend diagnostics. It also includes tooling and overlay workflows so users can create their own material and lighting rules for Duke content. Windows remains the primary and most complete target. A native Linux port is also available (see [Linux Build Instructions](#linux-build-instructions)) with path tracing, denoising, voxels and DLSS super resolution / ray reconstruction working; HDR and frame generation are not yet available there. [Watch the latest gameplay video](https://www.youtube.com/watch?v=7z7txcZg2q0).
 
 ![Duke-RT gameplay](images/6.png)
 
@@ -282,3 +282,95 @@ Example local overlay launch:
 ```powershell
 build\terminal-ninja\raze.exe -file M:\Raze\default-overlay
 ```
+
+
+### Linux Build Instructions
+
+The Linux port runs the NRI path tracer on Vulkan. Path tracing, NRD denoising,
+voxels, and DLSS super resolution / ray reconstruction all work.
+
+#### Requirements
+
+- An NVIDIA RTX GPU with current proprietary drivers. DLSS and ray reconstruction
+  need NGX; the renderer runs without them but at native resolution.
+- Vulkan 1.3 drivers and the Vulkan loader.
+- `git`, `curl`, a C++20 toolchain (GCC 13+ tested on Ubuntu 24.04).
+
+No root access is required. If the SDL2/OpenAL development packages are missing,
+the setup script downloads the `.deb`s and extracts them into a local sysroot.
+
+#### Build
+
+```sh
+./auto-setup-linux-rt.sh
+```
+
+That fetches anything the distro cannot supply (CMake >= 3.30, DXC, and glslang),
+builds ZMusic from master, builds and stages `libNRI.so`, and optionally builds
+the AMD FidelityFX SDK from the pinned upstream commit plus
+`linux-port/ffx-sdk-1.1.4-linux.patch`. Expect a long first build: it compiles
+every FidelityFX shader permutation.
+
+See [linux-port/README.md](linux-port/README.md) for what the FidelityFX patch
+changes and why it is needed.
+
+#### Run
+
+```sh
+./play-duke-rt.sh
+```
+
+Or invoke the binary directly with your own data paths:
+
+```sh
+build/raze -gamegrp /path/to/DUKE3D.GRP -file /path/to/release-overlay
+```
+
+The Vulkan backend is selected automatically; the D3D12 option is hidden.
+
+#### Recommended settings
+
+Under **Options -> Render Options**:
+
+- **Main Upscaler: DLRR** with **Denoiser: off** gives the best image quality and
+  is the only configuration where mirrors render correctly.
+- **Main Upscaler: DLSS-SR** with **Denoiser: on** is faster.
+
+Selecting an upscaler flips the denoiser to match automatically, since DLRR does
+its own denoising and everything else relies on NRD.
+
+Avoid the **Settings Profile** presets other than Safe Mode if you want HDR
+behaviour to match Windows; they are pinned to SDR on Linux because there is no
+HDR path.
+
+#### Known limitations
+
+| Feature | Status |
+| --- | --- |
+| Path tracing, NRD denoising, voxels | Working |
+| DLSS super resolution, ray reconstruction | Working |
+| HDR output | Unavailable. NRI's `DisplayDescHelper` is a stub off Windows and X11 has no HDR path. |
+| Frame generation | Incomplete. The FidelityFX Vulkan runtime loads and initialises, but presentation is not taken over, so it falls back to the native present path. |
+| D3D12 backend, XeSS | Windows only by design. |
+
+If an upscaler produces a black screen, the NGX runtime is almost certainly not
+sitting next to the executable. The build stages it automatically; a stale build
+directory may not have it.
+
+## AI assistance
+
+Parts of this Linux port were produced with AI assistance (Anthropic's Claude),
+working interactively with the repository owner.
+
+That work covered the portability changes to the NRI backend, the FidelityFX SDK
+Linux patch and its supporting compatibility headers, the setup script, and this
+documentation. Diagnosis was a large part of it: several defects here were found
+by instrumenting the renderer and reading its telemetry rather than by
+inspection, including an upscaler failure that presented only as a black screen,
+and three latent upstream bugs in the FidelityFX SDK that are harmless under MSVC.
+
+Every change was compiled and exercised at runtime, and rendering results were
+confirmed visually by a human before being accepted. Log output alone proved
+unreliable for this: more than one change looked correct in telemetry while the
+screen was black. Treat this code as you would any other contribution and review
+it on its merits.
