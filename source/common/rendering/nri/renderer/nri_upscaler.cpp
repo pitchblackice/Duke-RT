@@ -270,6 +270,13 @@ bool NRIUpscalerContext::EnsureUpscaler(
 			(uint32_t)flags);
 	}
 
+	// Provider resources can remain referenced by previously submitted frames.
+	// The current command list has not used the replacement yet, so drain those
+	// consumers before destroying the old instance.
+	if (slot.instance != nullptr)
+	{
+		frameBuffer.WaitForCommands(true);
+	}
 	DestroyUpscaler(frameBuffer, slot.instance);
 	if (!frameBuffer.mUpscaler.IsUpscalerSupported(*frameBuffer.mDevice, type))
 	{
