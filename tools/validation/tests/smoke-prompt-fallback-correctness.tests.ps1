@@ -24,10 +24,14 @@ $promptSource = Read-Source 'source/common/rendering/nri/renderer/nri_smoke_prom
 
 Require-Match $grid 'NRISmokeGridPass::PrepareBricks[\s\S]{0,1000}NRISmokeGridPass::ValidatePrompt[\s\S]{0,300}NRISmokeGridPass::AuthorizePrompt[\s\S]{0,300}NRISmokeGridPass::Deposit[\s\S]{0,300}NRISmokeGridPass::FinalizePrompt' 'Prompt grid authority must validate resident mappings, authorize, deposit, then prove closure.'
 Require-Match $validate 'SmokeInjectionTraversalFits\(extent,\s*262144u\)[\s\S]*OUTCOME_FALLBACK' 'Oversized prompt kernels must select fallback before deposition.'
+Require-Match $validate 'RequestedBricks\s*=\s*0u[\s\S]*AdmittedBricks\s*=\s*0u[\s\S]*DeviceMemoryBarrierWithGroupSync\(\)' 'Prompt closure counters in device memory must be reset before validation atomics.'
+Require-NotMatch $validate 'AdmittedBricks\s*=\s*0u[\s\S]{0,100}GroupMemoryBarrierWithGroupSync\(\)' 'A group-memory-only barrier cannot order prompt outcome RW-buffer resets.'
 Require-Match $authorize 'RequestedBricks\s*==\s*0u[\s\S]*RequestedBricks\s*!=\s*outcome\.AdmittedBricks[\s\S]*OUTCOME_FALLBACK' 'Missing prompt mappings must select fallback before deposition.'
 Require-Match $finalize 'RequestedBricks\s*==\s*0u[\s\S]*OUTCOME_INTERNAL_ERROR[\s\S]*OUTCOME_GRID_COMMITTED' 'Post-deposit mismatch must remain distinct from validation fallback and grid commit.'
 Require-Match $allocate 'PROMPT_PROVISIONAL[\s\S]*TOMBSTONE[\s\S]*SmokeGridPushFree' 'Failed prompt admission must reclaim its provisional empty bricks.'
 Require-Match $allocate '!SmokeInjectionPromptEligible\(command\)[\s\S]*SmokeGridTryReplaceBorrowedDormantSerial' 'Prompt provisional admission must not destructively replace borrowed bricks.'
+Require-Match $allocate 'command\.SourceSlot\s*!=\s*sourceSlot[\s\S]{0,300}continue;[\s\S]{0,200}command\.Epoch[\s\S]*SmokePromptReject\(command\)' 'A source cursor must skip another source command before invalid-command rejection.'
+Require-NotMatch $allocate 'command\.Epoch[^\r\n]*\|\|[\s\S]{0,100}command\.SourceSlot\s*!=\s*sourceSlot[\s\S]{0,100}SmokePromptReject\(command\)' 'An unrelated source command must never poison its prompt transaction.'
 Require-Match $deposit 'OUTCOME_GRID_NEW[\s\S]*InterlockedAdd\(gSmokePromptOutcomes[\s\S]*RequestedBricks[\s\S]*AdmittedBricks' 'Prompt deposition must publish attempted/deposited closure counters.'
 
 Require-Match $fallback 'command\.Epoch\s*!=\s*gSmokeConstants\.SimulationEpoch' 'Fallback materialization must reject stale epochs.'
@@ -48,6 +52,8 @@ Require-Match $pulse 'Validate the complete mutation set first[\s\S]*for\s*\(con
 Require-Match $promptHeader 'deferredRanges[\s\S]*deferredMass[\s\S]*deferredBrickWork' 'Prompt filtering must return exact deferred count, mass, and work.'
 Require-Match $runtime 'CommitGridHandoffs[\s\S]{0,200}RetireExpired[\s\S]{0,800}PendingCommands' 'Grid acknowledgments must win before expired fallback retirement and command selection.'
 Require-Match $promptHeader 'expiredFallbackRanges[\s\S]*expiredFallbackMass[\s\S]*expiryAcknowledgeFailures' 'Prompt expiry must publish exact analytic-retirement accounting.'
+Require-Match $promptHeader 'fallbackRequestedCells[\s\S]*fallbackAdmittedCells[\s\S]*fallbackEmptyClosures[\s\S]*fallbackPartialClosures[\s\S]*fallbackClosedClosures' 'Fallback telemetry must preserve closure failure shape.'
+Require-Match $promptSource 'Fallback[\s\S]*fallbackRequestedCells[\s\S]*fallbackAdmittedCells[\s\S]*fallbackEmptyClosures[\s\S]*fallbackPartialClosures[\s\S]*fallbackClosedClosures' 'GPU fallback acknowledgments must classify empty, partial, and otherwise-closed outcomes.'
 Require-Match $promptSource 'style\.radius\s*\*\s*command\.radiusScale[\s\S]{0,100}gridCellSize[\s\S]{0,300}style\.expansionVelocity\s*\*\s*age[\s\S]{0,200}std::exp2' 'Fallback retries must share minimum grid support and publish an expanded, half-life-decayed command.'
 Require-Match $pulse 'RetireFallback[\s\S]*RetireRange[\s\S]*fallbackRetiredRanges[\s\S]*fallbackRetiredMass' 'Analytic fallback retirement must remain distinct from a grid commit.'
 Require-Match $pulse 'AuthoredSimulationSeconds[\s\S]*ExpireDeferred[\s\S]*deferredExpiredRanges[\s\S]*deferredExpiredMass' 'Deferred pulses must retain authored time and expire without later publication.'

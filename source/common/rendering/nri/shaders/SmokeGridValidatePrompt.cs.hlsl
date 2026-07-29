@@ -19,7 +19,10 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 		gSmokePromptOutcomes[slot].RequestedBricks = 0u;
 		gSmokePromptOutcomes[slot].AdmittedBricks = 0u;
 	}
-	GroupMemoryBarrierWithGroupSync();
+	// RequestedBricks and AdmittedBricks live in a device RW buffer, not in
+	// groupshared memory. Order thread 0's reset before this group's atomics so
+	// a complete prompt cannot be rejected from stale allocation counters.
+	DeviceMemoryBarrierWithGroupSync();
 	if (command.Epoch != gSmokeGridConstants.SimulationEpoch || command.StyleIndex >= min(gSmokeGridConstants.StyleCount, styleCapacity))
 	{
 		if (groupThreadId.x == 0u) gSmokePromptOutcomes[slot].Outcome = NRI_SMOKE_PROMPT_OUTCOME_FALLBACK;

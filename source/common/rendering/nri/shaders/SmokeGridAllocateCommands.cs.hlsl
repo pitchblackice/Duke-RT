@@ -319,8 +319,17 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					gSmokeGridSourceBrickCursor[sourceSlot] = 0u;
 					continue;
 				}
+				// Each source owns an independent cursor over the shared command
+				// array. An unrelated command is not a rejection of that command's
+				// prompt transaction; its owning source will process it.
+				if (command.SourceSlot != sourceSlot)
+				{
+					gSmokeGridSourceCommandCursor[sourceSlot]++;
+					gSmokeGridSourceBrickCursor[sourceSlot] = 0u;
+					continue;
+				}
 				if (command.Epoch != gSmokeGridConstants.SimulationEpoch ||
-					command.StyleIndex >= validStyleCount || command.SourceSlot != sourceSlot)
+					command.StyleIndex >= validStyleCount)
 				{
 					SmokePromptReject(command);
 					gSmokeGridSourceCommandCursor[sourceSlot]++;

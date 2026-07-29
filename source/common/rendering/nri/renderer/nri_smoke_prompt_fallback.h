@@ -24,6 +24,11 @@ struct NRISmokePromptFallbackSnapshot
 	uint64_t fallbackCarrierMass = 0;
 	uint64_t scheduledFallbackRanges = 0;
 	uint64_t executedFallbackRanges = 0;
+	uint64_t fallbackRequestedCells = 0;
+	uint64_t fallbackAdmittedCells = 0;
+	uint64_t fallbackEmptyClosures = 0;
+	uint64_t fallbackPartialClosures = 0;
+	uint64_t fallbackClosedClosures = 0;
 	uint64_t gridHandoffs = 0;
 	uint64_t expiredFallbackRanges = 0;
 	uint64_t expiredFallbackMass = 0;

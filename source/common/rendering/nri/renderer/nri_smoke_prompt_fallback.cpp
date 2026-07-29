@@ -198,6 +198,14 @@ void NRISmokePromptFallback::CommitGridHandoffs(NRISmokePulseOwner& pulses,
 		{
 			mSnapshot.executedFallbackRanges++;
 			mSnapshot.fallbackCarrierMass += outcome.rangeCount;
+			mSnapshot.fallbackRequestedCells += outcome.requestedBricks;
+			mSnapshot.fallbackAdmittedCells += outcome.admittedBricks;
+			if (outcome.requestedBricks == 0u)
+				mSnapshot.fallbackEmptyClosures++;
+			else if (outcome.requestedBricks != outcome.admittedBricks)
+				mSnapshot.fallbackPartialClosures++;
+			else
+				mSnapshot.fallbackClosedClosures++;
 			continue;
 		}
 		if (outcome.outcome == (uint32_t)NRISmokePromptOutcome::InternalError)
