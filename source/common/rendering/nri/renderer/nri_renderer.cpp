@@ -3377,13 +3377,18 @@ void NRIRenderer::ReadbackAutoExposureStats()
 
 
 
-void NRIRenderer::BindSceneRootDescriptors()
+bool NRIRenderer::BindSceneRootDescriptors()
 {
 	const NRIWorldTlasFrameSlot& frameSlot = GetCurrentWorldTlasFrameSlot();
-	if (frameSlot.accelerationStructure.descriptor != nullptr)
+	if (!frameSlot.publicationValid ||
+		frameSlot.accelerationStructure.accelerationStructure == nullptr ||
+		frameSlot.accelerationStructure.descriptor == nullptr)
 	{
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, frameSlot.accelerationStructure.descriptor, 0, nri::BindPoint::COMPUTE });
+		return false;
 	}
+
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, frameSlot.accelerationStructure.descriptor, 0, nri::BindPoint::COMPUTE });
+	return true;
 }
 
 uint32_t NRIRenderer::CountPotentialOutstandingQueuedFrames() const

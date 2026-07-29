@@ -2520,13 +2520,18 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		{
 			return nullptr;
 		}
+		const uint64_t recordingFenceValue = renderer.GetRecordingCommandFenceValue();
+		if (recordingFenceValue == 0)
+		{
+			return nullptr;
+		}
 
-		if (!renderer.IsFrameFenceValueComplete(snapshot.retireFenceValue))
+		if (!renderer.IsCommandFenceValueComplete(snapshot.retireFenceValue))
 		{
 			renderer.WaitForCommandsTracked("scene_data_snapshot_reuse");
 		}
 
-		snapshot.retireFenceValue = renderer.mFrameIndex + 1u;
+		snapshot.retireFenceValue = recordingFenceValue;
 		return &snapshot;
 	};
 

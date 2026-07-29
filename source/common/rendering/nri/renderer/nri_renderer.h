@@ -2597,7 +2597,7 @@ private:
 	const NRIBufferResource& GetActiveIndexBuffer() const;
 	const NRIBufferResource& GetActivePrimitiveBuffer() const;
 	const NRIBufferResource& GetActiveMaterialBuffer() const;
-	void BindSceneRootDescriptors();
+	bool BindSceneRootDescriptors();
 
 	bool CreateStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
 	bool EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, bool writesQuiesced = false, const char* waitReason = nullptr);

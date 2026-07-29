@@ -124,9 +124,9 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext(bool mainViewEligib
 		{
 			return static_cast<NRIRenderer*>(user)->GetCurrentSceneDataSet();
 		};
-		service.bindSceneRootDescriptors = [](void* user)
+		service.bindSceneRootDescriptors = [](void* user) -> bool
 		{
-			static_cast<NRIRenderer*>(user)->BindSceneRootDescriptors();
+			return static_cast<NRIRenderer*>(user)->BindSceneRootDescriptors();
 		};
 		return service;
 	};

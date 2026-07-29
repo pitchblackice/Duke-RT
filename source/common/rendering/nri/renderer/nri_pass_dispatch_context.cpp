@@ -127,9 +127,9 @@ nri::DescriptorSet* NRIPassDispatchContext::SceneBindingService::GetCurrentScene
 	return getCurrentSceneDataSet(user);
 }
 
-void NRIPassDispatchContext::SceneBindingService::BindSceneRootDescriptors() const
+bool NRIPassDispatchContext::SceneBindingService::BindSceneRootDescriptors() const
 {
-	bindSceneRootDescriptors(user);
+	return bindSceneRootDescriptors != nullptr && bindSceneRootDescriptors(user);
 }
 
 void NRIPassDispatchContext::ExposureService::ReadbackAutoExposureStats() const

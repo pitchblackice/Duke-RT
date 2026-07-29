@@ -1655,10 +1655,28 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						(uint32_t)overlayGeometry.primitives.size(),
 						hasPersistentVoxelOverlay ? 1u : 0u);
 				}
-				if (mGpuSceneHasDynamicOverlay)
+				const bool staticTextureStateRestored =
+					EnsurePaletteTexture(mStaticMapScene.materialBridge) &&
+					EnsureSceneTextures(
+						mStaticMapScene.sceneView,
+						mStaticMapScene.materialBridge,
+						capturedGpuMaterials,
+						false,
+						"static_map_scene");
+				const bool staticSceneRestored =
+					staticTextureStateRestored && RestoreStaticTopLevelScene();
+				if (!staticSceneRestored)
 				{
-					RestoreStaticTopLevelScene();
+					LogFallback("PT resident static scene restore failed after runtime/dynamic overlay update failure.");
+					if (preserveHistory)
+					{
+						RestoreRenderSceneHistorySnapshot(history);
+					}
+					return false;
 				}
+				mGpuSceneHasDynamicOverlay = false;
+				mUsedDynamicSceneLastFrame = false;
+				mUsedStaticMapSceneLastFrame = true;
 				paletteReady = true;
 				texturesReady = true;
 				buffersReady = true;
@@ -2026,6 +2044,59 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			RestoreRenderSceneHistorySnapshot(history);
 		}
 		return false;
+	}
+
+	const auto currentTraceBindingsReady = [&]()
+	{
+		const NRIWorldTlasFrameSlot& worldTlas = GetCurrentWorldTlasFrameSlot();
+		const uint32_t queuedFrameIndex = GetCurrentQueuedFrameIndex();
+		return
+			worldTlas.publicationValid &&
+			worldTlas.accelerationStructure.accelerationStructure != nullptr &&
+			worldTlas.accelerationStructure.descriptor != nullptr &&
+			worldTlas.publishedMapEpoch == mMapWorld.buildSerial &&
+			worldTlas.publishedBuildEpoch == mStaticMapScene.buildSerial &&
+			GetCurrentSceneTextureSet() != nullptr &&
+			queuedFrameIndex < mSceneTextureSetHashValid.size() &&
+			mSceneTextureSetHashValid[queuedFrameIndex] != 0 &&
+			GetCurrentSceneDataSet() != nullptr &&
+			IsCurrentSceneDataDescriptorsInitialized();
+	};
+	if (!currentTraceBindingsReady())
+	{
+		LogFallback("PT current queued-frame scene bindings were incomplete; republishing the resident static world.");
+		const bool staticBindingsRestored =
+			EnsurePaletteTexture(mStaticMapScene.materialBridge) &&
+			EnsureSceneTextures(
+				mStaticMapScene.sceneView,
+				mStaticMapScene.materialBridge,
+				capturedGpuMaterials,
+				false,
+				"static_binding_repair") &&
+			RestoreStaticTopLevelScene();
+		if (!staticBindingsRestored || !currentTraceBindingsReady())
+		{
+			LogFallback("PT current queued-frame scene binding repair failed; skipping TraceOpaque.");
+			if (preserveHistory)
+			{
+				RestoreRenderSceneHistorySnapshot(history);
+			}
+			return false;
+		}
+
+		mGpuSceneHasDynamicOverlay = false;
+		mUsedDynamicSceneLastFrame = false;
+		mUsedStaticMapSceneLastFrame = true;
+		activeSceneView = &mStaticMapScene.sceneView;
+		activeGeometry = &mStaticMapScene.geometry;
+		activeGpuMaterials = &mStaticMapScene.gpuMaterials;
+		activeMaterialBridge = &mStaticMapScene.materialBridge;
+		activeStats = mStaticMapScene.sceneView.stats;
+		paletteReady = true;
+		texturesReady = true;
+		buffersReady = true;
+		accelerationReady = true;
+		PrepareSceneTextureInputsForCompute();
 	}
 
 	TraceRuntimeLinkEvents(di);

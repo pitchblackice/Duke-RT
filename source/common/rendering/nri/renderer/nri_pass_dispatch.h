@@ -133,7 +133,7 @@ public:
 	struct SceneBindingService
 	{
 		using GetCurrentSceneDescriptorSetFn = nri::DescriptorSet* (*)(void* user);
-		using BindSceneRootDescriptorsFn = void (*)(void* user);
+		using BindSceneRootDescriptorsFn = bool (*)(void* user);
 
 		void* user = nullptr;
 		GetCurrentSceneDescriptorSetFn getCurrentSceneTextureSet = nullptr;
@@ -142,7 +142,7 @@ public:
 
 		nri::DescriptorSet* GetCurrentSceneTextureSet() const;
 		nri::DescriptorSet* GetCurrentSceneDataSet() const;
-		void BindSceneRootDescriptors() const;
+		bool BindSceneRootDescriptors() const;
 	};
 
 	struct ExposureService
