@@ -84,7 +84,7 @@ Assert-Contains $implementation 'SmokeQueuePolicyName\(rule\.queuePolicy\)' 'Res
 Assert-Contains $implementation 'LIGHTOVR smokeeventrule[\s\S]*?offsetrandom=\(' 'Parsed smoke-event diagnostics must report random-offset extents.'
 Assert-Contains $implementation 'LIGHTOVR resolved smokeeventrule[\s\S]*?offsetrandom=\(' 'Resolved smoke-event diagnostics must report random-offset extents.'
 Assert-Contains $authoringGuide '`offsetrandom <right> <forward> <up>`[\s\S]*?finite and nonnegative[\s\S]*?deterministically samples' 'Smoke event random-offset authoring semantics are undocumented.'
-Assert-Contains $authored 'smokeeventrule "duke\.chaingun\.primary"[\s\S]*?offsetrandom 4\.0 0\.0 0\.0' 'Chaingun primary must use horizontal-only local-right offset randomness.'
+Assert-Contains $authored 'smokeeventrule "duke\.chaingun\.primary"[\s\S]*?offset 2\.5 32\.0 5\.0[\s\S]*?offsetrandom 6\.0 0\.0 0\.0' 'Chaingun primary must retain the validated horizontal-only local-right offset and randomness.'
 
 Assert-Contains $implementation 'smokeStyleLookup\[MakeNormalizedKey\(source->id\)\]' 'Resolved styles are not indexed case-insensitively.'
 Assert-Contains $implementation 'destination\.styleResolved = style != smokeStyleLookup\.end\(\)' 'Invalid smoke style references are not retained as explicitly unresolved.'

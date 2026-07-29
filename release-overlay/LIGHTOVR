@@ -501,8 +501,8 @@ LIGHTOVR
         queuepolicy drop
         maxlatencyseconds 0.075
         count 10
-        offset 0.0 32.0 5.0
-        offsetrandom 4.0 0.0 0.0
+        offset 2.5 32.0 5.0
+        offsetrandom 6.0 0.0 0.0
         spawnradius 3.0
         densityscale 1
         radiusscale 0.025
@@ -555,7 +555,7 @@ LIGHTOVR
         queuepolicy drop
         maxlatencyseconds 0.075
         count 10
-        offset 0.0 32.0 5.0
+        offset 2.5 32.0 7.0
         spawnradius 3.0
         densityscale 1
         radiusscale 0.025
@@ -792,7 +792,7 @@ LIGHTOVR
         {
             color 0.75 0.75 0.85
             intensity 1.0
-            direction 0.4 0.6 -1.4
+            direction 1.9 1.9 -0.5
             angularsize 0.05
             shadow on
         }
@@ -1392,9 +1392,9 @@ LIGHTOVR
             fixturematerialresponse on
             type "point"
             color 1.0 0.9 1.0
-            intensity 2.5
+            intensity 1.0
             radius 416.0
-            sectorresponse on
+            sectorresponse off
             signal sector 410
             responseintensity 16.0
             responsemin 0.05
@@ -2757,8 +2757,8 @@ LIGHTOVR
             fixturematerialresponse on
             type "point"
             color 1.0 1.0 1.0
-            intensity 1.5
-            radius 416.0
+            intensity 2
+            radius 1024.0
             sectorresponse on
             signal sector 437
             responseintensity 4.0
@@ -2778,8 +2778,8 @@ LIGHTOVR
             fixturematerialresponse on
             type "point"
             color 1.0 1.0 1.0
-            intensity 1.5
-            radius 416.0
+            intensity 2
+            radius 1024.0
             sectorresponse on
             signal sector 438
             responseintensity 4.0
