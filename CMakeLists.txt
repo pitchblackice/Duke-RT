@@ -457,6 +457,26 @@ endif()
 
 add_subdirectory( libraries/lzma )
 add_subdirectory( libraries/miniz )
+
+if( HAVE_NRI )
+	# NRD only downloads a dependency when the matching target does not already
+	# exist, so the vendored copies have to be added before it. NRI is built as a
+	# shared library because the renderer resolves it at runtime (LoadNRI).
+	set( SHADERMAKE_TOOL ON CACHE BOOL "" FORCE )
+	set( NRI_STATIC_LIBRARY OFF CACHE BOOL "" FORCE )
+	# DLSS super resolution and ray reconstruction; NGX ships Linux binaries, and
+	# this option is not gated on WIN32 (unlike the FFX and XeSS SDKs).
+	set( NRI_ENABLE_NGX_SDK ON CACHE BOOL "" FORCE )
+	# NVIDIA Image Scaling. Off by default in NRI but not platform gated, and the
+	# Windows build offers it as an upscaler, so enable it for parity.
+	set( NRI_ENABLE_NIS_SDK ON CACHE BOOL "" FORCE )
+
+	add_subdirectory( ${RAZE_SHADERMAKE_DIR} )
+	add_subdirectory( ${RAZE_NRIFRAMEWORK_DIR}/External/MathLib )
+	add_subdirectory( ${RAZE_NRIFRAMEWORK_DIR}/External/NRI )
+	add_subdirectory( ${RAZE_NRD_DIR} )
+endif()
+
 add_subdirectory( tools )
 add_subdirectory( wadsrc )
 add_subdirectory( source )

@@ -42,7 +42,17 @@
 #include <unordered_set>
 #include <typeinfo>
 #include <vector>
+#include "buildtiles.h"  // inline spritetypebase::spritetexture (PCH-provided on Windows)
+#ifdef _WIN32
 #include <windows.h>
+#define RAZE_PTRPROBE_TRY __try
+#define RAZE_PTRPROBE_EXCEPT __except (EXCEPTION_EXECUTE_HANDLER)
+#else
+// GCC/Clang have no SEH for hardware faults and no portable VirtualQuery; the
+// cheap pointer sanity checks remain, the guarded access runs unprotected.
+#define RAZE_PTRPROBE_TRY if (true)
+#define RAZE_PTRPROBE_EXCEPT else
+#endif
 
 
 namespace
@@ -614,11 +624,11 @@ namespace
 	FTexture* TryGetSkyTraceBaseTexture(FGameTexture* texture)
 	{
 		FTexture* baseTexture = nullptr;
-		__try
+		RAZE_PTRPROBE_TRY
 		{
 			baseTexture = IsUsableGameTexturePointer(texture) ? texture->GetTexture() : nullptr;
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
+		RAZE_PTRPROBE_EXCEPT
 		{
 			baseTexture = nullptr;
 		}
@@ -748,7 +758,7 @@ namespace
 
 	bool TryInspectSkyTextureInner(FGameTexture* texture, CachedSkyInspection& outInspection)
 	{
-		__try
+		RAZE_PTRPROBE_TRY
 		{
 			if (!IsUsableGameTexturePointer(texture))
 			{
@@ -763,11 +773,11 @@ namespace
 			}
 
 			FTexture* baseTexture = nullptr;
-			__try
+			RAZE_PTRPROBE_TRY
 			{
 				baseTexture = texture->GetTexture();
 			}
-			__except (EXCEPTION_EXECUTE_HANDLER)
+			RAZE_PTRPROBE_EXCEPT
 			{
 				baseTexture = nullptr;
 			}
@@ -791,11 +801,11 @@ namespace
 					gSkyPerfStats.inspectFaceWalks++;
 				}
 				FGameTexture* face = nullptr;
-				__try
+				RAZE_PTRPROBE_TRY
 				{
 					face = skybox->GetSkyFace(i);
 				}
-				__except (EXCEPTION_EXECUTE_HANDLER)
+				RAZE_PTRPROBE_EXCEPT
 				{
 					face = nullptr;
 				}
@@ -821,7 +831,7 @@ namespace
 
 			return true;
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
+		RAZE_PTRPROBE_EXCEPT
 		{
 			return false;
 		}
@@ -912,11 +922,11 @@ namespace
 		}
 
 		FTexture* baseTexture = nullptr;
-		__try
+		RAZE_PTRPROBE_TRY
 		{
 			baseTexture = texture->GetTexture();
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
+		RAZE_PTRPROBE_EXCEPT
 		{
 			return false;
 		}
@@ -973,11 +983,11 @@ namespace
 			}
 			float faceColor[3] = {};
 			FGameTexture* skyFace = nullptr;
-			__try
+			RAZE_PTRPROBE_TRY
 			{
 				skyFace = skybox->GetSkyFace(i);
 			}
-			__except (EXCEPTION_EXECUTE_HANDLER)
+			RAZE_PTRPROBE_EXCEPT
 			{
 				skyFace = nullptr;
 			}
@@ -1002,11 +1012,11 @@ namespace
 		}
 
 		FGameTexture* previous = nullptr;
-		__try
+		RAZE_PTRPROBE_TRY
 		{
 			previous = skybox->previous;
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
+		RAZE_PTRPROBE_EXCEPT
 		{
 			previous = nullptr;
 		}
@@ -6459,11 +6469,11 @@ void Copy3(const float* source, float* destination)
 
 bool TryGetAverageTextureColor(FGameTexture* texture, float* outColor)
 {
-	__try
+	RAZE_PTRPROBE_TRY
 	{
 		return TryGetAverageTextureColorRecursive(texture, outColor, 0);
 	}
-	__except (EXCEPTION_EXECUTE_HANDLER)
+	RAZE_PTRPROBE_EXCEPT
 	{
 	return false;
 	}

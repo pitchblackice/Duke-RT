@@ -425,6 +425,7 @@ struct NRIPersistentVoxelAdmissionServices
 	using IsSubmitBudgetHitFn = bool (*)(void* user);
 	using GetRecordingCommandFenceValueFn = uint64_t (*)(void* user);
 	using IsCommandFenceValueCompleteFn = bool (*)(void* user, uint64_t fenceValue);
+	using IsCommandFenceValueAbandonedFn = bool (*)(void* user, uint64_t fenceValue);
 	using RetireBufferFn = void (*)(void* user, NRIBufferResource& resource);
 	using RetireAccelerationStructureFn = void (*)(void* user, NRIAccelerationStructureResource& resource);
 	using BuildMaterialsFn = void (*)(void* user, nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label);
@@ -454,6 +455,7 @@ struct NRIPersistentVoxelAdmissionServices
 	IsSubmitBudgetHitFn isSubmitBudgetHit = nullptr;
 	GetRecordingCommandFenceValueFn getRecordingCommandFenceValue = nullptr;
 	IsCommandFenceValueCompleteFn isCommandFenceValueComplete = nullptr;
+	IsCommandFenceValueAbandonedFn isCommandFenceValueAbandoned = nullptr;
 	RetireBufferFn retireBuffer = nullptr;
 	RetireAccelerationStructureFn retireAccelerationStructure = nullptr;
 	BuildMaterialsFn buildMaterials = nullptr;
@@ -502,6 +504,7 @@ struct NRIPersistentVoxelAdmissionServices
 		NRIBufferResource* buildScratchBuffer = nullptr) const;
 	uint64_t GetRecordingCommandFenceValue() const;
 	bool IsCommandFenceValueComplete(uint64_t fenceValue) const;
+	bool IsCommandFenceValueAbandoned(uint64_t fenceValue) const;
 	bool BarrierBuildInputs(const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) const;
 	bool BarrierComputeToBuildInputs(const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) const;
 };

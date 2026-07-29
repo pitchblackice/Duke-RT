@@ -283,8 +283,13 @@ bool NRIUpscalerContext::EnsureUpscaler(
 	upscalerDesc.commandBuffer = frameBuffer.mCommandBuffer;
 	upscalerDesc.flags = flags;
 
-	if (frameBuffer.mUpscaler.CreateUpscaler(*frameBuffer.mDevice, upscalerDesc, slot.instance) != nri::Result::SUCCESS)
+	const nri::Result upsResult = frameBuffer.mUpscaler.CreateUpscaler(*frameBuffer.mDevice, upscalerDesc, slot.instance);
+	if (upsResult != nri::Result::SUCCESS)
 	{
+		// Worth reporting: a failure here makes the whole upscale pass bail out,
+		// which presents as a black frame with no other diagnostic.
+		Printf(TEXTCOLOR_YELLOW "NRI upscaler creation failed: type=%s result=%u size=%ux%u\n",
+			GetUpscalerTypeName(type), (unsigned)upsResult, upscaleWidth, upscaleHeight);
 		slot.instance = nullptr;
 		return false;
 	}

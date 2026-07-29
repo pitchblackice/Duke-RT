@@ -2380,6 +2380,11 @@ bool NRIRenderer::IsCommandFenceValueComplete(uint64_t fenceValue) const
 	return mFrameBuffer != nullptr && mFrameBuffer->IsCommandFenceValueComplete(fenceValue);
 }
 
+bool NRIRenderer::IsCommandFenceValueAbandoned(uint64_t fenceValue) const
+{
+	return mFrameBuffer != nullptr && mFrameBuffer->IsCommandFenceValueAbandoned(fenceValue);
+}
+
 uint64_t NRIRenderer::GetRecordingFrameFenceValue() const
 {
 	if (mFrameBuffer == nullptr || !mFrameBuffer->mFrameBegun || !mFrameBuffer->mCommandBufferOpen)
@@ -3183,9 +3188,9 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 
 	{
 		ScopedPtPerfTimer descriptorValidateTimer(renderer.mLastPerfShellTraceStats.sceneDataSetDescriptorValidateMs);
-		for (const nri::Descriptor* descriptor : renderer.mSceneDataDescriptors)
+		for (size_t descriptorIndex = 0; descriptorIndex < renderer.mSceneDataDescriptors.size(); ++descriptorIndex)
 		{
-			if (descriptor == nullptr)
+			if (renderer.mSceneDataDescriptors[descriptorIndex] == nullptr)
 			{
 				renderer.mLastPerfShellTraceStats.sceneDataSetDescriptorNullCount++;
 				return false;

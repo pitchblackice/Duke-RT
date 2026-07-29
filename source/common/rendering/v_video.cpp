@@ -128,7 +128,15 @@ CUSTOM_CVAR(Int, vid_preferbackend, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_N
 	Printf("Changing the video backend requires a restart for " GAMENAME ".\n");
 }
 
-CUSTOM_CVAR(String, nri_api, "d3d12", CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
+// D3D12 is the more complete backend and stays the default on Windows, but it
+// does not exist elsewhere, so other platforms default to the Vulkan backend.
+#ifdef _WIN32
+#define RAZE_DEFAULT_NRI_API "d3d12"
+#else
+#define RAZE_DEFAULT_NRI_API "vulkan"
+#endif
+
+CUSTOM_CVAR(String, nri_api, RAZE_DEFAULT_NRI_API, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
 {
 	const char *api = self;
 	if (stricmp(api, "vulkan") != 0 && stricmp(api, "d3d12") != 0)

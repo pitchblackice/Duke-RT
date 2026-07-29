@@ -14,7 +14,16 @@
 #include <algorithm>
 #include <cstdint>
 #define NOMINMAX
+#ifdef _WIN32
 #include <windows.h>
+#define RAZE_PTRPROBE_TRY __try
+#define RAZE_PTRPROBE_EXCEPT __except (EXCEPTION_EXECUTE_HANDLER)
+#else
+// GCC/Clang have no SEH for hardware faults and no portable VirtualQuery; the
+// cheap pointer sanity checks remain, the guarded access runs unprotected.
+#define RAZE_PTRPROBE_TRY if (true)
+#define RAZE_PTRPROBE_EXCEPT else
+#endif
 
 
 namespace
@@ -106,12 +115,12 @@ namespace
 				{
 					FGameTexture* texture = nullptr;
 					uint32_t fadeColor = 0;
-					__try
+					RAZE_PTRPROBE_TRY
 					{
 						texture = wall.sky->texture;
 						fadeColor = wall.sky->fadecolor.d;
 					}
-					__except (EXCEPTION_EXECUTE_HANDLER)
+					RAZE_PTRPROBE_EXCEPT
 					{
 						texture = nullptr;
 						fadeColor = 0;

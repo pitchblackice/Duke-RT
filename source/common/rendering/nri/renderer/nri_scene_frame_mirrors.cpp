@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <cstring>
+#include "buildtiles.h"  // inline spritetypebase::spritetexture (PCH-provided on Windows)
 
 namespace
 {

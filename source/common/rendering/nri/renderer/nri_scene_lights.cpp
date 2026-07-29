@@ -30,6 +30,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include "buildtiles.h"  // inline spritetypebase::spritetexture (PCH-provided on Windows)
 
 
 namespace

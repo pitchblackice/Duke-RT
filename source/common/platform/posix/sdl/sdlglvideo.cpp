@@ -62,6 +62,10 @@
 #include <zvulkan/vulkanbuilders.h>
 #endif
 
+#ifdef HAVE_NRI
+#include "nri/system/nri_renderdevice.h"
+#endif
+
 // MACROS ------------------------------------------------------------------
 
 #if defined HAVE_VULKAN
@@ -116,6 +120,7 @@ namespace Priv
 {
 	SDL_Window *window;
 	bool vulkanEnabled;
+	bool nriEnabled;
 	bool softpolyEnabled;
 	bool fullscreenSwitch;
 	int numberOfDisplays;
@@ -326,6 +331,16 @@ bool I_CreateVulkanSurface(VkInstance instance, VkSurfaceKHR *surface)
 }
 #endif
 
+#ifdef HAVE_NRI
+// Exposed for sdlnrivideo.cpp, which needs the native handles. That file is kept
+// separate because <SDL_syswm.h> drags in Xlib, whose GC typedef collides with
+// the engine's GC namespace.
+SDL_Window* I_GetSDLWindowHandle()
+{
+	return Priv::window;
+}
+#endif
+
 
 SDLVideo::SDLVideo ()
 {
@@ -340,6 +355,24 @@ SDLVideo::SDLVideo ()
 	{
 		I_FatalError("Only SDL 2.0.6 or later is supported.");
 	}
+
+#ifdef HAVE_NRI
+	// Backend 4 is the NRI path tracer. NRI creates its own Vulkan instance and
+	// surface from the native handles, but the window still has to be created
+	// Vulkan-capable so SDL loads the loader and picks a compatible visual.
+	Priv::nriEnabled = V_GetBackend() == 4;
+
+	if (Priv::nriEnabled)
+	{
+		Priv::CreateWindow(SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN | (vid_fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
+
+		if (Priv::window == nullptr)
+		{
+			Printf(TEXTCOLOR_RED "Failed to create a Vulkan-capable window for the NRI backend.\n");
+			Priv::nriEnabled = false;
+		}
+	}
+#endif
 
 #ifdef HAVE_VULKAN
 	Priv::vulkanEnabled = V_GetBackend() == 1;
@@ -382,6 +415,14 @@ void SDLVideo::DumpAdapters()
 DFrameBuffer *SDLVideo::CreateFrameBuffer ()
 {
 	SystemBaseFrameBuffer *fb = nullptr;
+
+#ifdef HAVE_NRI
+	if (Priv::nriEnabled)
+	{
+		return new NRIRenderDevice(nullptr, vid_fullscreen);
+	}
+#endif
+	// (NRI owns its own swapchain and surface, so no VulkanSurface is built here.)
 
 	// first try Vulkan, if that fails OpenGL
 #ifdef HAVE_VULKAN
@@ -459,7 +500,8 @@ int SystemBaseFrameBuffer::GetClientWidth()
 
 
 #ifdef HAVE_VULKAN
-	assert(Priv::vulkanEnabled);
+	// The NRI backend also uses a Vulkan-capable window, so it queries the same way.
+	assert(Priv::vulkanEnabled || Priv::nriEnabled);
 	SDL_Vulkan_GetDrawableSize(Priv::window, &width, nullptr);
 #endif
 
@@ -471,7 +513,7 @@ int SystemBaseFrameBuffer::GetClientHeight()
 	int height = 0;
 
 #ifdef HAVE_VULKAN
-	assert(Priv::vulkanEnabled);
+	assert(Priv::vulkanEnabled || Priv::nriEnabled);
 	SDL_Vulkan_GetDrawableSize(Priv::window, nullptr, &height);
 #endif
 
