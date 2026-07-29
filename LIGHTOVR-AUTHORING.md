@@ -59,7 +59,7 @@ Current parser fields by block:
 - `smokeactorrule`
   `actorclass`, `ownerclass`, `excludeownerclass`, `trigger`, `activation`, `emitterforeground`, `style`, `count`, `offset`, `spawnradius`, `densityscale`, `radiusscale`, `velocitycone`, `velocityscale`, `intervalseconds`, `starttime`, `startdistance`, `spacing`, `maxsegmentsperframe`
 - `smokeeventrule`
-  `style`, `count`, `offset`, `spawnradius`, `densityscale`, `radiusscale`, `velocitycone`, `velocityscale`, `normaloffset`, `direction`
+  `style`, `count`, `offset`, `offsetrandom`, `spawnradius`, `densityscale`, `radiusscale`, `velocitycone`, `velocityscale`, `normaloffset`, `direction`
 - `smokeemitter`
   `style`, `position`, `normal`, `size`, `rotation`, `offset`, `count`, `intervalseconds`, `spawnradius`, `densityscale`, `radiusscale`, `velocityscale`, `velocitycone`, `maxsegmentsperframe`
 - `directional`
@@ -385,6 +385,7 @@ Thermal buoyancy and turbulence then continue to modify the field while drag dam
 | `maxlatencyseconds <seconds>` | Omitted; minimum `0` | Optional first-publication freshness bound in gameplay/presentation time. |
 | `count <integer>` | `1`; `[1,256]` | Particle count or grid deposited-mass multiplier, as described for actor rules. |
 | `offset <x> <y> <z>` | `0 0 0` | Event-local right, forward, and producer-supplied third-basis offset. Current Duke weapon producers use positive Build Z for that third vector at level aim, so a negative third offset moves visually upward. With no basis, this offset is ignored. |
+| `offsetrandom <right> <forward> <up>` | `0 0 0`; each component is finite and nonnegative | Per-event local-axis jitter half-extents added to `offset`. Each event deterministically samples right, forward, and up within the corresponding `[-extent,+extent]` interval. One sampled origin is shared by the complete event rather than changing per frame; zero leaves the fixed offset unchanged. With no producer basis, this jitter is ignored. |
 | `spawnradius <units>` | `0`, minimum `0` | Initial event-source spread/support. |
 | `densityscale <scale>` | `1`, minimum `0` | Per-event multiplier on style density/mass. |
 | `radiusscale <scale>` | `1`, minimum `0` | Per-event multiplier on style radius. |

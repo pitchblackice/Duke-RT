@@ -3,6 +3,8 @@
 #include "nri_smoke_admission.h"
 #include "nri_scene_lights.h"
 
+#include "../scene/nri_hash.h"
+
 #include "coreactor.h"
 #include "lightoverlay.h"
 #include "lightoverlay_smoke_editor.h"
@@ -89,6 +91,38 @@ namespace
 		value ^= value >> 15u;
 		value *= 0x846ca68bu;
 		return value ^ (value >> 16u);
+	}
+
+	uint64_t BuildSmokeOffsetRandomSeed(const PathTracingWeaponLightEvent& event)
+	{
+		uint64_t hash = nri_scene::NRIHashFnv1a64OffsetBasis;
+		constexpr char domain[] = "smoke-event-offset";
+		nri_scene::Fnv1a64Append(hash, domain, sizeof(domain) - 1u);
+		hash = nri_scene::HashCombine64(hash, event.serial);
+		hash = nri_scene::HashCombine64(hash,
+			(uint64_t)(uint32_t)(event.hasEmitterActorIndex ?
+				event.emitterActorIndex + 1 : 0));
+		for (const unsigned char* cursor =
+			(const unsigned char*)event.eventId.GetChars(); cursor != nullptr && *cursor != 0u;
+			++cursor)
+		{
+			const uint8_t lower = *cursor >= 'A' && *cursor <= 'Z' ?
+				(uint8_t)(*cursor - 'A' + 'a') : *cursor;
+			nri_scene::Fnv1a64Append(hash, &lower, sizeof(lower));
+		}
+		return hash;
+	}
+
+	float NextSmokeOffsetSignedRandom(uint64_t& state)
+	{
+		state += 0x9e3779b97f4a7c15ull;
+		uint64_t value = state;
+		value = (value ^ (value >> 30u)) * 0xbf58476d1ce4e5b9ull;
+		value = (value ^ (value >> 27u)) * 0x94d049bb133111ebull;
+		value ^= value >> 31u;
+		const float unit = (float)((value >> 40u) & 0xffffffu) *
+			(1.0f / 16777215.0f);
+		return unit * 2.0f - 1.0f;
 	}
 
 	void ShapeAnalyticCarrier(const NRISmokeInjectionCommandGpu& command, uint64_t eventSerial,
@@ -876,9 +910,18 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			DVector3 worldPosition = event.worldPosition;
 			if (event.hasBasis)
 			{
-				worldPosition += event.basisRight * rule.offset[0] +
-					event.basisForward * rule.offset[1] +
-					event.basisUp * rule.offset[2];
+				uint64_t offsetRandomState = BuildSmokeOffsetRandomSeed(event);
+				const float resolvedOffset[3] = {
+					rule.offset[0] + rule.offsetRandom[0] *
+						NextSmokeOffsetSignedRandom(offsetRandomState),
+					rule.offset[1] + rule.offsetRandom[1] *
+						NextSmokeOffsetSignedRandom(offsetRandomState),
+					rule.offset[2] + rule.offsetRandom[2] *
+						NextSmokeOffsetSignedRandom(offsetRandomState)
+				};
+				worldPosition += event.basisRight * resolvedOffset[0] +
+					event.basisForward * resolvedOffset[1] +
+					event.basisUp * resolvedOffset[2];
 			}
 			if (event.hasSurfaceNormal && !event.surfaceNormal.isZero())
 				worldPosition += event.surfaceNormal.Unit() * rule.normalOffset;

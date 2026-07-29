@@ -1014,6 +1014,12 @@ namespace
 				else if (sc.Compare("analyticcarriers")) { sc.MustGetNumber(); rule.analyticCarrierCount = (uint32_t)std::clamp(sc.Number, 1, 8); }
 				else if (sc.Compare("count")) { sc.MustGetNumber(); rule.count = (uint32_t)std::clamp(sc.Number, 1, 256); }
 				else if (sc.Compare("offset")) MustParseVector3(rule.offset);
+				else if (sc.Compare("offsetrandom"))
+				{
+					MustParseVector3(rule.offsetRandom);
+					for (float& value : rule.offsetRandom)
+						value = std::isfinite(value) ? std::max(value, 0.0f) : 0.0f;
+				}
 				else if (sc.Compare("spawnradius")) { sc.MustGetFloat(); rule.spawnRadius = std::max(0.0f, (float)sc.Float); }
 				else if (sc.Compare("densityscale")) { sc.MustGetFloat(); rule.densityScale = std::max(0.0f, (float)sc.Float); }
 				else if (sc.Compare("radiusscale")) { sc.MustGetFloat(); rule.radiusScale = std::max(0.0f, (float)sc.Float); }
@@ -1984,6 +1990,7 @@ namespace
 		AppendLine(text, 2, FStringf("analyticcarriers %u", rule.analyticCarrierCount));
 		AppendLine(text, 2, FStringf("count %u", rule.count));
 		AppendVector3Field(text, 2, "offset", rule.offset);
+		AppendVector3Field(text, 2, "offsetrandom", rule.offsetRandom);
 		AppendLine(text, 2, FStringf("spawnradius %s", FormatLightOverlayFloat(rule.spawnRadius).GetChars()));
 		AppendLine(text, 2, FStringf("densityscale %s", FormatLightOverlayFloat(rule.densityScale).GetChars()));
 		AppendLine(text, 2, FStringf("radiusscale %s", FormatLightOverlayFloat(rule.radiusScale).GetChars()));
@@ -2445,10 +2452,11 @@ namespace
 		}
 		for (const auto* rule : SortRulesByOrder(database.smokeEventRules))
 		{
-			Printf("LIGHTOVR smokeeventrule %s: style=%s representation=%s queuepolicy=%s maxlatency=%s analyticcarriers=%u count=%u spawnradius=%.3f velocityscale=%.3f "
+			Printf("LIGHTOVR smokeeventrule %s: style=%s representation=%s queuepolicy=%s maxlatency=%s analyticcarriers=%u count=%u offsetrandom=(%.3f,%.3f,%.3f) spawnradius=%.3f velocityscale=%.3f "
 				"normaloffset=%.3f direction=%s source=%s\n",
 				rule->id.GetChars(), rule->styleId.GetChars(), SmokeRepresentationName(rule->representation), SmokeQueuePolicyName(rule->queuePolicy),
-				rule->hasMaxLatencySeconds ? FormatLightOverlayFloat(rule->maxLatencySeconds).GetChars() : "none", rule->analyticCarrierCount, rule->count, rule->spawnRadius, rule->velocityScale,
+				rule->hasMaxLatencySeconds ? FormatLightOverlayFloat(rule->maxLatencySeconds).GetChars() : "none", rule->analyticCarrierCount, rule->count,
+				rule->offsetRandom[0], rule->offsetRandom[1], rule->offsetRandom[2], rule->spawnRadius, rule->velocityScale,
 				rule->normalOffset, SmokeDirectionPolicyName(rule->directionPolicy),
 				SourceLocationText(rule->source).GetChars());
 		}
@@ -2624,11 +2632,11 @@ namespace
 		for (const auto& rule : resolved.smokeEventRules)
 		{
 			Printf("LIGHTOVR resolved smokeeventrule %s: style=%s style_resolved=%s style_index=%u representation=%s queuepolicy=%s maxlatency=%s analyticcarriers=%u "
-				"velocityscale=%.3f normaloffset=%.3f direction=%s source=%s\n",
+				"offsetrandom=(%.3f,%.3f,%.3f) velocityscale=%.3f normaloffset=%.3f direction=%s source=%s\n",
 				rule.id.GetChars(), rule.styleId.GetChars(), rule.styleResolved ? "yes" : "no", rule.styleIndex,
 				SmokeRepresentationName(rule.representation), SmokeQueuePolicyName(rule.queuePolicy),
 				rule.hasMaxLatencySeconds ? FormatLightOverlayFloat(rule.maxLatencySeconds).GetChars() : "none", rule.analyticCarrierCount,
-				rule.velocityScale, rule.normalOffset, SmokeDirectionPolicyName(rule.directionPolicy),
+				rule.offsetRandom[0], rule.offsetRandom[1], rule.offsetRandom[2], rule.velocityScale, rule.normalOffset, SmokeDirectionPolicyName(rule.directionPolicy),
 				SourceLocationText(rule.source).GetChars());
 		}
 		for (const auto& rule : resolved.mapSmokeEmitterRules)

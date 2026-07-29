@@ -4,6 +4,7 @@ $root = Resolve-Path (Join-Path $PSScriptRoot '..\..\..')
 $header = Get-Content (Join-Path $root 'source\core\lightoverlay.h') -Raw
 $implementation = Get-Content (Join-Path $root 'source\core\lightoverlay.cpp') -Raw
 $authored = Get-Content (Join-Path $root 'release-overlay\LIGHTOVR') -Raw
+$authoringGuide = Get-Content (Join-Path $root 'LIGHTOVR-AUTHORING.md') -Raw
 
 function Assert-Contains([string]$Text, [string]$Pattern, [string]$Message) {
     if ($Text -notmatch $Pattern) { throw $Message }
@@ -25,6 +26,7 @@ Assert-Contains $header 'bool hasMaxLatencySeconds = false' 'Existing smoke rule
 Assert-Contains $header 'float densityScale = 1\.0f' 'Smoke emission density scale must default to identity.'
 Assert-Contains $header 'float radiusScale = 1\.0f' 'Smoke emission radius scale must default to identity.'
 Assert-Contains $header 'float velocityScale = 1\.0f' 'Smoke emission velocity scale must default to identity.'
+Assert-Contains $header 'float offsetRandom\[3\] = \{ 0\.0f, 0\.0f, 0\.0f \}' 'Smoke event random offsets must default to no jitter.'
 Assert-Contains $header 'float startDistance = 0\.0f' 'Existing smoke actor rules must remain immediately distance-eligible by default.'
 Assert-Contains $header 'float startTime = 0\.0f' 'Existing smoke actor rules must remain immediately time-eligible by default.'
 Assert-Contains $header 'bool emitterForeground = false' 'Existing smoke actor rules must leave their emitter surfaces behind smoke by default.'
@@ -67,6 +69,8 @@ foreach ($field in @('representation', 'queuepolicy', 'maxlatencyseconds', 'velo
     Assert-Contains $implementation ('sc\.Compare\("' + $field + '"\)') "Smoke event parser is missing $field."
     Assert-Contains $implementation ('"' + $field + ' ') "Smoke event serializer is missing $field."
 }
+Assert-Contains $implementation 'sc\.Compare\("offsetrandom"\)' 'Smoke event parser is missing offsetrandom.'
+Assert-Contains $implementation 'AppendVector3Field\(text, 2, "offsetrandom", rule\.offsetRandom\)' 'Smoke event serializer is missing offsetrandom.'
 foreach ($policy in @('aim', 'normal', 'incoming')) {
     Assert-Contains $implementation ('stricmp\(sc\.String, "' + $policy + '"\)') "Smoke event parser is missing direction policy $policy."
 }
@@ -74,8 +78,13 @@ Assert-Contains $implementation 'expected aim, normal, or incoming' 'Invalid eve
 Assert-Contains $implementation 'expected grid or analytic' 'Invalid smoke representation diagnostics are missing.'
 Assert-Contains $implementation 'expected retry, drop, or latest' 'Invalid smoke queue-policy diagnostics are missing.'
 Assert-Contains $implementation 'maxLatencySeconds = std::max\(0\.0f' 'Negative smoke freshness bounds must clamp to zero.'
+Assert-Contains $implementation 'offsetRandom[\s\S]*?std::isfinite\(value\) \? std::max\(value, 0\.0f\) : 0\.0f' 'Smoke event random-offset extents must normalize nonfinite and negative values to zero.'
 Assert-Contains $implementation 'SmokeRepresentationName\(rule\.representation\)' 'Resolved smoke representation is absent from dumps.'
 Assert-Contains $implementation 'SmokeQueuePolicyName\(rule\.queuePolicy\)' 'Resolved smoke queue policy is absent from dumps.'
+Assert-Contains $implementation 'LIGHTOVR smokeeventrule[\s\S]*?offsetrandom=\(' 'Parsed smoke-event diagnostics must report random-offset extents.'
+Assert-Contains $implementation 'LIGHTOVR resolved smokeeventrule[\s\S]*?offsetrandom=\(' 'Resolved smoke-event diagnostics must report random-offset extents.'
+Assert-Contains $authoringGuide '`offsetrandom <right> <forward> <up>`[\s\S]*?finite and nonnegative[\s\S]*?deterministically samples' 'Smoke event random-offset authoring semantics are undocumented.'
+Assert-Contains $authored 'smokeeventrule "duke\.chaingun\.primary"[\s\S]*?offsetrandom 4\.0 0\.0 0\.0' 'Chaingun primary must use horizontal-only local-right offset randomness.'
 
 Assert-Contains $implementation 'smokeStyleLookup\[MakeNormalizedKey\(source->id\)\]' 'Resolved styles are not indexed case-insensitively.'
 Assert-Contains $implementation 'destination\.styleResolved = style != smokeStyleLookup\.end\(\)' 'Invalid smoke style references are not retained as explicitly unresolved.'

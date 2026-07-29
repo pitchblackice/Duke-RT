@@ -502,6 +502,7 @@ LIGHTOVR
         maxlatencyseconds 0.075
         count 10
         offset 0.0 32.0 5.0
+        offsetrandom 4.0 0.0 0.0
         spawnradius 3.0
         densityscale 1
         radiusscale 0.025
