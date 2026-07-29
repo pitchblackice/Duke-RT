@@ -167,6 +167,7 @@ void NRISmokeEmitterSystem::Reset()
 void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, const TArray<PathTracingWeaponLightEvent>& weaponEvents,
 	const SceneLightSystem& sceneLights,
 	std::vector<NRISmokeStyleGpu>& styles, std::vector<NRISmokeInjectionCommandGpu>& commands,
+	std::vector<NRISmokePulseEnqueueInfo>& commandEnqueueInfo,
 	std::vector<NRISmokeAnalyticCarrierRequest>& analyticRequests,
 	uint32_t& nextSerial, uint32_t traceMode, const NRISmokeInterestSnapshot& interest,
 	float gridCellSize, uint32_t gridBrickCapacity)
@@ -213,11 +214,19 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 	auto routeCommand = [&](const NRISmokeInjectionCommandGpu& command,
 		LightOverlaySmokeRepresentation representation, LightOverlaySmokeQueuePolicy queuePolicy,
 		bool hasMaximumLatency, float maximumLatencySeconds, double authoredGameplaySeconds,
-		uint64_t sourceEventSerial, uint32_t analyticCarrierCount) -> bool
+		uint64_t sourceEventSerial, uint32_t analyticCarrierCount, bool transitory) -> bool
 	{
 		if (representation != LightOverlaySmokeRepresentation::Analytic)
 		{
 			commands.push_back(command);
+			NRISmokePulseEnqueueInfo info = {};
+			info.authoredGameplaySeconds = authoredGameplaySeconds;
+			info.maximumLatencySeconds = hasMaximumLatency ?
+				std::max(maximumLatencySeconds, 0.0f) : 0.0f;
+			info.queuePolicy = queuePolicy == LightOverlaySmokeQueuePolicy::Latest ?
+				NRISmokePulseQueuePolicy::Latest : NRISmokePulseQueuePolicy::Retry;
+			info.transitory = transitory;
+			commandEnqueueInfo.push_back(info);
 			return true;
 		}
 		// Slice 8 intentionally has no analytic backlog. Latest/retry require a
@@ -314,6 +323,10 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			state.observed = true;
 			const uint32_t actorSourceId = NRIMakeSmokeSourceId("actor", resolved.activeMapName.GetChars(),
 				rule.id.GetChars(), static_cast<uint32_t>(actor->GetIndex()));
+			const NRISmokeActorSourceLifetime sourceLifetime = NRIClassifySmokeActorSource({
+				rule.id.GetChars(), rule.trigger == LightOverlaySmokeTrigger::Interval,
+				rule.representation == LightOverlaySmokeRepresentation::Grid,
+				rule.spacing, rule.velocityScale });
 			if (traceMode != 0) observedPerRule[ruleIndex]++;
 			const bool appearanceReady = rule.activationPolicy == LightOverlayActorActivationPolicy::Immediate ||
 				sceneLights.HasActorAppearanceEvidence(identity.actorIndex);
@@ -506,7 +519,8 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 				const bool routed = routeCommand(command, rule.representation, rule.queuePolicy,
 					rule.hasMaxLatencySeconds, rule.maxLatencySeconds, emission.gameplaySeconds,
 					(uint64_t)(uint32_t)actor->GetIndex() << 32u | command.serial,
-					rule.analyticCarrierCount);
+					rule.analyticCarrierCount,
+					sourceLifetime == NRISmokeActorSourceLifetime::Transitory);
 				if (traceMode != 0)
 				{
 					emittedPerRule[ruleIndex] += routed ? 1u : 0u;
@@ -527,10 +541,6 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 					state.sourceTracePublished = true;
 				}
 			}
-			const NRISmokeActorSourceLifetime sourceLifetime = NRIClassifySmokeActorSource({
-				rule.id.GetChars(), rule.trigger == LightOverlaySmokeTrigger::Interval,
-				rule.representation == LightOverlaySmokeRepresentation::Grid,
-				rule.spacing, rule.velocityScale });
 			if (sourceLifetime == NRISmokeActorSourceLifetime::PersistentContinuous)
 			{
 				state.continuousCadenceOrdinal += continuousCadenceSteps;
@@ -710,6 +720,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			command.sourceId = sourceId;
 			command.sourceMetadata = NRIPackSmokeSourceMetadata(sourceClass);
 			commands.push_back(command);
+			commandEnqueueInfo.push_back({});
 			state.emitted = true;
 			stats.emitted++;
 			stats.particles += command.count;
@@ -873,7 +884,7 @@ void NRISmokeEmitterSystem::Gather(uint32_t epoch, double gameplayTimeSeconds, c
 			SetPointSourceShape(command);
 			const bool routed = routeCommand(command, rule.representation, rule.queuePolicy,
 				rule.hasMaxLatencySeconds, rule.maxLatencySeconds, event.absoluteTimeSeconds,
-				event.serial, rule.analyticCarrierCount);
+				event.serial, rule.analyticCarrierCount, true);
 			if (!routed)
 			{
 				if (traceMode != 0)

@@ -237,6 +237,18 @@ void NRISmokePromptFallback::Commit(uint64_t rendererFrame)
 	mNewlyClaimedSlots.clear();
 }
 
+void NRISmokePromptFallback::Commit(uint64_t rendererFrame, NRISmokePulseOwner& pulses)
+{
+	for (const uint32_t slot : mNewlyClaimedSlots)
+	{
+		if (slot >= mActiveSlots.size()) continue;
+		const NRISmokePromptRangeIdentity& identity = mActiveSlots[slot].identity;
+		pulses.MarkVisible(identity.pulseIdLow, identity.pulseIdHigh,
+			identity.rangeBegin, identity.rangeCount);
+	}
+	Commit(rendererFrame);
+}
+
 void NRISmokePromptFallback::Rollback()
 {
 	if (!mPlan.empty())

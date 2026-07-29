@@ -737,6 +737,7 @@ void NRISmokeSystem::AppendSyntheticCommand(NRIRenderer& renderer)
 	command.sourceId = NRIMakeSmokeSourceId("diagnostic", "runtime", "synthetic");
 	command.sourceMetadata = NRIPackSmokeSourceMetadata(NRISmokeInjectionSourceClass::Diagnostic);
 	mPendingCommands.push_back(command);
+	mPendingPulseEnqueueInfo.push_back({});
 }
 
 bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, const TArray<PathTracingWeaponLightEvent>& weaponEvents)
@@ -1174,7 +1175,8 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 	const double gameplayTimeSeconds = PlayClock > 0 ? (double)PlayClock * (1.0 / 120.0) : 0.0;
 	mEmitters.SetContinuousSourceWorkQuantity(dormantConfig.maximumEvolutionPerFrame);
 	mEmitters.Gather(mStatus.simulationEpoch, gameplayTimeSeconds, weaponEvents, renderer.mSceneLights,
-		mStyles, mPendingCommands, mPendingAnalyticRequests, mNextCommandSerial, mSettings.traceMode, mInterest.GetSnapshot(),
+		mStyles, mPendingCommands, mPendingPulseEnqueueInfo, mPendingAnalyticRequests,
+		mNextCommandSerial, mSettings.traceMode, mInterest.GetSnapshot(),
 		mSettings.gridCellSize, mSettings.gridBrickCapacity);
 	std::set<NRISmokeSpatialCoordinate> promotionCoordinates;
 	for (const NRISmokeDormantGridWorkGpu& work : mDormantPromotions)
@@ -1203,12 +1205,14 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 	}
 	if (!dormantRoutedSourceIds.empty())
 	{
-		mPendingCommands.erase(std::remove_if(mPendingCommands.begin(), mPendingCommands.end(),
-			[&](const NRISmokeInjectionCommandGpu& command)
-			{
-				return dormantRoutedSourceIds.find(command.sourceId) !=
-					dormantRoutedSourceIds.end();
-			}), mPendingCommands.end());
+		for (size_t index = mPendingCommands.size(); index-- > 0u; )
+		{
+			if (dormantRoutedSourceIds.find(mPendingCommands[index].sourceId) ==
+				dormantRoutedSourceIds.end()) continue;
+			mPendingCommands.erase(mPendingCommands.begin() + index);
+			if (index < mPendingPulseEnqueueInfo.size())
+				mPendingPulseEnqueueInfo.erase(mPendingPulseEnqueueInfo.begin() + index);
+		}
 	}
 	const bool styleLayoutInvalidated = previousGeneration != 0 && previousGeneration != mEmitters.GetGeneration();
 	if (styleLayoutInvalidated)
@@ -1305,9 +1309,12 @@ bool NRISmokeSystem::PrepareFrame(NRIRenderer& renderer, bool mainViewEligible, 
 	if (authorityTransition)
 	{
 		std::vector<NRISmokeInjectionCommandGpu> transitionCommands = std::move(mPendingCommands);
+		std::vector<NRISmokePulseEnqueueInfo> transitionEnqueueInfo =
+			std::move(mPendingPulseEnqueueInfo);
 		std::vector<NRISmokeAnalyticCarrierRequest> transitionAnalytic = std::move(mPendingAnalyticRequests);
 		Reset("authority-transition");
 		mPendingCommands = std::move(transitionCommands);
+		mPendingPulseEnqueueInfo = std::move(transitionEnqueueInfo);
 		mPendingAnalyticRequests = std::move(transitionAnalytic);
 		mStatus.preparedFrame = renderer.mFrameIndex;
 		mLastPreparedFrame = renderer.mFrameIndex;
@@ -1577,12 +1584,15 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 
 	// Authored pulses become persistent before selection. The immutable plan is
 	// committed only after every authoritative consumer has recorded it.
-	mPulseOwner.Enqueue(mPendingCommands, mPromptSimulationSeconds);
+	mPulseOwner.Enqueue(mPendingCommands, mPendingPulseEnqueueInfo,
+		mPromptSimulationSeconds, now);
 	mPendingCommands.clear();
+	mPendingPulseEnqueueInfo.clear();
 	{
 		mPromptFallback.CommitGridHandoffs(mPulseOwner, mGrid.ConsumePromptOutcomes());
 		mPromptFallback.RetireExpired(mPulseOwner, mPromptSimulationSeconds, mStyles);
 	}
+	mPulseOwner.ExpireStale(now);
 	const auto& availableCommands = mPulseOwner.PendingCommands();
 	const uint32_t maximumCommands = std::min(kMaxCommands, workTable.emissionCommands);
 	if (gridAuthority && !particleAuthority)
@@ -1976,7 +1986,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 		return false;
 	}
 	mPulsePlanToken = 0u;
-	mPromptFallback.Commit(renderer.mFrameBuffer->mFrameIndex);
+	mPromptFallback.Commit(renderer.mFrameBuffer->mFrameIndex, mPulseOwner);
 	if (mSettings.traceMode >= 2u)
 	{
 		const NRISmokeWorkSchedulerSnapshot& work = mWorkScheduler.GetSnapshot();
@@ -2041,6 +2051,7 @@ bool NRISmokeSystem::RecordSimulation(NRIRenderer& renderer)
 			(unsigned long long)dormant.payloadBytes);
 	}
 	mPendingCommands.clear();
+	mPendingPulseEnqueueInfo.clear();
 	mSelectedGridCommands.clear();
 	mPendingAnalyticRequests.clear();
 	return true;
@@ -3034,6 +3045,7 @@ void NRISmokeSystem::Reset(const char* reason)
 	mStatus.filterContinuationLimitExits = 0;
 	mStatus.filterResourceDowngrades = 0;
 	mPendingCommands.clear();
+	mPendingPulseEnqueueInfo.clear();
 	mSelectedGridCommands.clear();
 	mAdmissionScheduler.Reset();
 	mWorkScheduler.ResetTelemetry();

@@ -4,6 +4,7 @@
 #include "nri_smoke_analytic_carriers.h"
 #include "nri_smoke_continuous_sources.h"
 #include "nri_smoke_interest.h"
+#include "nri_smoke_pulses.h"
 #include "v_video.h"
 
 #include <cstdint>
@@ -18,6 +19,7 @@ public:
 	void Gather(uint32_t epoch, double gameplayTimeSeconds, const TArray<PathTracingWeaponLightEvent>& weaponEvents,
 		const SceneLightSystem& sceneLights,
 		std::vector<NRISmokeStyleGpu>& styles, std::vector<NRISmokeInjectionCommandGpu>& commands,
+		std::vector<NRISmokePulseEnqueueInfo>& commandEnqueueInfo,
 		std::vector<NRISmokeAnalyticCarrierRequest>& analyticRequests,
 		uint32_t& nextSerial, uint32_t traceMode, const NRISmokeInterestSnapshot& interest,
 		float gridCellSize, uint32_t gridBrickCapacity);

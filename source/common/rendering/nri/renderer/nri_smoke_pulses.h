@@ -6,6 +6,23 @@
 #include <unordered_map>
 #include <vector>
 
+enum class NRISmokePulseQueuePolicy : uint8_t
+{
+	Retry,
+	Latest,
+};
+
+// CPU-only authoring data. This deliberately stays beside the GPU command
+// instead of consuming command ABI fields used by grid injection.
+struct NRISmokePulseEnqueueInfo
+{
+	double authoredSimulationSeconds = -1.0;
+	double authoredGameplaySeconds = -1.0;
+	float maximumLatencySeconds = 0.0f;
+	NRISmokePulseQueuePolicy queuePolicy = NRISmokePulseQueuePolicy::Retry;
+	bool transitory = false;
+};
+
 struct NRISmokePulseSnapshot
 {
 	uint64_t enqueuedPulses = 0;
@@ -18,6 +35,10 @@ struct NRISmokePulseSnapshot
 	uint64_t fallbackRetiredMass = 0;
 	uint64_t deferredExpiredRanges = 0;
 	uint64_t deferredExpiredMass = 0;
+	uint64_t supersededPulses = 0;
+	uint64_t supersededMass = 0;
+	uint64_t staleDroppedPulses = 0;
+	uint64_t staleDroppedMass = 0;
 	uint64_t rollbackCount = 0;
 	uint64_t resetPulses = 0;
 	uint64_t resetMass = 0;
@@ -36,6 +57,10 @@ class NRISmokePulseOwner
 public:
 	void Enqueue(const std::vector<NRISmokeInjectionCommandGpu>& commands,
 		double authoredSimulationSeconds = 0.0);
+	void Enqueue(const std::vector<NRISmokeInjectionCommandGpu>& commands,
+		const std::vector<NRISmokePulseEnqueueInfo>& enqueueInfo,
+		double fallbackSimulationSeconds, double fallbackGameplaySeconds);
+	uint32_t ExpireStale(double gameplaySeconds);
 	bool Plan(const std::vector<NRISmokeInjectionCommandGpu>& selected,
 		std::vector<NRISmokeInjectionCommandGpu>& planned, uint64_t& token);
 	bool Commit(uint64_t token);
@@ -49,6 +74,8 @@ public:
 	void RebaseEpoch(uint32_t epoch);
 	void RebaseSimulationClock(double oldSimulationSeconds, double newSimulationSeconds);
 	uint32_t Reset();
+	bool MarkVisible(uint32_t pulseIdLow, uint32_t pulseIdHigh,
+		uint32_t rangeBegin, uint32_t rangeCount);
 
 	const std::vector<NRISmokeInjectionCommandGpu>& PendingCommands() const { return mPending; }
 	const NRISmokePulseSnapshot& GetSnapshot() const { return mSnapshot; }
@@ -56,19 +83,32 @@ public:
 		double fallbackSeconds) const;
 
 private:
+	struct PulseState
+	{
+		double authoredSimulationSeconds = 0.0;
+		double authoredGameplaySeconds = 0.0;
+		float maximumLatencySeconds = 0.0f;
+		NRISmokePulseQueuePolicy queuePolicy = NRISmokePulseQueuePolicy::Retry;
+		bool transitory = false;
+		bool visible = false;
+	};
+
 	static uint64_t PulseId(const NRISmokeInjectionCommandGpu& command);
+	static uint64_t SourceKey(const NRISmokeInjectionCommandGpu& command);
 	static void SetPulseId(NRISmokeInjectionCommandGpu& command, uint64_t pulseId);
 	static uint64_t RangeEnd(const NRISmokeInjectionCommandGpu& command);
 	enum class RetirementKind { GridCommitted, FallbackCompleted, DeferredExpired };
 	bool RetireRange(uint32_t pulseIdLow, uint32_t pulseIdHigh,
 		uint32_t rangeBegin, uint32_t rangeCount, RetirementKind kind);
 	void ReleaseAuthoredTimeIfComplete(uint64_t pulseId);
+	bool IsStale(const PulseState& state, double gameplaySeconds) const;
+	void RetireUnpublishedPulse(uint64_t pulseId, bool superseded);
 	void RefreshPendingSnapshot();
 	void ClearPlan();
 
 	std::vector<NRISmokeInjectionCommandGpu> mPending;
 	std::vector<NRISmokeInjectionCommandGpu> mPlan;
-	std::unordered_map<uint64_t, double> mAuthoredSimulationSeconds;
+	std::unordered_map<uint64_t, PulseState> mPulseStates;
 	NRISmokePulseSnapshot mSnapshot = {};
 	uint64_t mNextPulseId = 1;
 	uint64_t mNextPlanToken = 1;

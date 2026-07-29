@@ -25,6 +25,17 @@ NRISmokeInjectionCommandGpu Command(uint32_t serial, uint32_t count, uint32_t ep
 	return command;
 }
 
+NRISmokePulseEnqueueInfo Latest(double authoredGameplaySeconds, float maximumLatencySeconds,
+	bool transitory = true)
+{
+	NRISmokePulseEnqueueInfo info = {};
+	info.authoredGameplaySeconds = authoredGameplaySeconds;
+	info.maximumLatencySeconds = maximumLatencySeconds;
+	info.queuePolicy = NRISmokePulseQueuePolicy::Latest;
+	info.transitory = transitory;
+	return info;
+}
+
 uint64_t PulseId(const NRISmokeInjectionCommandGpu& command)
 {
 	return (uint64_t(command.pulseIdHigh) << 32u) | command.pulseIdLow;
@@ -120,6 +131,58 @@ int main()
 	const uint32_t resetCount = owner.Reset();
 	Require(resetCount == 1u && owner.GetSnapshot().resetMass == 7u && owner.PendingCommands().empty(),
 		"reset must explicitly account for every discarded pulse and unit of mass");
+
+	NRISmokePulseOwner freshness;
+	auto oldA = Command(30u, 2u);
+	auto oldB = Command(31u, 3u);
+	oldA.sourceId = oldB.sourceId = 77u;
+	oldA.sourceMetadata = oldB.sourceMetadata =
+		(uint32_t)NRISmokeInjectionSourceClass::InteractiveActor;
+	freshness.Enqueue({ oldA, oldB }, { Latest(10.0, 0.2f), Latest(10.0, 0.2f) }, 4.0, 10.0);
+	Require(freshness.PendingCommands().size() == 2u && freshness.GetSnapshot().pendingMass == 5u,
+		"latest policy must retain every command in one coherent authored batch");
+
+	auto newestA = Command(32u, 4u);
+	auto newestB = Command(33u, 5u);
+	newestA.sourceId = newestB.sourceId = 77u;
+	newestA.sourceMetadata = newestB.sourceMetadata = oldA.sourceMetadata;
+	freshness.Enqueue({ newestA, newestB }, { Latest(10.1, 0.2f), Latest(10.1, 0.2f) }, 4.1, 10.1);
+	Require(freshness.PendingCommands().size() == 2u && freshness.GetSnapshot().pendingMass == 9u &&
+		freshness.GetSnapshot().supersededPulses == 2u && freshness.GetSnapshot().supersededMass == 5u,
+		"a fresh latest batch must replace older never-visible work from the same source");
+
+	const auto published = freshness.PendingCommands()[0];
+	Require(freshness.MarkVisible(published.pulseIdLow, published.pulseIdHigh,
+		published.rangeBegin, published.rangeCount),
+		"a committed first-use transaction must mark its exact pulse visible");
+	auto following = Command(34u, 6u);
+	following.sourceId = 77u;
+	following.sourceMetadata = oldA.sourceMetadata;
+	freshness.Enqueue({ following }, { Latest(10.2, 0.2f) }, 4.2, 10.2);
+	Require(freshness.PendingCommands().size() == 2u && freshness.GetSnapshot().pendingMass == 10u &&
+		PulseId(freshness.PendingCommands()[0]) == PulseId(published),
+		"newest replacement must preserve visible work while retiring an unpublished sibling");
+
+	Require(freshness.ExpireStale(10.41) == 1u && freshness.PendingCommands().size() == 1u &&
+		PulseId(freshness.PendingCommands()[0]) == PulseId(published),
+		"freshness expiry must drop only never-visible latest work");
+	const uint64_t staleDrops = freshness.GetSnapshot().staleDroppedPulses;
+	auto staleArrival = Command(35u, 7u);
+	staleArrival.sourceId = 77u;
+	staleArrival.sourceMetadata = oldA.sourceMetadata;
+	freshness.Enqueue({ staleArrival }, { Latest(10.0, 0.2f) }, 4.5, 10.5);
+	Require(freshness.PendingCommands().size() == 1u &&
+		freshness.GetSnapshot().staleDroppedPulses == staleDrops + 1u,
+		"already-stale latest work must be discarded on arrival without replacing visible work");
+
+	NRISmokePulseOwner persistent;
+	auto persistentOld = Command(40u, 2u);
+	auto persistentNew = Command(41u, 3u);
+	persistentOld.sourceId = persistentNew.sourceId = 88u;
+	persistent.Enqueue({ persistentOld }, { Latest(20.0, 0.1f, false) }, 5.0, 20.0);
+	persistent.Enqueue({ persistentNew }, { Latest(21.0, 0.1f, false) }, 6.0, 21.0);
+	Require(persistent.PendingCommands().size() == 2u && persistent.ExpireStale(30.0) == 0u,
+		"persistent sources must remain unchanged even if authoring metadata requests latest policy");
 
 	std::cout << "Smoke pulse transaction and ranged-mass tests passed.\n";
 	return 0;

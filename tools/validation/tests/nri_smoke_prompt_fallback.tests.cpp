@@ -34,6 +34,16 @@ std::vector<NRISmokeStyleGpu> Styles()
 	styles[0].densityHalfLife = 1.0f;
 	return styles;
 }
+
+NRISmokePulseEnqueueInfo Latest(double authoredGameplaySeconds)
+{
+	NRISmokePulseEnqueueInfo info = {};
+	info.authoredGameplaySeconds = authoredGameplaySeconds;
+	info.maximumLatencySeconds = 0.2f;
+	info.queuePolicy = NRISmokePulseQueuePolicy::Latest;
+	info.transitory = true;
+	return info;
+}
 }
 
 int main()
@@ -251,6 +261,27 @@ int main()
 	rebasedPulses.Reset();
 	Require(rebasedPulses.GetSnapshot().authoredClockCount == 0u,
 		"pulse reset must release every authored-time sidecar entry");
+
+	NRISmokePulseOwner visiblePulses;
+	NRISmokePromptFallback visibleOwner;
+	auto visibleCommand = Interactive(950u);
+	visibleCommand.sourceId = 42u;
+	visiblePulses.Enqueue({ visibleCommand }, { Latest(30.0) }, 12.0, 30.0);
+	auto visibleSelection = visiblePulses.PendingCommands();
+	visibleOwner.Prepare(visibleSelection, visiblePulses, 950u, 12.0,
+		styles, 8.0f, retained, 1u);
+	std::vector<NRISmokeInjectionCommandGpu> visiblePlan;
+	uint64_t visibleToken = 0u;
+	Require(visiblePulses.Plan(visibleSelection, visiblePlan, visibleToken) &&
+		visiblePulses.CommitRetaining(visibleToken, visiblePlan),
+		"the visibility fixture must retain prompt authority through dispatch");
+	visibleOwner.Commit(950u, visiblePulses);
+	auto laterCommand = Interactive(951u);
+	laterCommand.sourceId = 42u;
+	visiblePulses.Enqueue({ laterCommand }, { Latest(30.1) }, 12.1, 30.1);
+	Require(visiblePulses.PendingCommands().size() == 2u &&
+		visiblePulses.GetSnapshot().supersededPulses == 0u,
+		"a committed prompt dispatch must protect visible work from latest replacement");
 
 	std::cout << "Smoke prompt sticky-slot transaction tests passed.\n";
 	return 0;

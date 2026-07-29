@@ -73,6 +73,7 @@ public:
 	void CommitGridHandoffs(NRISmokePulseOwner& pulses,
 		const std::vector<NRISmokePromptOutcomeGpu>& outcomes);
 	void Commit(uint64_t rendererFrame);
+	void Commit(uint64_t rendererFrame, NRISmokePulseOwner& pulses);
 	void Rollback();
 	void Reset();
 

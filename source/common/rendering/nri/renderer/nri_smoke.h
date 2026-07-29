@@ -389,6 +389,7 @@ private:
 	NRISmokeWorkScheduler mWorkScheduler;
 	std::vector<NRISmokeStyleGpu> mStyles;
 	std::vector<NRISmokeInjectionCommandGpu> mPendingCommands;
+	std::vector<NRISmokePulseEnqueueInfo> mPendingPulseEnqueueInfo;
 	std::vector<NRISmokeInjectionCommandGpu> mSelectedGridCommands;
 	std::vector<NRISmokeAnalyticCarrierRequest> mPendingAnalyticRequests;
 	std::vector<NRISmokeDormantGridWorkGpu> mDormantDemotions;

@@ -478,6 +478,8 @@ LIGHTOVR
         activation immediate
         emitterforeground off
         style "duke_trail_smoke"
+        queuepolicy latest
+        maxlatencyseconds 0.15
         count 14
         offset 0.0 -5.0 1.0
         spawnradius 2.0
