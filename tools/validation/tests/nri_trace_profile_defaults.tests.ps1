@@ -32,7 +32,7 @@ foreach ($entry in $profiles.GetEnumerator()) {
 	Assert-Contract -Condition ($cvars -match $definition) -Message "$($entry.Key) must default to $($entry.Value.new)"
 }
 
-Assert-Contract -Condition ($config -match '#define\s+LASTRUNVERSION\s+"8"') -Message "the trace-profile migration must advance the config version to 8"
+Assert-Contract -Condition ($config -match '#define\s+LASTRUNVERSION\s+"9"') -Message "the current config migration version must be 9"
 $migrationStart = $config.IndexOf('if (last < 8)')
 $globalSetupEnd = $config.IndexOf('void FGameConfigFile::DoGameSetup', $migrationStart)
 Assert-Contract -Condition ($migrationStart -ge 0 -and $globalSetupEnd -gt $migrationStart) -Message "the version 8 trace-profile migration is missing"

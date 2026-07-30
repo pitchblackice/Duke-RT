@@ -45,7 +45,7 @@
 #include "gamecontrol.h"
 #include "version.h"
 
-#define LASTRUNVERSION "8"
+#define LASTRUNVERSION "9"
 
 #if !defined _MSC_VER && !defined __APPLE__
 #include "i_system.h"  // for SHARE_DIR
@@ -458,6 +458,13 @@ void FGameConfigFile::DoGlobalSetup ()
 				migrateIntCVar("nri_ptmirrorbounces", 8, 2);
 				migrateIntCVar("nri_ptportaldepth", 6, 3);
 				migrateIntCVar("nri_ptemissivesamples", 4, 1);
+			}
+			if (last < 9)
+			{
+				if (auto var = FindCVar("nri_ptsmoke", nullptr))
+				{
+					var->SetGenericRep(true, CVAR_Bool);
+				}
 			}
 		}
 	}

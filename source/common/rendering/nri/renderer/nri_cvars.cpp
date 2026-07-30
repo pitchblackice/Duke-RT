@@ -795,7 +795,7 @@ CVAR(Float, nri_sharpness, 0.1375f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptselftest, false, 0)
 
 CVAR(String, nri_ptsmokemenuwarning, "", 0)
-CUSTOM_CVAR(Bool, nri_ptsmoke, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Bool, nri_ptsmoke, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	nri_ptsmokemenuwarning = self
 		? "Smoke is experimental, and is still very taxing on your GPU"
