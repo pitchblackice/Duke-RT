@@ -22,6 +22,20 @@
 
 namespace
 {
+	std::unordered_set<uint64_t> CollectActivePersistentVoxelMaterialKeys(const PersistentVoxelBatch& batch)
+	{
+		std::unordered_set<uint64_t> keys;
+		keys.reserve(batch.actors.size());
+		for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+		{
+			if (actor.active && actor.materialKeyHash != 0)
+			{
+				keys.insert(actor.materialKeyHash);
+			}
+		}
+		return keys;
+	}
+
 	template<typename Services>
 	void RetirePersistentVoxelShadowProxy(
 		NRIVoxelShadowProxyResource& proxy,
@@ -1036,6 +1050,132 @@ bool NRIPersistentVoxelResidency::HasResidentIndirectOnlyActor(int32_t actorInde
 	return false;
 }
 
+bool NRIPersistentVoxelResidency::IsIndirectOnlyActorTlasAppendEligible(
+	int32_t actorIndex,
+	uint32_t frameIndex,
+	const NRIPersistentVoxelSettings& settings,
+	const NRIPersistentVoxelTlasServices& services) const
+{
+	if (actorIndex < 0 || !batch.valid)
+	{
+		return false;
+	}
+
+	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	{
+		if (actor.active && actor.indirectOnly && actor.actorIndex == actorIndex &&
+			IsActorTlasAppendEligible(actor, frameIndex, settings, services))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool NRIPersistentVoxelResidency::HasOverlayPreparationEligibleActor(
+	const NRIPersistentVoxelSettings& settings) const
+{
+	if (!batch.valid)
+	{
+		return false;
+	}
+
+	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	{
+		if (actor.active && IsActorOverlayPreparationEligible(actor, settings))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool NRIPersistentVoxelResidency::IsActorTlasAppendEligible(
+	const PersistentVoxelBatch::ActorEntry& actor,
+	uint32_t frameIndex,
+	const NRIPersistentVoxelSettings& settings,
+	const NRIPersistentVoxelTlasServices& services) const
+{
+	if (services.getAccelerationStructureHandle == nullptr ||
+		!IsActorOverlayPreparationEligible(actor, settings))
+	{
+		return false;
+	}
+
+	const PersistentVoxelMeshVariantResource& mesh = meshVariantResources.find(actor.meshResourceKey)->second;
+	if (mesh.accelerationStructure.accelerationStructure == nullptr ||
+		vertexBuffer.shaderView == nullptr ||
+		indexBuffer.shaderView == nullptr ||
+		primitiveBuffer.shaderView == nullptr ||
+		materialBuffer.shaderView == nullptr)
+	{
+		return false;
+	}
+	return
+		(mesh.tlasPublished || mesh.tlasReadyFrame <= frameIndex) &&
+		services.GetAccelerationStructureHandle(mesh.accelerationStructure) != 0;
+}
+
+bool NRIPersistentVoxelResidency::IsActorOverlayPreparationEligible(
+	const PersistentVoxelBatch::ActorEntry& actor,
+	const NRIPersistentVoxelSettings& settings) const
+{
+	if (settings.omitTlasOccurrences ||
+			(actor.resolvedVoxelIndex >= 0 &&
+				(actor.resolvedVoxelIndex == settings.excludeIndices[0] ||
+				 actor.resolvedVoxelIndex == settings.excludeIndices[1] ||
+				 actor.resolvedVoxelIndex == settings.excludeIndices[2])) ||
+		(settings.excludeMinPrimitives > 0 && actor.primitiveCount >= settings.excludeMinPrimitives))
+	{
+		return false;
+	}
+
+	const auto meshIt = meshVariantResources.find(actor.meshResourceKey);
+	const auto materialIt = materialVariantResources.find(actor.materialKeyHash);
+	if (meshIt == meshVariantResources.end() || materialIt == materialVariantResources.end())
+	{
+		return false;
+	}
+	const PersistentVoxelMeshVariantResource& mesh = meshIt->second;
+	const PersistentVoxelMaterialVariantResource& material = materialIt->second;
+	if (!materialRangeAllocator.Owns(PersistentVoxelMaterialRangeHandle(material)) ||
+		!PersistentVoxelMaterialRangeMatches(actor, material) ||
+		(!mesh.directComputePublished &&
+			(mesh.indexBuffer.shaderView == nullptr || mesh.vertexBuffer.shaderView == nullptr)))
+	{
+		return false;
+	}
+	const bool primitiveRangeValid =
+		(uint64_t)actor.primitiveOffset + (uint64_t)actor.primitiveCount <= (uint64_t)arenaPrimitiveCursor;
+	const bool materialRangeValid =
+		(uint64_t)actor.materialOffset + (uint64_t)actor.materialCount <= materialRangeAllocator.Stats().cursorRows;
+	const bool publishedMaterialRangeValid =
+		(uint64_t)actor.materialOffset + (uint64_t)actor.materialCount <= batch.materialBridge.materials.size();
+	const bool meshRangeMatches =
+		actor.primitiveOffset == mesh.primitiveOffset &&
+		actor.primitiveCount == mesh.primitiveCount &&
+		actor.indexOffset == mesh.indexOffset &&
+		actor.indexCount == mesh.indexCount;
+	const auto transformFinite = [](const std::array<float, 12>& transform)
+	{
+		for (float value : transform)
+		{
+			if (!std::isfinite(value))
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	return
+		primitiveRangeValid &&
+		materialRangeValid &&
+		publishedMaterialRangeValid &&
+		meshRangeMatches &&
+		transformFinite(actor.instanceTransform) &&
+		transformFinite(actor.previousInstanceTransform);
+}
+
 bool NRIPersistentVoxelResidency::HasPreloadPending() const
 {
 	return preloadPending;
@@ -1098,7 +1238,7 @@ uint64_t NRIPersistentVoxelResidency::BuildSceneGenerationHash() const
 				(uint64_t)batch.activeActorCount),
 			(uint64_t)batch.primitiveCount),
 		(uint64_t)batch.materialCount),
-		batchMaterialResourceGeneration);
+		batchMaterialPublicationGeneration);
 }
 
 bool NRIPersistentVoxelResidency::PublishCanonicalMaterialResource(
@@ -1169,15 +1309,18 @@ void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge(PersistentVoxelBatc
 	const uint32_t materialCursor = materialRangeAllocator.Stats().cursorRows;
 	targetBatch.materialBridge.materials.reserve(materialCursor);
 	targetBatch.materialBridge.lightMetadata.reserve(materialCursor);
+	const std::unordered_set<uint64_t> activeMaterialKeys =
+		CollectActivePersistentVoxelMaterialKeys(targetBatch);
 	std::unordered_map<uint64_t, uint32_t> textureLookup;
-	textureLookup.reserve(targetBatch.materialBridge.textures.capacity() + materialVariantResources.size());
+	textureLookup.reserve(targetBatch.materialBridge.textures.capacity() + activeMaterialKeys.size());
 	std::vector<PersistentVoxelMaterialVariantResource*> materialResources;
-	materialResources.reserve(materialVariantResources.size());
-	for (auto& pair : materialVariantResources)
+	materialResources.reserve(activeMaterialKeys.size());
+	for (uint64_t materialKey : activeMaterialKeys)
 	{
-		if (pair.second.materialCount > 0)
+		auto resourceIt = materialVariantResources.find(materialKey);
+		if (resourceIt != materialVariantResources.end() && resourceIt->second.materialCount > 0)
 		{
-			materialResources.push_back(&pair.second);
+			materialResources.push_back(&resourceIt->second);
 		}
 	}
 	std::sort(
@@ -1248,18 +1391,20 @@ void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge(PersistentVoxelBatc
 	if (!NRIPersistentVoxelMaterialTextureLayoutPreservesPrefix(uploadedMaterialTextureKeys, rebuiltTextureKeys))
 	{
 		pendingMaterialLayoutInvalidatedResources = 0;
-		for (auto& pair : materialVariantResources)
+		for (uint64_t materialKey : activeMaterialKeys)
 		{
-			if (pair.second.materialCount == 0)
+			auto resourceIt = materialVariantResources.find(materialKey);
+			if (resourceIt == materialVariantResources.end() || resourceIt->second.materialCount == 0)
 			{
 				continue;
 			}
-			pair.second.materialUploadHash = 0;
-			dirtyMaterialResourceKeys.insert(pair.first);
+			resourceIt->second.materialUploadHash = 0;
+			dirtyMaterialResourceKeys.insert(materialKey);
 			pendingMaterialLayoutInvalidatedResources++;
 		}
 	}
 	batchMaterialResourceGeneration = materialResourceGeneration;
+	batchMaterialPublicationGeneration++;
 }
 
 void NRIPersistentVoxelResidency::RecomputeBatchState(PersistentVoxelBatch& targetBatch) const
@@ -1578,20 +1723,24 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 		}
 		activeMaterialKeys.insert(actor.materialKeyHash);
 	}
-	if (validateActiveMaterialPayloads)
+	if (validateActiveMaterialPayloads ||
+		uploadedMaterialPublicationGeneration != batchMaterialPublicationGeneration)
 	{
 		dirtyMaterialResourceKeys.insert(activeMaterialKeys.begin(), activeMaterialKeys.end());
+	}
+	for (auto dirtyIt = dirtyMaterialResourceKeys.begin(); dirtyIt != dirtyMaterialResourceKeys.end(); )
+	{
+		if (activeMaterialKeys.find(*dirtyIt) == activeMaterialKeys.end())
+		{
+			dirtyIt = dirtyMaterialResourceKeys.erase(dirtyIt);
+			continue;
+		}
+		++dirtyIt;
 	}
 	if (dirtyMaterialResourceKeys.empty() &&
 		(materialBuffer.buffer == nullptr || uploadedMaterialResourceGeneration != materialResourceGeneration))
 	{
-		for (const auto& pair : materialVariantResources)
-		{
-			if (pair.second.materialCount != 0)
-			{
-				dirtyMaterialResourceKeys.insert(pair.first);
-			}
-		}
+		dirtyMaterialResourceKeys.insert(activeMaterialKeys.begin(), activeMaterialKeys.end());
 	}
 	outStats.activeValidatedResources = (uint32_t)activeMaterialKeys.size();
 	if (uploadedMaterialResourceGeneration == materialResourceGeneration && materialBuffer.buffer != nullptr)
@@ -1682,17 +1831,19 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 		{
 			dirtyMaterialResourceKeys.erase(materialKey);
 		}
-		if (dirtyMaterialResourceKeys.empty())
+		if (!dirtyMaterialResourceKeys.empty())
 		{
-			uploadedMaterialResourceGeneration = materialResourceGeneration;
-			pendingMaterialLayoutInvalidatedResources = 0;
-			pendingMaterialActorRebinds = 0;
-			uploadedMaterialTextureKeys.clear();
-			uploadedMaterialTextureKeys.reserve(batch.materialBridge.textures.size());
-			for (const nri_scene::TextureUpload& texture : batch.materialBridge.textures)
-			{
-				uploadedMaterialTextureKeys.push_back(texture.key);
-			}
+			return false;
+		}
+		uploadedMaterialResourceGeneration = materialResourceGeneration;
+		uploadedMaterialPublicationGeneration = batchMaterialPublicationGeneration;
+		pendingMaterialLayoutInvalidatedResources = 0;
+		pendingMaterialActorRebinds = 0;
+		uploadedMaterialTextureKeys.clear();
+		uploadedMaterialTextureKeys.reserve(batch.materialBridge.textures.size());
+		for (const nri_scene::TextureUpload& texture : batch.materialBridge.textures)
+		{
+			uploadedMaterialTextureKeys.push_back(texture.key);
 		}
 		return true;
 	}
@@ -1790,9 +1941,14 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 	{
 		dirtyMaterialResourceKeys.erase(materialKey);
 	}
+	if (!dirtyMaterialResourceKeys.empty())
+	{
+		return false;
+	}
 	if (dirtyMaterialResourceKeys.empty())
 	{
 		uploadedMaterialResourceGeneration = materialResourceGeneration;
+		uploadedMaterialPublicationGeneration = batchMaterialPublicationGeneration;
 		pendingMaterialLayoutInvalidatedResources = 0;
 		pendingMaterialActorRebinds = 0;
 		uploadedMaterialTextureKeys.clear();
@@ -7617,6 +7773,8 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 
 	if (batch.valid)
 	{
+		const std::unordered_set<uint64_t> previousActiveMaterialKeys =
+			CollectActivePersistentVoxelMaterialKeys(batch);
 		batch.actors.reserve(batch.actors.size() + cacheEntries.size());
 		std::unordered_map<uint64_t, PersistentVoxelBatch::ActorEntry*> existingActors;
 		existingActors.reserve(batch.actors.size());
@@ -7920,7 +8078,10 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				}
 			}
 		}
-		if (batchMaterialResourceGeneration != materialResourceGeneration)
+		const std::unordered_set<uint64_t> currentActiveMaterialKeys =
+			CollectActivePersistentVoxelMaterialKeys(batch);
+		if (batchMaterialResourceGeneration != materialResourceGeneration ||
+			previousActiveMaterialKeys != currentActiveMaterialKeys)
 		{
 			PersistentVoxelScopedTimer perfTimer(outStats.persistentVoxelBatchMaterialBridgeMs);
 			RebuildBatchMaterialBridge(batch);
@@ -8708,7 +8869,9 @@ void NRIPersistentVoxelResidency::Reset(
 	uploadedMaterialTextureKeys.clear();
 	materialResourceGeneration++;
 	batchMaterialResourceGeneration = 0;
+	batchMaterialPublicationGeneration++;
 	uploadedMaterialResourceGeneration = 0;
+	uploadedMaterialPublicationGeneration = 0;
 	publishedMeshKeys.clear();
 	publishedMaterialKeys.clear();
 	RebuildAdmissionIndex(true);

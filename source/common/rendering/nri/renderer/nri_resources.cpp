@@ -263,6 +263,7 @@ void NRIRenderer::DestroySceneBuffers()
 	}
 	mSceneDataSnapshots.clear();
 	mActiveSceneDataSet = nullptr;
+	mActiveSceneDataSnapshot = nullptr;
 	mActiveSceneDataSetFrameIndex = UINT64_MAX;
 	mSceneDataSnapshotCursor = 0;
 	mSceneDataFrameRingHighWaterBytes = 0;
@@ -311,6 +312,8 @@ void NRIRenderer::DestroySceneBuffers()
 	{
 		initialized = 0u;
 	}
+	std::fill(mSceneDataDescriptorMapEpochs.begin(), mSceneDataDescriptorMapEpochs.end(), 0ull);
+	std::fill(mSceneDataDescriptorBuildEpochs.begin(), mSceneDataDescriptorBuildEpochs.end(), 0ull);
 	mSceneDataDescriptors.fill(nullptr);
 	mCurrentSceneTextureDescriptors.clear();
 	mBoundStaticPrimitiveCount = 0;

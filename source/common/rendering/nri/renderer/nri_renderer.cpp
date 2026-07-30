@@ -1830,6 +1830,7 @@ void NRIRenderer::Shutdown()
 	mSceneDataSets.clear();
 	mSceneDataSnapshots.clear();
 	mActiveSceneDataSet = nullptr;
+	mActiveSceneDataSnapshot = nullptr;
 	mActiveSceneDataSetFrameIndex = UINT64_MAX;
 	mSceneDataSnapshotCursor = 0;
 	mFrameTextureSet = nullptr;
@@ -1852,6 +1853,8 @@ void NRIRenderer::Shutdown()
 	mVoxelComputeOutputSets = {};
 	mAutoExposureInputSourceSlot = FrameTextureSlot::Count;
 	mSceneDataDescriptorsInitialized.clear();
+	mSceneDataDescriptorMapEpochs.clear();
+	mSceneDataDescriptorBuildEpochs.clear();
 }
 
 void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
@@ -1872,6 +1875,34 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 			"level-unload",
 			(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats);
 	}
+
+	// Static BLAS resources are about to be destroyed. Retire every TLAS that
+	// can reference them and invalidate all scene-data publications from the old
+	// level before any new queued-frame slot can be considered trace-ready.
+	DestroyWorldTlasFrameSlots();
+	for (uint8_t& initialized : mSceneDataDescriptorsInitialized)
+	{
+		initialized = 0u;
+	}
+	std::fill(mSceneDataDescriptorMapEpochs.begin(), mSceneDataDescriptorMapEpochs.end(), 0ull);
+	std::fill(mSceneDataDescriptorBuildEpochs.begin(), mSceneDataDescriptorBuildEpochs.end(), 0ull);
+	for (SceneDataDescriptorSnapshot& snapshot : mSceneDataSnapshots)
+	{
+		snapshot.descriptorsInitialized = false;
+		snapshot.publishedMapEpoch = 0;
+		snapshot.publishedBuildEpoch = 0;
+	}
+	mActiveSceneDataSet = nullptr;
+	mActiveSceneDataSnapshot = nullptr;
+	mActiveSceneDataSetFrameIndex = UINT64_MAX;
+	mSceneDataDescriptors.fill(nullptr);
+	mSceneInstancePayloadCacheValid = false;
+	mSceneInstancePayloadHash = 0;
+	mSceneInstancePayloadCount = 0;
+	mPortalPayloadCacheValid = false;
+	mPortalPayloadHash = 0;
+	mPortalPayloadBuildSerial = 0;
+	mPortalPayloadCount = 0;
 
 	DestroyStaticMapSceneCache("level-unload");
 	mStaticMapScene = {};
@@ -3382,7 +3413,9 @@ bool NRIRenderer::BindSceneRootDescriptors()
 	const NRIWorldTlasFrameSlot& frameSlot = GetCurrentWorldTlasFrameSlot();
 	if (!frameSlot.publicationValid ||
 		frameSlot.accelerationStructure.accelerationStructure == nullptr ||
-		frameSlot.accelerationStructure.descriptor == nullptr)
+		frameSlot.accelerationStructure.descriptor == nullptr ||
+		(mMapWorld.valid && frameSlot.publishedMapEpoch != mMapWorld.buildSerial) ||
+		(mStaticMapScene.valid && frameSlot.publishedBuildEpoch != mStaticMapScene.buildSerial))
 	{
 		return false;
 	}

@@ -4,6 +4,8 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../..'))
 $frameBuildPath = Join-Path $repoRoot 'source/common/rendering/nri/renderer/nri_scene_frame_build.cpp'
 $frameBuildSource = Get-Content -LiteralPath $frameBuildPath -Raw
+$residentStaticPath = Join-Path $repoRoot 'source/common/rendering/nri/renderer/nri_runtime_mutation_resident_static.cpp'
+$residentStaticSource = Get-Content -LiteralPath $residentStaticPath -Raw
 
 $startMarker = 'if (paletteReady && texturesReady && buffersReady && accelerationReady)'
 $endMarker = 'else if (mGpuSceneHasDynamicOverlay || residentStaticWorldGeometryChanged)'
@@ -43,6 +45,21 @@ $forcedReady = $fallback.IndexOf('paletteReady = true;', $failureCheck, [StringC
 if ($textureRestore -lt 0 -or $sceneRestore -le $textureRestore -or
 	$failureCheck -le $sceneRestore -or $forcedReady -le $failureCheck) {
 	throw 'static textures and scene data must be restored and checked before fallback is marked ready'
+}
+
+$restoreStart = $residentStaticSource.IndexOf('bool NRIRenderer::RestoreStaticTopLevelScene()', [StringComparison]::Ordinal)
+$restoreEnd = $residentStaticSource.IndexOf('bool NRIRenderer::RefreshResidentStaticSceneDataSet()', $restoreStart, [StringComparison]::Ordinal)
+$refreshEnd = $residentStaticSource.IndexOf('bool NRIRenderer::RefreshResidentStaticMaterialSlices(', $restoreEnd, [StringComparison]::Ordinal)
+if ($restoreStart -lt 0 -or $restoreEnd -lt 0 -or $refreshEnd -lt 0) {
+	throw 'could not isolate resident-static scene-data publication helpers'
+}
+$staticPublication = $residentStaticSource.Substring($restoreStart, $refreshEnd - $restoreStart)
+if ($staticPublication.Contains('GetCurrentDynamic')) {
+	throw 'resident-static publication must not depend on a dynamic ring slot that may be uninitialized after a transition'
+}
+if (([regex]::Matches($staticPublication, [regex]::Escape('mStaticVertexBuffer'))).Count -lt 4 -or
+	([regex]::Matches($staticPublication, [regex]::Escape('mStaticMaterialBuffer'))).Count -lt 4) {
+	throw 'resident-static publication must supply static buffers for both descriptor domains'
 }
 
 Write-Host 'NRI resident-static overlay fallback restore tests passed.'

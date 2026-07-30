@@ -117,7 +117,7 @@ struct NRIRuntimeMutationSettings
 
 struct NRISmokeSettings
 {
-	bool enabled = false;
+	bool enabled = true;
 	bool readback = false;
 	bool viewCompare = false;
 	uint32_t viewRoute = 0;
