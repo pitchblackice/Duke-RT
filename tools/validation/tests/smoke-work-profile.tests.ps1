@@ -23,7 +23,9 @@ Assert-Match $settingsHeader 'bool enabled = true;' 'Captured smoke settings mus
 Assert-Match $settingsHeader 'bool dormantGrid = true;' 'Captured smoke settings must agree with the dormant residency CVar default.'
 Assert-Match $settingsHeader 'uint32_t workProfile = 2;' 'Captured smoke settings must agree with the Medium CVar default.'
 Assert-Match $settings 'settings\.workProfile\s*=\s*\(uint32_t\)std::max\(\(int\)nri_ptsmokeworkprofile,\s*0\)' 'Captured settings must carry the requested profile.'
-Assert-Match $menu 'Option\s+"Smoke Work Profile",\s*"nri_ptsmokeworkprofile",\s*"NRISmokeWorkProfile"' 'Video options must expose the smoke work profile.'
+Assert-Match $menu 'Option\s+"Smoke Quality",\s*"nri_ptsmokeworkprofile",\s*"NRISmokeWorkProfile"' 'Video options must expose Smoke Quality.'
+Assert-Match $cvars 'Smoke is very taxing on your GPU, especially at Ultra settings' 'The enabled smoke warning must identify the GPU cost and call out Ultra settings.'
+if ($cvars -match 'Smoke is experimental') { throw 'The production smoke warning must not describe smoke as experimental.' }
 Assert-Match $menu 'OptionValue NRISmokeWorkProfile[\s\S]*0, "Ultra"[\s\S]*1, "High"[\s\S]*2, "Medium"[\s\S]*3, "Low"' 'Menu values must match the runtime profile ABI.'
 Assert-Match $schedulerHeader 'Reference\s*=\s*0[\s\S]*High\s*=\s*1[\s\S]*Medium\s*=\s*2[\s\S]*Low\s*=\s*3' 'Profiles must preserve the archived numeric ABI.'
 Assert-Match $scheduler 'NRISmokeWorkProfile::Reference[\s\S]*return "ultra"' 'Profile zero diagnostics must use the Ultra name.'
