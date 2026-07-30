@@ -1049,10 +1049,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		overlayEligibilityInputs.hasPersistentVoxelBatch = hasPersistentVoxelBatch;
 		overlayEligibilityInputs.persistentVoxelRenderable =
 			hasPersistentVoxelBatch &&
-			mPersistentVoxels.HasTlasAppendEligibleActor(
-				(uint32_t)mFrameIndex,
-				persistentVoxelSettings,
-				persistentVoxelEligibilityServices);
+			mPersistentVoxels.HasOverlayPreparationEligibleActor(persistentVoxelSettings);
 		overlayEligibilityInputs.activeDynamicGeometry = activeDynamicGeometry;
 		overlayEligibilityInputs.activeDynamicMaterials = activeDynamicMaterials;
 		overlayEligibilityInputs.hasLocalPlayerReflectionScene = hasLocalPlayerReflectionScene;

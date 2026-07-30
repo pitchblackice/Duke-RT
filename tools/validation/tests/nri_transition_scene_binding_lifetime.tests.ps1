@@ -100,29 +100,71 @@ if ($guardCount -lt 5) {
 if (-not $frameBuild.Contains('mPersistentVoxels.IsIndirectOnlyActorTlasAppendEligible(')) {
 	throw 'local-player reflection handoff must use exact resident-actor TLAS eligibility'
 }
-if (-not $frameBuild.Contains('mPersistentVoxels.HasTlasAppendEligibleActor(')) {
-	throw 'persistent voxel render admission must require an actor that can append to the current TLAS'
+if (-not $frameBuild.Contains('mPersistentVoxels.HasOverlayPreparationEligibleActor(')) {
+	throw 'persistent voxel render admission must allow resource preparation before final TLAS eligibility'
 }
-if ($frameBuild.Contains('persistentVoxelRenderable = hasPersistentVoxelBatch ? mPersistentVoxels.HasRenderableOverlay()')) {
-	throw 'persistent voxel render admission must not rely on CPU batch metadata alone'
+$renderAdmissionStart = $frameBuild.IndexOf('overlayEligibilityInputs.persistentVoxelRenderable =', [StringComparison]::Ordinal)
+$renderAdmissionEnd = $frameBuild.IndexOf('overlayEligibilityInputs.activeDynamicGeometry =', $renderAdmissionStart, [StringComparison]::Ordinal)
+if ($renderAdmissionStart -lt 0 -or $renderAdmissionEnd -lt 0) {
+	throw 'could not isolate persistent voxel render admission'
 }
-$eligibilityStart = $persistentVoxels.IndexOf('bool NRIPersistentVoxelResidency::IsActorTlasAppendEligible(', [StringComparison]::Ordinal)
-$eligibilityEnd = $persistentVoxels.IndexOf('bool NRIPersistentVoxelResidency::HasPreloadPending()', $eligibilityStart, [StringComparison]::Ordinal)
-if ($eligibilityStart -lt 0 -or $eligibilityEnd -lt 0) {
+$renderAdmission = $frameBuild.Substring($renderAdmissionStart, $renderAdmissionEnd - $renderAdmissionStart)
+if ($renderAdmission.Contains('HasTlasAppendEligibleActor(')) {
+	throw 'persistent voxel render admission must not require the BLAS and arena views that its branch produces'
+}
+$exactEligibilityStart = $persistentVoxels.IndexOf('bool NRIPersistentVoxelResidency::IsActorTlasAppendEligible(', [StringComparison]::Ordinal)
+$preparationEligibilityStart = $persistentVoxels.IndexOf('bool NRIPersistentVoxelResidency::IsActorOverlayPreparationEligible(', $exactEligibilityStart, [StringComparison]::Ordinal)
+$eligibilityEnd = $persistentVoxels.IndexOf('bool NRIPersistentVoxelResidency::HasPreloadPending()', $preparationEligibilityStart, [StringComparison]::Ordinal)
+if ($exactEligibilityStart -lt 0 -or $preparationEligibilityStart -lt 0 -or $eligibilityEnd -lt 0) {
 	throw 'could not isolate persistent voxel TLAS append eligibility'
 }
-$eligibility = $persistentVoxels.Substring($eligibilityStart, $eligibilityEnd - $eligibilityStart)
+$exactEligibility = $persistentVoxels.Substring($exactEligibilityStart, $preparationEligibilityStart - $exactEligibilityStart)
+$preparationEligibility = $persistentVoxels.Substring($preparationEligibilityStart, $eligibilityEnd - $preparationEligibilityStart)
+foreach ($required in @(
+	'mesh.accelerationStructure.accelerationStructure == nullptr',
+	'materialBuffer.shaderView == nullptr',
+	'(mesh.tlasPublished || mesh.tlasReadyFrame <= frameIndex)',
+	'services.GetAccelerationStructureHandle(mesh.accelerationStructure) != 0'
+)) {
+	if (-not $exactEligibility.Contains($required)) {
+		throw "final persistent voxel TLAS eligibility is missing an append gate ('$required')"
+	}
+}
 foreach ($required in @(
 	'PersistentVoxelMaterialRangeMatches(actor, material)',
-	'(mesh.tlasPublished || mesh.tlasReadyFrame <= frameIndex)',
-	'services.GetAccelerationStructureHandle(mesh.accelerationStructure) != 0',
-	'vertexBuffer.shaderView == nullptr',
 	'primitiveRangeValid',
 	'meshRangeMatches'
 )) {
-	if (-not $eligibility.Contains($required)) {
-		throw "persistent voxel render admission is missing a TLAS append gate ('$required')"
+	if (-not $preparationEligibility.Contains($required)) {
+		throw "persistent voxel overlay preparation is missing a safe preflight gate ('$required')"
 	}
+}
+foreach ($forbidden in @(
+	'mesh.accelerationStructure.accelerationStructure',
+	'materialBuffer.shaderView',
+	'GetAccelerationStructureHandle'
+)) {
+	if ($preparationEligibility.Contains($forbidden)) {
+		throw "persistent voxel overlay preparation must not depend on a resource produced inside the overlay branch ('$forbidden')"
+	}
+}
+
+$materialBridgeStart = $persistentVoxels.IndexOf('void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge', [StringComparison]::Ordinal)
+$materialBridgeEnd = $persistentVoxels.IndexOf('void NRIPersistentVoxelResidency::RecomputeBatchState', $materialBridgeStart, [StringComparison]::Ordinal)
+$materialUploadStart = $persistentVoxels.IndexOf('bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers', [StringComparison]::Ordinal)
+$materialUploadEnd = $persistentVoxels.IndexOf('bool NRIPersistentVoxelResidency::AppendTlasInstances', $materialUploadStart, [StringComparison]::Ordinal)
+if ($materialBridgeStart -lt 0 -or $materialBridgeEnd -lt 0 -or $materialUploadStart -lt 0 -or $materialUploadEnd -lt 0) {
+	throw 'could not isolate persistent voxel material publication policy'
+}
+$materialBridgePolicy = $persistentVoxels.Substring($materialBridgeStart, $materialBridgeEnd - $materialBridgeStart)
+$materialUploadPolicy = $persistentVoxels.Substring($materialUploadStart, $materialUploadEnd - $materialUploadStart)
+if (-not $materialBridgePolicy.Contains('activeMaterialKeys.insert(actor.materialKeyHash)') -or
+	$materialBridgePolicy.Contains('materialResources.reserve(materialVariantResources.size())')) {
+	throw 'the frame material bridge must include active actor materials rather than all session-resident materials'
+}
+if (-not $materialUploadPolicy.Contains('activeMaterialKeys.find(*dirtyIt) == activeMaterialKeys.end()') -or
+	-not $materialUploadPolicy.Contains('dirtyMaterialResourceKeys.insert(activeMaterialKeys.begin(), activeMaterialKeys.end())')) {
+	throw 'material upload dirtiness must be scoped to currently active actor materials'
 }
 
 Write-Host 'NRI transition scene-binding lifetime tests passed.'

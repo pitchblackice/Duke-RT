@@ -1053,10 +1053,8 @@ bool NRIPersistentVoxelResidency::IsIndirectOnlyActorTlasAppendEligible(
 	return false;
 }
 
-bool NRIPersistentVoxelResidency::HasTlasAppendEligibleActor(
-	uint32_t frameIndex,
-	const NRIPersistentVoxelSettings& settings,
-	const NRIPersistentVoxelTlasServices& services) const
+bool NRIPersistentVoxelResidency::HasOverlayPreparationEligibleActor(
+	const NRIPersistentVoxelSettings& settings) const
 {
 	if (!batch.valid)
 	{
@@ -1065,7 +1063,7 @@ bool NRIPersistentVoxelResidency::HasTlasAppendEligibleActor(
 
 	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
 	{
-		if (actor.active && IsActorTlasAppendEligible(actor, frameIndex, settings, services))
+		if (actor.active && IsActorOverlayPreparationEligible(actor, settings))
 		{
 			return true;
 		}
@@ -1080,7 +1078,30 @@ bool NRIPersistentVoxelResidency::IsActorTlasAppendEligible(
 	const NRIPersistentVoxelTlasServices& services) const
 {
 	if (services.getAccelerationStructureHandle == nullptr ||
-		settings.omitTlasOccurrences ||
+		!IsActorOverlayPreparationEligible(actor, settings))
+	{
+		return false;
+	}
+
+	const PersistentVoxelMeshVariantResource& mesh = meshVariantResources.find(actor.meshResourceKey)->second;
+	if (mesh.accelerationStructure.accelerationStructure == nullptr ||
+		vertexBuffer.shaderView == nullptr ||
+		indexBuffer.shaderView == nullptr ||
+		primitiveBuffer.shaderView == nullptr ||
+		materialBuffer.shaderView == nullptr)
+	{
+		return false;
+	}
+	return
+		(mesh.tlasPublished || mesh.tlasReadyFrame <= frameIndex) &&
+		services.GetAccelerationStructureHandle(mesh.accelerationStructure) != 0;
+}
+
+bool NRIPersistentVoxelResidency::IsActorOverlayPreparationEligible(
+	const PersistentVoxelBatch::ActorEntry& actor,
+	const NRIPersistentVoxelSettings& settings) const
+{
+	if (settings.omitTlasOccurrences ||
 			(actor.resolvedVoxelIndex >= 0 &&
 				(actor.resolvedVoxelIndex == settings.excludeIndices[0] ||
 				 actor.resolvedVoxelIndex == settings.excludeIndices[1] ||
@@ -1100,13 +1121,8 @@ bool NRIPersistentVoxelResidency::IsActorTlasAppendEligible(
 	const PersistentVoxelMaterialVariantResource& material = materialIt->second;
 	if (!materialRangeAllocator.Owns(PersistentVoxelMaterialRangeHandle(material)) ||
 		!PersistentVoxelMaterialRangeMatches(actor, material) ||
-		mesh.accelerationStructure.accelerationStructure == nullptr ||
 		(!mesh.directComputePublished &&
-			(mesh.indexBuffer.shaderView == nullptr || mesh.vertexBuffer.shaderView == nullptr)) ||
-		vertexBuffer.shaderView == nullptr ||
-		indexBuffer.shaderView == nullptr ||
-		primitiveBuffer.shaderView == nullptr ||
-		materialBuffer.shaderView == nullptr)
+			(mesh.indexBuffer.shaderView == nullptr || mesh.vertexBuffer.shaderView == nullptr)))
 	{
 		return false;
 	}
@@ -1135,9 +1151,7 @@ bool NRIPersistentVoxelResidency::IsActorTlasAppendEligible(
 		materialRangeValid &&
 		meshRangeMatches &&
 		transformFinite(actor.instanceTransform) &&
-		transformFinite(actor.previousInstanceTransform) &&
-		(mesh.tlasPublished || mesh.tlasReadyFrame <= frameIndex) &&
-		services.GetAccelerationStructureHandle(mesh.accelerationStructure) != 0;
+		transformFinite(actor.previousInstanceTransform);
 }
 
 bool NRIPersistentVoxelResidency::HasPreloadPending() const
@@ -1273,15 +1287,25 @@ void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge(PersistentVoxelBatc
 	const uint32_t materialCursor = materialRangeAllocator.Stats().cursorRows;
 	targetBatch.materialBridge.materials.reserve(materialCursor);
 	targetBatch.materialBridge.lightMetadata.reserve(materialCursor);
-	std::unordered_map<uint64_t, uint32_t> textureLookup;
-	textureLookup.reserve(targetBatch.materialBridge.textures.capacity() + materialVariantResources.size());
-	std::vector<PersistentVoxelMaterialVariantResource*> materialResources;
-	materialResources.reserve(materialVariantResources.size());
-	for (auto& pair : materialVariantResources)
+	std::unordered_set<uint64_t> activeMaterialKeys;
+	activeMaterialKeys.reserve(targetBatch.actors.size());
+	for (const PersistentVoxelBatch::ActorEntry& actor : targetBatch.actors)
 	{
-		if (pair.second.materialCount > 0)
+		if (actor.active && actor.materialKeyHash != 0)
 		{
-			materialResources.push_back(&pair.second);
+			activeMaterialKeys.insert(actor.materialKeyHash);
+		}
+	}
+	std::unordered_map<uint64_t, uint32_t> textureLookup;
+	textureLookup.reserve(targetBatch.materialBridge.textures.capacity() + activeMaterialKeys.size());
+	std::vector<PersistentVoxelMaterialVariantResource*> materialResources;
+	materialResources.reserve(activeMaterialKeys.size());
+	for (uint64_t materialKey : activeMaterialKeys)
+	{
+		auto resourceIt = materialVariantResources.find(materialKey);
+		if (resourceIt != materialVariantResources.end() && resourceIt->second.materialCount > 0)
+		{
+			materialResources.push_back(&resourceIt->second);
 		}
 	}
 	std::sort(
@@ -1352,14 +1376,15 @@ void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge(PersistentVoxelBatc
 	if (!NRIPersistentVoxelMaterialTextureLayoutPreservesPrefix(uploadedMaterialTextureKeys, rebuiltTextureKeys))
 	{
 		pendingMaterialLayoutInvalidatedResources = 0;
-		for (auto& pair : materialVariantResources)
+		for (uint64_t materialKey : activeMaterialKeys)
 		{
-			if (pair.second.materialCount == 0)
+			auto resourceIt = materialVariantResources.find(materialKey);
+			if (resourceIt == materialVariantResources.end() || resourceIt->second.materialCount == 0)
 			{
 				continue;
 			}
-			pair.second.materialUploadHash = 0;
-			dirtyMaterialResourceKeys.insert(pair.first);
+			resourceIt->second.materialUploadHash = 0;
+			dirtyMaterialResourceKeys.insert(materialKey);
 			pendingMaterialLayoutInvalidatedResources++;
 		}
 	}
@@ -1686,16 +1711,19 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 	{
 		dirtyMaterialResourceKeys.insert(activeMaterialKeys.begin(), activeMaterialKeys.end());
 	}
+	for (auto dirtyIt = dirtyMaterialResourceKeys.begin(); dirtyIt != dirtyMaterialResourceKeys.end(); )
+	{
+		if (activeMaterialKeys.find(*dirtyIt) == activeMaterialKeys.end())
+		{
+			dirtyIt = dirtyMaterialResourceKeys.erase(dirtyIt);
+			continue;
+		}
+		++dirtyIt;
+	}
 	if (dirtyMaterialResourceKeys.empty() &&
 		(materialBuffer.buffer == nullptr || uploadedMaterialResourceGeneration != materialResourceGeneration))
 	{
-		for (const auto& pair : materialVariantResources)
-		{
-			if (pair.second.materialCount != 0)
-			{
-				dirtyMaterialResourceKeys.insert(pair.first);
-			}
-		}
+		dirtyMaterialResourceKeys.insert(activeMaterialKeys.begin(), activeMaterialKeys.end());
 	}
 	outStats.activeValidatedResources = (uint32_t)activeMaterialKeys.size();
 	if (uploadedMaterialResourceGeneration == materialResourceGeneration && materialBuffer.buffer != nullptr)

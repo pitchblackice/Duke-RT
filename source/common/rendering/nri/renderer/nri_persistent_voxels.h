@@ -1082,10 +1082,7 @@ public:
 	bool HasValidBatch() const;
 	bool HasRenderableOverlay() const;
 	bool HasResidentIndirectOnlyActor(int32_t actorIndex) const;
-	bool HasTlasAppendEligibleActor(
-		uint32_t frameIndex,
-		const NRIPersistentVoxelSettings& settings,
-		const NRIPersistentVoxelTlasServices& services) const;
+	bool HasOverlayPreparationEligibleActor(const NRIPersistentVoxelSettings& settings) const;
 	bool IsIndirectOnlyActorTlasAppendEligible(
 		int32_t actorIndex,
 		uint32_t frameIndex,
@@ -1157,6 +1154,9 @@ public:
 		uint32_t frameIndex,
 		const NRIPersistentVoxelSettings& settings,
 		const NRIPersistentVoxelTlasServices& services) const;
+	bool IsActorOverlayPreparationEligible(
+		const PersistentVoxelBatch::ActorEntry& actor,
+		const NRIPersistentVoxelSettings& settings) const;
 
 	bool IsPostLoadAdmissionGraceActive(uint32_t frameIndex) const;
 
