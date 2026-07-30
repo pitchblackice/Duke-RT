@@ -14,6 +14,49 @@ constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 constexpr uint32_t NRI_TRACE_SHADER_STATS_DESCRIPTOR_NUM = 1;
 constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
 
+// The cache variant extends the ordinary five-set trace layout with one
+// storage-buffer set. The ordinary TraceOpaque layout remains unchanged.
+constexpr uint32_t NRI_INDIRECT_RADIANCE_CACHE_SET_INDEX = 5;
+constexpr uint32_t NRI_INDIRECT_RADIANCE_CACHE_REGISTER_SPACE = 6;
+constexpr uint32_t NRI_INDIRECT_RADIANCE_CACHE_DESCRIPTOR_NUM = 3;
+constexpr uint32_t NRI_INDIRECT_RADIANCE_CACHE_RECORD_STRIDE = 48;
+constexpr uint32_t NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_COUNT = 16;
+
+enum NRIIndirectRadianceCacheTelemetryIndex : uint32_t
+{
+	NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_LOOKUPS = 0,
+	NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_FORCED_MISSES = 1,
+	NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_COLLISIONS = 2,
+	NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_STALE_GENERATION = 3,
+	NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_UNSUPPORTED_ROUTE = 4,
+	NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_EXACT_FALLBACK = 5,
+	NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_OCCUPANCY = 6,
+	NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_UPDATES = 7,
+	NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_CLEAR_COUNT = 8,
+	NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_LOOKUP_TIME = 9,
+	NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_UPDATE_TIME = 10,
+	NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_RESOLVE_TIME = 11,
+	NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_CLEAR_TIME = 12,
+	NRI_INDIRECT_RADIANCE_CACHE_TELEMETRY_ACCEPTED_HITS = 13,
+};
+
+// Mirrors shaders/Include/IndirectRadianceCache.hlsli. StableKey must be
+// derived from static semantic identity and quantized world-space evidence;
+// Compatibility must never contain a transient TLAS instance index.
+struct NRIIndirectRadianceCacheRecord
+{
+	uint32_t StableKey[2] = {};
+	uint32_t Compatibility[2] = {};
+	uint32_t QuantizedWorldPosition[2] = {};
+	uint32_t PackedNormalAndRoute = 0;
+	uint32_t MaterialFlags = 0;
+	float IncidentRadiance[3] = {};
+	uint32_t Metadata = 0;
+};
+
+static_assert(sizeof(NRIIndirectRadianceCacheRecord) == NRI_INDIRECT_RADIANCE_CACHE_RECORD_STRIDE,
+	"Indirect-radiance cache records must match the HLSL contract.");
+
 constexpr uint32_t NRI_FLAG_RESET_HISTORY = 0x1u;
 constexpr uint32_t NRI_FLAG_USE_UPSCALED = 0x2u;
 constexpr uint32_t NRI_FLAG_BOOTSTRAP_VIEW = 0x4u;
@@ -27,6 +70,8 @@ constexpr uint32_t NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS = 0x200u;
 constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW = 0x400u;
 constexpr uint32_t NRI_FLAG_TRACE_SHADER_STATS = 0x800u;
 constexpr uint32_t NRI_FLAG_PROBABILISTIC_INDIRECT = 0x1000u;
+constexpr uint32_t NRI_FLAG_INDIRECT_RADIANCE_CACHE = 0x2000u;
+constexpr uint32_t NRI_FLAG_INDIRECT_RADIANCE_CACHE_ACCEPT = 0x4000u;
 
 constexpr uint32_t NRI_PRESENT_FLAG_SPLIT_SHADOW_DENOISER = NRI_FLAG_SPLIT_SHADOW_DENOISER;
 constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_DISPLAY_INFO_AVAILABLE = 0x1u;

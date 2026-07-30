@@ -7,6 +7,7 @@
 #include "nri_exposure.h"
 #include "nri_frame_graph.h"
 #include "nri_frame_resources.h"
+#include "nri_indirect_radiance_cache.h"
 #include "nri_nrd.h"
 #include "nri_persistent_voxels.h"
 #include "nri_pipeline_state.h"
@@ -1746,6 +1747,7 @@ public:
 		uint32_t traceSplitShadow = 0;
 		uint32_t traceFastEmissiveShadow = 0;
 		uint32_t traceVisibleChunkGate = 0;
+		uint32_t traceVoxelOccurrenceControl = 0;
 		uint32_t activePrimitiveCount = 0;
 		uint32_t dynamicPrimitiveCount = 0;
 		uint32_t activeMaterialCount = 0;
@@ -2033,6 +2035,7 @@ public:
 	const PerfShellTraceStats& GetLastPerfShellTraceStats() const { return mLastPerfShellTraceStats; }
 	const PerfResourceTraceStats& GetLastPerfResourceTraceStats() const { return mLastPerfResourceTraceStats; }
 	const PerfTraceShaderStats& GetLastPerfTraceShaderStats() const { return mLastPerfTraceShaderStats; }
+	const NRIVoxelRepresentationSnapshot& GetVoxelRepresentationSnapshot() const { return mVoxelRepresentationPolicy.GetSnapshot(); }
 	NRISE29FloorDeformerRouteFrameStats GetSE29FloorDeformerRouteFrameStats() const;
 	NRIMapMaterialOnlyRouteFrameStats GetMapMaterialOnlyRouteFrameStats() const;
 	nri_scene::PTMapMaterialStateVariantStats GetMapMaterialVariantStats() const;
@@ -2106,6 +2109,7 @@ public:
 	enum class PipelineSlot : uint32_t
 	{
 		TraceOpaque,
+		TraceOpaqueCache,
 		Composition,
 		TraceTransparent,
 		ExposureHistogramClear,
@@ -2145,6 +2149,7 @@ private:
 	friend class NRIAccelerationStructureManager;
 	friend class NRIDescriptorSetManager;
 	friend class NRIFrameResources;
+	friend NRIIndirectRadianceCacheServices BuildNRIIndirectRadianceCacheServices(NRIRenderer& renderer);
 	friend class NRIPipelineStateManager;
 	friend class NRISmokeSystem;
 	friend class NRIPreloadCoordinator;
@@ -2361,6 +2366,9 @@ private:
 		NRIBufferResource sceneInstanceBuffer;
 		SceneBufferDebugStats sceneInstanceStats = { "SceneDataSnapshotSceneInstance" };
 		uint64_t retireFenceValue = 0;
+		uint64_t publishedMapEpoch = 0;
+		uint64_t publishedBuildEpoch = 0;
+		bool descriptorsInitialized = false;
 	};
 
 	using RuntimeMutationResidentUploadRange = ::RuntimeMutationResidentUploadRange;
@@ -2592,7 +2600,7 @@ private:
 	const NRIBufferResource& GetActiveIndexBuffer() const;
 	const NRIBufferResource& GetActivePrimitiveBuffer() const;
 	const NRIBufferResource& GetActiveMaterialBuffer() const;
-	void BindSceneRootDescriptors();
+	bool BindSceneRootDescriptors();
 
 	bool CreateStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
 	bool EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, bool writesQuiesced = false, const char* waitReason = nullptr);
@@ -2649,6 +2657,7 @@ private:
 	std::unique_ptr<NRISmokeSystem> mSmoke;
 	NRIWeaponEventBatch mWeaponEventBatch;
 	nri::PipelineLayout* mPipelineLayout = nullptr;
+	nri::PipelineLayout* mIndirectRadianceCachePipelineLayout = nullptr;
 	nri::PipelineLayout* mTaaPipelineLayout = nullptr;
 	nri::PipelineLayout* mPresentPipelineLayout = nullptr;
 	nri::PipelineLayout* mExposurePipelineLayout = nullptr;
@@ -2664,6 +2673,7 @@ private:
 	std::vector<nri::DescriptorSet*> mSceneDataSets;
 	std::vector<SceneDataDescriptorSnapshot> mSceneDataSnapshots;
 	nri::DescriptorSet* mActiveSceneDataSet = nullptr;
+	SceneDataDescriptorSnapshot* mActiveSceneDataSnapshot = nullptr;
 	uint64_t mActiveSceneDataSetFrameIndex = UINT64_MAX;
 	uint32_t mSceneDataSnapshotCursor = 0;
 	nri::DescriptorSet* mFrameTextureSet = nullptr;
@@ -2722,6 +2732,8 @@ private:
 	NRIBufferResource mVisibleChunkBuffer;
 	NRIBufferResource mVisibleFlatPlaneBuffer;
 	NRITraceShaderStats mTraceShaderStats;
+	NRIIndirectRadianceCache mIndirectRadianceCache;
+	NRIIndirectRadianceCacheTelemetrySnapshot mLastIndirectRadianceCacheTelemetry = {};
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mResidentStaticBlasScratchBuffer;
 	NRIBufferResource mEmissiveTopLevelScratchBuffer;
@@ -2805,6 +2817,7 @@ private:
 	NRISurfaceLightOverlayCache mSurfaceLightOverlayCache;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	NRIPersistentVoxelResidency mPersistentVoxels;
+	NRIVoxelRepresentationPolicy mVoxelRepresentationPolicy;
 	StateCommitDomainGenerations mLastStateCommitDomainGenerations = {};
 	bool mHasLastStateCommitDomainGenerations = false;
 	nri_material_policy::ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
@@ -2940,6 +2953,8 @@ private:
 	uint32_t mBoundRuntimeLightTileIndexCount = 0;
 	uint32_t mBoundRuntimeLightMaxTileOccupancy = 0;
 	std::vector<uint8_t> mSceneDataDescriptorsInitialized;
+	std::vector<uint64_t> mSceneDataDescriptorMapEpochs;
+	std::vector<uint64_t> mSceneDataDescriptorBuildEpochs;
 	bool mRuntimeLightPayloadCacheValid = false;
 	uint64_t mRuntimeLightPayloadHash = 0;
 	bool mRuntimeLightClusterCacheValid = false;

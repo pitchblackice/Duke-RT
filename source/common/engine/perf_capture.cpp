@@ -13,11 +13,21 @@ CUSTOM_CVAR(Int, perf_compactframes, 0, 0)
 	else if (self > 2048) self = 2048;
 }
 
+// Delay the next compact capture by a bounded number of presentations. This
+// lets a fixed-simulation oracle settle every queued renderer lane before its
+// first accepted sample without thawing the simulation clock.
+CUSTOM_CVAR(Int, perf_compactwarmupframes, 0, 0)
+{
+	if (self < 0) self = 0;
+	else if (self > 2048) self = 2048;
+}
+
 namespace
 {
 	constexpr uint32_t MaxRecords = 4096;
 	constexpr uint32_t MaxFirstUseRecords = 4096;
 	constexpr uint32_t MaxFirstUseDrainFrames = 32;
+	constexpr uint32_t MinReadbackDrainFrames = 3;
 
 	struct Record
 	{
@@ -49,6 +59,7 @@ namespace
 		uint32_t requested = 0, observed = 0, eligible = 0, pendingGpu = 0;
 		uint32_t firstUseCount = 0, firstUseDropped = 0, openFirstUseCount = 0;
 		uint32_t firstUseDrainFrames = 0;
+		uint32_t readbackDrainFrames = 0;
 		uint32_t rejectState = 0, rejectLevelRendered = 0, rejectNriActive = 0;
 		uint32_t rejectNriInvalid = 0, rejectNriNotRendered = 0, rejectBoundaryInvalid = 0;
 		uint32_t rejectNotPathTraced = 0, rejectPresent = 0, rejectFrameJoin = 0;
@@ -78,6 +89,7 @@ namespace
 		gCapture.firstUseDropped = 0;
 		gCapture.openFirstUseCount = 0;
 		gCapture.firstUseDrainFrames = 0;
+		gCapture.readbackDrainFrames = 0;
 		gCapture.rejectState = 0;
 		gCapture.rejectLevelRendered = 0;
 		gCapture.rejectNriActive = 0;
@@ -242,7 +254,7 @@ namespace
 			(unsigned long long)outer.traceFrame, (unsigned long long)nri.frame,
 			nri.resourceWaitCalls, nri.resourceWaitMs,
 			(unsigned long long)gCapture.epoch, record.eligibleIndex);
-		Printf("PERF pt trace workload NRI: frame=%llu nri_frame=%llu renderer_frame=%llu schema=2 settings_key=%llu workload_key=%llu render_w=%u render_h=%u output_w=%u output_h=%u dispatch_x=%u dispatch_y=%u dispatch_z=%u light_bounces=%u mirror_bounces=%u portal_depth=%u emissive_samples=%u emissive_requested=%u emissive_budget=%u indirect_requested=%u indirect_effective=%u indirect_active=%u hit_recon=%u runtime_lights=%u light_tiles_x=%u light_tiles_y=%u light_tile_size=%u light_tile_indices=%u light_tile_max=%u emissive_prims=%u emissive_power=%.3f flags=%u debug=%u bootstrap=%u upscaler=%u upscaler_mode=%u denoiser=%u direct_scene=%u directional=%u directional_shadow=%u split_shadow=%u fast_emissive_shadow=%u visible_chunk_gate=%u compact=1 epoch=%llu sample=%u\n",
+		Printf("PERF pt trace workload NRI: frame=%llu nri_frame=%llu renderer_frame=%llu schema=3 settings_key=%llu workload_key=%llu render_w=%u render_h=%u output_w=%u output_h=%u dispatch_x=%u dispatch_y=%u dispatch_z=%u light_bounces=%u mirror_bounces=%u portal_depth=%u emissive_samples=%u emissive_requested=%u emissive_budget=%u indirect_requested=%u indirect_effective=%u indirect_active=%u hit_recon=%u runtime_lights=%u light_tiles_x=%u light_tiles_y=%u light_tile_size=%u light_tile_indices=%u light_tile_max=%u emissive_prims=%u emissive_power=%.3f voxel_occurrences=%u voxel_instance_prims=%llu voxel_occurrence_control=%u flags=%u debug=%u bootstrap=%u upscaler=%u upscaler_mode=%u denoiser=%u direct_scene=%u directional=%u directional_shadow=%u split_shadow=%u fast_emissive_shadow=%u visible_chunk_gate=%u compact=1 epoch=%llu sample=%u\n",
 			(unsigned long long)outer.traceFrame, (unsigned long long)nri.frame,
 			(unsigned long long)nri.traceRendererFrame,
 			(unsigned long long)nri.traceSettingsKey,
@@ -257,16 +269,38 @@ namespace
 			nri.traceRuntimeLights, nri.traceRuntimeLightTilesX, nri.traceRuntimeLightTilesY,
 			nri.traceRuntimeLightTileSize, nri.traceRuntimeLightTileIndices, nri.traceRuntimeLightMaxOccupancy,
 			nri.traceEmissivePrimitiveCount, nri.traceEmissiveTotalPower,
+			nri.traceVoxelOccurrences, (unsigned long long)nri.traceVoxelInstancePrimitives,
+			nri.traceVoxelOccurrenceControl,
 			nri.traceFlags, nri.traceDebugMode, nri.traceBootstrapMode,
 			nri.traceUpscalerKind, nri.traceUpscalerMode, nri.traceDenoiserMode,
 			nri.traceDirectScene, nri.traceDirectional, nri.traceDirectionalShadow,
 			nri.traceSplitShadow, nri.traceFastEmissiveShadow, nri.traceVisibleChunkGate,
 			(unsigned long long)gCapture.epoch, record.eligibleIndex);
-		Printf("PERF pt gpu timing NRI: frame=%llu nri_frame=%llu segment=%.3f scene=%.3f trace=%.3f trace_dispatch=%.3f denoise=%.3f compose=%.3f upscale=%.3f final=%.3f segments=%u invalid=%u dropped=%u resolved=%u expected=%u compact=1 epoch=%llu sample=%u\n",
+		Printf("PERF pt gpu timing NRI: frame=%llu nri_frame=%llu segment=%.3f scene=%.3f trace=%.3f trace_dispatch=%.3f denoise=%.3f compose=%.3f upscale=%.3f final=%.3f smoke_simulation=%.3f smoke_volume=%.3f smoke_total=%.3f smoke_detail_total=%.3f smoke_grid_allocate=%.3f smoke_grid_initialize=%.3f smoke_grid_deposit=%.3f smoke_grid_halo=%.3f smoke_grid_simulate=%.3f smoke_grid_rebuild=%.3f smoke_dormant_archive=%.3f smoke_dormant_promote=%.3f smoke_dormant_evolve=%.3f smoke_world_active=%.3f smoke_world_link=%.3f smoke_world_proposal=%.3f smoke_world_seed=%.3f smoke_world_temporal=%.3f smoke_world_filter=%.3f smoke_world_scatter=%.3f smoke_carrier=%.3f smoke_view_prepare=%.3f smoke_materialize=%.3f smoke_analytic_materialize=%.3f smoke_view_point=%.3f smoke_view_directional=%.3f smoke_view_direct_reuse=%.3f smoke_view_emissive=%.3f smoke_analytic_emissive_build=%.3f smoke_analytic_emissive_apply=%.3f smoke_view_indirect=%.3f smoke_integrate=%.3f smoke_reconstruction=%.3f segments=%u invalid=%u dropped=%u resolved=%u expected=%u compact=1 epoch=%llu sample=%u\n",
 			(unsigned long long)outer.traceFrame, (unsigned long long)nri.frame,
 			record.gpu.segmentMs, record.gpu.sceneMs,
 			record.gpu.traceMs, record.gpu.traceDispatchMs, record.gpu.denoiseMs, record.gpu.compositionMs,
-			record.gpu.upscaleMs, record.gpu.finalMs, record.gpu.segmentCount,
+			record.gpu.upscaleMs, record.gpu.finalMs,
+			record.gpu.smokeSimulationMs, record.gpu.smokeVolumeMs,
+			record.gpu.smokeSimulationMs + record.gpu.smokeVolumeMs,
+			record.gpu.SmokeDetailTotalMs(),
+			record.gpu.smokeGridAllocateMs, record.gpu.smokeGridInitializeMs,
+			record.gpu.smokeGridDepositMs, record.gpu.smokeGridHaloMs,
+			record.gpu.smokeGridSimulateMs, record.gpu.smokeGridRebuildMs,
+			record.gpu.smokeDormantArchiveMs, record.gpu.smokeDormantPromoteMs,
+			record.gpu.smokeDormantEvolveMs,
+			record.gpu.smokeWorldActiveMs, record.gpu.smokeWorldLinkMs,
+			record.gpu.smokeWorldProposalMs, record.gpu.smokeWorldSeedMs,
+			record.gpu.smokeWorldTemporalMs, record.gpu.smokeWorldFilterMs,
+			record.gpu.smokeWorldScatterMs, record.gpu.smokeCarrierMs,
+			record.gpu.smokeViewPrepareMs, record.gpu.smokeMaterializeMs,
+			record.gpu.smokeAnalyticMaterializeMs,
+			record.gpu.smokeViewPointMs, record.gpu.smokeViewDirectionalMs,
+			record.gpu.smokeViewDirectReuseMs, record.gpu.smokeViewEmissiveMs,
+			record.gpu.smokeAnalyticEmissiveBuildMs, record.gpu.smokeAnalyticEmissiveApplyMs,
+			record.gpu.smokeViewIndirectMs, record.gpu.smokeIntegrateMs,
+			record.gpu.smokeReconstructionMs,
+			record.gpu.segmentCount,
 			record.gpu.invalidPairs, record.gpu.droppedScopes, record.resolvedGpuSegments,
 			record.expectedGpuSegments, (unsigned long long)gCapture.epoch,
 			record.eligibleIndex);
@@ -275,14 +309,16 @@ namespace
 	void FlushLoopRecord(const Record& record)
 	{
 		const auto& f = record.outer;
-		Printf("PERF loop trace: frame=%llu presentation_gen=%llu simulation_gen=%llu engine_gen=%llu state=level gametic=%d startframe_ms=%.3f try_ms=%.3f try_traced_ms=%.3f display_ms=%.3f display_begin_ms=%.3f display_render_ms=%.3f display_overlay_ms=%.3f display_update_ms=%.3f starttic_ms=%.3f music_ms=%.3f frame_ms=%.3f do_wait=%d realtics=%d avail=%d counts=%d ticks=%d wait_loops=%d zero_return=%d wait_return=%d paused_return=%d display_skip=%d level_rendered=1 compact=1 epoch=%llu sample=%u\n",
+		Printf("PERF loop trace: frame=%llu presentation_gen=%llu simulation_gen=%llu engine_gen=%llu state=level gametic=%d startframe_ms=%.3f try_ms=%.3f try_traced_ms=%.3f display_ms=%.3f display_begin_ms=%.3f display_render_ms=%.3f display_overlay_ms=%.3f display_update_ms=%.3f starttic_ms=%.3f music_ms=%.3f frame_ms=%.3f do_wait=%d realtics=%d avail=%d counts=%d ticks=%d wait_loops=%d zero_return=%d wait_return=%d paused_return=%d fixed_return=%d fixed_tail_suppressed=%u display_skip=%d level_rendered=1 compact=1 epoch=%llu sample=%u\n",
 			(unsigned long long)f.traceFrame, (unsigned long long)f.presentationGeneration,
 			(unsigned long long)f.simulationGeneration, (unsigned long long)f.engineGeneration,
 			f.gametic, f.startFrameMs, f.tryMs, f.tryTracedMs, f.displayMs,
 			f.displayBeginMs, f.displayRenderMs, f.displayOverlayMs, f.displayUpdateMs,
 			f.startTicMs, f.musicMs, f.frameMs, f.doWait ? 1 : 0, f.realtics,
 			f.availabletics, f.counts, f.ticks, f.waitLoops, f.zeroReturn ? 1 : 0,
-			f.waitReturn ? 1 : 0, f.pausedReturn ? 1 : 0, f.displaySkipped ? 1 : 0,
+			f.waitReturn ? 1 : 0, f.pausedReturn ? 1 : 0,
+			f.fixedSimulationReturn ? 1 : 0, f.fixedSimulationSuppressedTailTicks,
+			f.displaySkipped ? 1 : 0,
 			(unsigned long long)gCapture.epoch, record.eligibleIndex);
 	}
 }
@@ -291,6 +327,7 @@ void PerfCompactCaptureFlushIfReady()
 {
 	if (gCapture.state != CaptureState::Draining && gCapture.state != CaptureState::Aborted) return;
 	if (gCapture.state == CaptureState::Draining && gCapture.pendingGpu != 0) return;
+	if (gCapture.state == CaptureState::Draining && gCapture.readbackDrainFrames < MinReadbackDrainFrames) return;
 	if (gCapture.state == CaptureState::Draining && gCapture.openFirstUseCount != 0)
 	{
 		if (gCapture.firstUseDrainFrames < MaxFirstUseDrainFrames) return;
@@ -307,10 +344,11 @@ void PerfCompactCaptureFlushIfReady()
 	FlushFirstUseRecords();
 	uint32_t firstUsePending = 0, firstUseDuplicates = 0, firstUseUnresolved = 0;
 	MeasureFirstUseClosure(firstUsePending, firstUseDuplicates, firstUseUnresolved);
-	Printf("PERF compact capture complete: epoch=%llu status=%s requested=%u eligible=%u observed=%u pending_gpu=%u dropped=0 first_use_records=%u first_use_pending=%u first_use_dropped=%u first_use_duplicates=%u first_use_unresolved=%u first_use_drain_frames=%u reject_state=%u reject_level_rendered=%u reject_nri_active=%u reject_nri_invalid=%u reject_nri_not_rendered=%u reject_boundary_invalid=%u reject_not_path_traced=%u reject_present=%u reject_frame_join=%u reason=%s\n",
+	Printf("PERF compact capture complete: epoch=%llu status=%s requested=%u eligible=%u observed=%u pending_gpu=%u dropped=0 readback_drain_frames=%u first_use_records=%u first_use_pending=%u first_use_dropped=%u first_use_duplicates=%u first_use_unresolved=%u first_use_drain_frames=%u reject_state=%u reject_level_rendered=%u reject_nri_active=%u reject_nri_invalid=%u reject_nri_not_rendered=%u reject_boundary_invalid=%u reject_not_path_traced=%u reject_present=%u reject_frame_join=%u reason=%s\n",
 		(unsigned long long)gCapture.epoch,
 		gCapture.state == CaptureState::Draining ? "complete" : "aborted",
 		gCapture.requested, gCapture.eligible, gCapture.observed, gCapture.pendingGpu,
+		gCapture.readbackDrainFrames,
 		gCapture.firstUseCount, firstUsePending, gCapture.firstUseDropped,
 		firstUseDuplicates, firstUseUnresolved, gCapture.firstUseDrainFrames,
 		gCapture.rejectState, gCapture.rejectLevelRendered, gCapture.rejectNriActive,
@@ -323,10 +361,19 @@ void PerfCompactCaptureFlushIfReady()
 void PerfCompactCaptureBeginOuterFrame(uint64_t presentationGeneration)
 {
 	PerfCompactCaptureFlushIfReady();
+	if (gCapture.state == CaptureState::Idle &&
+		(int)perf_compactframes > 0 &&
+		(int)perf_compactwarmupframes > 0)
+	{
+		perf_compactwarmupframes = (int)perf_compactwarmupframes - 1;
+		gCapture.current = {};
+		return;
+	}
 	if (gCapture.state == CaptureState::Idle && (int)perf_compactframes > 0)
 	{
 		const uint32_t requested = (uint32_t)(int)perf_compactframes;
 		perf_compactframes = 0;
+		perf_compactwarmupframes = 0;
 		ResetCapture();
 		if (++gCapture.epoch == 0) gCapture.epoch = 1;
 		gCapture.requested = requested;
@@ -334,6 +381,8 @@ void PerfCompactCaptureBeginOuterFrame(uint64_t presentationGeneration)
 	}
 	const bool drainFirstUse = gCapture.state == CaptureState::Draining &&
 		gCapture.openFirstUseCount != 0 && gCapture.firstUseDrainFrames < MaxFirstUseDrainFrames;
+	if (gCapture.state == CaptureState::Draining && gCapture.readbackDrainFrames < MinReadbackDrainFrames)
+		gCapture.readbackDrainFrames++;
 	if (gCapture.state != CaptureState::Active && !drainFirstUse)
 	{
 		gCapture.current = {};
@@ -355,6 +404,13 @@ bool PerfCompactCaptureTimingActive()
 	return (gCapture.state == CaptureState::Active || gCapture.state == CaptureState::Draining) &&
 		(bool)gCapture.current;
 }
+
+bool PerfCompactCaptureReadbackDrainActive()
+{
+	return gCapture.state == CaptureState::Draining &&
+		(gCapture.pendingGpu != 0 || gCapture.readbackDrainFrames <= MinReadbackDrainFrames);
+}
+
 PerfCompactCaptureToken PerfCompactCaptureGetCurrentToken() { return PerfCompactCaptureTimingActive() ? gCapture.current : PerfCompactCaptureToken{}; }
 
 void PerfCompactCaptureNoteNri(const PerfCompactCaptureToken& token, const PerfCompactNriStats& stats)
@@ -385,6 +441,37 @@ void PerfCompactCaptureResolveGpuSegment(const PerfCompactCaptureToken& token, c
 	r.gpu.denoiseMs += timing.denoiseMs;
 	r.gpu.compositionMs += timing.compositionMs; r.gpu.upscaleMs += timing.upscaleMs;
 	r.gpu.finalMs += timing.finalMs; r.gpu.segmentCount += timing.segmentCount;
+	r.gpu.smokeSimulationMs += timing.smokeSimulationMs;
+	r.gpu.smokeVolumeMs += timing.smokeVolumeMs;
+	r.gpu.smokeGridAllocateMs += timing.smokeGridAllocateMs;
+	r.gpu.smokeGridInitializeMs += timing.smokeGridInitializeMs;
+	r.gpu.smokeGridDepositMs += timing.smokeGridDepositMs;
+	r.gpu.smokeGridHaloMs += timing.smokeGridHaloMs;
+	r.gpu.smokeGridSimulateMs += timing.smokeGridSimulateMs;
+	r.gpu.smokeGridRebuildMs += timing.smokeGridRebuildMs;
+	r.gpu.smokeDormantArchiveMs += timing.smokeDormantArchiveMs;
+	r.gpu.smokeDormantPromoteMs += timing.smokeDormantPromoteMs;
+	r.gpu.smokeDormantEvolveMs += timing.smokeDormantEvolveMs;
+	r.gpu.smokeWorldActiveMs += timing.smokeWorldActiveMs;
+	r.gpu.smokeWorldLinkMs += timing.smokeWorldLinkMs;
+	r.gpu.smokeWorldProposalMs += timing.smokeWorldProposalMs;
+	r.gpu.smokeWorldSeedMs += timing.smokeWorldSeedMs;
+	r.gpu.smokeWorldTemporalMs += timing.smokeWorldTemporalMs;
+	r.gpu.smokeWorldFilterMs += timing.smokeWorldFilterMs;
+	r.gpu.smokeWorldScatterMs += timing.smokeWorldScatterMs;
+	r.gpu.smokeCarrierMs += timing.smokeCarrierMs;
+	r.gpu.smokeViewPrepareMs += timing.smokeViewPrepareMs;
+	r.gpu.smokeMaterializeMs += timing.smokeMaterializeMs;
+	r.gpu.smokeAnalyticMaterializeMs += timing.smokeAnalyticMaterializeMs;
+	r.gpu.smokeViewPointMs += timing.smokeViewPointMs;
+	r.gpu.smokeViewDirectionalMs += timing.smokeViewDirectionalMs;
+	r.gpu.smokeViewDirectReuseMs += timing.smokeViewDirectReuseMs;
+	r.gpu.smokeViewEmissiveMs += timing.smokeViewEmissiveMs;
+	r.gpu.smokeAnalyticEmissiveBuildMs += timing.smokeAnalyticEmissiveBuildMs;
+	r.gpu.smokeAnalyticEmissiveApplyMs += timing.smokeAnalyticEmissiveApplyMs;
+	r.gpu.smokeViewIndirectMs += timing.smokeViewIndirectMs;
+	r.gpu.smokeIntegrateMs += timing.smokeIntegrateMs;
+	r.gpu.smokeReconstructionMs += timing.smokeReconstructionMs;
 	r.gpu.invalidPairs += timing.invalidPairs; r.gpu.droppedScopes += timing.droppedScopes;
 	if (gCapture.pendingGpu > 0) gCapture.pendingGpu--;
 }

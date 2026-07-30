@@ -459,6 +459,24 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		mWeaponEventBatch.Capture(*mFrameBuffer, mFrameIndex);
 	}
 	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
+	mLastPerfShellTraceStats.traceVoxelOccurrenceControl = persistentVoxelSettings.omitTlasOccurrences ? 1u : 0u;
+	if (!inputs.preserveHistory)
+	{
+		NRIVoxelRepresentationFrameInput voxelRepresentationFrame = {};
+		voxelRepresentationFrame.mapBuildSerial = mMapWorld.valid ? mMapWorld.buildSerial : 0ull;
+		voxelRepresentationFrame.frameIndex = mFrameIndex;
+		voxelRepresentationFrame.renderWidth = mRenderWidth;
+		voxelRepresentationFrame.renderHeight = mRenderHeight;
+		voxelRepresentationFrame.cameraPosition = { mCurrentCameraPos[0], mCurrentCameraPos[1], mCurrentCameraPos[2] };
+		voxelRepresentationFrame.cameraForward = { mCurrentCameraForward[0], mCurrentCameraForward[1], mCurrentCameraForward[2] };
+		voxelRepresentationFrame.cameraRight = { mCurrentCameraRight[0], mCurrentCameraRight[1], mCurrentCameraRight[2] };
+		voxelRepresentationFrame.cameraUp = { mCurrentCameraUp[0], mCurrentCameraUp[1], mCurrentCameraUp[2] };
+		voxelRepresentationFrame.tanHalfFovX = mCurrentTanHalfFovX;
+		voxelRepresentationFrame.tanHalfFovY = mCurrentTanHalfFovY;
+		voxelRepresentationFrame.shadowProxyRouteEnabled = persistentVoxelSettings.shadowProxyRouteEnabled;
+		voxelRepresentationFrame.shadowProxyTransitionsPerFrame = persistentVoxelSettings.shadowProxyTransitionsPerFrame;
+		mVoxelRepresentationPolicy.BeginFrame(voxelRepresentationFrame);
+	}
 	const bool allowStaticMapScene = !bootstrapCapturedView && !rawTraceDirectScene && mMapWorld.valid;
 	nri_scene::SceneView& capturedSceneView = frame.capturedSceneView;
 	nri_scene::SceneView& dynamicSceneView = frame.dynamicSceneView;
@@ -537,6 +555,22 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	uint32_t selectedPersistentVoxelSceneInstanceCount = 0;
 	uint32_t selectedSceneInstanceCount = 0;
 	uint32_t selectedTlasInstanceCount = 0;
+	const auto currentTraceBindingsReady = [&]()
+	{
+		const NRIWorldTlasFrameSlot& worldTlas = GetCurrentWorldTlasFrameSlot();
+		const uint32_t queuedFrameIndex = GetCurrentQueuedFrameIndex();
+		return
+			worldTlas.publicationValid &&
+			worldTlas.accelerationStructure.accelerationStructure != nullptr &&
+			worldTlas.accelerationStructure.descriptor != nullptr &&
+			worldTlas.publishedMapEpoch == mMapWorld.buildSerial &&
+			worldTlas.publishedBuildEpoch == mStaticMapScene.buildSerial &&
+			GetCurrentSceneTextureSet() != nullptr &&
+			queuedFrameIndex < mSceneTextureSetHashValid.size() &&
+			mSceneTextureSetHashValid[queuedFrameIndex] != 0 &&
+			GetCurrentSceneDataSet() != nullptr &&
+			IsCurrentSceneDataDescriptorsInitialized();
+	};
 	{
 		ScopedPtPerfTimer sceneSelectTimer(mLastPerfShellTraceStats.sceneSelectMs);
 		const bool staticMapSceneReady = allowStaticMapScene && [&]()
@@ -702,8 +736,21 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			IsNRILocalPlayerPrimaryVisibleFromViewpoint(viewpointActorIndex, localPlayerActorIndex);
 		NRISceneInstanceVisibilityContext sceneInstanceVisibilityContext = {};
 		sceneInstanceVisibilityContext.localPlayerActorIndex = localPlayerActorIndex;
+		NRIPersistentVoxelTlasServices persistentVoxelEligibilityServices = {};
+		persistentVoxelEligibilityServices.user = this;
+		persistentVoxelEligibilityServices.getAccelerationStructureHandle = [](void* user, const NRIAccelerationStructureResource& resource) -> uint64_t
+		{
+			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			return resource.accelerationStructure != nullptr ?
+				renderer->mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*resource.accelerationStructure) :
+				0ull;
+		};
 		const bool residentLocalPlayerVoxelReady =
-			mPersistentVoxels.HasResidentIndirectOnlyActor(localPlayerActorIndex);
+			mPersistentVoxels.IsIndirectOnlyActorTlasAppendEligible(
+				localPlayerActorIndex,
+				(uint32_t)mFrameIndex,
+				persistentVoxelSettings,
+				persistentVoxelEligibilityServices);
 		NRILocalPlayerReflectionCaptureResult localPlayerReflectionResult = {};
 		const bool hasLocalPlayerReflectionScene = !deferOverlayThisFrame && [&]()
 		{
@@ -1000,7 +1047,9 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		overlayEligibilityInputs.runtimeSpaceLinkBuilt = hasRuntimeSpaceLinkOverlay;
 		overlayEligibilityInputs.runtimeMutationBuilt = hasRuntimeMutationOverlay;
 		overlayEligibilityInputs.hasPersistentVoxelBatch = hasPersistentVoxelBatch;
-		overlayEligibilityInputs.persistentVoxelRenderable = hasPersistentVoxelBatch ? mPersistentVoxels.HasRenderableOverlay() : false;
+		overlayEligibilityInputs.persistentVoxelRenderable =
+			hasPersistentVoxelBatch &&
+			mPersistentVoxels.HasOverlayPreparationEligibleActor(persistentVoxelSettings);
 		overlayEligibilityInputs.activeDynamicGeometry = activeDynamicGeometry;
 		overlayEligibilityInputs.activeDynamicMaterials = activeDynamicMaterials;
 		overlayEligibilityInputs.hasLocalPlayerReflectionScene = hasLocalPlayerReflectionScene;
@@ -1195,12 +1244,23 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						mStaticMapScene.buildSerial,
 						mStaticMapScene.materialGeneration,
 						persistentMaterials,
-						hasPersistentVoxelOverlay ? mPersistentVoxels.MaterialResourceGeneration() : 0,
+						hasPersistentVoxelOverlay ? mPersistentVoxels.MaterialPublicationGeneration() : 0,
 						overlayMaterialBridge,
 						cacheStats);
+					const uint32_t persistentVoxelMaterialCount =
+						hasPersistentVoxelOverlay ? mPersistentVoxels.OverlayMaterialCount() : 0u;
+					if (mSceneMaterialFrameCache.PersistentMaterialCount() != persistentVoxelMaterialCount)
+					{
+						LogFallback("PT persistent voxel material publication count did not match the frame cache.");
+						if (preserveHistory)
+						{
+							RestoreRenderSceneHistorySnapshot(history);
+						}
+						return false;
+					}
 					combinedOverlayMaterialOffset =
 						(uint32_t)mStaticMapScene.materialBridge.materials.size() +
-						(hasPersistentVoxelOverlay ? mPersistentVoxels.OverlayMaterialCount() : 0u);
+						mSceneMaterialFrameCache.PersistentMaterialCount();
 					mLastPerfShellTraceStats.sceneMaterialResidentRebuilds += cacheStats.residentRebuilds;
 					mLastPerfShellTraceStats.sceneMaterialResidentHits += cacheStats.residentHits;
 					mLastPerfShellTraceStats.sceneMaterialStaticRowsCopied += cacheStats.staticRowsCopied;
@@ -1243,7 +1303,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 					{
 						ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMaterialSplitMs);
 						const size_t staticMaterialCount = mStaticMapScene.gpuMaterials.size();
-						const size_t persistentVoxelMaterialCount = hasPersistentVoxelOverlay ? mPersistentVoxels.OverlayMaterialCount() : 0u;
+						const size_t persistentVoxelMaterialCount = mSceneMaterialFrameCache.PersistentMaterialCount();
 						if (combinedGpuMaterials.size() < staticMaterialCount + persistentVoxelMaterialCount)
 						{
 							texturesReady = false;
@@ -1261,7 +1321,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				{
 					ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadMs);
 					return UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials, &sceneUploadDomainSpans) &&
-						(!hasPersistentVoxelOverlay || UploadPersistentVoxelArenaMaterialBuffers(persistentVoxelGpuMaterials));
+						(!hasPersistentVoxelOverlay || UploadPersistentVoxelArenaMaterialBuffers(persistentVoxelGpuMaterials, true));
 				}();
 				accelerationReady = false;
 				const uint32_t liveOverlayPrimitiveCount = (uint32_t)overlayGeometry.primitives.size();
@@ -1356,6 +1416,13 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 								renderer->mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*resource.accelerationStructure) :
 								0ull;
 						};
+						if (!inputs.preserveHistory)
+						{
+							persistentVoxelTlasServices.evaluateRepresentation = [](void* user, const NRIVoxelRepresentationFacts& facts) -> NRIVoxelRepresentationDecision
+							{
+								return static_cast<NRIRenderer*>(user)->mVoxelRepresentationPolicy.EvaluateExact(facts);
+							};
+						}
 						NRIPersistentVoxelTlasBuildStats persistentVoxelTlasStats = {};
 						if (!mPersistentVoxels.AppendTlasInstances(
 							instances,
@@ -1371,6 +1438,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						}
 						mLastPerfShellTraceStats.persistentVoxelSharedMeshResources = persistentVoxelTlasStats.sharedMeshResourceCount;
 						mLastPerfShellTraceStats.persistentVoxelTlasInstances += persistentVoxelTlasStats.instanceCount;
+						mLastPerfShellTraceStats.persistentVoxelInstancePrimitiveCount = persistentVoxelTlasStats.instancePrimitiveCount;
 						mLastPerfShellTraceStats.persistentVoxelBakedFallbackInstances += persistentVoxelTlasStats.bakedFallbackInstanceCount;
 					}
 
@@ -1629,10 +1697,28 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						(uint32_t)overlayGeometry.primitives.size(),
 						hasPersistentVoxelOverlay ? 1u : 0u);
 				}
-				if (mGpuSceneHasDynamicOverlay)
+				const bool staticTextureStateRestored =
+					EnsurePaletteTexture(mStaticMapScene.materialBridge) &&
+					EnsureSceneTextures(
+						mStaticMapScene.sceneView,
+						mStaticMapScene.materialBridge,
+						capturedGpuMaterials,
+						false,
+						"static_map_scene");
+				const bool staticSceneRestored =
+					staticTextureStateRestored && RestoreStaticTopLevelScene();
+				if (!staticSceneRestored)
 				{
-					RestoreStaticTopLevelScene();
+					LogFallback("PT resident static scene restore failed after runtime/dynamic overlay update failure.");
+					if (preserveHistory)
+					{
+						RestoreRenderSceneHistorySnapshot(history);
+					}
+					return false;
 				}
+				mGpuSceneHasDynamicOverlay = false;
+				mUsedDynamicSceneLastFrame = false;
+				mUsedStaticMapSceneLastFrame = true;
 				paletteReady = true;
 				texturesReady = true;
 				buffersReady = true;
@@ -1995,6 +2081,16 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	if (!BuildEmissiveTopLevelAccelerationStructure())
 	{
 		LogFallback("PT emissive TLAS update failed.");
+		if (preserveHistory)
+		{
+			RestoreRenderSceneHistorySnapshot(history);
+		}
+		return false;
+	}
+
+	if (!currentTraceBindingsReady())
+	{
+		LogFallback("PT current queued-frame scene bindings became incomplete after scene construction; skipping TraceOpaque.");
 		if (preserveHistory)
 		{
 			RestoreRenderSceneHistorySnapshot(history);

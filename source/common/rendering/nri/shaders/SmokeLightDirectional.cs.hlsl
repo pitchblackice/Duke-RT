@@ -145,5 +145,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (diagnostics && any(unclamped > 32.0))
 		InterlockedAdd(gSmokeControl[0].DirectionalRadianceClamps, 1u);
 	const float3 source = gSmokeFroxelSource[froxelIndex].rgb + min(unclamped, 32.0) * gSmokeConstants.RadianceScale;
-	gSmokeFroxelSource[froxelIndex] = float4(source, 0.0);
+	uint metadata = SmokeFroxelMetadata(gSmokeFroxelSource[froxelIndex].w);
+	metadata = SmokeFroxelResolveRadiance(metadata, gSmokeConstants.SimulationEpoch,
+		NRI_SMOKE_FALLBACK_ENVIRONMENT, 0u);
+	gSmokeFroxelSource[froxelIndex] = float4(source, SmokeFroxelMetadataValue(metadata));
 }

@@ -2498,9 +2498,10 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 {
 	ScopedPtPerfTimer perfTimer(renderer.mLastPerfShellTraceStats.sceneDataSetMs);
 	renderer.mLastPerfShellTraceStats.sceneDataSetCalls++;
-	renderer.SetCurrentSceneDataDescriptorsInitialized(false);
 	renderer.mActiveSceneDataSet = nullptr;
+	renderer.mActiveSceneDataSnapshot = nullptr;
 	renderer.mActiveSceneDataSetFrameIndex = UINT64_MAX;
+	renderer.SetCurrentSceneDataDescriptorsInitialized(false);
 	bool waitedForWrites = false;
 	const char* sceneDataReason = reason != nullptr ? reason : "scene_data_full_rebuild";
 	const auto ensureSceneDataBatched = [&](NRIBufferResource& resource, SceneBufferDebugStats& stats, const char* bufferLabel, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, double& uploadMs, uint64_t& requestedBytes, uint64_t& uploadedBytes, bool writesQuiesced) -> bool
@@ -2520,13 +2521,21 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 		{
 			return nullptr;
 		}
+		const uint64_t recordingFenceValue = renderer.GetRecordingCommandFenceValue();
+		if (recordingFenceValue == 0)
+		{
+			return nullptr;
+		}
 
-		if (!renderer.IsFrameFenceValueComplete(snapshot.retireFenceValue))
+		if (!renderer.IsCommandFenceValueComplete(snapshot.retireFenceValue))
 		{
 			renderer.WaitForCommandsTracked("scene_data_snapshot_reuse");
 		}
 
-		snapshot.retireFenceValue = renderer.mFrameIndex + 1u;
+		snapshot.retireFenceValue = recordingFenceValue;
+		snapshot.descriptorsInitialized = false;
+		snapshot.publishedMapEpoch = 0;
+		snapshot.publishedBuildEpoch = 0;
 		return &snapshot;
 	};
 
@@ -2624,6 +2633,7 @@ bool NRISceneUploadManager::UpdateSceneDataSet(
 	if (sceneInstanceUsesFrameSlot)
 	{
 		renderer.mActiveSceneDataSet = sceneDataSnapshot->sceneDataSet;
+		renderer.mActiveSceneDataSnapshot = sceneDataSnapshot;
 		renderer.mActiveSceneDataSetFrameIndex = renderer.mFrameIndex;
 	}
 

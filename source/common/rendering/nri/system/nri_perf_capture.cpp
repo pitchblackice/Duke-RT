@@ -134,6 +134,9 @@ void NRIRenderDevice::CaptureCompactPerfRendererStats(bool rendered)
 	stats.traceSplitShadow = shell.traceSplitShadow;
 	stats.traceFastEmissiveShadow = shell.traceFastEmissiveShadow;
 	stats.traceVisibleChunkGate = shell.traceVisibleChunkGate;
+	stats.traceVoxelOccurrences = shell.sceneInstancePersistentVoxelCount;
+	stats.traceVoxelOccurrenceControl = shell.traceVoxelOccurrenceControl;
+	stats.traceVoxelInstancePrimitives = shell.persistentVoxelInstancePrimitiveCount;
 	stats.rendered = rendered;
 	stats.valid = true;
 	PerfCompactCaptureNoteNri(token, stats);

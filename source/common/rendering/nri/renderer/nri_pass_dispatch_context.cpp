@@ -14,6 +14,16 @@ nri::Pipeline* NRIPassDispatchContext::PipelineService::Get(PipelineSlot slot) c
 	return getPipeline(user, slot);
 }
 
+bool NRIPassDispatchContext::PipelineService::EnsureIndirectRadianceCachePipeline() const
+{
+	return ensureIndirectRadianceCachePipeline != nullptr && ensureIndirectRadianceCachePipeline(user);
+}
+
+nri::PipelineLayout* NRIPassDispatchContext::PipelineService::GetIndirectRadianceCachePipelineLayout() const
+{
+	return getIndirectRadianceCachePipelineLayout != nullptr ? getIndirectRadianceCachePipelineLayout(user) : nullptr;
+}
+
 bool NRIPassDispatchContext::DescriptorService::UpdateFrameTextureSet() const
 {
 	return updateFrameTextureSet(user);
@@ -117,9 +127,9 @@ nri::DescriptorSet* NRIPassDispatchContext::SceneBindingService::GetCurrentScene
 	return getCurrentSceneDataSet(user);
 }
 
-void NRIPassDispatchContext::SceneBindingService::BindSceneRootDescriptors() const
+bool NRIPassDispatchContext::SceneBindingService::BindSceneRootDescriptors() const
 {
-	bindSceneRootDescriptors(user);
+	return bindSceneRootDescriptors != nullptr && bindSceneRootDescriptors(user);
 }
 
 void NRIPassDispatchContext::ExposureService::ReadbackAutoExposureStats() const
@@ -218,6 +228,37 @@ NRIPassDispatchContext::FrameTextureSlot NRIPassDispatchContext::SmokeService::G
 	return getVolumeSlot != nullptr ? (FrameTextureSlot)getVolumeSlot(user, metadata) : FrameTextureSlot::Count;
 }
 
+NRIIndirectRadianceCachePrepareResult NRIPassDispatchContext::IndirectRadianceCacheService::Prepare(bool enabled) const
+{
+	return prepare != nullptr ? prepare(user, enabled) : NRIIndirectRadianceCachePrepareResult{};
+}
+
+bool NRIPassDispatchContext::IndirectRadianceCacheService::RecordPendingClear() const
+{
+	return recordPendingClear == nullptr || recordPendingClear(user);
+}
+
+void NRIPassDispatchContext::IndirectRadianceCacheService::AdvanceFrame() const
+{
+	if (advanceFrame != nullptr) advanceFrame(user);
+}
+
+void NRIPassDispatchContext::IndirectRadianceCacheService::CopyTelemetry(uint64_t frameNumber) const
+{
+	if (copyTelemetry != nullptr) copyTelemetry(user, frameNumber);
+}
+
+void NRIPassDispatchContext::IndirectRadianceCacheService::ReadbackTelemetry(bool enabled) const
+{
+	if (readbackTelemetry != nullptr) readbackTelemetry(user, enabled);
+}
+
+const NRIIndirectRadianceCacheTelemetrySnapshot& NRIPassDispatchContext::IndirectRadianceCacheService::GetTelemetry() const
+{
+	static const NRIIndirectRadianceCacheTelemetrySnapshot empty = {};
+	return getTelemetry != nullptr ? getTelemetry(user) : empty;
+}
+
 NRIPassDispatchContext::NRIPassDispatchContext(const Init& init)
 	: mTextures(init.textures),
 	mPipelines(init.pipelines),
@@ -229,6 +270,7 @@ NRIPassDispatchContext::NRIPassDispatchContext(const Init& init)
 	mUpscalerService(init.upscalerService),
 	mSelfTest(init.selfTest),
 	mSmokeService(init.smokeService),
+	mIndirectRadianceCacheService(init.indirectRadianceCacheService),
 	mPipelineLayout(*init.pipelineLayout),
 	mTaaPipelineLayout(*init.taaPipelineLayout),
 	mPresentPipelineLayout(*init.presentPipelineLayout),

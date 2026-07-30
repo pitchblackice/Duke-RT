@@ -110,6 +110,7 @@ public:
 	nri::CoreInterface* GetCoreInterface() { return &mCore; }
 	nri::Device* GetDevice() const { return mDevice; }
 	nri::CommandBuffer* GetCurrentCommandBuffer() const { return mCommandBuffer; }
+	nri::DescriptorPool* GetDescriptorPool() const { return mDescriptorPool; }
 	bool StartPathTracingLevelPreload() override;
 	bool TickPathTracingLevelPreload() override;
 	bool IsPathTracingLevelPreloadPending() const override;

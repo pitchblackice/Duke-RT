@@ -7,12 +7,14 @@
 #include "nri_persistent_voxel_material_range_allocator.h"
 #include "nri_frame_resources.h"
 #include "nri_persistent_voxel_shared_blas.h"
+#include "nri_persistent_voxel_shadow_proxy.h"
 #include "nri_renderer_settings.h"
 #include "nri_resources.h"
 #include "nri_runtime_mutation.h"
 #include "nri_scene_lights.h"
 #include "nri_scene_instance_visibility.h"
 #include "nri_voxel_compute_meshing.h"
+#include "nri_voxel_representation_policy.h"
 
 #include "../scene/nri_geometry_bridge.h"
 #include "../scene/nri_material_bridge.h"
@@ -78,6 +80,7 @@ struct PersistentVoxelBatch
 
 struct PersistentVoxelMeshVariantResource
 {
+	FVoxelModel* sourceModel = nullptr;
 	uint64_t resourceKey = 0;
 	uint64_t meshKeyHash = 0;
 	uint64_t geometrySignature = 0;
@@ -110,6 +113,7 @@ struct PersistentVoxelMeshVariantResource
 	int32_t priority = 0;
 	uint64_t residentBytes = 0;
 	bool tlasPublished = false;
+	bool shadowProxyPrimitiveSemanticsCertified = false;
 	bool directComputePublished = false;
 	NRIVoxelComputeDirectPublishOutputKind directComputeOutputKind = NRIVoxelComputeDirectPublishOutputKind::None;
 	NRIVoxelComputeDirectPublishFailure directComputeFailure = NRIVoxelComputeDirectPublishFailure::None;
@@ -130,6 +134,7 @@ struct PersistentVoxelMeshVariantResource
 	NRIBufferResource vertexBuffer;
 	NRIBufferResource indexBuffer;
 	NRIAccelerationStructureResource accelerationStructure;
+	NRIVoxelShadowProxyResource shadowProxy;
 };
 
 struct PersistentVoxelMaterialVariantResource
@@ -510,6 +515,7 @@ struct NRIPersistentVoxelAccelerationBuildStats
 	uint32_t builds = 0;
 	uint32_t uniqueMeshBuilds = 0;
 	uint32_t instances = 0;
+	NRIVoxelShadowProxyBuildStats shadowProxy;
 };
 
 struct NRIPersistentVoxelAccelerationServices
@@ -525,10 +531,12 @@ struct NRIPersistentVoxelAccelerationServices
 		uint32_t primitiveCount,
 		NRIAccelerationStructureResource& outAccelerationStructure);
 	using BarrierBuildInputsFn = bool (*)(void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer);
+	using EnsureStructuredBufferFn = bool (*)(void* user, NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* reason, int uploadKind);
 
 	void* user = nullptr;
 	BuildBottomLevelFn buildBottomLevel = nullptr;
 	BarrierBuildInputsFn barrierBuildInputs = nullptr;
+	EnsureStructuredBufferFn ensureStructuredBuffer = nullptr;
 
 	bool BuildBottomLevel(
 		const NRIBufferResource& vertexBuffer,
@@ -540,6 +548,7 @@ struct NRIPersistentVoxelAccelerationServices
 		uint32_t primitiveCount,
 		NRIAccelerationStructureResource& outAccelerationStructure) const;
 	bool BarrierBuildInputs(const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) const;
+	bool EnsureStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* reason, int uploadKind) const;
 };
 
 struct NRIPersistentVoxelDescriptorSnapshot
@@ -587,6 +596,9 @@ struct NRIPersistentVoxelMemoryUsage
 	uint64_t privateIndexBytes = 0;
 	uint64_t directBlasBytes = 0;
 	uint64_t sharedBlasBytes = 0;
+	uint64_t shadowProxyVertexBytes = 0;
+	uint64_t shadowProxyIndexBytes = 0;
+	uint64_t shadowProxyBlasBytes = 0;
 	uint64_t materialLogicalBytes = 0;
 	uint64_t admissionTransientBufferBytes = 0;
 	uint64_t admissionTransientAsBytes = 0;
@@ -605,6 +617,10 @@ struct NRIPersistentVoxelStatusSnapshot
 	uint64_t zeroRefResourceBytes = 0;
 	uint32_t zeroRefMeshResourceCount = 0;
 	uint32_t zeroRefMaterialResourceCount = 0;
+	uint32_t shadowProxyResidentCount = 0;
+	uint32_t shadowProxyFailedCount = 0;
+	uint64_t shadowProxyPrimitiveCount = 0;
+	uint64_t shadowProxyResidentBytes = 0;
 	uint32_t activeInstanceCount = 0;
 	uint32_t instancePrimitiveCount = 0;
 	uint32_t instanceMaterialCount = 0;
@@ -888,18 +904,25 @@ struct NRIPersistentVoxelMaterialUploadServices
 struct NRIPersistentVoxelTlasServices
 {
 	using GetAccelerationStructureHandleFn = uint64_t (*)(void* user, const NRIAccelerationStructureResource& resource);
+	using EvaluateRepresentationFn = NRIVoxelRepresentationDecision (*)(void* user, const NRIVoxelRepresentationFacts& facts);
 
 	void* user = nullptr;
 	GetAccelerationStructureHandleFn getAccelerationStructureHandle = nullptr;
+	EvaluateRepresentationFn evaluateRepresentation = nullptr;
 
 	uint64_t GetAccelerationStructureHandle(const NRIAccelerationStructureResource& resource) const;
+	NRIVoxelRepresentationDecision EvaluateRepresentation(const NRIVoxelRepresentationFacts& facts) const;
 };
 
 struct NRIPersistentVoxelTlasBuildStats
 {
 	uint32_t sharedMeshResourceCount = 0;
 	uint32_t instanceCount = 0;
+	uint64_t instancePrimitiveCount = 0;
 	uint32_t bakedFallbackInstanceCount = 0;
+	uint32_t shadowProxyInstanceCount = 0;
+	uint64_t shadowProxyPrimitiveCount = 0;
+	uint64_t exactShadowPrimitiveCountRemoved = 0;
 };
 
 struct NRIPersistentVoxelPreloadStatus
@@ -954,6 +977,8 @@ public:
 	bool PreSizeDirectGeometryArenas(
 		uint64_t buildSerial,
 		uint64_t uniqueGeometryBytes,
+		uint64_t plannedRuntimeTailBytes,
+		uint64_t largestKnownGeometryBytes,
 		int loadingTraceLevel,
 		const NRIPersistentVoxelAdmissionServices& services);
 	bool PreloadResources(
@@ -1060,11 +1085,17 @@ public:
 	bool HasValidBatch() const;
 	bool HasRenderableOverlay() const;
 	bool HasResidentIndirectOnlyActor(int32_t actorIndex) const;
+	bool HasOverlayPreparationEligibleActor(const NRIPersistentVoxelSettings& settings) const;
+	bool IsIndirectOnlyActorTlasAppendEligible(
+		int32_t actorIndex,
+		uint32_t frameIndex,
+		const NRIPersistentVoxelSettings& settings,
+		const NRIPersistentVoxelTlasServices& services) const;
 	bool HasPreloadPending() const;
 	NRIPersistentVoxelPreloadStatus BuildPreloadStatusSnapshot() const;
 	uint32_t OverlayMaterialCount() const;
 	const nri_scene::MaterialBridgeData& MaterialBridge() const { return batch.materialBridge; }
-	uint64_t MaterialResourceGeneration() const { return batchMaterialResourceGeneration; }
+	uint64_t MaterialPublicationGeneration() const { return batchMaterialPublicationGeneration; }
 	const NRIPersistentVoxelMaterialRangeStats& MaterialRangeStats() const { return materialRangeAllocator.Stats(); }
 	uint32_t EstimatePrimitiveCountForInstanceOffset(uint32_t primitiveOffset) const;
 	nri_scene::SceneDebugStats BuildOverlayDebugStats() const;
@@ -1121,6 +1152,14 @@ public:
 		uint64_t materialKeyHash,
 		const PersistentVoxelReadinessStatus& status,
 		bool traceEnabled) const;
+	bool IsActorTlasAppendEligible(
+		const PersistentVoxelBatch::ActorEntry& actor,
+		uint32_t frameIndex,
+		const NRIPersistentVoxelSettings& settings,
+		const NRIPersistentVoxelTlasServices& services) const;
+	bool IsActorOverlayPreparationEligible(
+		const PersistentVoxelBatch::ActorEntry& actor,
+		const NRIPersistentVoxelSettings& settings) const;
 
 	bool IsPostLoadAdmissionGraceActive(uint32_t frameIndex) const;
 
@@ -1162,9 +1201,11 @@ public:
 	uint64_t blasPolicyTraceBuildSerial = 0;
 	uint64_t materialResourceGeneration = 1;
 	uint64_t batchMaterialResourceGeneration = 0;
+	uint64_t batchMaterialPublicationGeneration = 1;
 	uint64_t materialRangeCompactions = 0;
 	uint64_t materialRangeCompactedRows = 0;
 	uint64_t uploadedMaterialResourceGeneration = 0;
+	uint64_t uploadedMaterialPublicationGeneration = 0;
 	uint32_t committedWorldTlasFrameIndex = UINT32_MAX;
 	uint32_t pendingMaterialLayoutInvalidatedResources = 0;
 	uint32_t pendingMaterialActorRebinds = 0;

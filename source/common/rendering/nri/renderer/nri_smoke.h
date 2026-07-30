@@ -3,14 +3,26 @@
 #include "nri_renderer_settings.h"
 #include "nri_resources.h"
 #include "nri_smoke_authority.h"
+#include "nri_smoke_admission.h"
+#include "nri_smoke_analytic_carriers.h"
 #include "nri_smoke_contracts.h"
 #include "nri_smoke_emitters.h"
 #include "nri_smoke_grid.h"
+#include "nri_smoke_dormant_grid.h"
+#include "nri_smoke_dormant_injection.h"
 #include "nri_smoke_grid_lighting.h"
+#include "nri_smoke_interest.h"
+#include "nri_smoke_pulses.h"
+#include "nri_smoke_prompt_fallback.h"
+#include "nri_smoke_spatial_interest.h"
+#include "nri_smoke_view_work.h"
+#include "nri_smoke_work_scheduler.h"
 #include "v_video.h"
 
 #include <array>
 #include <cstdint>
+#include <map>
+#include <set>
 #include <vector>
 
 class NRIRenderer;
@@ -40,6 +52,43 @@ struct NRISmokeStatusSnapshot
 	uint64_t commandsUploadedTotal = 0;
 	uint32_t styleCount = 0;
 	uint32_t commandsDropped = 0;
+	NRISmokeAdmissionSnapshot admission = {};
+	NRISmokeAnalyticCarrierSnapshot analytic = {};
+	NRISmokeSpatialInterestSnapshot spatialResidency = {};
+	NRISmokeDormantGridStatusSnapshot dormantGrid = {};
+	struct AnalyticLightTelemetry
+	{
+		bool valid = false;
+		uint64_t sourceFrame = UINT64_MAX;
+		uint32_t epoch = 0u;
+		uint32_t profile = 0u;
+		uint32_t profileRevision = 0u;
+		uint32_t implementation = 2u;
+		uint32_t buildDispatchGroups = 0u;
+		uint32_t applyDispatchGroups = 0u;
+		NRISmokeAnalyticCarrierSnapshot cpu = {};
+		uint32_t buildEvents = 0u;
+		uint32_t anchorsBuilt = 0u;
+		uint32_t anchorsValid = 0u;
+		uint32_t anchorsInvalid = 0u;
+		uint32_t samplesRequested = 0u;
+		uint32_t samplesExecuted = 0u;
+		uint32_t evaluations = 0u;
+		uint32_t buildVisibilityRays = 0u;
+		uint32_t gridSeedHits = 0u;
+		uint32_t gridSeedMisses = 0u;
+		uint32_t applyFroxelsTested = 0u;
+		uint32_t applyFroxelsApplied = 0u;
+		uint32_t carrierContributions = 0u;
+		uint32_t anchorBlendTaps = 0u;
+		uint32_t groupCacheHits = 0u;
+		uint32_t missingGroupRecords = 0u;
+		uint32_t identityRejects = 0u;
+		uint32_t applyVisibilityRays = 0u;
+	} analyticLight = {};
+	bool analyticEmissiveCarrierOwned = false;
+	uint32_t admissionFrame = UINT32_MAX;
+	uint64_t admissionRendererFrame = UINT64_MAX;
 	uint32_t simulationSubsteps = 0;
 	uint32_t representationRequested = 0;
 	uint32_t representationEffective = 0;
@@ -93,6 +142,8 @@ struct NRISmokeStatusSnapshot
 	uint32_t indirectCacheModeEffective = 0;
 	uint64_t controlReadbackBytes = 0;
 	bool gpuStatsValid = false;
+	uint64_t gpuStatsFrame = UINT64_MAX;
+	uint32_t gpuStatsEpoch = 0;
 	uint32_t activeParticles = 0;
 	uint32_t spawnedParticles = 0;
 	uint32_t expiredParticles = 0;
@@ -248,6 +299,8 @@ private:
 	{
 		NRIBufferResource upload;
 		NRIBufferResource device;
+		NRIBufferResource analyticUpload;
+		NRIBufferResource analyticDevice;
 		NRIBufferResource styleUpload;
 		NRIBufferResource controlReadback;
 		nri::DescriptorSet* inputSet = nullptr;
@@ -259,6 +312,13 @@ private:
 		bool readbackPending = false;
 		bool initialized = false;
 		bool readbackInitialized = false;
+		uint64_t readbackFrame = UINT64_MAX;
+		uint32_t readbackEpoch = 0;
+		uint32_t analyticProfile = 0u;
+		uint32_t analyticProfileRevision = 0u;
+		uint32_t analyticBuildDispatchGroups = 0u;
+		uint32_t analyticApplyDispatchGroups = 0u;
+		NRISmokeAnalyticCarrierSnapshot analyticSnapshot = {};
 	};
 
 	bool EnsureResources(NRIRenderer& renderer, uint32_t representation);
@@ -285,7 +345,7 @@ private:
 	NRISmokeSettings mSettings = {};
 	NRISmokeStatusSnapshot mStatus = {};
 	nri::PipelineLayout* mPipelineLayout = nullptr;
-	std::array<nri::Pipeline*, 21> mPipelines = {};
+	std::array<nri::Pipeline*, (size_t)NRISmokePass::Count> mPipelines = {};
 	std::vector<CommandSlot> mCommandSlots;
 	NRIBufferResource mStyleBuffer;
 	NRIBufferResource mCompatibilityStorage;
@@ -310,12 +370,37 @@ private:
 	NRIBufferResource mEmissiveHistory;
 	NRIBufferResource mDirectCurrent;
 	NRIBufferResource mDirectHistory;
+	NRIBufferResource mAnalyticTileHeaders;
+	NRIBufferResource mAnalyticTileIndices;
+	NRIBufferResource mAnalyticFroxelMedium;
+	NRIBufferResource mAnalyticEmissiveA;
+	NRIBufferResource mAnalyticEmissiveB;
 	NRISmokeEmitterSystem mEmitters;
 	NRISmokeAuthority mAuthority;
 	NRISmokeGrid mGrid;
+	NRISmokeDormantGrid mDormantGrid;
 	NRISmokeGridLighting mGridLighting;
+	NRISmokeInterestTracker mInterest;
+	NRISmokeSpatialInterestOwner mSpatialInterest;
+	NRISmokeViewWork mViewWork;
+	NRISmokePulseOwner mPulseOwner;
+	NRISmokePromptFallback mPromptFallback;
+	NRISmokeAnalyticCarriers mAnalyticCarriers;
+	NRISmokeAnalyticTrailBridge mAnalyticTrailBridge;
+	NRISmokeWorkScheduler mWorkScheduler;
 	std::vector<NRISmokeStyleGpu> mStyles;
 	std::vector<NRISmokeInjectionCommandGpu> mPendingCommands;
+	std::vector<NRISmokePulseEnqueueInfo> mPendingPulseEnqueueInfo;
+	std::vector<NRISmokeAnalyticTrailObservationBatch> mPendingTrailObservations;
+	std::vector<NRISmokeInjectionCommandGpu> mSelectedGridCommands;
+	std::vector<NRISmokeAnalyticCarrierRequest> mPendingAnalyticRequests;
+	std::vector<NRISmokeDormantGridWorkGpu> mDormantDemotions;
+	std::vector<NRISmokeDormantGridWorkGpu> mDormantPromotions;
+	NRISmokeDormantInjectionBuildResult mDormantInjectionBuild;
+	std::map<NRISmokeSpatialCoordinate, NRISmokeSpatialBrickObservation> mDormantAuthorities;
+	std::set<NRISmokeSpatialCoordinate> mDormantPendingDemotions;
+	NRISmokeAdmissionScheduler mAdmissionScheduler;
+	uint64_t mPulsePlanToken = 0;
 	uint32_t mResourceParticleCapacity = 0;
 	uint32_t mResourceFroxelWidth = 0;
 	uint32_t mResourceFroxelHeight = 0;
@@ -324,12 +409,14 @@ private:
 	uint32_t mLastPreparedFrame = UINT32_MAX;
 	uint32_t mLastSimulatedFrame = UINT32_MAX;
 	uint32_t mLastGridBrickCapacity = 0;
+	uint64_t mLastDormantResultFrame = UINT64_MAX;
 	float mLastGridCellSize = 0.0f;
 	bool mGridLayoutTracked = false;
 	uint32_t mNextCommandSerial = 1;
 	float mAccumulator = 0.0f;
 	double mLastGameplaySeconds = -1.0;
 	double mParticleSimulationSeconds = 0.0;
+	double mPromptSimulationSeconds = 0.0;
 	double mLatestParticleDeathSeconds = 0.0;
 	bool mMayHaveParticleSmoke = false;
 	bool mSyntheticRequested = false;

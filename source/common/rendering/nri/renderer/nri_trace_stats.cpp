@@ -1,9 +1,4 @@
 #include "nri_trace_stats.h"
-#include "nri_cvars.h"
-
-#include "nri_renderer.h"
-#include "nri_diagnostic_names.h"
-#include "c_cvars.h"
 
 #include <algorithm>
 #include <cstring>
@@ -13,16 +8,23 @@
 namespace
 {
 	static constexpr uint32_t NRI_TRACE_SHADER_STATS_COUNTER_COUNT = NRI_TRACE_SHADER_STAT_COUNT;
+}
 
-	static bool ShouldTracePtPerf()
-	{
-		return (int)perf_looptraceframes > 0 || (int)nri_pttraceframes > 0;
-	}
+uint64_t NRITraceShaderStatsFenceServices::GetRecordingCommandFenceValue() const
+{
+	return getRecordingCommandFenceValue != nullptr ? getRecordingCommandFenceValue(user) : 0;
+}
 
-	static bool ShouldCollectTraceShaderStats()
-	{
-		return !!nri_ptshaderstats && (ShouldTracePtPerf() || (bool)nri_ptslowdowntrace);
-	}
+bool NRITraceShaderStatsFenceServices::IsCommandFenceValueComplete(uint64_t fenceValue) const
+{
+	return fenceValue != 0 && isCommandFenceValueComplete != nullptr &&
+		isCommandFenceValueComplete(user, fenceValue);
+}
+
+bool NRITraceShaderStatsFenceServices::IsCommandFenceValueAbandoned(uint64_t fenceValue) const
+{
+	return fenceValue != 0 && isCommandFenceValueAbandoned != nullptr &&
+		isCommandFenceValueAbandoned(user, fenceValue);
 }
 
 bool NRITraceShaderStats::CreateBufferWithoutViewAtLocation(
@@ -103,15 +105,16 @@ bool NRITraceShaderStats::Ensure(const NRIResourceServices& services)
 		}
 	}
 
-	if (mReadbackBuffer.buffer == nullptr)
+	for (ReadbackSlot& slot : mReadbackSlots)
 	{
-		if (!CreateBufferWithoutViewAtLocation(
-			services,
-			mReadbackBuffer,
-			byteSize,
-			kStride,
-			nri::BufferUsageBits::NONE,
-			nri::MemoryLocation::HOST_READBACK))
+		if (slot.buffer.buffer == nullptr &&
+			!CreateBufferWithoutViewAtLocation(
+				services,
+				slot.buffer,
+				byteSize,
+				kStride,
+				nri::BufferUsageBits::NONE,
+				nri::MemoryLocation::HOST_READBACK))
 		{
 			return false;
 		}
@@ -145,9 +148,16 @@ bool NRITraceShaderStats::Ensure(const NRIResourceServices& services)
 void NRITraceShaderStats::Destroy(const NRIResourceServices& services)
 {
 	services.DestroyBufferResource(mStatsBuffer);
-	services.DestroyBufferResource(mReadbackBuffer);
 	services.DestroyBufferResource(mZeroBuffer);
-	mPendingFrame = 0;
+	for (ReadbackSlot& slot : mReadbackSlots)
+	{
+		services.DestroyBufferResource(slot.buffer);
+		slot = {};
+	}
+	mObserver = {};
+	mNextCopySerial = 1;
+	mReadbackConsumerFence = 0;
+	mNextCopySlot = 0;
 }
 
 void NRITraceShaderStats::ResetBuffer(const NRIResourceServices& services, bool enabled)
@@ -188,55 +198,215 @@ void NRITraceShaderStats::ResetBuffer(const NRIResourceServices& services, bool 
 	context.core->CmdBarrier(*context.commandBuffer, afterDesc);
 }
 
-void NRITraceShaderStats::CopyForReadback(const NRIResourceServices& services, bool enabled, uint64_t frameNumber)
+void NRITraceShaderStats::ClearReadbackSlot(uint32_t slotIndex)
+{
+	if (slotIndex >= mReadbackSlots.size())
+	{
+		return;
+	}
+	ReadbackSlot& slot = mReadbackSlots[slotIndex];
+	slot.attribution.clear();
+	slot.frameNumber = 0;
+	slot.fenceValue = 0;
+	slot.copySerial = 0;
+	slot.pending = false;
+}
+
+void NRITraceShaderStats::UpdateObserverSnapshot(NRITraceShaderStatsSnapshot& outStats) const
+{
+	outStats.observer = mObserver;
+	outStats.observer.pendingReadbackCount = 0;
+	for (const ReadbackSlot& slot : mReadbackSlots)
+	{
+		outStats.observer.pendingReadbackCount += slot.pending ? 1u : 0u;
+	}
+}
+
+void NRITraceShaderStats::CopyForReadback(
+	const NRIResourceServices& services,
+	const NRITraceShaderStatsCopyInput& input)
 {
 	const NRIResourceContext& context = services.context;
-	if (!enabled || context.commandBuffer == nullptr || context.core == nullptr || !Ensure(services))
+	if (!input.enabled || context.commandBuffer == nullptr || context.core == nullptr)
+	{
+		return;
+	}
+	mObserver.copiesRequested++;
+
+	const uint64_t fenceValue = input.fences.GetRecordingCommandFenceValue();
+	if (fenceValue == 0)
+	{
+		mObserver.copiesDroppedNoFence++;
+		return;
+	}
+	if (!Ensure(services))
 	{
 		return;
 	}
 
+	for (uint32_t slotIndex = 0; slotIndex < mReadbackSlots.size(); ++slotIndex)
+	{
+		ReadbackSlot& slot = mReadbackSlots[slotIndex];
+		if (slot.pending && input.fences.IsCommandFenceValueAbandoned(slot.fenceValue))
+		{
+			ClearReadbackSlot(slotIndex);
+			mObserver.readbacksAbandoned++;
+		}
+	}
+
+	uint32_t selectedSlot = NRI_TRACE_SHADER_INVALID_READBACK_SLOT;
+	for (uint32_t offset = 0; offset < mReadbackSlots.size(); ++offset)
+	{
+		const uint32_t slotIndex = (mNextCopySlot + offset) % (uint32_t)mReadbackSlots.size();
+		if (!mReadbackSlots[slotIndex].pending)
+		{
+			selectedSlot = slotIndex;
+			break;
+		}
+	}
+	if (selectedSlot == NRI_TRACE_SHADER_INVALID_READBACK_SLOT)
+	{
+		mObserver.copiesDroppedBusy++;
+		return;
+	}
+
+	ReadbackSlot& slot = mReadbackSlots[selectedSlot];
+	slot.attribution.clear();
+	if (input.boundSceneInstances != nullptr)
+	{
+		const uint32_t rowCount = std::min<uint32_t>(
+			(uint32_t)input.boundSceneInstances->size(),
+			NRI_TRACE_SHADER_INSTANCE_BUCKET_COUNT);
+		slot.attribution.reserve(rowCount);
+		for (uint32_t instanceId = 0; instanceId < rowCount; ++instanceId)
+		{
+			const SceneInstanceData& instance = (*input.boundSceneInstances)[instanceId];
+			slot.attribution.push_back({
+				instance.primitiveBase,
+				0,
+				instance.dataSource,
+				instance.metadata0,
+				instance.metadata1,
+				DecodeNRIVoxelShadowProxyPrimitiveCount(instance.visibilityChunk)
+			});
+		}
+		ResolveNRITraceShaderAttributionPrimitiveCounts(
+			slot.attribution,
+			{ input.staticPrimitiveCount, input.dynamicPrimitiveCount, input.persistentVoxelPrimitiveCount });
+	}
+
 	const uint64_t byteSize = (uint64_t)NRI_TRACE_SHADER_STATS_COUNTER_COUNT * sizeof(uint32_t);
-	nri::BufferBarrierDesc beforeBarrier = {};
-	beforeBarrier.buffer = mStatsBuffer.buffer;
-	beforeBarrier.before = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
-	beforeBarrier.after = NRIResourceCopySourceAccess();
+	nri::BufferBarrierDesc beforeBarriers[2] = {};
+	beforeBarriers[0].buffer = mStatsBuffer.buffer;
+	beforeBarriers[0].before = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
+	beforeBarriers[0].after = NRIResourceCopySourceAccess();
+	beforeBarriers[1].buffer = slot.buffer.buffer;
+	beforeBarriers[1].before = slot.initialized ? NRIResourceCopyDestinationAccess() : nri::AccessStage{};
+	beforeBarriers[1].after = NRIResourceCopyDestinationAccess();
 	nri::BarrierDesc beforeDesc = {};
-	beforeDesc.buffers = &beforeBarrier;
-	beforeDesc.bufferNum = 1;
+	beforeDesc.buffers = beforeBarriers;
+	beforeDesc.bufferNum = 2;
 	context.core->CmdBarrier(*context.commandBuffer, beforeDesc);
 	context.core->CmdCopyBuffer(
 		*context.commandBuffer,
-		*mReadbackBuffer.buffer,
+		*slot.buffer.buffer,
 		0,
 		*mStatsBuffer.buffer,
 		0,
 		byteSize);
-	mPendingFrame = frameNumber;
+	slot.frameNumber = input.frameNumber;
+	slot.fenceValue = fenceValue;
+	slot.copySerial = mNextCopySerial++;
+	slot.pending = true;
+	slot.initialized = true;
+	mNextCopySlot = (selectedSlot + 1u) % (uint32_t)mReadbackSlots.size();
+	mObserver.copiesRecorded++;
+	mObserver.attributionRowsCopied += slot.attribution.size();
+	mObserver.attributionBytesCopied += slot.attribution.size() * sizeof(NRITraceShaderInstanceAttribution);
 }
 
 void NRITraceShaderStats::Readback(
 	const NRIResourceServices& services,
-	const NRITraceShaderStatsReadbackInput& input,
+	bool enabled,
+	const NRITraceShaderStatsFenceServices& fences,
 	NRITraceShaderStatsSnapshot& outStats)
 {
 	const NRIResourceContext& context = services.context;
-	if (!input.enabled || mPendingFrame == 0 || mReadbackBuffer.buffer == nullptr || context.core == nullptr)
+	const uint64_t consumerFence = fences.GetRecordingCommandFenceValue();
+	if (consumerFence != mReadbackConsumerFence)
+	{
+		outStats.valid = false;
+		mReadbackConsumerFence = consumerFence;
+	}
+	if (context.core == nullptr)
 	{
 		return;
 	}
 
-	services.WaitForCommands("trace_shader_stats_readback");
+	std::array<NRITraceShaderReadbackSlotObservation, NRI_TRACE_SHADER_READBACK_SLOT_COUNT> observations = {};
+	for (uint32_t slotIndex = 0; slotIndex < mReadbackSlots.size(); ++slotIndex)
+	{
+		const ReadbackSlot& slot = mReadbackSlots[slotIndex];
+		observations[slotIndex].pending = slot.pending;
+		observations[slotIndex].copySerial = slot.copySerial;
+		if (slot.pending)
+		{
+			observations[slotIndex].fenceAbandoned = fences.IsCommandFenceValueAbandoned(slot.fenceValue);
+			if (!observations[slotIndex].fenceAbandoned)
+			{
+				observations[slotIndex].fenceComplete = fences.IsCommandFenceValueComplete(slot.fenceValue);
+			}
+		}
+	}
+
+	const NRITraceShaderReadbackDecision decision = SelectNRITraceShaderReadback(
+		observations.data(),
+		(uint32_t)observations.size());
+	for (uint32_t slotIndex = 0; slotIndex < observations.size(); ++slotIndex)
+	{
+		if (observations[slotIndex].pending && observations[slotIndex].fenceAbandoned)
+		{
+			ClearReadbackSlot(slotIndex);
+			mObserver.readbacksAbandoned++;
+		}
+	}
+
+	if (decision.newestReadySlot == NRI_TRACE_SHADER_INVALID_READBACK_SLOT)
+	{
+		UpdateObserverSnapshot(outStats);
+		return;
+	}
+	for (uint32_t slotIndex = 0; slotIndex < observations.size(); ++slotIndex)
+	{
+		if (slotIndex != decision.newestReadySlot && observations[slotIndex].pending &&
+			observations[slotIndex].fenceComplete && !observations[slotIndex].fenceAbandoned)
+		{
+			ClearReadbackSlot(slotIndex);
+			mObserver.readbacksSuperseded++;
+		}
+	}
+
+	ReadbackSlot& slot = mReadbackSlots[decision.newestReadySlot];
+	if (!enabled)
+	{
+		ClearReadbackSlot(decision.newestReadySlot);
+		mObserver.readbacksSuperseded++;
+		UpdateObserverSnapshot(outStats);
+		return;
+	}
+
 	const uint64_t byteSize = (uint64_t)NRI_TRACE_SHADER_STATS_COUNTER_COUNT * sizeof(uint32_t);
-	const void* mapped = context.core->MapBuffer(*mReadbackBuffer.buffer, 0, byteSize);
+	const void* mapped = context.core->MapBuffer(*slot.buffer.buffer, 0, byteSize);
 	if (mapped == nullptr)
 	{
-		mPendingFrame = 0;
+		ClearReadbackSlot(decision.newestReadySlot);
+		mObserver.readbackMapFailures++;
+		UpdateObserverSnapshot(outStats);
 		return;
 	}
 
 	outStats.valid = true;
-	outStats.frameNumber = mPendingFrame;
+	outStats.frameNumber = slot.frameNumber;
 	std::memcpy(outStats.counters.data(), mapped, (size_t)byteSize);
 	outStats.hotInstanceCount = 0;
 	outStats.hotInstances = {};
@@ -248,11 +418,8 @@ void NRITraceShaderStats::Readback(
 		uint32_t accepted = 0;
 	};
 
-	const std::vector<SceneInstanceData> emptySceneInstances;
-	const std::vector<SceneInstanceData>& sceneInstances =
-		input.boundSceneInstances != nullptr ? *input.boundSceneInstances : emptySceneInstances;
 	std::vector<TraceShaderHotCandidate> hotCandidates;
-	const uint32_t instanceBucketCount = std::min<uint32_t>((uint32_t)sceneInstances.size(), NRI_TRACE_SHADER_INSTANCE_BUCKET_COUNT);
+	const uint32_t instanceBucketCount = std::min<uint32_t>((uint32_t)slot.attribution.size(), NRI_TRACE_SHADER_INSTANCE_BUCKET_COUNT);
 	hotCandidates.reserve(instanceBucketCount);
 	for (uint32_t instanceId = 0; instanceId < instanceBucketCount; ++instanceId)
 	{
@@ -276,59 +443,20 @@ void NRITraceShaderStats::Readback(
 			return a.accepted > b.accepted;
 		});
 
-	auto getDataSourcePrimitiveTotal = [&input](uint32_t dataSource) -> uint32_t
-	{
-		switch (dataSource)
-		{
-		case nri_diag::SceneDataSourceStatic: return input.staticPrimitiveCount;
-		case nri_diag::SceneDataSourceDynamic: return input.dynamicPrimitiveCount;
-		case nri_diag::SceneDataSourcePersistentVoxel: return input.persistentVoxelPrimitiveCount;
-		default: return 0;
-		}
-	};
-	auto estimateInstancePrimitiveCount = [&input, &getDataSourcePrimitiveTotal, &sceneInstances](const SceneInstanceData& instance) -> uint32_t
-	{
-		if (instance.dataSource == nri_diag::SceneDataSourcePersistentVoxel && input.estimatePersistentVoxelPrimitiveCount != nullptr)
-		{
-			const uint32_t persistentVoxelPrimitiveCount = input.estimatePersistentVoxelPrimitiveCount(input.user, instance.primitiveBase);
-			if (persistentVoxelPrimitiveCount > 0)
-			{
-				return persistentVoxelPrimitiveCount;
-			}
-		}
-
-		const uint32_t total = getDataSourcePrimitiveTotal(instance.dataSource);
-		if (instance.primitiveBase >= total)
-		{
-			return 0;
-		}
-
-		uint32_t endOffset = total;
-		for (const SceneInstanceData& other : sceneInstances)
-		{
-			if (other.dataSource == instance.dataSource &&
-				other.primitiveBase > instance.primitiveBase &&
-				other.primitiveBase < endOffset)
-			{
-				endOffset = other.primitiveBase;
-			}
-		}
-		return endOffset - instance.primitiveBase;
-	};
-
 	const uint32_t hotCount = std::min<uint32_t>((uint32_t)hotCandidates.size(), NRI_TRACE_SHADER_HOT_INSTANCE_COUNT);
 	outStats.hotInstanceCount = hotCount;
 	for (uint32_t hotIndex = 0; hotIndex < hotCount; ++hotIndex)
 	{
 		const TraceShaderHotCandidate& candidate = hotCandidates[hotIndex];
-		const SceneInstanceData& instance = sceneInstances[candidate.instanceId];
+		const NRITraceShaderInstanceAttribution& instance = slot.attribution[candidate.instanceId];
 		NRITraceShaderHotInstance& hot = outStats.hotInstances[hotIndex];
 		hot.instanceId = candidate.instanceId;
 		hot.dataSource = instance.dataSource;
-		hot.primitiveOffset = instance.primitiveBase;
-		hot.primitiveCount = estimateInstancePrimitiveCount(instance);
+		hot.primitiveOffset = instance.primitiveOffset;
+		hot.primitiveCount = instance.primitiveCount;
 		hot.metadata0 = instance.metadata0;
 		hot.metadata1 = instance.metadata1;
+		hot.shadowProxy = instance.explicitPrimitiveCount != 0u;
 		hot.committed = candidate.committed;
 		hot.accepted = candidate.accepted;
 		hot.primaryCommitted = outStats.counters[NRI_TRACE_SHADER_INSTANCE_KIND_COMMITTED_BASE + 0u * NRI_TRACE_SHADER_INSTANCE_BUCKET_COUNT + candidate.instanceId];
@@ -338,6 +466,8 @@ void NRITraceShaderStats::Readback(
 		hot.emissiveCommitted = outStats.counters[NRI_TRACE_SHADER_INSTANCE_KIND_COMMITTED_BASE + 4u * NRI_TRACE_SHADER_INSTANCE_BUCKET_COUNT + candidate.instanceId];
 		hot.fastEmissiveCommitted = outStats.counters[NRI_TRACE_SHADER_INSTANCE_KIND_COMMITTED_BASE + 5u * NRI_TRACE_SHADER_INSTANCE_BUCKET_COUNT + candidate.instanceId];
 	}
-	context.core->UnmapBuffer(*mReadbackBuffer.buffer);
-	mPendingFrame = 0;
+	context.core->UnmapBuffer(*slot.buffer.buffer);
+	ClearReadbackSlot(decision.newestReadySlot);
+	mObserver.readbacksPublished++;
+	UpdateObserverSnapshot(outStats);
 }

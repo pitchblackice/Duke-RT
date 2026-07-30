@@ -64,6 +64,8 @@ struct PerfCompactNriStats
 	uint32_t traceUpscalerKind = 0, traceUpscalerMode = 0, traceDenoiserMode = 0;
 	uint32_t traceDirectScene = 0, traceDirectional = 0, traceDirectionalShadow = 0;
 	uint32_t traceSplitShadow = 0, traceFastEmissiveShadow = 0, traceVisibleChunkGate = 0;
+	uint32_t traceVoxelOccurrences = 0, traceVoxelOccurrenceControl = 0;
+	uint64_t traceVoxelInstancePrimitives = 0;
 	bool rendered = false;
 	bool valid = false;
 };
@@ -92,6 +94,8 @@ struct PerfCompactOuterFrame
 	double nriDenoiseMs = 0.0, nriComposeMs = 0.0, nriUpscaleMs = 0.0, nriFinalMs = 0.0;
 	int realtics = 0, availabletics = 0, counts = 0, ticks = 0, waitLoops = 0;
 	bool doWait = false, zeroReturn = false, waitReturn = false, pausedReturn = false;
+	bool fixedSimulationReturn = false;
+	uint32_t fixedSimulationSuppressedTailTicks = 0;
 	bool displaySkipped = false, levelRendered = false, stateIsLevel = false, nriActive = false;
 };
 
@@ -99,7 +103,31 @@ struct PerfCompactGpuTiming
 {
 	double segmentMs = 0.0, sceneMs = 0.0, traceMs = 0.0, traceDispatchMs = 0.0, denoiseMs = 0.0;
 	double compositionMs = 0.0, upscaleMs = 0.0, finalMs = 0.0;
+	double smokeSimulationMs = 0.0, smokeVolumeMs = 0.0;
+	double smokeGridAllocateMs = 0.0, smokeGridInitializeMs = 0.0, smokeGridDepositMs = 0.0;
+	double smokeGridHaloMs = 0.0, smokeGridSimulateMs = 0.0, smokeGridRebuildMs = 0.0;
+	double smokeDormantArchiveMs = 0.0, smokeDormantPromoteMs = 0.0, smokeDormantEvolveMs = 0.0;
+	double smokeWorldActiveMs = 0.0, smokeWorldLinkMs = 0.0, smokeWorldProposalMs = 0.0;
+	double smokeWorldSeedMs = 0.0, smokeWorldTemporalMs = 0.0, smokeWorldFilterMs = 0.0;
+	double smokeWorldScatterMs = 0.0, smokeCarrierMs = 0.0, smokeViewPrepareMs = 0.0;
+	double smokeMaterializeMs = 0.0, smokeAnalyticMaterializeMs = 0.0;
+	double smokeViewPointMs = 0.0, smokeViewDirectionalMs = 0.0;
+	double smokeViewDirectReuseMs = 0.0, smokeViewEmissiveMs = 0.0, smokeViewIndirectMs = 0.0;
+	double smokeAnalyticEmissiveBuildMs = 0.0, smokeAnalyticEmissiveApplyMs = 0.0;
+	double smokeIntegrateMs = 0.0, smokeReconstructionMs = 0.0;
 	uint32_t segmentCount = 0, invalidPairs = 0, droppedScopes = 0;
+
+	double SmokeDetailTotalMs() const
+	{
+		return smokeGridAllocateMs + smokeGridInitializeMs + smokeGridDepositMs + smokeGridHaloMs +
+			smokeGridSimulateMs + smokeGridRebuildMs + smokeDormantArchiveMs +
+			smokeDormantPromoteMs + smokeDormantEvolveMs + smokeWorldActiveMs + smokeWorldLinkMs +
+			smokeWorldProposalMs + smokeWorldSeedMs + smokeWorldTemporalMs + smokeWorldFilterMs +
+			smokeWorldScatterMs + smokeCarrierMs + smokeViewPrepareMs + smokeMaterializeMs +
+			smokeAnalyticMaterializeMs +
+			smokeViewPointMs + smokeViewDirectionalMs + smokeViewDirectReuseMs + smokeViewEmissiveMs +
+			smokeViewIndirectMs + smokeIntegrateMs + smokeReconstructionMs;
+	}
 };
 
 enum class PerfCompactFirstUseDomain : uint32_t
@@ -181,6 +209,7 @@ struct PerfCompactFirstUseRecord
 void PerfCompactCaptureBeginOuterFrame(uint64_t presentationGeneration);
 void PerfCompactCaptureFlushIfReady();
 bool PerfCompactCaptureTimingActive();
+bool PerfCompactCaptureReadbackDrainActive();
 PerfCompactCaptureToken PerfCompactCaptureGetCurrentToken();
 void PerfCompactCaptureNoteNri(const PerfCompactCaptureToken& token, const PerfCompactNriStats& stats);
 void PerfCompactCaptureNoteBoundary(const PerfCompactCaptureToken& token, const PerfCompactBoundaryStats& stats);

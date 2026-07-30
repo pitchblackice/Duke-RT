@@ -182,6 +182,10 @@ NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars()
 	settings.sharedBlasBuildsPerFrame = (int)nri_ptvoxelsharedblasbuilds <= 0 ? 0u : (uint32_t)(int)nri_ptvoxelsharedblasbuilds;
 	settings.sharedBlasLoadingWarmupEnabled = (bool)nri_ptvoxelsharedblasloading;
 	settings.sharedBlasRouteEnabled = (bool)nri_ptvoxelsharedblasroute;
+	settings.shadowProxyBuildEnabled = (bool)nri_ptvoxelshadowproxybuild;
+	settings.shadowProxyRouteEnabled = (bool)nri_ptvoxelshadowproxyroute;
+	settings.shadowProxyBuildsPerFrame = (uint32_t)std::max(0, (int)nri_ptvoxelshadowproxybuilds);
+	settings.shadowProxyTransitionsPerFrame = (uint32_t)std::max(0, (int)nri_ptvoxelshadowproxytransitions);
 	settings.transformKeyed = (bool)nri_ptvoxeltransformkeyed;
 	settings.diagnosticsEnabled =
 		(bool)nri_voxelstats ||
@@ -194,6 +198,7 @@ NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars()
 		(int32_t)(int)nri_ptvoxelexcludeindex3
 	};
 	settings.excludeMinPrimitives = (uint32_t)std::max(0, (int)nri_ptvoxelexcludeminprims);
+	settings.omitTlasOccurrences = (bool)nri_ptvoxelomitoccurrences;
 	return settings;
 }
 
@@ -218,6 +223,7 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	NRISmokeSettings settings = {};
 	settings.enabled = (bool)nri_ptsmoke;
 	settings.readback = (bool)nri_ptsmokereadback;
+	settings.workProfile = (uint32_t)std::max((int)nri_ptsmokeworkprofile, 0);
 	settings.quality = (uint32_t)std::clamp((int)nri_ptsmokequality, 0, 2);
 	settings.particleCapacity = (uint32_t)std::clamp((int)nri_ptsmokeparticles, 256, 65536);
 	settings.froxelPixelSize = (uint32_t)std::clamp((int)nri_ptsmokefroxelpixels, 4, 64);
@@ -236,6 +242,11 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.emissiveWorldFilter = (bool)nri_ptsmokeemissiveworldfilter;
 	settings.emissiveLocalProposals = (bool)nri_ptsmokeemissivelocal;
 	settings.emissiveWorldDebug = (uint32_t)std::clamp((int)nri_ptsmokeemissiveworlddebug, 0, 7);
+	const uint32_t requestedWorldPartitions = (uint32_t)std::clamp((int)nri_ptsmokeworldpartitions, 1, 4);
+	settings.worldRadiancePartitions = requestedWorldPartitions >= 4u ? 4u : (requestedWorldPartitions >= 2u ? 2u : 1u);
+	settings.worldRadianceNewCells = (uint32_t)std::clamp((int)nri_ptsmokeworldnewcells, 1, 262144);
+	settings.worldRadianceMaintenanceCells = (uint32_t)std::clamp((int)nri_ptsmokeworldmaintenancecells, 1, 262144);
+	settings.worldRadianceMaximumAge = (uint32_t)std::clamp((int)nri_ptsmokeworldradiancemaxage, 1, 65535);
 	settings.emissiveLegacyGatherDisabled = (bool)nri_ptsmokeemissivelegacygatherdisable;
 	settings.emissiveQuarterKey = (bool)nri_ptsmokeemissivequarterkey;
 	settings.emissiveSourceClamp = std::clamp((float)nri_ptsmokeemissiveclamp, 1.0f, 256.0f);
@@ -255,8 +266,10 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.lightSamples = (uint32_t)std::clamp((int)nri_ptsmokelightsamples, 1, 4);
 	settings.maxLightCandidates = (uint32_t)std::clamp((int)nri_ptsmokemaxlightcandidates, 1, 32);
 	settings.filteredVisibility = (bool)nri_ptsmokefilteredvisibility;
-	settings.debugMode = (uint32_t)std::clamp((int)nri_ptsmokedebug, 0, 7);
+	settings.debugMode = (uint32_t)std::clamp((int)nri_ptsmokedebug, 0, 11);
 	settings.traceMode = (uint32_t)std::clamp((int)nri_ptsmoketrace, 0, 2);
+	settings.viewCompare = (bool)nri_ptsmokeviewcompare;
+	settings.viewRoute = (uint32_t)std::clamp((int)nri_ptsmokeviewroute, 0, 2);
 	settings.froxelMaxDistance = std::clamp((float)nri_ptsmokefroxelmaxdistance, 64.0f, 32768.0f);
 	settings.timeScale = std::clamp((float)nri_ptsmoketimescale, 0.0f, 4.0f);
 	settings.wind[0] = std::clamp((float)nri_ptsmokewindx, -256.0f, 256.0f);
@@ -267,6 +280,7 @@ NRISmokeSettings BuildNRISmokeSettingsFromCVars()
 	settings.indirectScale = std::clamp((float)nri_ptsmokeindirectscale, 0.0f, 16.0f);
 	settings.representation = (uint32_t)std::clamp((int)nri_ptsmokerepresentation, 0, 2);
 	settings.gridBrickCapacity = (uint32_t)std::clamp((int)nri_ptsmokegridbricks, 64, 4096);
+	settings.dormantGrid = (bool)nri_ptsmokedormantgrid;
 	settings.gridCellSize = std::clamp((float)nri_ptsmokegridcellsize, 1.0f, 64.0f);
 	settings.gridBuoyancy = std::clamp((float)nri_ptsmokegridbuoyancy, 0.0f, 64.0f);
 	settings.gridVelocityDamping = std::clamp((float)nri_ptsmokegridvelocitydamping, 0.0f, 16.0f);

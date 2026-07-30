@@ -18,6 +18,95 @@ void SmokeGridLightWriteTarget(uint cellIndex, SmokeGridLightRecord record, Smok
 	}
 }
 
+uint SmokeGridLightStableWorldKey(int3 cell)
+{
+	return SmokeHash(asuint(cell.x) ^ SmokeHash(asuint(cell.y)) ^ SmokeHash(asuint(cell.z)));
+}
+
+bool SmokeGridLightClaimNewInvalid()
+{
+	uint ticket;
+	InterlockedAdd(gSmokeGridLightControl[0].RadianceNewInvalidTickets, 1u, ticket);
+	if (ticket >= gSmokeGridLightControl[0].RadianceNewInvalidQuantity)
+		return false;
+	InterlockedAdd(gSmokeGridLightControl[0].RadianceNewInvalidScheduled, 1u);
+	return true;
+}
+
+bool SmokeGridLightClaimMaintenance()
+{
+	uint ticket;
+	InterlockedAdd(gSmokeGridLightControl[0].RadianceMaintenanceTickets, 1u, ticket);
+	if (ticket >= gSmokeGridLightControl[0].RadianceMaintenanceQuantity)
+		return false;
+	InterlockedAdd(gSmokeGridLightControl[0].RadianceMaintenanceScheduled, 1u);
+	return true;
+}
+
+bool SmokeGridLightScheduleRadiance(uint cellIndex, int3 cell, SmokeGridBrick brick)
+{
+	const uint partitionCount = max(gSmokeGridLightControl[0].RadiancePartitionCount, 1u);
+	const bool workLimited = (gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_WORK_LIMITED) != 0u;
+	if (partitionCount <= 1u && !workLimited)
+		return true;
+
+	const bool targetHistory = (gSmokeConstants.Flags & NRI_SMOKE_GRID_LIGHT_FIELD_PING) != 0u;
+	SmokeGridLightRecord prior;
+	if (targetHistory)
+		prior = gSmokeGridLightCurrent[cellIndex];
+	else
+		prior = gSmokeGridLightHistory[cellIndex];
+	const bool historyValid = SmokeGridLightRecordValid(prior, brick.Generation, gSmokeConstants.SimulationEpoch);
+	const uint partition = SmokeGridLightStableWorldKey(cell) % partitionCount;
+	const bool partitionDue = partitionCount <= 1u ||
+		partition == (gSmokeConstants.FrameIndex % partitionCount);
+	bool scheduled = false;
+	if (!historyValid)
+	{
+		InterlockedAdd(gSmokeGridLightControl[0].RadianceNewInvalidRequested, 1u);
+		scheduled = SmokeGridLightClaimNewInvalid();
+		if (!scheduled)
+			InterlockedAdd(gSmokeGridLightControl[0].RadianceNewInvalidDeferred, 1u);
+	}
+	else
+	{
+		InterlockedAdd(gSmokeGridLightControl[0].RadianceMaintenanceRequested, 1u);
+		const uint historyAge = SmokeGridLightAge(prior);
+		const bool ageDue = historyAge >= gSmokeGridLightControl[0].RadianceMaximumAge;
+		scheduled = (partitionDue || ageDue) && SmokeGridLightClaimMaintenance();
+		if (!scheduled)
+			InterlockedAdd(gSmokeGridLightControl[0].RadianceMaintenanceDeferred, 1u);
+	}
+	if (scheduled)
+		return true;
+
+	SmokeGridLightRecord retained = (SmokeGridLightRecord)0;
+	SmokeGridLightRecord retainedShadow = (SmokeGridLightRecord)0;
+	if (historyValid)
+	{
+		retained = prior;
+		const uint retainedAge = min(SmokeGridLightAge(prior) + 1u, 65535u);
+		SmokeGridLightSetMetadata(retained, brick.Generation, gSmokeConstants.SimulationEpoch,
+			SmokeGridLightSampleCount(prior), SmokeGridLightSequence(prior), SmokeGridLightConfidence(prior),
+			SmokeGridLightEvidence(prior), SmokeGridLightLastUpdate(prior), retainedAge);
+		if (SmokeSelfShadowEnabled(gSmokeConstants.DebugMode))
+		{
+			if (targetHistory)
+				retainedShadow = gSmokeGridLightSelfShadowCurrent[cellIndex];
+			else
+				retainedShadow = gSmokeGridLightSelfShadowHistory[cellIndex];
+		}
+		InterlockedAdd(gSmokeGridLightControl[0].RadianceHistoryRetained, 1u);
+		InterlockedMax(gSmokeGridLightControl[0].MaximumAge, retainedAge);
+		if (retainedAge > gSmokeGridLightControl[0].RadianceMaximumAge)
+			InterlockedAdd(gSmokeGridLightControl[0].RadianceAgeOverflows, 1u);
+	}
+	else
+		InterlockedAdd(gSmokeGridLightControl[0].RadianceHistoryMissing, 1u);
+	SmokeGridLightWriteTarget(cellIndex, retained, retainedShadow);
+	return false;
+}
+
 uint SmokeGridLightSeedForCell(int3 cell, uint sampleIndex)
 {
 	uint seed = SmokeHash(asuint(cell.x) ^ SmokeHash(asuint(cell.y)) ^ SmokeHash(asuint(cell.z)) ^
@@ -364,6 +453,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const SmokeGridBrick brick = gSmokeRenderGridBricks[brickIndex];
 	const float cellSize = max(asfloat(gSmokeRenderGridControl[0].CellSizeBits), 0.0001);
 	const int3 cell = SmokeGridCellCoordinate(brick.Coordinate, local);
+	if (!SmokeGridLightScheduleRadiance(cellIndex, cell, brick))
+		return;
 	const float3 receiverPosition = SmokeGridLightCellCenter(cell, cellSize);
 	const bool referenceSampling = (gSmokeConstants.Flags & NRI_SMOKE_EMISSIVE_REFERENCE) != 0u;
 	const uint sampleCount = referenceSampling ? 32u : 1u;

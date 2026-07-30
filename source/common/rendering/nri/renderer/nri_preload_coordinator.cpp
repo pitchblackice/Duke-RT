@@ -49,6 +49,8 @@ namespace
 		std::chrono::steady_clock::time_point firstSeen = {};
 		uint64_t peakTrackedBytes = 0;
 		uint64_t lastLoggedPeakBytes = 0;
+		uint64_t releaseCommandArmedBuildSerial = 0;
+		uint64_t releaseCommandQueuedBuildSerial = 0;
 		bool strictAbortLatched = false;
 		bool strictTerminalLogged = false;
 	};
@@ -174,6 +176,168 @@ namespace
 		Printf("PERF pt voxel preload terminal action NRI: result=queued command=\"%s\"\n", command.GetChars());
 		AddCommandString(command.GetChars());
 	}
+
+	void ArmStrictPreloadFirstFrameReleaseCommand(const char* levelName, const NRIVoxelComputePreloadClosureStats& closure)
+	{
+		const FString command((const char*)nri_ptvoxelcomputepreloadreleasecommand);
+		if (command.IsEmpty() || gVoxelPreloadTimeline.releaseCommandArmedBuildSerial == closure.buildSerial)
+		{
+			return;
+		}
+
+		gVoxelPreloadTimeline.releaseCommandArmedBuildSerial = closure.buildSerial;
+		Printf("PERF pt voxel preload release action NRI: result=armed reason=strict-complete level=%s build_serial=%llu manifest_hash=0x%llx sequence=%llu command=\"%s\"\n",
+			levelName != nullptr ? levelName : "(none)",
+			(unsigned long long)closure.buildSerial,
+			(unsigned long long)closure.manifestHash,
+			(unsigned long long)closure.sequence,
+			command.GetChars());
+	}
+}
+
+void NRIPreloadCoordinator::QueueStrictPreloadFirstFrameReleaseCommand(NRIRenderer& renderer)
+{
+	const FString command((const char*)nri_ptvoxelcomputepreloadreleasecommand);
+	if (command.IsEmpty())
+	{
+		return;
+	}
+
+	// This is a one-shot diagnostic command. Consume it before any possible
+	// queue so a rejected or repeated release cannot leak into another level.
+	nri_ptvoxelcomputepreloadreleasecommand = "";
+
+	const uint64_t buildSerial = renderer.mMapWorld.buildSerial;
+	const NRIVoxelComputePreloadClosureStats closure = BuildNRIVoxelComputePreloadClosure(
+		renderer.mPersistentVoxels,
+		buildSerial);
+	const NRIPersistentVoxelPreloadStatus preloadStatus =
+		renderer.mPersistentVoxels.BuildPreloadStatusSnapshot();
+	const NRIPersistentVoxelStatusSnapshot voxelStatus =
+		renderer.mPersistentVoxels.BuildStatusSnapshot();
+
+	const char* reason = nullptr;
+	if (buildSerial == 0)
+	{
+		reason = "build-serial-zero";
+	}
+	else if (gVoxelPreloadTimeline.releaseCommandQueuedBuildSerial == buildSerial)
+	{
+		reason = "already-queued";
+	}
+	else if (gVoxelPreloadTimeline.buildSerial != buildSerial)
+	{
+		reason = "timeline-build-mismatch";
+	}
+	else if (gVoxelPreloadTimeline.releaseCommandArmedBuildSerial != buildSerial)
+	{
+		reason = "command-build-mismatch";
+	}
+	else if (!closure.valid || closure.buildSerial != buildSerial)
+	{
+		reason = "closure-build-mismatch";
+	}
+	else if (voxelStatus.residencyBuildSerial != buildSerial)
+	{
+		reason = "residency-build-mismatch";
+	}
+	else if (!gVoxelPreloadTimeline.strictTerminalLogged ||
+		gVoxelPreloadTimeline.strictAbortLatched ||
+		!closure.strictRequested || closure.dryRun || closure.memoryGuardHit ||
+		std::strcmp(closure.outcome, "complete") != 0)
+	{
+		reason = "strict-incomplete";
+	}
+	else if (!preloadStatus.gpuLoadingEnabled || !preloadStatus.hasCacheEntries)
+	{
+		reason = "actor-cache-empty";
+	}
+	else if (!preloadStatus.batchReady || preloadStatus.batchPendingActors != 0 ||
+		preloadStatus.deferredTexturePrewarm != 0 || preloadStatus.deferredOnboarding != 0)
+	{
+		reason = "batch-incomplete";
+	}
+	else if (preloadStatus.requiredPending != 0 || preloadStatus.optionalPending != 0 ||
+		preloadStatus.failed != 0 || voxelStatus.pendingInstanceCount != 0 ||
+		voxelStatus.requiredAdmissionPendingCount != 0 ||
+		voxelStatus.optionalAdmissionPendingCount != 0 ||
+		voxelStatus.failedAdmissionCount != 0 || voxelStatus.computeInFlightCount != 0 ||
+		voxelStatus.blasInFlightCount != 0)
+	{
+		reason = "active-work-pending";
+	}
+	else if (preloadStatus.batchReadyActors == 0 || voxelStatus.activeInstanceCount == 0)
+	{
+		reason = "active-batch-empty";
+	}
+	else if (preloadStatus.batchReadyActors != voxelStatus.activeInstanceCount)
+	{
+		reason = "active-batch-mismatch";
+	}
+
+	const char* levelName = renderer.mMapWorld.level != nullptr ?
+		renderer.mMapWorld.level->labelName.GetChars() : "(none)";
+	if (reason != nullptr)
+	{
+		Printf("PERF pt voxel preload release action NRI: result=rejected reason=%s level=%s build_serial=%llu timeline_build_serial=%llu command_build_serial=%llu closure_build_serial=%llu residency_build_serial=%llu manifest_hash=0x%llx sequence=%llu outcome=%s strict=%u terminal_complete=%u selected_bindings=%u ready_bindings=%u reused_bindings=%u closure_failed=%u cap_skipped=%u runtime_withheld=%u closure_pending=%u admission_queue=%u gpu_loading=%u has_cache_entries=%u batch_ready=%u batch_ready_actors=%u batch_pending=%u deferred_texture=%u deferred_onboarding=%u batch_actors=%u active_instances=%u instance_records=%u pending_instances=%u desired_actors=%u required_pending=%u optional_pending=%u failed=%u compute_inflight=%u blas_inflight=%u command=\"%s\"\n",
+			reason,
+			levelName,
+			(unsigned long long)buildSerial,
+			(unsigned long long)gVoxelPreloadTimeline.buildSerial,
+			(unsigned long long)gVoxelPreloadTimeline.releaseCommandArmedBuildSerial,
+			(unsigned long long)closure.buildSerial,
+			(unsigned long long)voxelStatus.residencyBuildSerial,
+			(unsigned long long)closure.manifestHash,
+			(unsigned long long)closure.sequence,
+			closure.outcome,
+			closure.strictRequested ? 1u : 0u,
+			gVoxelPreloadTimeline.strictTerminalLogged ? 1u : 0u,
+			closure.selectedBindings,
+			closure.readyBindings,
+			closure.reusedBindings,
+			closure.failedBindings,
+			closure.capSkippedBindings,
+			closure.runtimeWithheldBindings,
+			closure.pendingBindings,
+			closure.admissionQueueCount,
+			preloadStatus.gpuLoadingEnabled ? 1u : 0u,
+			preloadStatus.hasCacheEntries ? 1u : 0u,
+			preloadStatus.batchReady ? 1u : 0u,
+			preloadStatus.batchReadyActors,
+			preloadStatus.batchPendingActors,
+			preloadStatus.deferredTexturePrewarm,
+			preloadStatus.deferredOnboarding,
+			voxelStatus.batchActorCount,
+			voxelStatus.activeInstanceCount,
+			voxelStatus.instanceRecordCount,
+			voxelStatus.pendingInstanceCount,
+			voxelStatus.lastDesiredActorCount,
+			preloadStatus.requiredPending,
+			preloadStatus.optionalPending,
+			preloadStatus.failed,
+			voxelStatus.computeInFlightCount,
+			voxelStatus.blasInFlightCount,
+			command.GetChars());
+		return;
+	}
+
+	gVoxelPreloadTimeline.releaseCommandQueuedBuildSerial = buildSerial;
+	Printf("PERF pt voxel preload release action NRI: result=queued reason=complete level=%s build_serial=%llu manifest_hash=0x%llx sequence=%llu outcome=%s strict=1 terminal_complete=1 selected_bindings=%u ready_bindings=%u reused_bindings=%u closure_failed=0 cap_skipped=0 runtime_withheld=0 closure_pending=0 admission_queue=0 batch_ready=1 batch_ready_actors=%u batch_pending=0 batch_actors=%u active_instances=%u instance_records=%u pending_instances=0 desired_actors=%u required_pending=0 optional_pending=0 failed=0 compute_inflight=0 blas_inflight=0 command=\"%s\"\n",
+		levelName,
+		(unsigned long long)buildSerial,
+		(unsigned long long)closure.manifestHash,
+		(unsigned long long)closure.sequence,
+		closure.outcome,
+		closure.selectedBindings,
+		closure.readyBindings,
+		closure.reusedBindings,
+		preloadStatus.batchReadyActors,
+		voxelStatus.batchActorCount,
+		voxelStatus.activeInstanceCount,
+		voxelStatus.instanceRecordCount,
+		voxelStatus.lastDesiredActorCount,
+		command.GetChars());
+	AddCommandString(command.GetChars());
 }
 
 bool NRIPreloadCoordinator::HasFrameTarget(NRIRenderer& renderer, const Context& context)
@@ -689,6 +853,9 @@ bool NRIPreloadCoordinator::Finish(NRIRenderer& renderer, const Context& context
 	}
 	if (closure.valid && closure.strictRequested && !gVoxelPreloadTimeline.strictTerminalLogged)
 	{
+		ArmStrictPreloadFirstFrameReleaseCommand(
+			renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : nullptr,
+			closure);
 		PrintVoxelPreloadTerminal(
 			renderer.mMapWorld.level != nullptr ? renderer.mMapWorld.level->labelName.GetChars() : nullptr,
 			closure,

@@ -7,6 +7,9 @@
 #include "SmokeSourceShaping.hlsli"
 #include "SmokeGridData.hlsli"
 #include "SmokeGridLightingData.hlsli"
+#include "SmokeViewWorkData.hlsli"
+#include "SmokeAnalyticData.hlsli"
+#include "SmokeDormantGridData.hlsli"
 
 #define NRI_SMOKE_SET_INPUTS 0
 #define NRI_SMOKE_SET_BUFFERS 1
@@ -261,10 +264,89 @@ struct SmokeControl
 	uint DirectHistoryResolved;
 	uint DirectHistoryClamps;
 	uint DirectNanRejects;
+	uint AnalyticLightBuildEvents;
+	uint AnalyticLightAnchorsBuilt;
+	uint AnalyticLightAnchorsValid;
+	uint AnalyticLightAnchorsInvalid;
+	uint AnalyticLightSamplesRequested;
+	uint AnalyticLightSamplesExecuted;
+	uint AnalyticLightEvaluations;
+	uint AnalyticLightBuildVisibilityRays;
+	uint AnalyticLightGridSeedHits;
+	uint AnalyticLightGridSeedMisses;
+	uint AnalyticLightApplyFroxelsTested;
+	uint AnalyticLightApplyFroxelsApplied;
+	uint AnalyticLightCarrierContributions;
+	uint AnalyticLightAnchorBlendTaps;
+	uint AnalyticLightGroupCacheHits;
+	uint AnalyticLightMissingGroupRecords;
+	uint AnalyticLightIdentityRejects;
+	uint AnalyticLightApplyVisibilityRays;
 };
+
+// Froxel carrier state is authored by materialization and remains independent
+// from progressively completed lighting in gSmokeFroxelSource.w. Beauty paths
+// consume rgb only; this word is an explicit diagnostic/validity contract.
+#define NRI_SMOKE_CARRIER_VALID 0x1u
+#define NRI_SMOKE_RADIANCE_VALID 0x2u
+#define NRI_SMOKE_CARRIER_GENERATION_SHIFT 2u
+#define NRI_SMOKE_RADIANCE_GENERATION_SHIFT 10u
+#define NRI_SMOKE_CARRIER_AGE_SHIFT 18u
+#define NRI_SMOKE_RADIANCE_AGE_SHIFT 22u
+#define NRI_SMOKE_FALLBACK_SHIFT 28u
+#define NRI_SMOKE_RADIANCE_UNRESOLVED 0x80000000u
+#define NRI_SMOKE_FALLBACK_NONE 0u
+#define NRI_SMOKE_FALLBACK_ENVIRONMENT 1u
+#define NRI_SMOKE_FALLBACK_ANALYTIC 2u
+#define NRI_SMOKE_FALLBACK_EMISSIVE 3u
+#define NRI_SMOKE_FALLBACK_CACHED 4u
+#define NRI_SMOKE_FALLBACK_WORLD 5u
+
+uint SmokeFroxelCarrierMetadata(uint simulationEpoch)
+{
+	return NRI_SMOKE_CARRIER_VALID |
+		((simulationEpoch & 0xffu) << NRI_SMOKE_CARRIER_GENERATION_SHIFT) |
+		NRI_SMOKE_RADIANCE_UNRESOLVED;
+}
+
+uint SmokeFroxelResolveRadiance(uint metadata, uint simulationEpoch, uint fallbackType, uint age)
+{
+	metadata |= NRI_SMOKE_RADIANCE_VALID;
+	metadata &= ~(0xffu << NRI_SMOKE_RADIANCE_GENERATION_SHIFT);
+	metadata |= (simulationEpoch & 0xffu) << NRI_SMOKE_RADIANCE_GENERATION_SHIFT;
+	metadata &= ~(0x3fu << NRI_SMOKE_RADIANCE_AGE_SHIFT);
+	metadata |= (min(age, 63u) & 0x3fu) << NRI_SMOKE_RADIANCE_AGE_SHIFT;
+	metadata &= ~(0x7u << NRI_SMOKE_FALLBACK_SHIFT);
+	metadata |= (fallbackType & 0x7u) << NRI_SMOKE_FALLBACK_SHIFT;
+	metadata &= ~NRI_SMOKE_RADIANCE_UNRESOLVED;
+	return metadata;
+}
+
+uint SmokeFroxelMetadata(float encoded) { return asuint(encoded); }
+float SmokeFroxelMetadataValue(uint metadata) { return asfloat(metadata); }
+bool SmokeFroxelCarrierValid(uint metadata) { return (metadata & NRI_SMOKE_CARRIER_VALID) != 0u; }
+bool SmokeFroxelRadianceValid(uint metadata) { return (metadata & NRI_SMOKE_RADIANCE_VALID) != 0u; }
+uint SmokeFroxelCarrierAge(uint metadata) { return (metadata >> NRI_SMOKE_CARRIER_AGE_SHIFT) & 0xfu; }
+uint SmokeFroxelRadianceAge(uint metadata) { return (metadata >> NRI_SMOKE_RADIANCE_AGE_SHIFT) & 0x3fu; }
+uint SmokeFroxelFallbackType(uint metadata) { return (metadata >> NRI_SMOKE_FALLBACK_SHIFT) & 0x7u; }
+bool SmokeFroxelRadianceUnresolved(uint metadata) { return (metadata & NRI_SMOKE_RADIANCE_UNRESOLVED) != 0u; }
+
+// gSmokeFroxelPhase.w is an integer-valued ownership mask. Existing particle
+// and grid writers already publish 1 and 2 respectively; analytic carriers add
+// bit 2 without pretending to own persistent grid-world radiance.
+#define NRI_SMOKE_FROXEL_CARRIER_PARTICLE 0x1u
+#define NRI_SMOKE_FROXEL_CARRIER_GRID 0x2u
+#define NRI_SMOKE_FROXEL_CARRIER_ANALYTIC 0x4u
+#define NRI_SMOKE_FROXEL_CARRIER_DORMANT 0x8u
+uint SmokeFroxelCarrierOwnership(float4 phase) { return (uint)round(max(phase.w, 0.0)); }
+bool SmokeFroxelHasParticleCarrier(float4 phase) { return (SmokeFroxelCarrierOwnership(phase) & NRI_SMOKE_FROXEL_CARRIER_PARTICLE) != 0u; }
+bool SmokeFroxelHasGridCarrier(float4 phase) { return (SmokeFroxelCarrierOwnership(phase) & NRI_SMOKE_FROXEL_CARRIER_GRID) != 0u; }
+bool SmokeFroxelHasAnalyticCarrier(float4 phase) { return (SmokeFroxelCarrierOwnership(phase) & NRI_SMOKE_FROXEL_CARRIER_ANALYTIC) != 0u; }
+bool SmokeFroxelHasDormantCarrier(float4 phase) { return (SmokeFroxelCarrierOwnership(phase) & NRI_SMOKE_FROXEL_CARRIER_DORMANT) != 0u; }
 
 StructuredBuffer<SmokeStyle> gSmokeStyles : register(t0, space0);
 StructuredBuffer<SmokeInjectionCommand> gSmokeCommands : register(t1, space0);
+StructuredBuffer<SmokeAnalyticCarrier> gSmokeAnalyticCarriers : register(t2, space0);
 
 RWStructuredBuffer<SmokeParticle> gSmokeParticles : register(u0, space1);
 RWStructuredBuffer<SmokeControl> gSmokeControl : register(u1, space1);
@@ -310,6 +392,23 @@ RWStructuredBuffer<SmokeGridScatterMetadata> gSmokeGridScatterMetadata : registe
 RWStructuredBuffer<uint> gSmokeGridScatterActive : register(u41, space1);
 RWStructuredBuffer<SmokeGridLightRecord> gSmokeGridLightSelfShadowCurrent : register(u42, space1);
 RWStructuredBuffer<SmokeGridLightRecord> gSmokeGridLightSelfShadowHistory : register(u43, space1);
+RWStructuredBuffer<SmokeGridLightSupportStamp> gSmokeGridLightSupportStamps : register(u44, space1);
+RWStructuredBuffer<uint2> gSmokeViewColumnMasks : register(u45, space1);
+RWStructuredBuffer<uint> gSmokeViewCompactIndices : register(u46, space1);
+RWStructuredBuffer<SmokeViewWorkControl> gSmokeViewWorkControl : register(u47, space1);
+RWStructuredBuffer<SmokePromptOutcome> gSmokePromptOutcomes : register(u48, space1);
+RWStructuredBuffer<SmokeAnalyticTileHeader> gSmokeAnalyticTileHeaders : register(u49, space1);
+RWStructuredBuffer<uint> gSmokeAnalyticTileIndices : register(u50, space1);
+RWStructuredBuffer<float4> gSmokeAnalyticFroxelMedium : register(u51, space1);
+RWStructuredBuffer<SmokeAnalyticEmissiveStorageRecord> gSmokeAnalyticEmissiveCurrent : register(u52, space1);
+RWStructuredBuffer<SmokeAnalyticEmissiveStorageRecord> gSmokeAnalyticEmissiveHistory : register(u53, space1);
+RWStructuredBuffer<SmokeDormantGridControl> gSmokeDormantControl : register(u54, space1);
+RWStructuredBuffer<SmokeDormantGridHashEntry> gSmokeDormantHash : register(u55, space1);
+RWStructuredBuffer<SmokeDormantGridRecord> gSmokeDormantRecords : register(u56, space1);
+RWStructuredBuffer<float4> gSmokeDormantScalar : register(u57, space1);
+RWStructuredBuffer<float4> gSmokeDormantVelocity : register(u58, space1);
+RWStructuredBuffer<float4> gSmokeDormantOptical : register(u59, space1);
+RWStructuredBuffer<float4> gSmokeDormantDynamics : register(u60, space1);
 
 Texture2D<float4> gSmokeSceneInput : register(t0, space2);
 Texture2D<float4> gSmokeViewZInput : register(t1, space2);

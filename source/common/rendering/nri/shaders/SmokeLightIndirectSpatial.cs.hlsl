@@ -74,5 +74,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	gSmokeIndirectHistory[froxelIndex] = outputRecord;
 	gSmokeFroxelSource[froxelIndex].rgb += medium.rgb * resolved *
 		(gSmokeConstants.IndirectScale * gSmokeConstants.RadianceScale);
+	uint metadata = SmokeFroxelMetadata(gSmokeFroxelSource[froxelIndex].w);
+	metadata = SmokeFroxelResolveRadiance(metadata, gSmokeConstants.SimulationEpoch,
+		NRI_SMOKE_FALLBACK_CACHED, age);
+	gSmokeFroxelSource[froxelIndex].w = SmokeFroxelMetadataValue(metadata);
 	if (diagnostics) InterlockedAdd(gSmokeControl[0].IndirectCacheResolved, 1u);
 }

@@ -23,6 +23,8 @@
 #define NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW 0x400u
 #define NRI_FLAG_TRACE_SHADER_STATS 0x800u
 #define NRI_FLAG_PROBABILISTIC_INDIRECT 0x1000u
+#define NRI_FLAG_INDIRECT_RADIANCE_CACHE 0x2000u
+#define NRI_FLAG_INDIRECT_RADIANCE_CACHE_ACCEPT 0x4000u
 #define NRI_TAA_JITTER_PHASE_COUNT 8u
 
 struct SectorLightHeaderData
@@ -199,5 +201,9 @@ NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gShadowPenumbraOutput, u
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gDirectLightingOutput, u, 13, SET_OUTPUTS);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gDirectEmissionOutput, u, 14, SET_OUTPUTS);
 RWStructuredBuffer<uint> gTraceShaderStats : register(u15, space4);
+
+#if defined(NRI_INDIRECT_RADIANCE_CACHE)
+#include "IndirectRadianceCache.hlsli"
+#endif
 
 #endif

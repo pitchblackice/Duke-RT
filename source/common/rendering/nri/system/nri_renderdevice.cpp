@@ -4573,6 +4573,26 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.voxelLocalSpaceInvariantUnknownSpaceActors,
 			shell.voxelLocalSpaceInvariantMaxBoundsCenterMagnitude,
 			shell.voxelLocalSpaceInvariantMaxBoundsAbs);
+		const auto& shaderObserver = shader.observer;
+		if (shader.valid || shaderObserver.copiesRequested != 0 || shaderObserver.pendingReadbackCount != 0)
+		{
+			Printf(
+				"PERF pt shader stats observer NRI: frame=%llu stats_frame=%llu valid=%u copies=%llu recorded=%llu busy=%llu no_fence=%llu published=%llu superseded=%llu abandoned=%llu map_fail=%llu pending=%u attribution_rows=%llu attribution_bytes=%llu\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				(unsigned long long)shader.frameNumber,
+				shader.valid ? 1u : 0u,
+				(unsigned long long)shaderObserver.copiesRequested,
+				(unsigned long long)shaderObserver.copiesRecorded,
+				(unsigned long long)shaderObserver.copiesDroppedBusy,
+				(unsigned long long)shaderObserver.copiesDroppedNoFence,
+				(unsigned long long)shaderObserver.readbacksPublished,
+				(unsigned long long)shaderObserver.readbacksSuperseded,
+				(unsigned long long)shaderObserver.readbacksAbandoned,
+				(unsigned long long)shaderObserver.readbackMapFailures,
+				shaderObserver.pendingReadbackCount,
+				(unsigned long long)shaderObserver.attributionRowsCopied,
+				(unsigned long long)shaderObserver.attributionBytesCopied);
+		}
 		if (shader.valid)
 		{
 			const auto& c = shader.counters;
@@ -9458,7 +9478,7 @@ bool NRIRenderDevice::CreateRenderResources()
 	poolDesc.textureMaxNum = 16384;
 	poolDesc.storageTextureMaxNum = 128;
 	poolDesc.structuredBufferMaxNum = 512;
-	poolDesc.storageStructuredBufferMaxNum = 256;
+	poolDesc.storageStructuredBufferMaxNum = 512;
 	poolDesc.accelerationStructureMaxNum = 16;
 
 	if (mCore.CreateDescriptorPool(*mDevice, poolDesc, mDescriptorPool) != nri::Result::SUCCESS)
@@ -9604,7 +9624,7 @@ bool NRIRenderDevice::BeginCommandList(const char* reason, bool waitForSlotReuse
 	mRecordingCommandFenceValue = success ? mNextCommandFenceValue++ : 0;
 	if (success && mGpuTiming != nullptr)
 	{
-		mGpuTiming->BeginSegment(mCore, *mCommandBuffer, mCurrentQueuedFrameIndex);
+		mGpuTiming->BeginSegment(mCore, *mCommandBuffer, mCurrentQueuedFrameIndex, mFrameIndex);
 	}
 	if (!success)
 	{

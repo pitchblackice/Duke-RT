@@ -26,6 +26,14 @@ enum class NRISmokePass : uint32_t
 	ResolveVolume,
 	TemporalVolume,
 	Composite,
+	EvaluateGridCompact,
+	PromptFallback,
+	AnalyticClear,
+	AnalyticBuildTiles,
+	AnalyticMaterialize,
+	AnalyticEmissiveBuild,
+	AnalyticEmissiveResolve,
+	Count,
 };
 
 struct NRISmokeParticleGpu
@@ -72,6 +80,19 @@ enum class NRISmokeInjectionShape : uint32_t
 	Rectangle = 1,
 };
 
+enum class NRISmokeInjectionSourceClass : uint32_t
+{
+	AmbientMap = 0,
+	InteractiveActor = 1,
+	InteractiveEvent = 2,
+	Diagnostic = 3,
+};
+
+constexpr uint32_t NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_SHIFT = 16u;
+constexpr uint32_t NRI_SMOKE_SOURCE_METADATA_PROMPT_SLOT_MASK = 0x000f0000u;
+constexpr uint32_t NRI_SMOKE_SOURCE_METADATA_PROMPT_ELIGIBLE = 0x00100000u;
+constexpr uint32_t NRI_SMOKE_SOURCE_METADATA_ANALYTIC_BRIDGE = 0x00200000u;
+
 struct NRISmokeInjectionCommandGpu
 {
 	float position[3] = {};
@@ -87,7 +108,13 @@ struct NRISmokeInjectionCommandGpu
 	float halfAxisU[3] = {};
 	uint32_t shape = static_cast<uint32_t>(NRISmokeInjectionShape::Sphere);
 	float halfAxisV[3] = {};
-	uint32_t padding[3] = {};
+	uint32_t sourceId = 0;
+	uint32_t sourceSlot = UINT32_MAX;
+	uint32_t sourceMetadata = 0;
+	uint32_t rangeBegin = 0;
+	uint32_t rangeCount = 0;
+	uint32_t pulseIdLow = 0;
+	uint32_t pulseIdHigh = 0;
 };
 
 struct NRISmokeControlGpu
@@ -236,6 +263,24 @@ struct NRISmokeControlGpu
 	uint32_t directHistoryResolved = 0;
 	uint32_t directHistoryClamps = 0;
 	uint32_t directNanRejects = 0;
+	uint32_t analyticLightBuildEvents = 0;
+	uint32_t analyticLightAnchorsBuilt = 0;
+	uint32_t analyticLightAnchorsValid = 0;
+	uint32_t analyticLightAnchorsInvalid = 0;
+	uint32_t analyticLightSamplesRequested = 0;
+	uint32_t analyticLightSamplesExecuted = 0;
+	uint32_t analyticLightEvaluations = 0;
+	uint32_t analyticLightBuildVisibilityRays = 0;
+	uint32_t analyticLightGridSeedHits = 0;
+	uint32_t analyticLightGridSeedMisses = 0;
+	uint32_t analyticLightApplyFroxelsTested = 0;
+	uint32_t analyticLightApplyFroxelsApplied = 0;
+	uint32_t analyticLightCarrierContributions = 0;
+	uint32_t analyticLightAnchorBlendTaps = 0;
+	uint32_t analyticLightGroupCacheHits = 0;
+	uint32_t analyticLightMissingGroupRecords = 0;
+	uint32_t analyticLightIdentityRejects = 0;
+	uint32_t analyticLightApplyVisibilityRays = 0;
 };
 
 struct NRISmokeIndirectCacheGpu
@@ -261,16 +306,31 @@ struct NRISmokeEmissiveStorageGpu
 	uint32_t data[12] = {};
 };
 
+struct NRISmokeAnalyticEmissiveStorageGpu
+{
+	// Four packed directional-lobe anchor records per analytic event are split
+	// evenly across the two persistent analytic emissive storage banks.
+	uint32_t data[16] = {};
+};
+
 static_assert(sizeof(NRISmokeParticleGpu) == 64);
 static_assert(sizeof(NRISmokeStyleGpu) == 80);
-static_assert(sizeof(NRISmokeInjectionCommandGpu) == 96);
+static_assert(sizeof(NRISmokeInjectionCommandGpu) == 112);
 static_assert(offsetof(NRISmokeInjectionCommandGpu, halfAxisU) == 56);
 static_assert(offsetof(NRISmokeInjectionCommandGpu, shape) == 68);
 static_assert(offsetof(NRISmokeInjectionCommandGpu, halfAxisV) == 72);
-static_assert(sizeof(NRISmokeControlGpu) == 568);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, sourceId) == 84);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, sourceSlot) == 88);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, sourceMetadata) == 92);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, rangeBegin) == 96);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, rangeCount) == 100);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, pulseIdLow) == 104);
+static_assert(offsetof(NRISmokeInjectionCommandGpu, pulseIdHigh) == 108);
+static_assert(sizeof(NRISmokeControlGpu) == 640);
 static_assert(sizeof(NRISmokeIndirectCacheGpu) == 32);
 static_assert(sizeof(NRISmokeDirectCacheGpu) == 40);
 static_assert(sizeof(NRISmokeEmissiveStorageGpu) == 48);
+static_assert(sizeof(NRISmokeAnalyticEmissiveStorageGpu) == 64);
 
 struct NRISmokeConstants
 {

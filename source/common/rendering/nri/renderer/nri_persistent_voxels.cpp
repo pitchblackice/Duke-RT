@@ -1,4 +1,5 @@
 #include "nri_persistent_voxels.h"
+#include "nri_persistent_voxel_geometry_arena_policy.h"
 #include "nri_persistent_voxel_pressure_policy.h"
 #include "nri_scene_instance_visibility.h"
 
@@ -18,6 +19,34 @@
 #include <cstring>
 #include <cmath>
 #include <limits>
+
+namespace
+{
+	std::unordered_set<uint64_t> CollectActivePersistentVoxelMaterialKeys(const PersistentVoxelBatch& batch)
+	{
+		std::unordered_set<uint64_t> keys;
+		keys.reserve(batch.actors.size());
+		for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+		{
+			if (actor.active && actor.materialKeyHash != 0)
+			{
+				keys.insert(actor.materialKeyHash);
+			}
+		}
+		return keys;
+	}
+
+	template<typename Services>
+	void RetirePersistentVoxelShadowProxy(
+		NRIVoxelShadowProxyResource& proxy,
+		const Services& services)
+	{
+		services.RetireBuffer(proxy.vertexBuffer);
+		services.RetireBuffer(proxy.indexBuffer);
+		services.RetireAccelerationStructure(proxy.accelerationStructure);
+		proxy = {};
+	}
+}
 
 const char* GetPersistentVoxelBakeSpaceName(nri_scene::VoxelMeshBakeSpace bakeSpace)
 {
@@ -790,6 +819,20 @@ bool NRIPersistentVoxelAccelerationServices::BarrierBuildInputs(const NRIBufferR
 	return barrierBuildInputs != nullptr && barrierBuildInputs(user, vertexBuffer, indexBuffer);
 }
 
+bool NRIPersistentVoxelAccelerationServices::EnsureStructuredBuffer(
+	NRIBufferResource& resource,
+	const void* data,
+	uint64_t size,
+	uint32_t stride,
+	nri::BufferUsageBits usage,
+	nri::AccessStage after,
+	const char* reason,
+	int uploadKind) const
+{
+	return ensureStructuredBuffer != nullptr &&
+		ensureStructuredBuffer(user, resource, data, size, stride, usage, after, reason, uploadKind);
+}
+
 void NRIPersistentVoxelBatchServices::BuildMaterials(
 	nri_scene::SceneView& sceneView,
 	nri_scene::MaterialBridgeData& materials,
@@ -927,6 +970,35 @@ uint64_t NRIPersistentVoxelTlasServices::GetAccelerationStructureHandle(const NR
 	return getAccelerationStructureHandle != nullptr ? getAccelerationStructureHandle(user, resource) : 0ull;
 }
 
+NRIVoxelRepresentationDecision NRIPersistentVoxelTlasServices::EvaluateRepresentation(
+	const NRIVoxelRepresentationFacts& facts) const
+{
+	if (evaluateRepresentation != nullptr)
+	{
+		return evaluateRepresentation(user, facts);
+	}
+
+	NRIVoxelRepresentationDecision decision = {};
+	decision.sourceIdentityKey = facts.sourceIdentityKey;
+	decision.meshResourceKey = facts.meshResourceKey;
+	decision.materialKeyHash = facts.materialKeyHash;
+	decision.actorIndex = facts.actorIndex;
+	decision.resolvedVoxelIndex = facts.resolvedVoxelIndex;
+	decision.primitiveCount = facts.primitiveCount;
+	decision.retainedFrameAge = facts.retainedFrameAge;
+	decision.requestedWorkloadMask = facts.workloadMask;
+	decision.exactWorkloadMask = facts.workloadMask;
+	decision.primaryWorkloadMask = (uint8_t)(facts.workloadMask & (uint8_t)NRI_TLAS_MASK_MAIN);
+	decision.shadowWorkloadMask = (uint8_t)(facts.workloadMask & (uint8_t)NRI_TLAS_MASK_SHADOW);
+	decision.reflectionWorkloadMask = (uint8_t)(facts.workloadMask & (uint8_t)NRI_TLAS_MASK_REFLECTION);
+	decision.giWorkloadMask = (uint8_t)(facts.workloadMask & (uint8_t)NRI_TLAS_MASK_GI);
+	decision.emissiveWorkloadMask = (uint8_t)(facts.workloadMask & (uint8_t)NRI_TLAS_MASK_EMISSIVE);
+	decision.debugWorkloadMask = (uint8_t)(facts.workloadMask & (uint8_t)NRI_TLAS_MASK_DEBUG);
+	decision.capturedThisFrame = facts.capturedThisFrame;
+	decision.routedThroughSharedBlas = facts.routedThroughSharedBlas;
+	return decision;
+}
+
 NRIPersistentVoxelOverlayStats NRIPersistentVoxelResidency::BuildOverlayStats() const
 {
 	NRIPersistentVoxelOverlayStats stats = {};
@@ -976,6 +1048,132 @@ bool NRIPersistentVoxelResidency::HasResidentIndirectOnlyActor(int32_t actorInde
 		}
 	}
 	return false;
+}
+
+bool NRIPersistentVoxelResidency::IsIndirectOnlyActorTlasAppendEligible(
+	int32_t actorIndex,
+	uint32_t frameIndex,
+	const NRIPersistentVoxelSettings& settings,
+	const NRIPersistentVoxelTlasServices& services) const
+{
+	if (actorIndex < 0 || !batch.valid)
+	{
+		return false;
+	}
+
+	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	{
+		if (actor.active && actor.indirectOnly && actor.actorIndex == actorIndex &&
+			IsActorTlasAppendEligible(actor, frameIndex, settings, services))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool NRIPersistentVoxelResidency::HasOverlayPreparationEligibleActor(
+	const NRIPersistentVoxelSettings& settings) const
+{
+	if (!batch.valid)
+	{
+		return false;
+	}
+
+	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	{
+		if (actor.active && IsActorOverlayPreparationEligible(actor, settings))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool NRIPersistentVoxelResidency::IsActorTlasAppendEligible(
+	const PersistentVoxelBatch::ActorEntry& actor,
+	uint32_t frameIndex,
+	const NRIPersistentVoxelSettings& settings,
+	const NRIPersistentVoxelTlasServices& services) const
+{
+	if (services.getAccelerationStructureHandle == nullptr ||
+		!IsActorOverlayPreparationEligible(actor, settings))
+	{
+		return false;
+	}
+
+	const PersistentVoxelMeshVariantResource& mesh = meshVariantResources.find(actor.meshResourceKey)->second;
+	if (mesh.accelerationStructure.accelerationStructure == nullptr ||
+		vertexBuffer.shaderView == nullptr ||
+		indexBuffer.shaderView == nullptr ||
+		primitiveBuffer.shaderView == nullptr ||
+		materialBuffer.shaderView == nullptr)
+	{
+		return false;
+	}
+	return
+		(mesh.tlasPublished || mesh.tlasReadyFrame <= frameIndex) &&
+		services.GetAccelerationStructureHandle(mesh.accelerationStructure) != 0;
+}
+
+bool NRIPersistentVoxelResidency::IsActorOverlayPreparationEligible(
+	const PersistentVoxelBatch::ActorEntry& actor,
+	const NRIPersistentVoxelSettings& settings) const
+{
+	if (settings.omitTlasOccurrences ||
+			(actor.resolvedVoxelIndex >= 0 &&
+				(actor.resolvedVoxelIndex == settings.excludeIndices[0] ||
+				 actor.resolvedVoxelIndex == settings.excludeIndices[1] ||
+				 actor.resolvedVoxelIndex == settings.excludeIndices[2])) ||
+		(settings.excludeMinPrimitives > 0 && actor.primitiveCount >= settings.excludeMinPrimitives))
+	{
+		return false;
+	}
+
+	const auto meshIt = meshVariantResources.find(actor.meshResourceKey);
+	const auto materialIt = materialVariantResources.find(actor.materialKeyHash);
+	if (meshIt == meshVariantResources.end() || materialIt == materialVariantResources.end())
+	{
+		return false;
+	}
+	const PersistentVoxelMeshVariantResource& mesh = meshIt->second;
+	const PersistentVoxelMaterialVariantResource& material = materialIt->second;
+	if (!materialRangeAllocator.Owns(PersistentVoxelMaterialRangeHandle(material)) ||
+		!PersistentVoxelMaterialRangeMatches(actor, material) ||
+		(!mesh.directComputePublished &&
+			(mesh.indexBuffer.shaderView == nullptr || mesh.vertexBuffer.shaderView == nullptr)))
+	{
+		return false;
+	}
+	const bool primitiveRangeValid =
+		(uint64_t)actor.primitiveOffset + (uint64_t)actor.primitiveCount <= (uint64_t)arenaPrimitiveCursor;
+	const bool materialRangeValid =
+		(uint64_t)actor.materialOffset + (uint64_t)actor.materialCount <= materialRangeAllocator.Stats().cursorRows;
+	const bool publishedMaterialRangeValid =
+		(uint64_t)actor.materialOffset + (uint64_t)actor.materialCount <= batch.materialBridge.materials.size();
+	const bool meshRangeMatches =
+		actor.primitiveOffset == mesh.primitiveOffset &&
+		actor.primitiveCount == mesh.primitiveCount &&
+		actor.indexOffset == mesh.indexOffset &&
+		actor.indexCount == mesh.indexCount;
+	const auto transformFinite = [](const std::array<float, 12>& transform)
+	{
+		for (float value : transform)
+		{
+			if (!std::isfinite(value))
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	return
+		primitiveRangeValid &&
+		materialRangeValid &&
+		publishedMaterialRangeValid &&
+		meshRangeMatches &&
+		transformFinite(actor.instanceTransform) &&
+		transformFinite(actor.previousInstanceTransform);
 }
 
 bool NRIPersistentVoxelResidency::HasPreloadPending() const
@@ -1040,7 +1238,7 @@ uint64_t NRIPersistentVoxelResidency::BuildSceneGenerationHash() const
 				(uint64_t)batch.activeActorCount),
 			(uint64_t)batch.primitiveCount),
 		(uint64_t)batch.materialCount),
-		batchMaterialResourceGeneration);
+		batchMaterialPublicationGeneration);
 }
 
 bool NRIPersistentVoxelResidency::PublishCanonicalMaterialResource(
@@ -1111,15 +1309,18 @@ void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge(PersistentVoxelBatc
 	const uint32_t materialCursor = materialRangeAllocator.Stats().cursorRows;
 	targetBatch.materialBridge.materials.reserve(materialCursor);
 	targetBatch.materialBridge.lightMetadata.reserve(materialCursor);
+	const std::unordered_set<uint64_t> activeMaterialKeys =
+		CollectActivePersistentVoxelMaterialKeys(targetBatch);
 	std::unordered_map<uint64_t, uint32_t> textureLookup;
-	textureLookup.reserve(targetBatch.materialBridge.textures.capacity() + materialVariantResources.size());
+	textureLookup.reserve(targetBatch.materialBridge.textures.capacity() + activeMaterialKeys.size());
 	std::vector<PersistentVoxelMaterialVariantResource*> materialResources;
-	materialResources.reserve(materialVariantResources.size());
-	for (auto& pair : materialVariantResources)
+	materialResources.reserve(activeMaterialKeys.size());
+	for (uint64_t materialKey : activeMaterialKeys)
 	{
-		if (pair.second.materialCount > 0)
+		auto resourceIt = materialVariantResources.find(materialKey);
+		if (resourceIt != materialVariantResources.end() && resourceIt->second.materialCount > 0)
 		{
-			materialResources.push_back(&pair.second);
+			materialResources.push_back(&resourceIt->second);
 		}
 	}
 	std::sort(
@@ -1190,18 +1391,20 @@ void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge(PersistentVoxelBatc
 	if (!NRIPersistentVoxelMaterialTextureLayoutPreservesPrefix(uploadedMaterialTextureKeys, rebuiltTextureKeys))
 	{
 		pendingMaterialLayoutInvalidatedResources = 0;
-		for (auto& pair : materialVariantResources)
+		for (uint64_t materialKey : activeMaterialKeys)
 		{
-			if (pair.second.materialCount == 0)
+			auto resourceIt = materialVariantResources.find(materialKey);
+			if (resourceIt == materialVariantResources.end() || resourceIt->second.materialCount == 0)
 			{
 				continue;
 			}
-			pair.second.materialUploadHash = 0;
-			dirtyMaterialResourceKeys.insert(pair.first);
+			resourceIt->second.materialUploadHash = 0;
+			dirtyMaterialResourceKeys.insert(materialKey);
 			pendingMaterialLayoutInvalidatedResources++;
 		}
 	}
 	batchMaterialResourceGeneration = materialResourceGeneration;
+	batchMaterialPublicationGeneration++;
 }
 
 void NRIPersistentVoxelResidency::RecomputeBatchState(PersistentVoxelBatch& targetBatch) const
@@ -1520,20 +1723,24 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 		}
 		activeMaterialKeys.insert(actor.materialKeyHash);
 	}
-	if (validateActiveMaterialPayloads)
+	if (validateActiveMaterialPayloads ||
+		uploadedMaterialPublicationGeneration != batchMaterialPublicationGeneration)
 	{
 		dirtyMaterialResourceKeys.insert(activeMaterialKeys.begin(), activeMaterialKeys.end());
+	}
+	for (auto dirtyIt = dirtyMaterialResourceKeys.begin(); dirtyIt != dirtyMaterialResourceKeys.end(); )
+	{
+		if (activeMaterialKeys.find(*dirtyIt) == activeMaterialKeys.end())
+		{
+			dirtyIt = dirtyMaterialResourceKeys.erase(dirtyIt);
+			continue;
+		}
+		++dirtyIt;
 	}
 	if (dirtyMaterialResourceKeys.empty() &&
 		(materialBuffer.buffer == nullptr || uploadedMaterialResourceGeneration != materialResourceGeneration))
 	{
-		for (const auto& pair : materialVariantResources)
-		{
-			if (pair.second.materialCount != 0)
-			{
-				dirtyMaterialResourceKeys.insert(pair.first);
-			}
-		}
+		dirtyMaterialResourceKeys.insert(activeMaterialKeys.begin(), activeMaterialKeys.end());
 	}
 	outStats.activeValidatedResources = (uint32_t)activeMaterialKeys.size();
 	if (uploadedMaterialResourceGeneration == materialResourceGeneration && materialBuffer.buffer != nullptr)
@@ -1624,17 +1831,19 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 		{
 			dirtyMaterialResourceKeys.erase(materialKey);
 		}
-		if (dirtyMaterialResourceKeys.empty())
+		if (!dirtyMaterialResourceKeys.empty())
 		{
-			uploadedMaterialResourceGeneration = materialResourceGeneration;
-			pendingMaterialLayoutInvalidatedResources = 0;
-			pendingMaterialActorRebinds = 0;
-			uploadedMaterialTextureKeys.clear();
-			uploadedMaterialTextureKeys.reserve(batch.materialBridge.textures.size());
-			for (const nri_scene::TextureUpload& texture : batch.materialBridge.textures)
-			{
-				uploadedMaterialTextureKeys.push_back(texture.key);
-			}
+			return false;
+		}
+		uploadedMaterialResourceGeneration = materialResourceGeneration;
+		uploadedMaterialPublicationGeneration = batchMaterialPublicationGeneration;
+		pendingMaterialLayoutInvalidatedResources = 0;
+		pendingMaterialActorRebinds = 0;
+		uploadedMaterialTextureKeys.clear();
+		uploadedMaterialTextureKeys.reserve(batch.materialBridge.textures.size());
+		for (const nri_scene::TextureUpload& texture : batch.materialBridge.textures)
+		{
+			uploadedMaterialTextureKeys.push_back(texture.key);
 		}
 		return true;
 	}
@@ -1732,9 +1941,14 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 	{
 		dirtyMaterialResourceKeys.erase(materialKey);
 	}
+	if (!dirtyMaterialResourceKeys.empty())
+	{
+		return false;
+	}
 	if (dirtyMaterialResourceKeys.empty())
 	{
 		uploadedMaterialResourceGeneration = materialResourceGeneration;
+		uploadedMaterialPublicationGeneration = batchMaterialPublicationGeneration;
 		pendingMaterialLayoutInvalidatedResources = 0;
 		pendingMaterialActorRebinds = 0;
 		uploadedMaterialTextureKeys.clear();
@@ -2347,23 +2561,35 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 		}
 	}
 	NRIRaySceneBuilder raySceneBuilder(instances, sceneInstances);
+	struct PendingShadowProxyInstance
+	{
+		nri::TopLevelInstance instance = {};
+		SceneInstanceData scene = {};
+		uint64_t actorIdentityKey = 0;
+		uint64_t meshResourceKey = 0;
+		uint32_t exactPrimitiveCount = 0;
+		uint32_t proxyPrimitiveCount = 0;
+	};
+	std::vector<PendingShadowProxyInstance> pendingShadowProxyInstances;
+	pendingShadowProxyInstances.reserve(persistentVoxelTlasActors.size());
 	for (PersistentVoxelBatch::ActorEntry* actorPtr : persistentVoxelTlasActors)
 	{
 		PersistentVoxelBatch::ActorEntry& actor = *actorPtr;
 		persistentVoxelTlasCandidateCount++;
+		const bool omittedByDiagnostic = settings.omitTlasOccurrences;
 		const bool excludedByIndex = actor.resolvedVoxelIndex >= 0 &&
 			(actor.resolvedVoxelIndex == persistentVoxelExcludeIndex0 ||
 				actor.resolvedVoxelIndex == persistentVoxelExcludeIndex1 ||
 				actor.resolvedVoxelIndex == persistentVoxelExcludeIndex2);
 		const bool excludedByPrimitiveCount = persistentVoxelExcludeMinPrims > 0 &&
 			actor.primitiveCount >= persistentVoxelExcludeMinPrims;
-		if (excludedByIndex || excludedByPrimitiveCount)
+		if (omittedByDiagnostic || excludedByIndex || excludedByPrimitiveCount)
 		{
 			if (voxelStatsEnabled)
 			{
 				Printf("PERF pt voxel tlas NRI: frame=%u action=skip reason=%s actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx voxel=%d instance_id=%u primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u blas=0 tlas_ready=0 tlas_published=0 ready=0\n",
 					frameIndex,
-					excludedByIndex ? "excluded-index" : "excluded-prims",
+					omittedByDiagnostic ? "diagnostic-omit-all" : (excludedByIndex ? "excluded-index" : "excluded-prims"),
 					(unsigned long long)actor.identityKey,
 					(unsigned long long)actor.meshResourceKey,
 					(unsigned long long)actor.meshKeyHash,
@@ -2580,6 +2806,86 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			persistentVoxelTlasMissingSkipPrimitiveCount += actor.primitiveCount;
 			continue;
 		}
+
+		NRIVoxelRepresentationFacts representationFacts = {};
+		representationFacts.sourceIdentityKey = actor.identityKey;
+		representationFacts.meshResourceKey = actor.meshResourceKey;
+		representationFacts.materialKeyHash = actor.materialKeyHash;
+		representationFacts.actorIndex = actor.actorIndex;
+		representationFacts.resolvedVoxelIndex = actor.resolvedVoxelIndex;
+		representationFacts.primitiveCount = actor.primitiveCount;
+		representationFacts.retainedFrameAge = actorRetainedFrameAge;
+		representationFacts.workloadMask = (uint8_t)persistentVoxelInstance.mask;
+		representationFacts.capturedThisFrame = actor.capturedThisFrame;
+		representationFacts.routedThroughSharedBlas = routedThroughSharedBlas;
+		representationFacts.boundsValid = meshResourceIt->second.boundsValid;
+		NRIVoxelShadowProxyRejectReason shadowProxyMaterialReason = NRIVoxelShadowProxyRejectReason::None;
+		const NRIVoxelShadowProxyResource& shadowProxy = meshResourceIt->second.shadowProxy;
+		const bool shadowProxyMaterialCertified =
+			settings.shadowProxyRouteEnabled &&
+			shadowProxy.state == NRIVoxelShadowProxyResourceState::Resident &&
+			CertifyNRIVoxelShadowProxyMaterialClosure(
+				materialResourceIt->second.materialBridge,
+				!actor.lightRecords.empty(),
+				shadowProxyMaterialReason);
+		const bool shadowProxyResourceCompatible =
+			settings.shadowProxyRouteEnabled &&
+			meshResourceIt->second.meshBakeSpace == nri_scene::VoxelMeshBakeSpace::LocalSpace &&
+			meshResourceIt->second.shadowProxyPrimitiveSemanticsCertified &&
+			shadowProxy.state == NRIVoxelShadowProxyResourceState::Resident &&
+			shadowProxy.accelerationStructure.accelerationStructure != nullptr &&
+			shadowProxy.readyFrame <= frameIndex &&
+			shadowProxy.sourceModel == meshResourceIt->second.sourceModel &&
+			shadowProxy.geometrySignature == meshResourceIt->second.geometrySignature &&
+			shadowProxy.exactPrimitiveCount == actor.primitiveCount &&
+			shadowProxy.proxyPrimitiveCount != 0u &&
+			shadowProxy.proxyPrimitiveCount <= actor.primitiveCount &&
+			IsNRIVoxelShadowProxyTransformValid(actor.instanceTransform) &&
+			IsNRIVoxelShadowProxyTransformValid(actor.previousInstanceTransform);
+		const uint64_t shadowProxyHandle = shadowProxyResourceCompatible && shadowProxyMaterialCertified ?
+			services.GetAccelerationStructureHandle(shadowProxy.accelerationStructure) : 0ull;
+		representationFacts.shadowProxyCertified = shadowProxyResourceCompatible && shadowProxyMaterialCertified;
+		representationFacts.shadowProxyReady = representationFacts.shadowProxyCertified && shadowProxyHandle != 0ull;
+		representationFacts.shadowProxyPrimitiveCount = shadowProxy.proxyPrimitiveCount;
+		uint64_t shadowProxyCompatibilityKey = nri_scene::HashCombine64(
+			shadowProxy.sourceArchiveSerial, shadowProxy.sourceContentHash);
+		shadowProxyCompatibilityKey = nri_scene::HashCombine64(shadowProxyCompatibilityKey, shadowProxy.geometrySignature);
+		shadowProxyCompatibilityKey = nri_scene::HashCombine64(shadowProxyCompatibilityKey, materialResourceIt->second.materialSignature);
+		shadowProxyCompatibilityKey = nri_scene::HashCombine64(shadowProxyCompatibilityKey, actor.materialSlotGeneration);
+		representationFacts.shadowProxyCompatibilityKey = shadowProxyCompatibilityKey;
+		for (uint32_t axis = 0u; axis < 3u; ++axis)
+		{
+			representationFacts.boundsMin[axis] = meshResourceIt->second.boundsMin[axis];
+			representationFacts.boundsMax[axis] = meshResourceIt->second.boundsMax[axis];
+		}
+		representationFacts.transform = actor.instanceTransform;
+		const NRIVoxelRepresentationDecision representationDecision =
+			services.EvaluateRepresentation(representationFacts);
+		const bool proxyMaskContract =
+			(representationDecision.proxyWorkloadMask & ~(uint8_t)NRI_TLAS_MASK_SHADOW) == 0u &&
+			(representationDecision.exactWorkloadMask & representationDecision.proxyWorkloadMask) == 0u &&
+			(uint8_t)(representationDecision.exactWorkloadMask | representationDecision.proxyWorkloadMask) == representationFacts.workloadMask;
+		const bool canUseShadowProxy =
+			representationDecision.representation == NRIVoxelRepresentationKind::ExactWithCertifiedShadowProxy &&
+			representationFacts.shadowProxyReady &&
+			representationDecision.proxyWorkloadMask != 0u &&
+			proxyMaskContract;
+		const uint8_t exactWorkloadMask = canUseShadowProxy ?
+			representationDecision.exactWorkloadMask : representationFacts.workloadMask;
+		const uint8_t proxyWorkloadMask = canUseShadowProxy ?
+			representationDecision.proxyWorkloadMask : 0u;
+		if (representationDecision.representation != NRIVoxelRepresentationKind::Exact && !canUseShadowProxy && voxelStatsEnabled)
+		{
+			Printf("PERF pt voxel representation invariant NRI: frame=%u actor_key=0x%llx actor=%d requested_mask=0x%x exact_mask=0x%x proxy_mask=0x%x representation=%s action=force-exact reason=proxy-contract\n",
+				frameIndex,
+				(unsigned long long)actor.identityKey,
+				actor.actorIndex,
+				(uint32_t)representationFacts.workloadMask,
+				(uint32_t)representationDecision.exactWorkloadMask,
+				(uint32_t)representationDecision.proxyWorkloadMask,
+				GetNRIVoxelRepresentationKindName(representationDecision.representation));
+		}
+		persistentVoxelInstance.mask = exactWorkloadMask;
 		SceneInstanceData sceneInstance = {};
 		sceneInstance.primitiveBase = actor.primitiveOffset;
 		sceneInstance.dataSource = PersistentVoxelSceneDataSource;
@@ -2600,11 +2906,27 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 		}
 		persistentVoxelInstance.instanceId = raySceneBuilder.AddLegacyInstance(persistentVoxelInstance, sceneInstance);
 		actor.worldTlasInstanceIndex = persistentVoxelInstance.instanceId;
+		if (proxyWorkloadMask != 0u)
+		{
+			PendingShadowProxyInstance pending = {};
+			pending.instance = persistentVoxelInstance;
+			pending.instance.mask = proxyWorkloadMask;
+			pending.instance.accelerationStructureHandle = shadowProxyHandle;
+			pending.scene = sceneInstance;
+			pending.scene.visibilityChunk = EncodeNRIVoxelShadowProxyVisibility(shadowProxy.proxyPrimitiveCount);
+			pending.actorIdentityKey = actor.identityKey;
+			pending.meshResourceKey = actor.meshResourceKey;
+			pending.exactPrimitiveCount = actor.primitiveCount;
+			pending.proxyPrimitiveCount = shadowProxy.proxyPrimitiveCount;
+			pendingShadowProxyInstances.push_back(pending);
+		}
 		if (actor.indirectOnly && ((int)perf_looptraceframes > 0 || (int)nri_pttraceframes > 0 || voxelStatsEnabled))
 		{
-			Printf("PERF pt local player voxel instance NRI: frame=%u actor=%d actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx material_key=0x%llx instance_id=%u mask=0x%x metadata=0x%x primary_visible=%u captured=%u retained_age=%llu blas=1\n",
+			Printf("PERF pt local player voxel instance NRI: frame=%u actor=%d voxel=%d prims=%u actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx material_key=0x%llx instance_id=%u mask=0x%x metadata=0x%x primary_visible=%u captured=%u retained_age=%llu blas=1\n",
 				frameIndex,
 				actor.actorIndex,
+				actor.resolvedVoxelIndex,
+				actor.primitiveCount,
 				(unsigned long long)actor.identityKey,
 				(unsigned long long)actor.meshResourceKey,
 				(unsigned long long)actor.meshKeyHash,
@@ -2768,10 +3090,41 @@ bool NRIPersistentVoxelResidency::AppendTlasInstances(
 			}
 		}
 		outStats.instanceCount++;
+		outStats.instancePrimitiveCount += actor.primitiveCount;
 		if (meshResourceIt->second.meshBakeSpace != nri_scene::VoxelMeshBakeSpace::LocalSpace)
 		{
 			outStats.bakedFallbackInstanceCount++;
 		}
+	}
+	for (PendingShadowProxyInstance& pending : pendingShadowProxyInstances)
+	{
+		pending.instance.instanceId = raySceneBuilder.AddLegacyInstance(pending.instance, pending.scene);
+		outStats.instanceCount++;
+		outStats.instancePrimitiveCount += pending.proxyPrimitiveCount;
+		outStats.shadowProxyInstanceCount++;
+		outStats.shadowProxyPrimitiveCount += pending.proxyPrimitiveCount;
+		outStats.exactShadowPrimitiveCountRemoved += pending.exactPrimitiveCount;
+		if (voxelStatsEnabled)
+		{
+			Printf("PERF pt voxel shadow proxy NRI: frame=%u action=route actor_key=0x%llx mesh_resource=0x%llx instance_id=%u mask=0x%x exact_prims=%u proxy_prims=%u visibility=0x%x\n",
+				frameIndex,
+				(unsigned long long)pending.actorIdentityKey,
+				(unsigned long long)pending.meshResourceKey,
+				pending.instance.instanceId,
+				(uint32_t)pending.instance.mask,
+				pending.exactPrimitiveCount,
+				pending.proxyPrimitiveCount,
+				pending.scene.visibilityChunk);
+		}
+	}
+	if (settings.diagnosticsEnabled)
+	{
+		Printf("PERF pt voxel shadow proxy route NRI: frame=%u enabled=%u routed_instances=%u routed_prims=%llu exact_shadow_prims_removed=%llu pending_tail=%u\n",
+			frameIndex, settings.shadowProxyRouteEnabled ? 1u : 0u,
+			outStats.shadowProxyInstanceCount,
+			(unsigned long long)outStats.shadowProxyPrimitiveCount,
+			(unsigned long long)outStats.exactShadowPrimitiveCountRemoved,
+			(uint32_t)pendingShadowProxyInstances.size());
 	}
 	outStats.sharedMeshResourceCount = (uint32_t)persistentVoxelTlasMeshResources.size();
 	sharedBlasCache.EndFrame();
@@ -3081,6 +3434,12 @@ NRIPersistentVoxelMemoryUsage NRIPersistentVoxelResidency::GetMemoryUsage() cons
 		accumulateBuffer(pair.second.vertexBuffer, usage.sceneBufferBytes);
 		accumulateBuffer(pair.second.indexBuffer, usage.sceneBufferBytes);
 		accumulateAs(pair.second.accelerationStructure, usage.accelerationStructureBytes);
+		usage.shadowProxyVertexBytes += pair.second.shadowProxy.vertexBuffer.memorySize;
+		usage.shadowProxyIndexBytes += pair.second.shadowProxy.indexBuffer.memorySize;
+		usage.shadowProxyBlasBytes += pair.second.shadowProxy.accelerationStructure.memorySize;
+		accumulateBuffer(pair.second.shadowProxy.vertexBuffer, usage.sceneBufferBytes);
+		accumulateBuffer(pair.second.shadowProxy.indexBuffer, usage.sceneBufferBytes);
+		accumulateAs(pair.second.shadowProxy.accelerationStructure, usage.accelerationStructureBytes);
 	}
 	for (const auto& pair : materialVariantResources)
 	{
@@ -3198,6 +3557,16 @@ void NRIPersistentVoxelResidency::FillResourceStatusSnapshot(NRIPersistentVoxelS
 	{
 		const PersistentVoxelMeshVariantResource& resource = meshPair.second;
 		snapshot.residentResourceBytes += resource.residentBytes;
+		if (resource.shadowProxy.state == NRIVoxelShadowProxyResourceState::Resident)
+		{
+			snapshot.shadowProxyResidentCount++;
+			snapshot.shadowProxyPrimitiveCount += resource.shadowProxy.proxyPrimitiveCount;
+			snapshot.shadowProxyResidentBytes += resource.shadowProxy.residentBytes;
+		}
+		else if (resource.shadowProxy.state == NRIVoxelShadowProxyResourceState::Failed)
+		{
+			snapshot.shadowProxyFailedCount++;
+		}
 		if (resource.activeActorReferences == 0)
 		{
 			snapshot.zeroRefMeshResourceCount++;
@@ -3360,7 +3729,10 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 		resource.residentBytes =
 			resource.vertexBuffer.memorySize +
 			resource.indexBuffer.memorySize +
-			resource.accelerationStructure.memorySize;
+			resource.accelerationStructure.memorySize +
+			resource.shadowProxy.vertexBuffer.memorySize +
+			resource.shadowProxy.indexBuffer.memorySize +
+			resource.shadowProxy.accelerationStructure.memorySize;
 		voxelResidentBytes += resource.residentBytes;
 		if (resource.cold)
 		{
@@ -3493,6 +3865,7 @@ void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 		services.RetireBuffer(resource.vertexBuffer);
 		services.RetireBuffer(resource.indexBuffer);
 		services.RetireAccelerationStructure(resource.accelerationStructure);
+		RetirePersistentVoxelShadowProxy(resource.shadowProxy, services);
 		for (auto instIt = instances.begin(); instIt != instances.end(); )
 		{
 			if (instIt->second.meshResourceKey == candidate.key)
@@ -4668,6 +5041,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			services.RetireBuffer(existingMeshIt->second.vertexBuffer);
 			services.RetireBuffer(existingMeshIt->second.indexBuffer);
 			services.RetireAccelerationStructure(existingMeshIt->second.accelerationStructure);
+			RetirePersistentVoxelShadowProxy(existingMeshIt->second.shadowProxy, services);
 		}
 		entry.uploadMaterialResource.lastUsedFrame = frameIndex;
 		entry.uploadMaterialResource.sourceBits |= entry.sourceBits;
@@ -4886,6 +5260,8 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 			else
 			{
 				meshResource.resourceKey = meshResourceKey;
+				meshResource.sourceModel = variant.model;
+				meshResource.shadowProxyPrimitiveSemanticsCertified = true; // VoxelComputeEmit contract: flags=0, portal=invalid.
 				meshResource.meshKeyHash = variant.meshKeyHash;
 				meshResource.geometrySignature = ResolvePersistentVoxelVariantGeometrySignature(variant);
 				meshResource.geometryContentHash = variant.geometryContentHash;
@@ -5315,7 +5691,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 				return true;
 			}
 			const uint32_t maxDirectJobs = computeMaxJobs;
-			const uint32_t queuedDirectJobs = GetNRIVoxelComputeMemoryUsage().queuedJobCount;
+			const uint32_t queuedDirectJobs = GetNRIVoxelComputeQueuedJobCount();
 			if (maxDirectJobs != 0 && queuedDirectJobs >= maxDirectJobs)
 			{
 				entry.state = PersistentVoxelAdmissionState::Pending;
@@ -5645,6 +6021,9 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		}
 
 		meshResource.resourceKey = meshResourceKey;
+		meshResource.sourceModel = variant.model;
+		meshResource.shadowProxyPrimitiveSemanticsCertified =
+			CertifyNRIVoxelShadowProxyPrimitiveSemantics(entry.uploadGeometry.primitives, 1u);
 		meshResource.meshKeyHash = variant.meshKeyHash;
 		meshResource.geometrySignature = ResolvePersistentVoxelVariantGeometrySignature(variant);
 		meshResource.geometryContentHash = variant.geometryContentHash;
@@ -5856,6 +6235,7 @@ bool NRIPersistentVoxelResidency::AdmitVariantResource(
 		services.RetireBuffer(existingMeshIt->second.vertexBuffer);
 		services.RetireBuffer(existingMeshIt->second.indexBuffer);
 		services.RetireAccelerationStructure(existingMeshIt->second.accelerationStructure);
+		RetirePersistentVoxelShadowProxy(existingMeshIt->second.shadowProxy, services);
 	}
 	entry.uploadMeshResource.residentBytes =
 		entry.uploadMeshResource.vertexBuffer.memorySize +
@@ -7107,7 +7487,11 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 			if (meshResourceChanged)
 			{
 				batchServices.RetireAccelerationStructure(meshResource.accelerationStructure);
+				RetirePersistentVoxelShadowProxy(meshResource.shadowProxy, resetServices);
 				meshResource.resourceKey = meshResourceKey;
+				meshResource.sourceModel = cacheEntry.model;
+				meshResource.shadowProxyPrimitiveSemanticsCertified =
+					CertifyNRIVoxelShadowProxyPrimitiveSemantics(actorGeometry.primitives, materialResource.materialCount);
 				meshResource.meshKeyHash = cacheEntry.meshKeyHash;
 				meshResource.geometrySignature = ResolvePersistentVoxelCacheEntryGeometrySignature(cacheEntry);
 				meshResource.geometryContentHash = cacheEntry.geometryContentHash;
@@ -7389,6 +7773,8 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 
 	if (batch.valid)
 	{
+		const std::unordered_set<uint64_t> previousActiveMaterialKeys =
+			CollectActivePersistentVoxelMaterialKeys(batch);
 		batch.actors.reserve(batch.actors.size() + cacheEntries.size());
 		std::unordered_map<uint64_t, PersistentVoxelBatch::ActorEntry*> existingActors;
 		existingActors.reserve(batch.actors.size());
@@ -7692,7 +8078,10 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				}
 			}
 		}
-		if (batchMaterialResourceGeneration != materialResourceGeneration)
+		const std::unordered_set<uint64_t> currentActiveMaterialKeys =
+			CollectActivePersistentVoxelMaterialKeys(batch);
+		if (batchMaterialResourceGeneration != materialResourceGeneration ||
+			previousActiveMaterialKeys != currentActiveMaterialKeys)
 		{
 			PersistentVoxelScopedTimer perfTimer(outStats.persistentVoxelBatchMaterialBridgeMs);
 			RebuildBatchMaterialBridge(batch);
@@ -7912,7 +8301,7 @@ bool NRIPersistentVoxelResidency::BuildAccelerationStructures(
 			{
 				if (!meshResource.tlasPublished && meshResource.tlasReadyFrame == 0)
 				{
-					meshResource.tlasReadyFrame = loadingWarmupActive ? frameIndex : frameIndex + 1u;
+					meshResource.tlasReadyFrame = frameIndex;
 				}
 				if (voxelStatsEnabled || (int)nri_ptvoxelcomputetrace > 0)
 				{
@@ -8028,8 +8417,191 @@ bool NRIPersistentVoxelResidency::BuildAccelerationStructures(
 		maybeBuildSharedBlas(actor, meshResource);
 	}
 
+	uint32_t shadowProxyBuildsThisFrame = 0;
+	std::unordered_set<uint64_t> consideredShadowProxyKeys;
+	consideredShadowProxyKeys.reserve(batch.actors.size());
+	if (settings.shadowProxyBuildEnabled && settings.shadowProxyBuildsPerFrame != 0u)
+	{
+		for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+		{
+			if (!actor.active || actor.meshResourceKey == 0)
+			{
+				continue;
+			}
+			auto meshIt = meshVariantResources.find(actor.meshResourceKey);
+			if (meshIt == meshVariantResources.end()) continue;
+			PersistentVoxelMeshVariantResource& mesh = meshIt->second;
+			NRIVoxelShadowProxyResource& proxy = mesh.shadowProxy;
+			if (proxy.state == NRIVoxelShadowProxyResourceState::Resident ||
+				proxy.state == NRIVoxelShadowProxyResourceState::Failed)
+			{
+				continue;
+			}
+			NRIVoxelShadowProxyRejectReason materialReason = NRIVoxelShadowProxyRejectReason::None;
+			const bool occurrenceCertified = CertifyNRIVoxelShadowProxyMaterialClosure(
+				actor.materialBridge, !actor.lightRecords.empty(), materialReason);
+			if (!occurrenceCertified)
+			{
+				outStats.shadowProxy.materialRejects++;
+				continue;
+			}
+			if (mesh.meshBakeSpace != nri_scene::VoxelMeshBakeSpace::LocalSpace ||
+				!mesh.shadowProxyPrimitiveSemanticsCertified || mesh.sourceModel == nullptr)
+			{
+				outStats.shadowProxy.geometryRejects++;
+				continue;
+			}
+			if (mesh.accelerationStructure.accelerationStructure == nullptr)
+			{
+				outStats.shadowProxy.resourceRejects++;
+				continue;
+			}
+			if (!consideredShadowProxyKeys.insert(actor.meshResourceKey).second)
+			{
+				continue;
+			}
+			outStats.shadowProxy.candidates++;
+			if (shadowProxyBuildsThisFrame >= settings.shadowProxyBuildsPerFrame)
+			{
+				continue;
+			}
+			if (proxy.firstRequestFrame == UINT32_MAX) proxy.firstRequestFrame = frameIndex;
+
+			NRIVoxelComputeRawSourceArchiveSnapshot source = {};
+			if (!CopyNRIVoxelComputeRawSourceArchiveSnapshot(mesh.sourceModel, source))
+			{
+				outStats.shadowProxy.archiveMisses++;
+				continue; // Archive production is owned by ordinary voxel loading; never re-decode here.
+			}
+			outStats.shadowProxy.archiveHits++;
+			if (source.exactPrimitiveCount != mesh.primitiveCount ||
+				(mesh.directComputeSourceArchiveSerial != 0 && source.recordSerial != mesh.directComputeSourceArchiveSerial))
+			{
+				proxy.state = NRIVoxelShadowProxyResourceState::Failed;
+				proxy.rejectReason = NRIVoxelShadowProxyRejectReason::ArchiveMismatch;
+				proxy.failedFrame = frameIndex;
+				outStats.shadowProxy.failures++;
+				continue;
+			}
+
+			NRIVoxelShadowProxyCpuGeometry cpuGeometry = {};
+			NRIVoxelShadowProxyRejectReason buildReason = NRIVoxelShadowProxyRejectReason::None;
+			const auto cpuStart = std::chrono::steady_clock::now();
+			const bool cpuReady = BuildNRIVoxelShadowProxyGeometry(
+				source, NRIVoxelShadowProxyBuildLimits{}, cpuGeometry, buildReason);
+			outStats.shadowProxy.cpuBuildMs += std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - cpuStart).count();
+			outStats.shadowProxy.temporaryMaskCells += cpuGeometry.temporaryMaskCells;
+			if (!cpuReady || !mesh.boundsValid || !cpuGeometry.boundsValid ||
+				!IsNRIVoxelShadowProxyBoundsEquivalent(
+					mesh.boundsMin, mesh.boundsMax, cpuGeometry.boundsMin, cpuGeometry.boundsMax))
+			{
+				proxy.state = NRIVoxelShadowProxyResourceState::Failed;
+				proxy.rejectReason = cpuReady ? NRIVoxelShadowProxyRejectReason::BoundsMismatch : buildReason;
+				proxy.failedFrame = frameIndex;
+				outStats.shadowProxy.failures++;
+				continue;
+			}
+
+			outStats.shadowProxy.cpuBuilds++;
+			outStats.shadowProxy.exactPrimitives += mesh.primitiveCount;
+			outStats.shadowProxy.proxyPrimitives += cpuGeometry.proxyPrimitiveCount;
+			const uint64_t vertexBytes = cpuGeometry.vertices.size() * sizeof(NRIVoxelShadowProxyVertex);
+			const uint64_t indexBytes = cpuGeometry.indices.size() * sizeof(uint32_t);
+			if (!accelerationServices.EnsureStructuredBuffer(
+					proxy.vertexBuffer, cpuGeometry.vertices.data(), vertexBytes,
+					sizeof(NRIVoxelShadowProxyVertex),
+					PersistentVoxelBufferUsageFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
+					PersistentVoxelAccelerationStructureBuildInputAccess(),
+					"persistent_voxel_shadow_proxy_vertex", ResidentUploadKind_Vertex) ||
+				!accelerationServices.EnsureStructuredBuffer(
+					proxy.indexBuffer, cpuGeometry.indices.data(), indexBytes,
+					sizeof(uint32_t),
+					PersistentVoxelBufferUsageFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
+					PersistentVoxelAccelerationStructureBuildInputAccess(),
+					"persistent_voxel_shadow_proxy_index", ResidentUploadKind_Index) ||
+				!accelerationServices.BuildBottomLevel(
+					proxy.vertexBuffer, proxy.indexBuffer, 0u,
+					(uint32_t)cpuGeometry.vertices.size(), 0u,
+					(uint32_t)cpuGeometry.indices.size(), cpuGeometry.proxyPrimitiveCount,
+					proxy.accelerationStructure) ||
+				!accelerationServices.BarrierBuildInputs(proxy.vertexBuffer, proxy.indexBuffer))
+			{
+				RetirePersistentVoxelShadowProxy(proxy, resetServices);
+				proxy.state = NRIVoxelShadowProxyResourceState::Failed;
+				proxy.rejectReason = NRIVoxelShadowProxyRejectReason::ResourceUnavailable;
+				proxy.failedFrame = frameIndex;
+				outStats.shadowProxy.failures++;
+				continue;
+			}
+
+			proxy.sourceModel = mesh.sourceModel;
+			proxy.sourceArchiveSerial = source.recordSerial;
+			proxy.sourceContentHash = source.contentHash;
+			proxy.geometrySignature = mesh.geometrySignature;
+			proxy.exactPrimitiveCount = mesh.primitiveCount;
+			proxy.proxyPrimitiveCount = cpuGeometry.proxyPrimitiveCount;
+			proxy.vertexCount = (uint32_t)cpuGeometry.vertices.size();
+			proxy.indexCount = (uint32_t)cpuGeometry.indices.size();
+			proxy.readyFrame = loadingWarmupActive ? frameIndex : frameIndex + 1u;
+			proxy.state = NRIVoxelShadowProxyResourceState::Resident;
+			proxy.rejectReason = NRIVoxelShadowProxyRejectReason::None;
+			proxy.residentBytes = proxy.vertexBuffer.memorySize + proxy.indexBuffer.memorySize + proxy.accelerationStructure.memorySize;
+			mesh.residentBytes += proxy.residentBytes;
+			outStats.shadowProxy.uploads++;
+			outStats.shadowProxy.blasBuilds++;
+			outStats.shadowProxy.uploadBytes += vertexBytes + indexBytes;
+			shadowProxyBuildsThisFrame++;
+			if (voxelStatsEnabled)
+			{
+				Printf("PERF pt voxel shadow proxy NRI: frame=%u action=resident mesh_resource=0x%llx exact_prims=%u proxy_prims=%u saved_prims=%u archive_serial=%llu upload_bytes=%llu as_bytes=%llu ready_frame=%u\n",
+					frameIndex,
+					(unsigned long long)actor.meshResourceKey,
+					mesh.primitiveCount,
+					proxy.proxyPrimitiveCount,
+					mesh.primitiveCount - proxy.proxyPrimitiveCount,
+					(unsigned long long)proxy.sourceArchiveSerial,
+					(unsigned long long)(vertexBytes + indexBytes),
+					(unsigned long long)proxy.accelerationStructure.memorySize,
+					proxy.readyFrame);
+			}
+		}
+	}
+
 	outStats.uniqueMeshBuilds += (uint32_t)builtMeshKeys.size();
-	if (outStats.builds != 0 || sharedBlasBuildsThisFrame != 0)
+	if (settings.diagnosticsEnabled)
+	{
+		uint32_t residentProxyResources = 0;
+		uint32_t failedProxyResources = 0;
+		uint64_t residentProxyPrimitives = 0;
+		uint64_t residentProxyBytes = 0;
+		for (const auto& meshPair : meshVariantResources)
+		{
+			const NRIVoxelShadowProxyResource& proxy = meshPair.second.shadowProxy;
+			residentProxyResources += proxy.state == NRIVoxelShadowProxyResourceState::Resident ? 1u : 0u;
+			failedProxyResources += proxy.state == NRIVoxelShadowProxyResourceState::Failed ? 1u : 0u;
+			if (proxy.state == NRIVoxelShadowProxyResourceState::Resident)
+			{
+				residentProxyPrimitives += proxy.proxyPrimitiveCount;
+				residentProxyBytes += proxy.residentBytes;
+			}
+		}
+		Printf("PERF pt voxel shadow proxy build NRI: frame=%u enabled=%u candidates=%u archive_hits=%u archive_misses=%u cpu_builds=%u uploads=%u upload_bytes=%llu blas_builds=%u failures=%u reject_material=%u reject_geometry=%u reject_resource=%u exact_prims=%llu proxy_prims=%llu temp_cells=%llu cpu_ms=%.3f resident=%u resident_prims=%llu resident_bytes=%llu failed_resident=%u\n",
+			frameIndex, settings.shadowProxyBuildEnabled ? 1u : 0u,
+			outStats.shadowProxy.candidates, outStats.shadowProxy.archiveHits,
+			outStats.shadowProxy.archiveMisses, outStats.shadowProxy.cpuBuilds,
+			outStats.shadowProxy.uploads, (unsigned long long)outStats.shadowProxy.uploadBytes,
+			outStats.shadowProxy.blasBuilds, outStats.shadowProxy.failures,
+			outStats.shadowProxy.materialRejects, outStats.shadowProxy.geometryRejects,
+			outStats.shadowProxy.resourceRejects,
+			(unsigned long long)outStats.shadowProxy.exactPrimitives,
+			(unsigned long long)outStats.shadowProxy.proxyPrimitives,
+			(unsigned long long)outStats.shadowProxy.temporaryMaskCells,
+			outStats.shadowProxy.cpuBuildMs, residentProxyResources,
+			(unsigned long long)residentProxyPrimitives,
+			(unsigned long long)residentProxyBytes, failedProxyResources);
+	}
+	if (outStats.builds != 0 || sharedBlasBuildsThisFrame != 0 || shadowProxyBuildsThisFrame != 0)
 	{
 		MarkMaintenanceMutation();
 	}
@@ -8283,6 +8855,7 @@ void NRIPersistentVoxelResidency::Reset(
 		services.RetireBuffer(pair.second.vertexBuffer);
 		services.RetireBuffer(pair.second.indexBuffer);
 		services.RetireAccelerationStructure(pair.second.accelerationStructure);
+		RetirePersistentVoxelShadowProxy(pair.second.shadowProxy, services);
 	}
 	sharedBlasCache.RetireAll([&](NRIAccelerationStructureResource& resource)
 	{
@@ -8296,7 +8869,9 @@ void NRIPersistentVoxelResidency::Reset(
 	uploadedMaterialTextureKeys.clear();
 	materialResourceGeneration++;
 	batchMaterialResourceGeneration = 0;
+	batchMaterialPublicationGeneration++;
 	uploadedMaterialResourceGeneration = 0;
+	uploadedMaterialPublicationGeneration = 0;
 	publishedMeshKeys.clear();
 	publishedMaterialKeys.clear();
 	RebuildAdmissionIndex(true);
@@ -9290,6 +9865,8 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 bool NRIPersistentVoxelResidency::PreSizeDirectGeometryArenas(
 	uint64_t buildSerial,
 	uint64_t uniqueGeometryBytes,
+	uint64_t plannedRuntimeTailBytes,
+	uint64_t largestKnownGeometryBytes,
 	int loadingTraceLevel,
 	const NRIPersistentVoxelAdmissionServices& services)
 {
@@ -9319,7 +9896,22 @@ bool NRIPersistentVoxelResidency::PreSizeDirectGeometryArenas(
 	{
 		return false;
 	}
-	const uint64_t primitiveCount = uniqueGeometryBytes / BytesPerPrimitive;
+	const NRIPersistentVoxelGeometryArenaPlan arenaPlan =
+		BuildNRIPersistentVoxelGeometryArenaPlan(
+			uniqueGeometryBytes,
+			plannedRuntimeTailBytes,
+			largestKnownGeometryBytes);
+	if (arenaPlan.overflow || arenaPlan.targetGeometryBytes == 0)
+	{
+		return false;
+	}
+	if (arenaPlan.targetGeometryBytes >
+		std::numeric_limits<uint64_t>::max() - (BytesPerPrimitive - 1ull))
+	{
+		return false;
+	}
+	const uint64_t primitiveCount =
+		(arenaPlan.targetGeometryBytes + BytesPerPrimitive - 1ull) / BytesPerPrimitive;
 	if (primitiveCount > std::numeric_limits<uint32_t>::max() / 3ull)
 	{
 		return false;
@@ -9359,8 +9951,14 @@ bool NRIPersistentVoxelResidency::PreSizeDirectGeometryArenas(
 	arenaPresizeBuildSerial = buildSerial;
 	if (loadingTraceLevel >= 1 || (int)nri_ptvoxelcomputetrace > 0)
 	{
-		Printf("PERF pt voxel arena presize NRI: build_serial=%llu primitives=%llu vertex_bytes=%llu index_bytes=%llu primitive_bytes=%llu total_bytes=%llu\n",
+		Printf("PERF pt voxel arena presize NRI: build_serial=%llu planned_bytes=%llu planned_runtime_tail_bytes=%llu late_alias_reserve_bytes=%llu reserve_bytes=%llu target_bytes=%llu capacity_bytes=%llu primitives=%llu vertex_bytes=%llu index_bytes=%llu primitive_bytes=%llu total_bytes=%llu\n",
 			(unsigned long long)buildSerial,
+			(unsigned long long)arenaPlan.plannedGeometryBytes,
+			(unsigned long long)arenaPlan.plannedRuntimeTailBytes,
+			(unsigned long long)arenaPlan.lateAliasReserveBytes,
+			(unsigned long long)arenaPlan.totalReserveBytes,
+			(unsigned long long)arenaPlan.targetGeometryBytes,
+			(unsigned long long)(primitiveCount * BytesPerPrimitive),
 			(unsigned long long)primitiveCount,
 			(unsigned long long)vertexBytes,
 			(unsigned long long)indexBytes,

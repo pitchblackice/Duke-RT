@@ -5,6 +5,19 @@
 
 constexpr uint32_t NRI_SMOKE_GRID_BRICK_AXIS = 8u;
 constexpr uint32_t NRI_SMOKE_GRID_CELLS_PER_BRICK = 512u;
+constexpr uint32_t NRI_SMOKE_GRID_FLAG_HASH_HEALTH = 1u;
+constexpr uint32_t NRI_SMOKE_GRID_FLAG_COMPACT_DRAINED_HASH = 2u;
+constexpr uint32_t NRI_SMOKE_PROMPT_FALLBACK_QUANTITY = 8u;
+constexpr uint32_t NRI_SMOKE_PROMPT_LEDGER_CAPACITY = NRI_SMOKE_PROMPT_FALLBACK_QUANTITY;
+
+enum class NRISmokePromptOutcome : uint32_t
+{
+	None = 0,
+	Fallback = 1,
+	GridNew = 2,
+	GridCommitted = 3,
+	InternalError = 4,
+};
 
 enum class NRISmokeGridPass : uint32_t
 {
@@ -19,6 +32,32 @@ enum class NRISmokeGridPass : uint32_t
 	AdvectVelocity,
 	AdvectFields,
 	Rebuild,
+	ValidatePrompt,
+	AuthorizePrompt,
+	FinalizePrompt,
+};
+
+struct NRISmokePromptOutcomeGpu
+{
+	uint32_t pulseIdLow = 0;
+	uint32_t pulseIdHigh = 0;
+	uint32_t rangeBegin = 0;
+	uint32_t rangeCount = 0;
+	uint32_t commandIndex = UINT32_MAX;
+	uint32_t outcome = 0;
+	uint32_t requestedBricks = 0;
+	uint32_t admittedBricks = 0;
+};
+
+struct NRISmokePromptLedgerGpu
+{
+	uint32_t pulseIdLow = 0;
+	uint32_t pulseIdHigh = 0;
+	uint32_t rangeBegin = 0;
+	uint32_t rangeCount = 0;
+	uint32_t epoch = 0;
+	uint32_t committed = 0;
+	uint32_t padding[2] = {};
 };
 
 struct NRISmokeGridHashEntryGpu
@@ -74,6 +113,70 @@ struct NRISmokeGridControlGpu
 	uint32_t activePing = 0;
 	uint32_t fieldPing = 0;
 	uint32_t cellSizeBits = 0;
+	uint32_t admissionSourceCount = 0;
+	uint32_t admissionRequested = 0;
+	uint32_t admissionExisting = 0;
+	uint32_t admissionAdmitted = 0;
+	uint32_t admissionRejected = 0;
+	uint32_t admissionCapacityRejected = 0;
+	uint32_t admissionProbeRejected = 0;
+	uint32_t admissionInvalidRejected = 0;
+	uint32_t admissionFootprintCulled = 0;
+	uint32_t hashEmpty = 0;
+	uint32_t hashClaimed = 0;
+	uint32_t hashResident = 0;
+	uint32_t hashNew = 0;
+	uint32_t hashTombstone = 0;
+	uint32_t hashInvalidState = 0;
+	uint32_t hashInvalidMapping = 0;
+	uint32_t controlProbeTotal = 0;
+	uint32_t controlProbeBin1 = 0;
+	uint32_t controlProbeBin2To4 = 0;
+	uint32_t controlProbeBin5To8 = 0;
+	uint32_t controlProbeBin9To16 = 0;
+	uint32_t controlProbeBin17To24 = 0;
+	uint32_t lookupProbeTotal = 0;
+	uint32_t insertionProbeTotal = 0;
+	uint32_t lookupProbeLimitFailures = 0;
+	uint32_t insertionProbeLimitFailures = 0;
+	uint32_t insertionCapacityFailures = 0;
+	uint32_t insertionActiveFailures = 0;
+	uint32_t reclaimInvalidMappingFailures = 0;
+	uint32_t hashRebuildAttempts = 0;
+	uint32_t hashRebuildSuccesses = 0;
+	uint32_t hashRebuildFailures = 0;
+	uint32_t firstUseCoreCapacity = 0;
+	uint32_t borrowedResident = 0;
+	uint32_t borrowedAllocations = 0;
+	uint32_t borrowedReturns = 0;
+	uint32_t borrowedPromotions = 0;
+	uint32_t borrowedReclaims = 0;
+	uint32_t firstUseReplacementAdmissions = 0;
+	uint32_t firstUseBlockedNoBorrowed = 0;
+	uint32_t firstUseBlockedVisible = 0;
+	uint32_t firstUseBlockedProbe = 0;
+	uint32_t firstUseBlockedInvalid = 0;
+	uint32_t firstUseCapacityFailures = 0;
+};
+
+struct NRISmokeGridSourceStatsGpu
+{
+	uint32_t sourceId = 0;
+	uint32_t sourceClass = 0;
+	uint32_t priority = 0;
+	uint32_t commands = 0;
+	uint32_t requestedBricks = 0;
+	uint32_t existingHits = 0;
+	uint32_t admittedNew = 0;
+	uint32_t rejectedCapacity = 0;
+	uint32_t rejectedProbe = 0;
+	uint32_t rejectedInvalid = 0;
+	uint32_t depositionCells = 0;
+	uint32_t footprintCulled = 0;
+	uint32_t requestedMassQ = 0;
+	uint32_t depositedMassQ = 0;
+	uint32_t rejectedMassQ = 0;
+	uint32_t admittedKeyHash = 0;
 };
 
 struct NRISmokeGridDispatchGpu
@@ -124,6 +227,9 @@ struct NRISmokeGridConstants
 
 static_assert(sizeof(NRISmokeGridHashEntryGpu) == 32);
 static_assert(sizeof(NRISmokeGridBrickGpu) == 32);
-static_assert(sizeof(NRISmokeGridControlGpu) == 128);
+static_assert(sizeof(NRISmokeGridControlGpu) == 304);
+static_assert(sizeof(NRISmokeGridSourceStatsGpu) == 64);
 static_assert(sizeof(NRISmokeGridDispatchGpu) == 12);
 static_assert(sizeof(NRISmokeGridConstants) == 128);
+static_assert(sizeof(NRISmokePromptOutcomeGpu) == 32);
+static_assert(sizeof(NRISmokePromptLedgerGpu) == 32);

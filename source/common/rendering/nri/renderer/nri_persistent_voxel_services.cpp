@@ -4,6 +4,7 @@
 #include "nri_render_geometry_helpers.h"
 #include "nri_voxel_compute_preload.h"
 #include "nri_voxel_compute_meshing.h"
+#include "../system/nri_gpu_timing.h"
 #include "../system/nri_renderdevice.h"
 #include "../scene/nri_material_bridge.h"
 #include "../scene/nri_hash.h"
@@ -19,6 +20,27 @@
 
 namespace
 {
+	bool PersistentVoxelArenaCopyRequired(
+		const NRIBufferResource& resource,
+		uint64_t requiredSize,
+		uint32_t stride,
+		nri::BufferUsageBits usage,
+		bool commandBufferAvailable)
+	{
+		const uint64_t alignedRequiredSize = std::max<uint64_t>(requiredSize, stride);
+		const bool alreadyCompatible =
+			resource.buffer != nullptr &&
+			resource.shaderView != nullptr &&
+			resource.memoryLocation == nri::MemoryLocation::DEVICE &&
+			resource.stride == stride &&
+			NRIResourceUsageIncludes(resource.usage, usage) &&
+			resource.size >= alignedRequiredSize;
+		return !alreadyCompatible &&
+			resource.buffer != nullptr &&
+			resource.usedSize != 0 &&
+			commandBufferAvailable;
+	}
+
 	nri::AccelerationStructureBits GetPersistentVoxelBlasBuildFlags()
 	{
 		nri::AccelerationStructureBits flags = nri::AccelerationStructureBits::PREFER_FAST_BUILD;
@@ -948,11 +970,26 @@ public:
 		};
 		services.ensureArenaBuffer = [](void* user, NRIBufferResource& resource, uint64_t requiredSize, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after) -> bool
 		{
-			return static_cast<NRIRenderer*>(user)->EnsureResidentArenaBuffer(resource, requiredSize, stride, usage, after);
+			NRIRenderer& renderer = *static_cast<NRIRenderer*>(user);
+			const bool recordsCopy = PersistentVoxelArenaCopyRequired(
+				resource,
+				requiredSize,
+				stride,
+				usage,
+				renderer.mFrameBuffer != nullptr && renderer.mFrameBuffer->HasCurrentCommandBuffer());
+			NRIScopedGpuTiming admissionGpuTiming(recordsCopy ? renderer.mFrameBuffer : nullptr, NRIGpuTimingScope::VoxelAdmission);
+			NRIScopedGpuTiming arenaCopyGpuTiming(
+				recordsCopy ? renderer.mFrameBuffer : nullptr,
+				NRIGpuTimingScope::VoxelArenaCopy);
+			return renderer.EnsureResidentArenaBuffer(resource, requiredSize, stride, usage, after);
 		};
 		services.stageBufferCopyRange = [](void* user, NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind) -> bool
 		{
-			return static_cast<NRIRenderer*>(user)->StageResidentBufferCopyRange(resource, byteOffset, data, size, after, uploadKind);
+			NRIRenderer& renderer = *static_cast<NRIRenderer*>(user);
+			const bool recordsUpload = resource.buffer != nullptr && data != nullptr && size != 0;
+			NRIScopedGpuTiming admissionGpuTiming(recordsUpload ? renderer.mFrameBuffer : nullptr, NRIGpuTimingScope::VoxelAdmission);
+			NRIScopedGpuTiming uploadGpuTiming(recordsUpload ? renderer.mFrameBuffer : nullptr, NRIGpuTimingScope::VoxelUpload);
+			return renderer.StageResidentBufferCopyRange(resource, byteOffset, data, size, after, uploadKind);
 		};
 		services.noteBufferUpload = [](void* user, int uploadKind, uint64_t size, const char* reason)
 		{
@@ -975,6 +1012,8 @@ public:
 			NRIBufferResource* buildScratchBuffer) -> bool
 		{
 			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			NRIScopedGpuTiming admissionGpuTiming(renderer->mFrameBuffer, NRIGpuTimingScope::VoxelAdmission);
+			NRIScopedGpuTiming blasGpuTiming(renderer->mFrameBuffer, NRIGpuTimingScope::VoxelBlas);
 			renderer->mFrameBuffer->mCore.CmdBeginAnnotation(
 				*renderer->mFrameBuffer->mCommandBuffer,
 				"Raze.Voxel.DirectBLAS.Build",
@@ -1020,7 +1059,10 @@ public:
 			uint32_t primitiveCount,
 			NRIAccelerationStructureResource& outAccelerationStructure) -> bool
 		{
-			return static_cast<NRIRenderer*>(user)->BuildBottomLevelAccelerationStructure(
+			NRIRenderer& renderer = *static_cast<NRIRenderer*>(user);
+			NRIScopedGpuTiming admissionGpuTiming(renderer.mFrameBuffer, NRIGpuTimingScope::VoxelAdmission);
+			NRIScopedGpuTiming blasGpuTiming(renderer.mFrameBuffer, NRIGpuTimingScope::VoxelBlas);
+			return renderer.BuildBottomLevelAccelerationStructure(
 				vertexBuffer,
 				indexBuffer,
 				vertexOffset,
@@ -1036,6 +1078,13 @@ public:
 		services.barrierBuildInputs = [](void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) -> bool
 		{
 			return BarrierBuildInputs(static_cast<NRIRenderer&>(*static_cast<NRIRenderer*>(user)), vertexBuffer, indexBuffer);
+		};
+		services.ensureStructuredBuffer = [](void* user, NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* reason, int uploadKind) -> bool
+		{
+			NRIRenderer& renderer = *static_cast<NRIRenderer*>(user);
+			SceneBufferDebugStats* stats = uploadKind == ResidentUploadKind_Index ?
+				&renderer.mIndexBufferStats : &renderer.mVertexBufferStats;
+			return renderer.EnsureResidentStructuredBuffer(resource, *stats, data, size, stride, usage, after, reason, uploadKind);
 		};
 		return services;
 	}
@@ -1121,6 +1170,8 @@ public:
 				!renderer.mPersistentVoxels.PreSizeDirectGeometryArenas(
 					renderer.mMapWorld.buildSerial,
 					computePreloadStats.rawSelectedUniqueGeometryBytes,
+					computePreloadStats.rawRuntimeWithheldUniqueGeometryBytes,
+					computePreloadStats.rawSelectedLargestUniqueGeometryBytes,
 					(int)nri_ptloadingtrace,
 					BuildAdmissionServices(renderer)))
 			{
@@ -1323,6 +1374,9 @@ public:
 		batchServices.ensureStructuredBuffer = [](void* user, NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* reason, int uploadKind) -> bool
 		{
 			NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+			const bool recordsUpload = data != nullptr && size != 0;
+			NRIScopedGpuTiming admissionGpuTiming(recordsUpload ? renderer->mFrameBuffer : nullptr, NRIGpuTimingScope::VoxelAdmission);
+			NRIScopedGpuTiming uploadGpuTiming(recordsUpload ? renderer->mFrameBuffer : nullptr, NRIGpuTimingScope::VoxelUpload);
 			SceneBufferDebugStats* stats =
 				uploadKind == ResidentUploadKind_Index ? &renderer->mIndexBufferStats :
 				(uploadKind == ResidentUploadKind_Primitive ? &renderer->mPrimitiveBufferStats : &renderer->mVertexBufferStats);
@@ -1330,11 +1384,26 @@ public:
 		};
 		batchServices.ensureArenaBuffer = [](void* user, NRIBufferResource& resource, uint64_t requiredSize, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after) -> bool
 		{
-			return static_cast<NRIRenderer*>(user)->EnsureResidentArenaBuffer(resource, requiredSize, stride, usage, after);
+			NRIRenderer& renderer = *static_cast<NRIRenderer*>(user);
+			const bool recordsCopy = PersistentVoxelArenaCopyRequired(
+				resource,
+				requiredSize,
+				stride,
+				usage,
+				renderer.mFrameBuffer != nullptr && renderer.mFrameBuffer->HasCurrentCommandBuffer());
+			NRIScopedGpuTiming admissionGpuTiming(recordsCopy ? renderer.mFrameBuffer : nullptr, NRIGpuTimingScope::VoxelAdmission);
+			NRIScopedGpuTiming arenaCopyGpuTiming(
+				recordsCopy ? renderer.mFrameBuffer : nullptr,
+				NRIGpuTimingScope::VoxelArenaCopy);
+			return renderer.EnsureResidentArenaBuffer(resource, requiredSize, stride, usage, after);
 		};
 		batchServices.stageBufferCopyRange = [](void* user, NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind) -> bool
 		{
-			return static_cast<NRIRenderer*>(user)->StageResidentBufferCopyRange(resource, byteOffset, data, size, after, uploadKind);
+			NRIRenderer& renderer = *static_cast<NRIRenderer*>(user);
+			const bool recordsUpload = resource.buffer != nullptr && data != nullptr && size != 0;
+			NRIScopedGpuTiming admissionGpuTiming(recordsUpload ? renderer.mFrameBuffer : nullptr, NRIGpuTimingScope::VoxelAdmission);
+			NRIScopedGpuTiming uploadGpuTiming(recordsUpload ? renderer.mFrameBuffer : nullptr, NRIGpuTimingScope::VoxelUpload);
+			return renderer.StageResidentBufferCopyRange(resource, byteOffset, data, size, after, uploadKind);
 		};
 		batchServices.noteBufferUpload = [](void* user, int uploadKind, uint64_t size, const char* reason)
 		{

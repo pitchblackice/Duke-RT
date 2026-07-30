@@ -202,6 +202,11 @@ void I_FreezeTime(bool frozen)
 	}
 }
 
+bool I_IsTimeFrozen()
+{
+	return FreezeTime != 0;
+}
+
 void I_ResetFrameTime()
 {
 	// Reset the starting point of the current frame to now. For use after lengthy operations that should not result in tic accumulation.

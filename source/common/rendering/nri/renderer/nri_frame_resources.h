@@ -3,6 +3,7 @@
 #include "nri_resources.h"
 #include "nri_scene_upload_identity.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -64,6 +65,30 @@ struct SceneInstanceData
 		0.0f, 0.0f, 1.0f, 0.0f
 	};
 };
+
+// Shadow-proxy records deliberately reuse their certified exact primitive and
+// material range. Shadow rays do not gate visibility chunks, leaving this bit
+// available for CPU/readback attribution without changing the shader ABI.
+static constexpr uint32_t NRI_VOXEL_SHADOW_PROXY_VISIBILITY_BIT = 0x80000000u;
+static constexpr uint32_t NRI_VOXEL_SHADOW_PROXY_PRIMITIVE_MASK = 0x7fffffffu;
+
+inline uint32_t EncodeNRIVoxelShadowProxyVisibility(uint32_t primitiveCount)
+{
+	return NRI_VOXEL_SHADOW_PROXY_VISIBILITY_BIT |
+		std::min(primitiveCount, NRI_VOXEL_SHADOW_PROXY_PRIMITIVE_MASK - 1u);
+}
+
+inline bool IsNRIVoxelShadowProxyVisibility(uint32_t visibilityChunk)
+{
+	return visibilityChunk != UINT32_MAX &&
+		(visibilityChunk & NRI_VOXEL_SHADOW_PROXY_VISIBILITY_BIT) != 0u;
+}
+
+inline uint32_t DecodeNRIVoxelShadowProxyPrimitiveCount(uint32_t visibilityChunk)
+{
+	return IsNRIVoxelShadowProxyVisibility(visibilityChunk) ?
+		visibilityChunk & NRI_VOXEL_SHADOW_PROXY_PRIMITIVE_MASK : 0u;
+}
 
 static_assert(sizeof(SceneInstanceData) == 128, "SceneInstanceData must match the HLSL scene instance layout");
 static_assert(offsetof(SceneInstanceData, currentTransform) == 32, "SceneInstanceData currentTransform offset must match HLSL");

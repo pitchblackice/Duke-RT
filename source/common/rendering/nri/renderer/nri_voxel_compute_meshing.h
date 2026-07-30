@@ -3,6 +3,7 @@
 #include "tarray.h"
 
 #include <cstdint>
+#include <vector>
 
 class FVoxelModel;
 class NRIRenderer;
@@ -129,6 +130,32 @@ struct NRIVoxelComputeRawSourcePreloadStats
 	double buildMs = 0.0;
 };
 
+// Immutable CPU copy of the already-decoded raw archive records. Optional
+// consumers must use this snapshot instead of rescanning FVoxelModel data.
+struct NRIVoxelComputeRawSlabSnapshot
+{
+	uint32_t x = 0;
+	uint32_t y = 0;
+	uint32_t zTop = 0;
+	uint32_t cullMask = 0;
+	uint32_t zLength = 0;
+};
+
+struct NRIVoxelComputeRawSourceArchiveSnapshot
+{
+	uint64_t recordSerial = 0;
+	uint64_t contentHash = 0;
+	uint32_t sizeX = 0;
+	uint32_t sizeY = 0;
+	uint32_t sizeZ = 0;
+	uint32_t exactFaceCount = 0;
+	uint32_t exactPrimitiveCount = 0;
+	float pivotX = 0.0f;
+	float pivotY = 0.0f;
+	float pivotZ = 0.0f;
+	std::vector<NRIVoxelComputeRawSlabSnapshot> slabs;
+};
+
 struct NRIVoxelComputeMemoryUsage
 {
 	uint32_t rawSourceCount = 0;
@@ -181,8 +208,12 @@ NRIVoxelComputeGeneratedGeometryStatus RequestNRIVoxelComputeDirectPublication(c
 bool TakeNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t generation, NRIVoxelComputeDirectPublishedMesh& outMesh);
 void CancelNRIVoxelComputeDirectPublication(uint64_t meshResourceKey, uint64_t generation);
 bool QueryNRIVoxelComputeRawSourceArchiveStats(FVoxelModel* model, FVoxelRawMeshStats& outStats);
+bool CopyNRIVoxelComputeRawSourceArchiveSnapshot(
+	FVoxelModel* model,
+	NRIVoxelComputeRawSourceArchiveSnapshot& outSnapshot);
 bool QueryNRIVoxelComputeRawSourceStats(FVoxelModel* model, FVoxelRawMeshStats& outStats);
 bool PreloadNRIVoxelComputeRawSource(FVoxelModel* model, NRIVoxelComputeRawSourcePreloadStats* outStats = nullptr);
 NRIVoxelComputeMemoryUsage GetNRIVoxelComputeMemoryUsage();
+uint32_t GetNRIVoxelComputeQueuedJobCount();
 void DispatchNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer, uint64_t frameNumber);
 void DestroyNRIVoxelComputeMeshingDiagnostics(NRIRenderer& renderer);
