@@ -133,6 +133,7 @@ foreach ($required in @(
 foreach ($required in @(
 	'PersistentVoxelMaterialRangeMatches(actor, material)',
 	'primitiveRangeValid',
+	'publishedMaterialRangeValid',
 	'meshRangeMatches'
 )) {
 	if (-not $preparationEligibility.Contains($required)) {
@@ -158,13 +159,33 @@ if ($materialBridgeStart -lt 0 -or $materialBridgeEnd -lt 0 -or $materialUploadS
 }
 $materialBridgePolicy = $persistentVoxels.Substring($materialBridgeStart, $materialBridgeEnd - $materialBridgeStart)
 $materialUploadPolicy = $persistentVoxels.Substring($materialUploadStart, $materialUploadEnd - $materialUploadStart)
-if (-not $materialBridgePolicy.Contains('activeMaterialKeys.insert(actor.materialKeyHash)') -or
+if (-not $persistentVoxels.Contains('CollectActivePersistentVoxelMaterialKeys(const PersistentVoxelBatch& batch)') -or
+	-not $materialBridgePolicy.Contains('CollectActivePersistentVoxelMaterialKeys(targetBatch)') -or
 	$materialBridgePolicy.Contains('materialResources.reserve(materialVariantResources.size())')) {
 	throw 'the frame material bridge must include active actor materials rather than all session-resident materials'
 }
 if (-not $materialUploadPolicy.Contains('activeMaterialKeys.find(*dirtyIt) == activeMaterialKeys.end()') -or
 	-not $materialUploadPolicy.Contains('dirtyMaterialResourceKeys.insert(activeMaterialKeys.begin(), activeMaterialKeys.end())')) {
 	throw 'material upload dirtiness must be scoped to currently active actor materials'
+}
+if (-not $persistentVoxels.Contains('previousActiveMaterialKeys != currentActiveMaterialKeys') -or
+	-not $persistentVoxels.Contains('batchMaterialPublicationGeneration++')) {
+	throw 'active persistent voxel material-set changes must rebuild and version the published bridge'
+}
+if (-not $frameBuild.Contains('mPersistentVoxels.MaterialPublicationGeneration()')) {
+	throw 'the scene material frame cache must be keyed by persistent material publication rather than resource residency'
+}
+if (-not $persistentVoxels.Contains('uploadedMaterialPublicationGeneration != batchMaterialPublicationGeneration') -or
+	-not $persistentVoxels.Contains('uploadedMaterialPublicationGeneration = batchMaterialPublicationGeneration')) {
+	throw 'reactivated persistent voxel materials must be validated and uploaded for the current publication'
+}
+if (-not $frameBuild.Contains('mSceneMaterialFrameCache.PersistentMaterialCount() != persistentVoxelMaterialCount') -or
+	-not $frameBuild.Contains('PT persistent voxel material publication count did not match the frame cache.')) {
+	throw 'persistent material slicing must fail closed when the frame cache does not match the active publication'
+}
+$validatedUploadCall = [regex]::Escape('UploadPersistentVoxelArenaMaterialBuffers(persistentVoxelGpuMaterials, true)')
+if ([regex]::Matches($frameBuild, $validatedUploadCall).Count -lt 2) {
+	throw 'primary and post-light persistent material uploads must validate active rows after texture-slot or proxy changes'
 }
 
 Write-Host 'NRI transition scene-binding lifetime tests passed.'

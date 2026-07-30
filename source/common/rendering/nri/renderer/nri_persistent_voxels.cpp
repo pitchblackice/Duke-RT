@@ -22,6 +22,20 @@
 
 namespace
 {
+	std::unordered_set<uint64_t> CollectActivePersistentVoxelMaterialKeys(const PersistentVoxelBatch& batch)
+	{
+		std::unordered_set<uint64_t> keys;
+		keys.reserve(batch.actors.size());
+		for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+		{
+			if (actor.active && actor.materialKeyHash != 0)
+			{
+				keys.insert(actor.materialKeyHash);
+			}
+		}
+		return keys;
+	}
+
 	template<typename Services>
 	void RetirePersistentVoxelShadowProxy(
 		NRIVoxelShadowProxyResource& proxy,
@@ -1130,6 +1144,8 @@ bool NRIPersistentVoxelResidency::IsActorOverlayPreparationEligible(
 		(uint64_t)actor.primitiveOffset + (uint64_t)actor.primitiveCount <= (uint64_t)arenaPrimitiveCursor;
 	const bool materialRangeValid =
 		(uint64_t)actor.materialOffset + (uint64_t)actor.materialCount <= materialRangeAllocator.Stats().cursorRows;
+	const bool publishedMaterialRangeValid =
+		(uint64_t)actor.materialOffset + (uint64_t)actor.materialCount <= batch.materialBridge.materials.size();
 	const bool meshRangeMatches =
 		actor.primitiveOffset == mesh.primitiveOffset &&
 		actor.primitiveCount == mesh.primitiveCount &&
@@ -1149,6 +1165,7 @@ bool NRIPersistentVoxelResidency::IsActorOverlayPreparationEligible(
 	return
 		primitiveRangeValid &&
 		materialRangeValid &&
+		publishedMaterialRangeValid &&
 		meshRangeMatches &&
 		transformFinite(actor.instanceTransform) &&
 		transformFinite(actor.previousInstanceTransform);
@@ -1216,7 +1233,7 @@ uint64_t NRIPersistentVoxelResidency::BuildSceneGenerationHash() const
 				(uint64_t)batch.activeActorCount),
 			(uint64_t)batch.primitiveCount),
 		(uint64_t)batch.materialCount),
-		batchMaterialResourceGeneration);
+		batchMaterialPublicationGeneration);
 }
 
 bool NRIPersistentVoxelResidency::PublishCanonicalMaterialResource(
@@ -1287,15 +1304,8 @@ void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge(PersistentVoxelBatc
 	const uint32_t materialCursor = materialRangeAllocator.Stats().cursorRows;
 	targetBatch.materialBridge.materials.reserve(materialCursor);
 	targetBatch.materialBridge.lightMetadata.reserve(materialCursor);
-	std::unordered_set<uint64_t> activeMaterialKeys;
-	activeMaterialKeys.reserve(targetBatch.actors.size());
-	for (const PersistentVoxelBatch::ActorEntry& actor : targetBatch.actors)
-	{
-		if (actor.active && actor.materialKeyHash != 0)
-		{
-			activeMaterialKeys.insert(actor.materialKeyHash);
-		}
-	}
+	const std::unordered_set<uint64_t> activeMaterialKeys =
+		CollectActivePersistentVoxelMaterialKeys(targetBatch);
 	std::unordered_map<uint64_t, uint32_t> textureLookup;
 	textureLookup.reserve(targetBatch.materialBridge.textures.capacity() + activeMaterialKeys.size());
 	std::vector<PersistentVoxelMaterialVariantResource*> materialResources;
@@ -1389,6 +1399,7 @@ void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge(PersistentVoxelBatc
 		}
 	}
 	batchMaterialResourceGeneration = materialResourceGeneration;
+	batchMaterialPublicationGeneration++;
 }
 
 void NRIPersistentVoxelResidency::RecomputeBatchState(PersistentVoxelBatch& targetBatch) const
@@ -1707,7 +1718,8 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 		}
 		activeMaterialKeys.insert(actor.materialKeyHash);
 	}
-	if (validateActiveMaterialPayloads)
+	if (validateActiveMaterialPayloads ||
+		uploadedMaterialPublicationGeneration != batchMaterialPublicationGeneration)
 	{
 		dirtyMaterialResourceKeys.insert(activeMaterialKeys.begin(), activeMaterialKeys.end());
 	}
@@ -1814,17 +1826,19 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 		{
 			dirtyMaterialResourceKeys.erase(materialKey);
 		}
-		if (dirtyMaterialResourceKeys.empty())
+		if (!dirtyMaterialResourceKeys.empty())
 		{
-			uploadedMaterialResourceGeneration = materialResourceGeneration;
-			pendingMaterialLayoutInvalidatedResources = 0;
-			pendingMaterialActorRebinds = 0;
-			uploadedMaterialTextureKeys.clear();
-			uploadedMaterialTextureKeys.reserve(batch.materialBridge.textures.size());
-			for (const nri_scene::TextureUpload& texture : batch.materialBridge.textures)
-			{
-				uploadedMaterialTextureKeys.push_back(texture.key);
-			}
+			return false;
+		}
+		uploadedMaterialResourceGeneration = materialResourceGeneration;
+		uploadedMaterialPublicationGeneration = batchMaterialPublicationGeneration;
+		pendingMaterialLayoutInvalidatedResources = 0;
+		pendingMaterialActorRebinds = 0;
+		uploadedMaterialTextureKeys.clear();
+		uploadedMaterialTextureKeys.reserve(batch.materialBridge.textures.size());
+		for (const nri_scene::TextureUpload& texture : batch.materialBridge.textures)
+		{
+			uploadedMaterialTextureKeys.push_back(texture.key);
 		}
 		return true;
 	}
@@ -1922,9 +1936,14 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 	{
 		dirtyMaterialResourceKeys.erase(materialKey);
 	}
+	if (!dirtyMaterialResourceKeys.empty())
+	{
+		return false;
+	}
 	if (dirtyMaterialResourceKeys.empty())
 	{
 		uploadedMaterialResourceGeneration = materialResourceGeneration;
+		uploadedMaterialPublicationGeneration = batchMaterialPublicationGeneration;
 		pendingMaterialLayoutInvalidatedResources = 0;
 		pendingMaterialActorRebinds = 0;
 		uploadedMaterialTextureKeys.clear();
@@ -7742,6 +7761,8 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 
 	if (batch.valid)
 	{
+		const std::unordered_set<uint64_t> previousActiveMaterialKeys =
+			CollectActivePersistentVoxelMaterialKeys(batch);
 		batch.actors.reserve(batch.actors.size() + cacheEntries.size());
 		std::unordered_map<uint64_t, PersistentVoxelBatch::ActorEntry*> existingActors;
 		existingActors.reserve(batch.actors.size());
@@ -8045,7 +8066,10 @@ bool NRIPersistentVoxelResidency::EnsureBatch(
 				}
 			}
 		}
-		if (batchMaterialResourceGeneration != materialResourceGeneration)
+		const std::unordered_set<uint64_t> currentActiveMaterialKeys =
+			CollectActivePersistentVoxelMaterialKeys(batch);
+		if (batchMaterialResourceGeneration != materialResourceGeneration ||
+			previousActiveMaterialKeys != currentActiveMaterialKeys)
 		{
 			PersistentVoxelScopedTimer perfTimer(outStats.persistentVoxelBatchMaterialBridgeMs);
 			RebuildBatchMaterialBridge(batch);
@@ -8833,7 +8857,9 @@ void NRIPersistentVoxelResidency::Reset(
 	uploadedMaterialTextureKeys.clear();
 	materialResourceGeneration++;
 	batchMaterialResourceGeneration = 0;
+	batchMaterialPublicationGeneration++;
 	uploadedMaterialResourceGeneration = 0;
+	uploadedMaterialPublicationGeneration = 0;
 	publishedMeshKeys.clear();
 	publishedMaterialKeys.clear();
 	RebuildAdmissionIndex(true);

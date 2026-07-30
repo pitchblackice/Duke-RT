@@ -1092,7 +1092,7 @@ public:
 	NRIPersistentVoxelPreloadStatus BuildPreloadStatusSnapshot() const;
 	uint32_t OverlayMaterialCount() const;
 	const nri_scene::MaterialBridgeData& MaterialBridge() const { return batch.materialBridge; }
-	uint64_t MaterialResourceGeneration() const { return batchMaterialResourceGeneration; }
+	uint64_t MaterialPublicationGeneration() const { return batchMaterialPublicationGeneration; }
 	const NRIPersistentVoxelMaterialRangeStats& MaterialRangeStats() const { return materialRangeAllocator.Stats(); }
 	uint32_t EstimatePrimitiveCountForInstanceOffset(uint32_t primitiveOffset) const;
 	nri_scene::SceneDebugStats BuildOverlayDebugStats() const;
@@ -1198,9 +1198,11 @@ public:
 	uint64_t blasPolicyTraceBuildSerial = 0;
 	uint64_t materialResourceGeneration = 1;
 	uint64_t batchMaterialResourceGeneration = 0;
+	uint64_t batchMaterialPublicationGeneration = 1;
 	uint64_t materialRangeCompactions = 0;
 	uint64_t materialRangeCompactedRows = 0;
 	uint64_t uploadedMaterialResourceGeneration = 0;
+	uint64_t uploadedMaterialPublicationGeneration = 0;
 	uint32_t committedWorldTlasFrameIndex = UINT32_MAX;
 	uint32_t pendingMaterialLayoutInvalidatedResources = 0;
 	uint32_t pendingMaterialActorRebinds = 0;

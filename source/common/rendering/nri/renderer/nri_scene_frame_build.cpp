@@ -1244,12 +1244,23 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						mStaticMapScene.buildSerial,
 						mStaticMapScene.materialGeneration,
 						persistentMaterials,
-						hasPersistentVoxelOverlay ? mPersistentVoxels.MaterialResourceGeneration() : 0,
+						hasPersistentVoxelOverlay ? mPersistentVoxels.MaterialPublicationGeneration() : 0,
 						overlayMaterialBridge,
 						cacheStats);
+					const uint32_t persistentVoxelMaterialCount =
+						hasPersistentVoxelOverlay ? mPersistentVoxels.OverlayMaterialCount() : 0u;
+					if (mSceneMaterialFrameCache.PersistentMaterialCount() != persistentVoxelMaterialCount)
+					{
+						LogFallback("PT persistent voxel material publication count did not match the frame cache.");
+						if (preserveHistory)
+						{
+							RestoreRenderSceneHistorySnapshot(history);
+						}
+						return false;
+					}
 					combinedOverlayMaterialOffset =
 						(uint32_t)mStaticMapScene.materialBridge.materials.size() +
-						(hasPersistentVoxelOverlay ? mPersistentVoxels.OverlayMaterialCount() : 0u);
+						mSceneMaterialFrameCache.PersistentMaterialCount();
 					mLastPerfShellTraceStats.sceneMaterialResidentRebuilds += cacheStats.residentRebuilds;
 					mLastPerfShellTraceStats.sceneMaterialResidentHits += cacheStats.residentHits;
 					mLastPerfShellTraceStats.sceneMaterialStaticRowsCopied += cacheStats.staticRowsCopied;
@@ -1292,7 +1303,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 					{
 						ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMaterialSplitMs);
 						const size_t staticMaterialCount = mStaticMapScene.gpuMaterials.size();
-						const size_t persistentVoxelMaterialCount = hasPersistentVoxelOverlay ? mPersistentVoxels.OverlayMaterialCount() : 0u;
+						const size_t persistentVoxelMaterialCount = mSceneMaterialFrameCache.PersistentMaterialCount();
 						if (combinedGpuMaterials.size() < staticMaterialCount + persistentVoxelMaterialCount)
 						{
 							texturesReady = false;
@@ -1310,7 +1321,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				{
 					ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadMs);
 					return UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials, &sceneUploadDomainSpans) &&
-						(!hasPersistentVoxelOverlay || UploadPersistentVoxelArenaMaterialBuffers(persistentVoxelGpuMaterials));
+						(!hasPersistentVoxelOverlay || UploadPersistentVoxelArenaMaterialBuffers(persistentVoxelGpuMaterials, true));
 				}();
 				accelerationReady = false;
 				const uint32_t liveOverlayPrimitiveCount = (uint32_t)overlayGeometry.primitives.size();
